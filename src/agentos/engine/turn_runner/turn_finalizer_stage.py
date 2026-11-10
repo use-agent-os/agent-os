@@ -34,6 +34,7 @@ No ``TurnHook.after_turn`` fan-out today.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -104,16 +105,14 @@ def _with_unconfirmed_action_notice(final_text: str, turn_segments: list[dict]) 
 class TranscriptAppendPort(Protocol):
     """Persist the assistant turn via ``SessionManager.append_message(...)``.
 
-    Wraps the inline ``await self._session_manager.append_message(...)``.
-    The adapter folds the
-    ``accepts_keyword_arg(..., "token_count")`` introspection so the
-    stage body has no ``inspect`` dependency, and the
-    ``session_manager is None`` guard so the stage body has no
-    conditional on manager presence. Returns ``True`` if the append
-    fired, ``False`` when the adapter declined (no manager configured).
+    The port folds the ``accepts_keyword_arg(..., "token_count")``
+    introspection so the stage body has no ``inspect`` dependency, and the
+    ``session_manager is None`` guard so the stage body has no conditional
+    on manager presence. Returns ``True`` if the append fired, ``False``
+    when the port declined (no manager configured).
 
-    Exceptions propagate to the outer ``_run_turn`` terminal handler --
-    no try/except wraps ``append_message``.
+    Exceptions propagate to the harness's terminal error handler -- no
+    try/except wraps ``append_message``.
     """
 
     async def append_message(
@@ -136,7 +135,7 @@ class TurnMemoryCapturePort(Protocol):
     """Wrap ``TurnRunner._capture_turn_memory(...)``.
 
     The call is wrapped in a log-and-continue try/except inside the
-    stage body so the error-handling contract is visible. The adapter
+    stage body so the error-handling contract is visible. The port
     forwards verbatim without swallowing.
     """
 
@@ -159,7 +158,7 @@ class TurnMemoryCapturePort(Protocol):
 class MemoryNudgePort(Protocol):
     """Wrap ``TurnRunner.note_turn_for_memory_nudge(...)``.
 
-    Synchronous by design: the adapter only advances a counter and, when a
+    Synchronous by design: the port only advances a counter and, when a
     review is due, schedules it as a background task. Nothing here awaits the
     review itself, so a slow review cannot hold the turn open.
     """
@@ -234,12 +233,12 @@ class SessionTotalsPort(Protocol):
     Wraps the entire post-DoneEvent block: the
     ``get_session`` read, ``normalize_event_cost_source`` call, the
     four ``next_*`` accumulator computations, the ``rollup_cost_source``
-    call, and the ``Session.update`` write. The adapter folds the
+    call, and the ``Session.update`` write. The port folds the
     ``session_manager is None`` guard and the ``current_session is None``
     early-return so the stage body has no conditional on manager
     presence.
 
-    Returns ``CostRollupResult | None``. ``None`` when the adapter
+    Returns ``CostRollupResult | None``. ``None`` when the port
     declined (no session manager or no current session row); a populated
     snapshot otherwise so the equivalence harness can pin the
     post-rollup ``Session`` row across modes.
@@ -259,7 +258,7 @@ class TurnErrorPersistPort(Protocol):
     """Wrap ``TurnRunner._persist_turn_error(session_key, event)``.
 
     The helper owns its own log-and-continue try/except; the
-    adapter forwards verbatim. The helper guards
+    port forwards verbatim. The helper guards
     ``session_manager is None`` AND ``event is None`` internally -- the
     stage body has no None checks.
     """
@@ -351,6 +350,12 @@ class TurnFinalizerStageInput:
     # was written; the final row replaces it in the same transaction.
     replaces_message_id: str | None = None
 
+    # Called right after the assistant turn was appended, before memory
+    # capture and the totals rollup are awaited. The harness records there
+    # that the reply is durable, so a cancel landing later in this stage does
+    # not persist the turn a second time.
+    on_transcript_appended: Callable[[], None] | None = None
+
 
 @dataclass(frozen=True)
 class TurnFinalizerStageOutput:
@@ -363,13 +368,13 @@ class TurnFinalizerStageOutput:
      equivalence harness, not consumed downstream).
     """
 
-    # Heartbeat-normalized final text (the harness writes this onto
-    # TurnContext for to read).
+    # Heartbeat-normalized final text (the harness reads it for the
+    # turn_end trace event and the decision entry).
     final_text: str
     # ``turn_segments`` may be EMPTIED by the heartbeat-empty edge; the
     # stage returns the post-empty value.
     turn_segments: list[dict]
-    # Re-exposed unchanged so has its turn_end payload inputs.
+    # Re-exposed unchanged for the turn_end payload.
     turn_artifacts: list[dict[str, Any]]
     error_message: str | None
     pending_error_event: ErrorEvent | None
@@ -392,8 +397,8 @@ class TurnFinalizerStage:
     """Persist the assistant turn, capture memory, roll up session totals.
 
      Stable boundary: runs ONCE per turn, after StreamConsumerStage
-     exhausts (and after the harness flushes the trailing text segment),
-    . The four ports execute in the original order:
+     exhausts (and after the harness flushes the trailing text segment).
+     The ports execute in this order:
 
      1. Heartbeat-normalize the accumulated text.
      2. ``TranscriptAppendPort.append_message`` (assistant turn).
@@ -410,8 +415,8 @@ class TurnFinalizerStage:
      that downstream observability relies on.
 
      Exception model: the stage does NOT wrap the ``append_message``
-     call. Any exception there propagates to the outer ``_run_turn``
-     terminal handler --. The memory-capture
+     call. Any exception there propagates to the harness's terminal error
+     handler. The memory-capture
      and totals-rollup ports each have their own log-and-continue
      try/except inside the stage body.
 
@@ -521,6 +526,8 @@ class TurnFinalizerStage:
                 token_count=token_count,
                 **append_kwargs,
             )
+            if transcript_appended and inp.on_transcript_appended is not None:
+                inp.on_transcript_appended()
             if transcript_appended:
                 try:
                     await self._turn_memory_capture.capture_turn(
@@ -570,7 +577,7 @@ class TurnFinalizerStage:
             )
 
         # 4. Error persist (only when error_message is truthy; the
-        # adapter folds the session-manager-None guard, and the helper
+        # port folds the session-manager-None guard, and the helper
         # also guards event-is-None internally).
         if inp.error_message:
             await self._turn_error_persist.persist_error(
@@ -579,7 +586,7 @@ class TurnFinalizerStage:
             )
 
         # 5. Session totals rollup (only when DoneEvent present; the
-        # adapter folds the session-manager-None and
+        # port folds the session-manager-None and
         # current_session-None guards).
         cost_rollup: CostRollupResult | None = None
         if inp.done_event is not None:

@@ -152,7 +152,14 @@ class _TurnRun:
     turn_progress: Any
     budget_reservation: str | None = None
     turn_call_logger: TurnCallLogger | None = None
+    #: The agent once bootstrap built it; the cancellation path reads its
+    #: sealed record whether or not a progress writer is attached.
+    agent: Any = None
+    #: The agent whose progress sink this run attached (detached on close).
     turn_progress_agent: Any = None
+    #: Set once the finalizer's transcript append succeeded: the turn's reply
+    #: is durable, so a cancel landing after it must not write it again.
+    reply_persisted: bool = False
     # Declared up-front so the cancellation path can read them even when it
     # fires before the stream loop.
     final_text_parts: list[str] = field(default_factory=list)
@@ -289,7 +296,7 @@ class TurnHarness:
                 run, "agent_bootstrap", stages.agent_bootstrap.run(ab_input)
             )
             ab_out = ab_outcome.require_output()
-            agent = ab_out.agent
+            agent = run.agent = ab_out.agent
             agent.turn_timing = run.timing
             # Read by the test_agent_bootstrap_stage_snapshot probe. Do not remove.
             agent_config = ab_out.agent_config
@@ -334,17 +341,20 @@ class TurnHarness:
             )
             replay_requested = False
             run.timing.stage_start("stream_consumer")
-            async for event in stages.stream_consumer.run(stream_inp):
-                if isinstance(event, RouterControlReplayEvent):
-                    replay_requested = True
+            # aclosing: leaving the loop (the replay ``break``, a closed or
+            # cancelled caller) closes the stage and the agent run under it now.
+            async with aclosing(stages.stream_consumer.run(stream_inp)) as stream_events:
+                async for event in stream_events:
+                    if isinstance(event, RouterControlReplayEvent):
+                        replay_requested = True
+                        yield event
+                        break
+                    if isinstance(event, SteeringEvent) and event.no_memory_capture:
+                        # A message steered in asked to stay out of memory.
+                        no_memory_capture = True
+                    if isinstance(event, DoneEvent):
+                        run.done_yielded = True
                     yield event
-                    break
-                if isinstance(event, SteeringEvent) and event.no_memory_capture:
-                    # A message steered in asked to stay out of memory.
-                    no_memory_capture = True
-                if isinstance(event, DoneEvent):
-                    run.done_yielded = True
-                yield event
             run.timing.stage_end("stream_consumer")
             if replay_requested:
                 # The replay reruns the whole turn (``run_turn`` loops); what
@@ -634,7 +644,15 @@ class TurnHarness:
             replaces_message_id=(
                 run.turn_progress.message_id if run.turn_progress is not None else None
             ),
+            on_transcript_appended=lambda: TurnHarness._note_reply_persisted(run),
         )
+
+    @staticmethod
+    def _note_reply_persisted(run: _TurnRun) -> None:
+        """The finalizer's append landed: the reply row replaced the in-progress row."""
+        run.reply_persisted = True
+        if run.turn_progress is not None:
+            run.turn_progress.replaced()
 
     @staticmethod
     def _replay_of(
@@ -888,7 +906,9 @@ class TurnHarness:
         """Keep what already streamed of a cancelled turn (the caller re-raises).
 
         The partial reply is persisted with an ``[interrupted]`` marker, so the
-        transcript does not end on an orphan user message.
+        transcript does not end on an orphan user message. A cancel that lands
+        after the finalizer persisted the reply (during memory capture or the
+        totals rollup) writes nothing: the turn is already in the transcript.
         """
         from agentos.engine.runtime import _cancelled_partial_response_text
         from agentos.engine.turn_progress import stopped_by_shutdown
@@ -901,11 +921,13 @@ class TurnHarness:
             # The in-progress row (or the bare user message) stays the tail, so
             # restart recovery sees how far the turn got.
             log.info("turn_runner.cancelled_by_shutdown", session_key=session_key)
+        elif run.reply_persisted:
+            log.info("turn_runner.cancelled_after_reply_persisted", session_key=session_key)
         elif runner._session_manager is not None and (
             partial_text
             or turn_segments
             or turn_artifacts
-            or transcript_record_of(run.turn_progress_agent) is not None
+            or transcript_record_of(run.agent) is not None
         ):
             try:
                 body = _cancelled_partial_response_text(partial_text, turn_artifacts)
@@ -921,7 +943,7 @@ class TurnHarness:
                 # interruption note at the end); persisting that record lets the
                 # next turn replay it without pairing repair.
                 cancelled_provider_messages = transcript_record_of(
-                    run.turn_progress_agent, artifacts=turn_artifacts
+                    run.agent, artifacts=turn_artifacts
                 )
                 if cancelled_provider_messages is not None:
                     cancel_kwargs["provider_messages"] = cancelled_provider_messages
