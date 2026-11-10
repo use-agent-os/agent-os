@@ -26,10 +26,13 @@ from __future__ import annotations
 from agentos.skills.types import SkillLayer, SkillPublisher
 
 #: Publishers allowed to appear as a brand. Keyed by the stable slug a skill
-#: declares in ``publisher.id``. Names match the labels the Skills UI already
-#: uses (``PARTNER_BRANDS`` in ``frontend/src/views/skills/SkillsPage.tsx``);
-#: ``logo`` stays empty for partners whose mark the client ships as a bundled
-#: asset, so no prompt or page has to fetch a remote image to render a card.
+#: declares in ``publisher.id``. Names match the partner labels the console
+#: shows in Settings > Skills (``PARTNER_MARKS`` and the
+#: ``webSetCapabilities.skillsPartner*`` strings used by
+#: ``frontend/src/web/features/settings/sections/skills.tsx``); ``logo`` stays
+#: empty for partners whose mark the client ships as a bundled asset under
+#: ``frontend/src/assets``, so no prompt or page has to fetch a remote image to
+#: render a card.
 RECOGNIZED_PUBLISHERS: dict[str, SkillPublisher] = {
     "robinhood": SkillPublisher(
         id="robinhood",

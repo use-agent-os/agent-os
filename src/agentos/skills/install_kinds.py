@@ -136,7 +136,7 @@ def build_install_argv(spec: SkillInstallSpec) -> list[str]:
 
     if kind == "download":
         raise InstallSpecError(
-            "Install kind 'download' has no single-command form; it runs through the Skills page"
+            "Install kind 'download' has no single-command form; it runs through Settings > Skills"
         )
 
     raise InstallSpecError(f"Unsupported install kind: {spec.kind}")
