@@ -183,7 +183,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   model, and fails if there is none. A `Retry-After` longer than 30 s with no
   model to fail over to fails the turn instead of retrying into the same
   limit. No failover happens after the model has streamed visible text.
-  Every failed attempt logs one `turn_policy_decision`.
+  With a fallback model configured, a request that fails before any output
+  (a timeout included) still switches to the fallback at once, as before;
+  these retry rules then apply on the fallback. Every failed attempt logs
+  one `turn_policy_decision`.
 - HTTP 401 from any provider is now an authentication failure (not
   retried), and the error says to check the provider's credentials.
 - Every agent turn now ends with exactly one `DoneEvent`, after the error on

@@ -289,6 +289,13 @@ are clamped to 0–300 s.
 
 ### Retrying transient failures
 
+With a fallback model configured, a request that fails before the model
+produced anything (a timeout, a transport blip, an overload or a rate limit
+without a short wait, an unknown model) switches to the fallback at once,
+without a retry on the first model. The rules below apply to the model the
+turn ends up on, to failures after output started, and to every failure when
+there is no fallback.
+
 Rate limits without a wait, overloads (HTTP 529, `overloaded_error`) and
 transport blips (connection resets, 502/504/52x) are retried on the same
 model. Each failed attempt gets exactly one recovery decision, which is
