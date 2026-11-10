@@ -584,10 +584,7 @@ def _configured_tool_hooks(runtime: dict[str, Any], rpc_ctx: Any) -> tuple[Any, 
     """
     hooks = runtime.get("tool_hooks")
     if hooks is None:
-        runner = getattr(rpc_ctx, "turn_runner", None)
-        hooks = getattr(runner, "tool_hooks", None)
-        if hooks is None:
-            hooks = getattr(runner, "_tool_hooks", None)
+        hooks = getattr(getattr(rpc_ctx, "turn_runner", None), "tool_hooks", None)
     if not hooks:
         return ()
     try:

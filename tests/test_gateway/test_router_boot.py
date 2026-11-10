@@ -1305,5 +1305,7 @@ async def test_start_gateway_server_wires_hooks(tmp_path) -> None:
         assert th in runner._turn_hooks
         assert runner._compaction_hooks == (ch,)
         assert runner._tool_hooks == (toh,)
+        # The public read-only view /tools/invoke uses.
+        assert runner.tool_hooks == (toh,)
     finally:
         await server.close()

@@ -2757,6 +2757,15 @@ class TurnRunner:
         return self._router_control_hold_store
 
     @property
+    def tool_hooks(self) -> tuple[ToolHook, ...]:
+        """The tool hooks every turn's tool calls run through (read-only).
+
+        Other entry points that run tools for the same gateway, such as
+        ``POST /api/v1/tools/invoke``, run them too.
+        """
+        return self._tool_hooks
+
+    @property
     def router_control_config(self) -> Any:
         """Active Pilot Router config section, or None when not configured."""
         return getattr(self._config, "agentos_router", None)
