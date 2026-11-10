@@ -766,7 +766,7 @@ describe('approval-monitor service', () => {
       const other: Approval = { id: 'b1', namespace: 'exec', command: 'pwd' }
       useApprovals.getState().setFromPoll([item, other], 'prompt')
       const firstPost = deferred<Response>()
-      fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
         if (init?.method !== 'POST') return okResponse({ pending: [], mode: 'prompt' })
         const body = JSON.parse(init.body as string) as { id: string }
         return body.id === 'a1' ? firstPost.promise : okResponse({ ok: true })
