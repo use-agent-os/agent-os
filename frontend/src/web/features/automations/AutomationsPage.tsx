@@ -64,6 +64,7 @@ import {
 import { Button } from '@/web/components/ui/button'
 import { PageHeader } from '@/web/components/ui/page-header'
 import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
+import { useDocumentVisible } from '@/web/shell/session-data'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { AutomationEditor, type SaveRequest } from './AutomationEditor'
 import { RunHistory } from './RunHistory'
@@ -77,6 +78,11 @@ const JOBS_QUERY_KEY = ['cron', 'jobs'] as const
 const TARGETS_QUERY_KEY = ['cron', 'deliveryTargets'] as const
 /** The run's record (and health) lands shortly after `cron.run.finished`. */
 const RUN_RECORD_SETTLE_MS = 1500
+/**
+ * The slow fallback poll. `cron.run.finished` keeps the cards current while the
+ * subscription holds; this bounds how stale they get if an event is missed.
+ */
+export const JOBS_POLL_MS = 60_000
 /** Where the chat workspace records the last open session (cron's "current session"). */
 const ACTIVE_SESSION_STORAGE = 'agentos.ui.lastSession'
 
@@ -159,6 +165,7 @@ export function AutomationsPage() {
   const [pendingDelete, setPendingDelete] = useState<RawJob | null>(null)
   const [deleting, setDeleting] = useState(false)
   const reasonId = useId()
+  const visibleTab = useDocumentVisible()
 
   const jobs = useQuery({
     queryKey: JOBS_QUERY_KEY,
@@ -167,6 +174,8 @@ export function AutomationsPage() {
       const data = await rpc.call<RawJob[] | { jobs?: RawJob[] }>('cron.list', {})
       return Array.isArray(data) ? data : (data?.jobs ?? [])
     },
+    refetchInterval: visibleTab ? JOBS_POLL_MS : false,
+    refetchIntervalInBackground: false,
   })
 
   // Known recipients per channel. A failure is quiet: the form falls back to
@@ -180,22 +189,30 @@ export function AutomationsPage() {
     staleTime: 60_000,
   })
 
-  // cron.subscribe for the page's lifetime (best effort before the handshake).
+  // cron.subscribe on every connection while the page is open. The gateway
+  // keeps subscriptions per connection, so a reconnect (a new `connectedAt`)
+  // starts without one and must subscribe again (the shell refetches queries
+  // on a reconnect, which covers runs that finished while the socket was down).
   useEffect(() => {
     let cancelled = false
     rpc
       .waitForConnection()
       .then(() => (cancelled ? undefined : rpc.call('cron.subscribe', {})))
       .catch(() => {
-        /* the subscription is best effort */
+        /* the subscription is best effort; the slow poll covers a miss */
       })
     return () => {
       cancelled = true
+    }
+  }, [rpc, connectedAt])
+  useEffect(
+    () => () => {
       rpc.call('cron.unsubscribe', {}).catch(() => {
         /* best effort while disconnecting */
       })
-    }
-  }, [rpc])
+    },
+    [rpc],
+  )
 
   // A finished run refreshes jobs and any open history at once, then once
   // more after the scheduler has recorded the result (its health streak).
@@ -502,6 +519,36 @@ export function AutomationsPage() {
 
 // ── One job ──────────────────────────────────────────────────────────────────
 
+/** `cron.run`'s answer: the run's outcome, or why it did not start (busy, disabled, …). */
+export interface ManualRunResult {
+  success?: boolean
+  status?: string
+  reply?: string | null
+  error?: string | null
+  reason?: string | null
+}
+
+/**
+ * What Run now reports. Failure is decided first: a run that failed or never
+ * started can still carry text, and showing that as a reply would read as
+ * success.
+ */
+export function runNowStatus(res: ManualRunResult | null): {
+  tone: 'ok' | 'danger'
+  text: string
+} {
+  if (res?.error) return { tone: 'danger', text: t('webPagesWork.runError', { error: res.error }) }
+  if (res?.success === false) {
+    const reason = res.reason || res.status || ''
+    return res.status && res.status !== 'accepted'
+      ? { tone: 'danger', text: t('webPagesWork.runRefused', { reason }) }
+      : { tone: 'danger', text: t('webPagesWork.runError', { error: reason || res.reply || '' }) }
+  }
+  if (res?.reply)
+    return { tone: 'ok', text: t('webPagesWork.runReply', { reply: res.reply.slice(0, 160) }) }
+  return { tone: 'ok', text: t('webPagesWork.runTriggered') }
+}
+
 function JobCard({
   job,
   control,
@@ -562,12 +609,8 @@ function JobCard({
 
   const runNow = () =>
     act('run', async () => {
-      const res = await rpc.call<{ reply?: string; error?: string } | null>('cron.run', { id })
-      if (res?.reply)
-        return { tone: 'ok', text: t('webPagesWork.runReply', { reply: res.reply.slice(0, 160) }) }
-      if (res?.error)
-        return { tone: 'danger', text: t('webPagesWork.runError', { error: res.error }) }
-      return { tone: 'ok', text: t('webPagesWork.runTriggered') }
+      const res = await rpc.call<ManualRunResult | null>('cron.run', { id })
+      return runNowStatus(res)
     })
   const toggle = () =>
     act('toggle', async () => {

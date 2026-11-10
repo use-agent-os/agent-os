@@ -323,6 +323,8 @@ function ProjectDetail({
 
   const projectSessions = sessionsInProject(sessions, id) as SessionRow[]
   const groups = groupProjectSessionsByAgent(projectSessions)
+  // The shared list holds only the newest sessions; the project's own count is exact.
+  const partial = projectSessionCount(project) > projectSessions.length
   const knowledgeValue = draft?.text ?? knowledge
   const dirty = draft !== null && draft.text !== knowledge
 
@@ -342,11 +344,18 @@ function ProjectDetail({
 
   const saveName = async () => {
     const next = (nameDraft ?? '').trim()
+    const sentBase = updatedAtOf(project)
     setSaving('name')
     setError(null)
     try {
-      const res = await update({ name: next }, updatedAtOf(project))
+      const res = await update({ name: next }, sentBase)
       applyFresh(res?.project)
+      // The rename bumped the project's version. A knowledge draft started on
+      // the version this rename replaced has seen every change but our own,
+      // so move it onto the new version: otherwise its save reads as someone
+      // else's conflict.
+      const renamed = res?.project ? updatedAtOf(res.project) : 0
+      if (renamed) setDraft((d) => (d && d.base === sentBase ? { ...d, base: renamed } : d))
       setNameDraft(null)
       toast.success(t('webPagesWork.projectRenamed'))
     } catch (e) {
@@ -555,8 +564,18 @@ function ProjectDetail({
             {t('webPagesWork.newChatInProject')}
           </Button>
         </div>
+        {partial ? (
+          <p role="note" className="text-small text-text-muted">
+            {t('webPagesWork.projectSessionsPartial', {
+              shown: projectSessions.length,
+              total: projectSessionCount(project),
+            })}
+          </p>
+        ) : null}
         {groups.length === 0 ? (
-          <p className="text-text-muted">{t('webPagesWork.projectNoSessions')}</p>
+          partial ? null : (
+            <p className="text-text-muted">{t('webPagesWork.projectNoSessions')}</p>
+          )
         ) : (
           groups.map((group) => (
             <div key={group.agentId}>
