@@ -157,7 +157,8 @@ the queue as soon as the harness has them and are never logged. Questions time
 out after 15 minutes.
 
 Over RPC, `approval.list` lists pending approvals of every namespace with a
-readable `title` (`params.namespace` narrows it), and `exec.approval.resolve`
+readable `title` (`params.namespace` narrows it; `params.display: true`
+answers exactly as `GET /api/approvals` does), and `exec.approval.resolve`
 (or `POST /api/approvals/resolve`) accepts an optional `payload` object for
 form answers.
 

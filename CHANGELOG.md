@@ -220,6 +220,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   strings of the previous console.
 
 ### Fixed
+- Web console: a turn that had finished could show **Working…** with Stop
+  for about 210 seconds. The gateway reported a run whose final frame it had
+  already sent as still running (the task ledger settles a moment later), and
+  the console believed it. Neither happens now: `chat.history` and
+  `sessions.messages.subscribe` no longer name a run that ended, and the
+  console treats a run's end (`done`, `error`, `task.*`) as final. The same
+  race left a turn recovered after a gateway restart stuck.
+- Web console: user messages loaded from history no longer show the
+  gateway's time prefix (`[2026-… Asia/…]`) and are not shown twice; a failed
+  turn keeps its reason and **Try again** after a reload.
+- Web console: after switching to another gateway (Settings › Gateway or a
+  `gatewayUrl` link), approvals were read from and answered on the page's
+  gateway, with the new gateway's token. HTTP calls now follow the connected
+  gateway and carry its token only to it; on a gateway other than the page's,
+  approvals go over its WebSocket. Settings › Gateway shows the new address
+  and confirms the switch without a reload.
+- Settings › Models: after switching provider with the router off, the router
+  form showed, and Pilot + Apply wrote, the previous provider's model ids; it
+  now shows and sends the current provider's tiers. Apply no longer resets a
+  tier's description, and a provider Apply no longer resets
+  `llm.circuit_breaker` and `llm.repetition_guard` to their defaults.
+- Automations: the next-run preview is worked out in the job's timezone (UTC
+  when empty), as the scheduler runs it.
+- Inbox: unanswered agent questions are listed after a reload without opening
+  each session (new read-only RPC `sessions.questions`).
+- Web console smaller fixes: Reset session asks first; **Stop now** after
+  Stop ends the turn at once; a refused gateway address fails at once on the
+  Connect screen; the restart notice names its reasons in words; Enter saves
+  a project's name; the Sessions page row menu has **Open in new tab**; an
+  image button in a reply shows as a link; the X search "What you need" text
+  reads as sentences.
 - A tool that returns a `dict` or `list` now hands the model JSON instead of
   a Python repr, so its result (a pending approval, for example) can be read
   back. String results are unchanged.

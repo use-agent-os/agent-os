@@ -454,7 +454,12 @@ before relying on it.
   runs (drop any live view), or `{run_id, task_id, status, started_at,
   through_stream_seq, text, text_truncated?, plan?, events?}` for the running
   turn. It is capped at 256 KiB, filled in that order of priority; text is cut
-  from the front. `through_stream_seq` is the stream position it covers.
+  from the front. `through_stream_seq` is the stream position it covers. A run
+  whose terminal frame (`done` / `error` / `task.*`) was already sent is never
+  reported, even while its task is being settled.
+- **`sessions.questions {limit?}`** — the unanswered `ask_user` questions the
+  most recently updated sessions end on (default 100 sessions, at most 500):
+  `{questions: [{key, questions, toolUseId, askedAt}]}`.
 - **`mid-turn-steering`** — a `chat.send` / `sessions.send` with an explicit
   `queueMode: "steer"` while the session's turn runs joins that turn instead
   of cancelling it (without `queueMode` the session's default still replaces

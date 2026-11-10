@@ -140,8 +140,8 @@ how many it has. The filter box matches titles and keys; the filter menu narrows
 by agent, channel or project; **Clear filters** resets them all. A row's ⋯ menu
 (also right-click, or Shift+F10 on a focused row) holds Open in new tab, Rename,
 Pin/Unpin (and Move up/down for pinned rows, which can also be dragged), Move to
-project, Reset, Export as Markdown, Copy session key and Delete (confirmed
-first). The list refreshes on `sessions.changed` and every 5 seconds while the
+project, Reset and Delete (both confirmed first), Export as Markdown and Copy
+session key. The list refreshes on `sessions.changed` and every 5 seconds while the
 tab is visible. Pins and the grouping choice are stored in the browser.
 
 Picking an agent in the rail's switcher makes it the default for New session
@@ -221,7 +221,7 @@ Chat is the center of the console; everything else is a page in the rail's
 | --- | --- | --- |
 | Chat | `/chat/…` | Run and resume sessions, follow tool activity, read artifacts and cards, compact. |
 | Home | `/home` | Readiness, provider and route, uptime, sessions, usage (all time, plus how many sessions were active today), the next automation run, and a live event feed. Each figure loads on its own and links to its detail. |
-| Sessions | `/sessions` | Search and filter every session, stat tiles with an open/completed/failed/aborted breakdown and how many are executing now, a lifecycle chip per row, inline rename, bulk delete, move to a project, a new-session dialog that can create an agent, orphan flags. |
+| Sessions | `/sessions` | Search and filter every session, stat tiles with an open/completed/failed/aborted breakdown and how many are executing now, a lifecycle chip per row, inline rename, a row menu with Open chat and Open in new tab, bulk delete, move to a project, a new-session dialog that can create an agent, orphan flags. |
 | Projects | `/projects` | Group sessions, edit each project's shared knowledge (injected into every member session), and start a new chat inside a project at once, under the project's agent. |
 | Usage | `/usage` | The sessions active in a range with their token and estimated-cost totals, the top sessions charted, a rollup by model, CSV export. |
 | Automations | `/automations` | Scheduled jobs and their run health; create, edit, run now, pause, delete, run history. |
@@ -257,7 +257,7 @@ and where the token comes from (`auth.token`, or `AGENTOS_GATEWAY_TOKEN`).
 - Too many failed sign-ins (`AUTH_RATE_LIMITED`) disable the form and say that
   sign-in is rate limited. The console does not retry by itself.
 - If the gateway does not answer within 10 seconds, the screen says it could
-  not be reached. The form stays usable during an attempt: correct the address
+  not be reached; a connection that is refused outright says so at once. The form stays usable during an attempt: correct the address
   and connect again at any time.
 - A new address is saved for this browser only after that gateway connects, so
   a mistyped or unreachable one does not stick across reloads.
@@ -266,7 +266,16 @@ and where the token comes from (`auth.token`, or `AGENTOS_GATEWAY_TOKEN`).
 token is required only when the gateway uses token auth (`auth.mode =
 "token"`); otherwise the WebSocket URL can be changed on its own. **Disconnect**
 closes the connection and stops reconnecting until you press **Reconnect** or
-reload the page.
+reload the page. After a switch the section shows the new address and
+"Connected to <host>." once that gateway answers.
+
+Connected to a gateway other than the one that served the page, the console
+reaches it only over its WebSocket: the page's security policy allows HTTP to
+its own origin only, and the tab's token is never sent to any other address.
+Approvals (the inbox, the tray and the approval mode) work over the socket.
+The elevated-execution switch, uploads of files over 2 MB and cards whose
+data loads over HTTP are not available there and say so. Open the console
+from that gateway's own address to use them.
 
 ### Credentials in a link
 
@@ -695,8 +704,8 @@ The chat workspace is one centered column. Your messages are right-aligned
 bubbles; replies are full-width prose. Hover or focus a message to copy it as
 Markdown or see when it was sent. The header shows the session title (activate
 it to rename in place), the agent, channel and project, a **Details** toggle, a
-**Panels** toggle and a ⋯ menu (Rename, Compact, Reset session, Export as
-Markdown, Copy session key). It stays visible while the transcript scrolls.
+**Panels** toggle and a ⋯ menu (Rename, Compact, Reset session (confirmed
+first), Export as Markdown, Copy session key). It stays visible while the transcript scrolls.
 
 While you are at the end of the transcript, new content keeps the latest in
 view. Scroll up and following pauses — the text you are reading does not move —
@@ -771,8 +780,9 @@ placeholder; press Tab on an empty composer to use it.
 
 The main button follows the session: **Send** when idle, **Stop** while a turn
 runs (calls `chat.abort`), and **Queue** next to Stop once you have typed
-something. After Stop the button reads **Stopping…** until the gateway confirms
-the turn ended; a refused stop is reported. Messages sent while a turn runs
+something. After Stop the turn shows **Stopping…** while the gateway winds it
+down, and the button reads **Stop now**: pressing it (or Escape) again sends a
+second `chat.abort`, which ends the turn at once. A refused stop is reported. Messages sent while a turn runs
 wait in a queue kept per session for the life of the tab (switching sessions
 keeps it). They are listed above the composer, where each can be edited or
 removed. The queue sends its next message when the turn ends normally or a
@@ -921,7 +931,8 @@ the same approvals next to agent questions and runtime issues.
 ## Automations
 
 **Automations** (`/automations`, `g r`) is the former Cron view. Each job is a
-card with its schedule (and a plain-language explanation with the next runs),
+card with its schedule (and a plain-language explanation with the next runs,
+worked out in the job's timezone, UTC when it has none, and shown in local time),
 delivery target, payload and run health. **New automation** opens the editor,
 which also sets the failure destination; an empty page explains that scheduled
 jobs appear there and offers **New automation** with presets. Cards offer
