@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { bindPendingQuestions, usePendingQuestions, type QuestionsRpc } from './pending-questions'
+import {
+  bindPendingQuestions,
+  loadPendingQuestions,
+  usePendingQuestions,
+  type QuestionsRpc,
+} from './pending-questions'
 
 type Handler = (...args: unknown[]) => void
 
@@ -110,5 +115,77 @@ describe('bindPendingQuestions', () => {
     same.retainSessions(new Set(['kept']), 2_000)
     expect(usePendingQuestions.getState()).toBe(same)
     off()
+  })
+})
+
+describe('loadPendingQuestions', () => {
+  const rpcAnswering = (answer: unknown) => ({
+    calls: [] as string[],
+    async call<T>(method: string): Promise<T> {
+      this.calls.push(method)
+      if (answer instanceof Error) throw answer
+      return answer as T
+    },
+  })
+
+  it('restores the questions the gateway reports, so the inbox lists them after a reload', async () => {
+    const rpc = rpcAnswering({
+      questions: [
+        {
+          key: 'agent:main:webchat:a',
+          questions: PRESENTED.questions,
+          toolUseId: 'tu-9',
+          askedAt: 10,
+        },
+        { key: 'agent:main:webchat:bad', questions: [{ question: 'no options' }] },
+      ],
+    })
+    await loadPendingQuestions(rpc, { now: () => 100 })
+    expect(rpc.calls).toEqual(['sessions.questions'])
+    const items = usePendingQuestions.getState().items
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      id: 'question:agent:main:webchat:a',
+      sessionKey: 'agent:main:webchat:a',
+      toolUseId: 'tu-9',
+      presentedAt: 10,
+    })
+    expect(items[0]!.questions[0]!.question).toBe('Which branch?')
+  })
+
+  it('replaces what was known before the call and keeps a question seen live since', async () => {
+    const rpc = new FakeRpc()
+    let clock = 5
+    const off = bindPendingQuestions(rpc, { now: () => clock })
+    rpc.emit('session.event.tool_result', askResult('agent:main:webchat:answered-elsewhere'))
+    clock = 50
+    const pending = loadPendingQuestions(
+      {
+        call: async <T>() => {
+          // Arrives live while the list is on its way.
+          clock = 60
+          rpc.emit('session.event.tool_result', askResult('agent:main:webchat:new'))
+          return { questions: [] } as T
+        },
+      },
+      { now: () => clock },
+    )
+    await pending
+    expect(usePendingQuestions.getState().items.map((q) => q.sessionKey)).toEqual([
+      'agent:main:webchat:new',
+    ])
+    off()
+  })
+
+  it('leaves the list alone when the gateway has no such method', async () => {
+    usePendingQuestions.getState().present({
+      id: 'question:k',
+      sessionKey: 'k',
+      questions: [],
+      toolUseId: null,
+      presentedAt: 1,
+    })
+    await loadPendingQuestions(rpcAnswering(new Error('METHOD_NOT_FOUND')))
+    expect(usePendingQuestions.getState().items).toHaveLength(1)
   })
 })

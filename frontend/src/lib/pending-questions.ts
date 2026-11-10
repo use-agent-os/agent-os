@@ -1,16 +1,15 @@
 /**
  * Pending operator questions (`ask_user`) for the attention inbox.
  *
- * The gateway has no RPC that lists unanswered questions: `ask_user` ends the
- * turn and the answer is simply the next user message. So the list is built
- * from what this connection sees: a `session.event.tool_result` whose result
- * is a presented question adds an entry for its session, and the next
- * `task.queued` for that session (the answer, or any newer message) clears
- * it. Replayed frames are ignored (they may predate the answer). The gateway
- * only streams `session.event.*` to connections subscribed to
- * a session's messages, which means a question asked in a session no window
- * of this console has open, or before the console connected, is not listed.
- * The chat transcript still shows it when the session is opened.
+ * `ask_user` ends the turn and the answer is simply the next user message.
+ * On every connect the list is restored from `sessions.questions` (the
+ * questions the most recently updated sessions end on), so a question asked
+ * before this console connected, or in a session no window has open, is
+ * listed too. After that it follows what this connection sees: a
+ * `session.event.tool_result` whose result is a presented question adds an
+ * entry for its session, and the next `task.queued` for that session (the
+ * answer, or any newer message) clears it. Replayed frames are ignored (they
+ * may predate the answer).
  *
  * Deleting a session sends no frame that clears its question, so a caller that
  * holds a complete session list prunes with `retainSessions`: a question whose
@@ -39,6 +38,11 @@ interface PendingQuestionsState {
    * may predate their session.
    */
   retainSessions(live: ReadonlySet<string>, asOf: number): void
+  /**
+   * The gateway's list, read at `asOf`, replaces what was known then; a
+   * question presented live after `asOf` is newer than the list and stays.
+   */
+  restore(loaded: PendingQuestion[], asOf: number): void
   reset(): void
 }
 
@@ -58,6 +62,12 @@ export const usePendingQuestions = create<PendingQuestionsState>((set) => ({
       const items = s.items.filter((q) => q.presentedAt > asOf || live.has(q.sessionKey))
       return items.length === s.items.length ? s : { items }
     }),
+  restore: (loaded, asOf) =>
+    set((s) => {
+      const newer = s.items.filter((q) => q.presentedAt > asOf)
+      const fresh = loaded.filter((q) => !newer.some((n) => n.sessionKey === q.sessionKey))
+      return { items: [...fresh, ...newer] }
+    }),
   reset: () => set({ items: [] }),
 }))
 
@@ -75,6 +85,50 @@ function toolUseIdOf(payload: unknown): string | null {
     if (typeof value === 'string' && value) return value
   }
   return null
+}
+
+interface LoadedQuestion {
+  key?: unknown
+  questions?: unknown
+  toolUseId?: unknown
+  askedAt?: unknown
+}
+
+/**
+ * Restore the list from the gateway (`sessions.questions`). A gateway without
+ * that method, or a failed call, leaves the list as it is.
+ */
+export async function loadPendingQuestions(
+  rpc: { call<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> },
+  options: { now?: () => number } = {},
+): Promise<void> {
+  const now = options.now ?? Date.now
+  const asOf = now()
+  let answer: { questions?: unknown } | null
+  try {
+    answer = await rpc.call<{ questions?: unknown } | null>('sessions.questions', {})
+  } catch {
+    return
+  }
+  const loaded: PendingQuestion[] = []
+  for (const raw of Array.isArray(answer?.questions) ? answer.questions : []) {
+    const item = (raw ?? {}) as LoadedQuestion
+    const sessionKey = typeof item.key === 'string' ? item.key : ''
+    const questions = parseAskQuestions({
+      name: 'ask_user',
+      result: { status: 'question_presented', questions: item.questions },
+    })
+    if (!sessionKey || !questions) continue
+    const askedAt = Number(item.askedAt)
+    loaded.push({
+      id: `question:${sessionKey}`,
+      sessionKey,
+      questions,
+      toolUseId: typeof item.toolUseId === 'string' ? item.toolUseId : null,
+      presentedAt: Number.isFinite(askedAt) && askedAt <= asOf ? askedAt : asOf,
+    })
+  }
+  usePendingQuestions.getState().restore(loaded, asOf)
 }
 
 export interface QuestionsRpc {

@@ -147,7 +147,7 @@ export const webPagesOverview = defineNamespace('webPagesOverview', {
   inboxEmptyUnknownHint:
     'The gateway is not connected, so new approvals and questions cannot arrive.',
   inboxQuestionsGap:
-    'Questions are listed from sessions this console is following; others show when you open the session.',
+    'Questions are listed from the 100 most recently updated sessions; an older one shows when you open its session.',
   inboxDismissed_one: '{count} dismissed issue is hidden.',
   inboxDismissed_other: '{count} dismissed issues are hidden.',
   inboxRestore: 'Show again',

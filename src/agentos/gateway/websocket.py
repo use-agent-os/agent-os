@@ -1356,6 +1356,7 @@ CONCURRENT_READ_METHODS: frozenset[str] = frozenset(
         "providers.status",
         "sessions.list",
         "sessions.preview",
+        "sessions.questions",
         "skills.list",
         "status",
         "usage.cost",

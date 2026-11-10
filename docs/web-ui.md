@@ -354,11 +354,11 @@ announced to screen readers:
   `/inbox?approval=<id>`, which scrolls to that approval and focuses it.
 - **Agent questions** (`ask_user`): the option chips and a free-text reply,
   sent as your next message in that session (to every session, when the
-  same question was asked in several). The gateway has no listing of
-  unanswered questions, so the inbox collects them from the sessions this
-  console has open; a question asked in a session you have not opened shows
-  in its chat when you open it. A question whose session was deleted
-  disappears.
+  same question was asked in several). On every connect the console asks
+  the gateway for the questions its 100 most recently updated sessions end on
+  (`sessions.questions`), so the inbox and its badge list them after a reload
+  without opening each session; after that new questions arrive live. A
+  question whose session was deleted disappears.
 - **Runtime issues**, typed from `doctor.status` findings and the connection
   state: `gateway_unreachable`, `auth_failed`, `protocol_mismatch`,
   `model_auth_required`, `rate_limited`, `channel_terminal`, `safe_mode`,

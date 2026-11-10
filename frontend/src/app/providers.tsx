@@ -6,7 +6,7 @@ import { useConnection } from '@/stores/connection'
 import { initTheme } from '@/stores/theme'
 import { initLocale, t } from '@/i18n'
 import { approvalMonitor } from '@/services/approval-monitor'
-import { bindPendingQuestions } from '@/lib/pending-questions'
+import { bindPendingQuestions, loadPendingQuestions } from '@/lib/pending-questions'
 import { bindRuntimeSignals } from '@/lib/runtime-signals'
 import type { RpcState } from '@/lib/ws-rpc'
 import { KeyboardShortcutProvider, type ShortcutHelpRenderer } from '@/components/KeyboardShortcuts'
@@ -59,6 +59,8 @@ export function AppProviders({
     // frame age, refused handshakes, doctor/ready, presented ask_user questions.
     const unbindSignals = bindRuntimeSignals(rpc)
     const unbindQuestions = bindPendingQuestions(rpc)
+    // Questions asked before this connection (a reload, a reconnect).
+    const offQuestionsLoad = rpc.on('_hello', () => void loadPendingQuestions(rpc))
     fetchBootstrap()
       // Legacy served bootstrap inline (it could not fail): the shell always
       // rendered and _autoConnect used the location-derived default WS URL with
@@ -86,6 +88,7 @@ export function AppProviders({
       unbindHttp()
       unbindSignals()
       unbindQuestions()
+      offQuestionsLoad()
       rpc.disconnect()
     }
   }, [rpc])
