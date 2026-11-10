@@ -1,7 +1,7 @@
 import '@/test/web'
 import { act, render } from '@testing-library/react'
 import { useEffect } from 'react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useFollowScroll, type FollowScroll } from './follow'
 
 /** A scroller whose geometry the test controls (jsdom has no layout). */
@@ -56,6 +56,32 @@ function Harness({
   }, [api, el])
   onApi(api)
   return null
+}
+
+/** Captures the hook's ResizeObserver so a test can report a size change. */
+function captureResizeObserver() {
+  const observers: Array<{ callback: () => void; targets: Element[] }> = []
+  class Captured {
+    targets: Element[] = []
+    constructor(public callback: () => void) {
+      observers.push(this)
+    }
+    observe(target: Element) {
+      this.targets.push(target)
+    }
+    unobserve() {}
+    disconnect() {
+      this.targets = []
+    }
+  }
+  vi.stubGlobal('ResizeObserver', Captured)
+  return {
+    /** The content was laid out again (a turn rendered at its real height). */
+    resized() {
+      for (const o of observers) if (o.targets.length) o.callback()
+    },
+    observed: () => observers.flatMap((o) => o.targets),
+  }
 }
 
 async function frame() {
@@ -129,5 +155,58 @@ describe('useFollowScroll', () => {
     s.grow(100)
     rerender(<Harness el={s.el} version={2} onApi={(a) => (api = a)} />)
     expect(api.hasNew).toBe(true)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps the end in view when the content changes size while following', async () => {
+    // Settled turns render at their real height only near the viewport, so
+    // jumping to the end changes the height again with no new content.
+    const ro = captureResizeObserver()
+    const s = fakeScroller()
+    const content = document.createElement('div')
+    s.el.appendChild(content)
+    render(<Harness el={s.el} version={0} onApi={() => {}} />)
+    await frame()
+    expect(ro.observed()).toEqual([content])
+    expect(s.top).toBe(s.bottom)
+    s.grow(250)
+    act(() => ro.resized())
+    expect(s.top).toBe(s.bottom)
+  })
+
+  it('leaves a paused reader where they are when the content changes size', async () => {
+    const ro = captureResizeObserver()
+    const s = fakeScroller()
+    s.el.appendChild(document.createElement('div'))
+    let api!: FollowScroll
+    render(<Harness el={s.el} version={0} onApi={(a) => (api = a)} />)
+    await frame()
+    act(() => s.userScroll(120))
+    expect(api.following).toBe(false)
+    s.grow(250)
+    act(() => ro.resized())
+    expect(s.top).toBe(120)
+    expect(api.hasNew).toBe(false)
+  })
+
+  it('keeps following through a scroll down that has not reached the end yet', async () => {
+    // A smooth scroll to Latest passes through positions short of the end.
+    const s = fakeScroller()
+    let api!: FollowScroll
+    render(<Harness el={s.el} version={0} onApi={(a) => (api = a)} />)
+    await frame()
+    act(() => s.userScroll(100))
+    expect(api.following).toBe(false)
+    act(() => api.resume())
+    s.grow(400)
+    await frame()
+    act(() => s.userScroll(700))
+    expect(api.following).toBe(true)
+    // Moving up from there is the reader pausing again.
+    act(() => s.userScroll(650))
+    expect(api.following).toBe(false)
   })
 })

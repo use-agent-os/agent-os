@@ -124,6 +124,34 @@ describe('useChatSession', () => {
     await waitFor(() => expect(rpc.callsTo('chat.history').length).toBe(before + 2))
   })
 
+  it('a turn ending keeps the older pages the reader loaded', async () => {
+    const row = (n: number, role: 'user' | 'assistant') => ({
+      id: `${role[0]}${n}`,
+      message_id: `${role[0]}${n}`,
+      role,
+      text: `${role} ${n}`,
+      timestamp: n * 10 + (role === 'user' ? 0 : 1),
+    })
+    let latest = [row(2, 'user'), row(2, 'assistant')]
+    const rpc = chatRpc().handle('chat.history', (p: Record<string, unknown>) =>
+      p.before
+        ? { messages: [row(1, 'user'), row(1, 'assistant')], has_more: false, oldest_cursor: 'c1' }
+        : { messages: latest, has_more: true, oldest_cursor: 'c2', newest_cursor: 'n' },
+    )
+    const { result } = setup(rpc, A)
+    await waitFor(() => expect(result.current.state.turns).toHaveLength(1))
+    await act(() => result.current.loadOlder())
+    expect(result.current.state.turns).toHaveLength(2)
+    latest = [row(2, 'assistant'), row(3, 'user'), row(3, 'assistant')]
+    act(() => rpc.emit('session.event.done', { session_key: A, stream_seq: 5 }))
+    await waitFor(() => expect(result.current.state.turns).toHaveLength(3))
+    expect(result.current.state.turns.map((t) => t.userMessage?.text)).toEqual([
+      'user 1',
+      'user 2',
+      'user 3',
+    ])
+  })
+
   it('aborts the open session', async () => {
     const rpc = chatRpc()
     const { result } = setup(rpc, A)

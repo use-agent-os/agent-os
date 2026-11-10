@@ -48,7 +48,15 @@ export function TranscriptView(props: TranscriptViewProps) {
   const follow = useFollowScroll(contentVersion(state))
   const scroller = useRef<HTMLDivElement | null>(null)
   const loadingOlder = useRef(false)
-  const { resume } = follow
+  const { resume, ref: followRef } = follow
+  // Stable, so the scroller is attached once, not detached on every render.
+  const attachScroller = useCallback(
+    (el: HTMLDivElement | null) => {
+      scroller.current = el
+      followRef(el)
+    },
+    [followRef],
+  )
 
   useEffect(() => {
     if (followSignal > 0) resume()
@@ -82,10 +90,7 @@ export function TranscriptView(props: TranscriptViewProps) {
   return (
     <div className="relative min-h-0 flex-1">
       <div
-        ref={(el) => {
-          scroller.current = el
-          follow.ref(el)
-        }}
+        ref={attachScroller}
         onScroll={maybeLoadOlder}
         role="log"
         aria-label={t('webChat.transcriptLabel')}

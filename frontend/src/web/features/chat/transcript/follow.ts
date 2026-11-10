@@ -3,12 +3,19 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 // Follow-to-latest scrolling (chat spec "Follow scrolling", "History paging").
 //
 // While the reader is within NEAR_END_PX of the bottom, new content keeps the
-// end in view. Scrolling up pauses following: content growth then leaves the
+// end in view. Scrolling up (away from the end) pauses following: content growth then leaves the
 // reading position alone (the browser's own scroll anchoring would move it,
 // so it is turned off on the scroller) and a Latest control appears once new
 // content exists. Latest, scrolling back to the end, or sending resumes.
 // Older history inserted above keeps the visible content in place by
 // compensating scrollTop for the height added on top.
+//
+// Settled turns render with `content-visibility: auto`, so a turn's real
+// height is only known once it is near the viewport: jumping to the end
+// renders the last turns, which changes the height again without any new
+// content. While following, any size change of the content keeps the end in
+// view too (a ResizeObserver on the scroller's content), so opening or
+// reloading a session lands on the latest message.
 
 export const NEAR_END_PX = 48
 
@@ -48,6 +55,8 @@ export function useFollowScroll(contentVersion: unknown): FollowScroll {
   const programmatic = useRef(false)
   // Older history going in above is not new content: no Latest for it.
   const prepending = useRef(false)
+  // The last scrollTop seen, to tell a move up (the reader) from one down.
+  const lastTop = useRef(0)
 
   const scrollToEnd = useCallback((smooth: boolean) => {
     const el = elRef.current
@@ -59,6 +68,7 @@ export function useFollowScroll(contentVersion: unknown): FollowScroll {
     } else {
       el.scrollTop = top
     }
+    lastTop.current = el.scrollTop
     requestAnimationFrame(() => {
       programmatic.current = false
     })
@@ -70,23 +80,54 @@ export function useFollowScroll(contentVersion: unknown): FollowScroll {
     if (next) setHasNew(false)
   }, [])
 
+  // Only a move up pauses following: a smooth scroll to the end (Latest)
+  // passes through positions short of the end on its way down, and turns
+  // rendering at their real height move the end while it runs.
   const onScroll = useCallback(() => {
     const el = elRef.current
-    if (!el || programmatic.current) return
-    const near = isNearEnd(el)
-    if (near !== followingRef.current) setFollow(near)
+    if (!el) return
+    const top = el.scrollTop
+    const movedUp = top < lastTop.current
+    lastTop.current = top
+    if (programmatic.current) return
+    if (isNearEnd(el)) {
+      if (!followingRef.current) setFollow(true)
+    } else if (movedUp && followingRef.current) {
+      setFollow(false)
+    }
   }, [setFollow])
+
+  // Size changes of the content (turns rendering at their real height) keep
+  // the end in view while following; they are not new content.
+  const resizeObserver = useRef<ResizeObserver | null>(null)
+  const observeContent = useCallback(
+    (el: HTMLElement | null) => {
+      resizeObserver.current?.disconnect()
+      resizeObserver.current = null
+      if (!el || typeof ResizeObserver === 'undefined') return
+      const observer = new ResizeObserver(() => {
+        if (followingRef.current && !isNearEnd(el)) scrollToEnd(false)
+      })
+      observer.observe(el.firstElementChild ?? el)
+      resizeObserver.current = observer
+    },
+    [scrollToEnd],
+  )
 
   const ref = useCallback(
     (el: HTMLElement | null) => {
+      if (el === elRef.current) return
       if (elRef.current) elRef.current.removeEventListener('scroll', onScroll)
       elRef.current = el
+      observeContent(el)
       if (el) {
         el.style.overflowAnchor = 'none'
         el.addEventListener('scroll', onScroll, { passive: true })
+        lastTop.current = el.scrollTop
+        if (followingRef.current) scrollToEnd(false)
       }
     },
-    [onScroll],
+    [onScroll, observeContent, scrollToEnd],
   )
 
   // New content: follow, or flag Latest.
@@ -95,7 +136,13 @@ export function useFollowScroll(contentVersion: unknown): FollowScroll {
     else if (!prepending.current) setHasNew(true)
   }, [contentVersion, scrollToEnd])
 
-  useEffect(() => () => elRef.current?.removeEventListener('scroll', onScroll), [onScroll])
+  useEffect(
+    () => () => {
+      elRef.current?.removeEventListener('scroll', onScroll)
+      resizeObserver.current?.disconnect()
+    },
+    [onScroll],
+  )
 
   const resume = useCallback(() => {
     setFollow(true)
@@ -113,6 +160,7 @@ export function useFollowScroll(contentVersion: unknown): FollowScroll {
       const added = el.scrollHeight - before
       programmatic.current = true
       el.scrollTop = top + added
+      lastTop.current = el.scrollTop
       requestAnimationFrame(() => {
         programmatic.current = false
       })

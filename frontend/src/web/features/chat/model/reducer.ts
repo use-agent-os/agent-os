@@ -4,6 +4,7 @@
 import {
   applyHistoryDelta,
   mergeHistoryMessagePages,
+  messagePageIdentity,
   type HistoryPagingState,
   type HistoryResponse,
 } from '@/views/chat/transcript/history'
@@ -13,6 +14,7 @@ import { stripTimePrefix } from '@/views/chat/logic'
 import type { ChatMessage } from '@/views/chat/types'
 import type {
   CompactionSummaryRow,
+  HistoryMode,
   HistoryPage,
   HistoryRow,
   InFlightRun,
@@ -1061,10 +1063,26 @@ function isEndedSnapshot(state: TranscriptState, run: InFlightRun | null | undef
   return Boolean(run && id && state.endedRuns.includes(id))
 }
 
+/**
+ * The rows of *current* above the first row of *page*: older history the
+ * page no longer covers. Empty when the page does not overlap the window (it
+ * skipped past it), so the caller falls back to a plain replace.
+ */
+function rowsAbove(current: HistoryRow[], page: HistoryRow[]): HistoryRow[] {
+  const first = page[0]
+  if (!first || !current.length) return []
+  const identity = messagePageIdentity(first as unknown as ChatMessage)
+  if (!identity) return []
+  const at = current.findIndex(
+    (row) => messagePageIdentity(row as unknown as ChatMessage) === identity,
+  )
+  return at > 0 ? current.slice(0, at) : []
+}
+
 function applyHistory(
   state: TranscriptState,
   page: HistoryPage,
-  mode: 'replace' | 'older' | 'delta',
+  mode: HistoryMode,
   issuedAt: number,
 ): TranscriptState {
   const messages = (page.messages ?? []) as HistoryRow[]
@@ -1104,10 +1122,21 @@ function applyHistory(
     needsResync = false
   }
 
-  const summaries =
-    mode === 'replace'
+  let summaries =
+    mode === 'replace' || mode === 'refresh'
       ? (page.compaction_summaries ?? [])
       : [...state.summaries, ...(page.compaction_summaries ?? [])]
+  const kept = mode === 'refresh' ? rowsAbove(state.rows, messages) : []
+  if (kept.length) {
+    // The reader loaded older pages: they stay, and so does the paging
+    // position, so a turn ending does not pull the history out from under
+    // them (or shift what they are reading by the rows that left the window).
+    rows = [...kept, ...messages]
+    hasMore = state.hasMore
+    oldestCursor = state.oldestCursor
+    const known = new Set(summaries.map((s) => JSON.stringify(s)))
+    summaries = [...state.summaries.filter((s) => !known.has(JSON.stringify(s))), ...summaries]
+  }
 
   const next: TranscriptState = { ...state }
   let liveTurns = state.liveTurns
@@ -1148,7 +1177,8 @@ function applyHistory(
     activeGroups,
     pendingInputs,
     streamFloor,
-    needsResync: mode === 'replace' ? false : needsResync || state.needsResync,
+    needsResync:
+      mode === 'replace' || mode === 'refresh' ? false : needsResync || state.needsResync,
   }
   return { ...out, turns: deriveTurns(out) }
 }
