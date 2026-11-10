@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useReducer, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { t } from '@/i18n'
@@ -117,7 +117,8 @@ export function useChatSession(sessionKey: string | null): ChatSession {
   const buffered = useRef<FrameInput[]>([])
   const cancelFlush = useRef<(() => void) | null>(null)
 
-  useEffect(() => {
+  // Layout timing: the transcript's own effects (paging) read it right after.
+  useLayoutEffect(() => {
     stateRef.current = state
   }, [state])
 

@@ -1,13 +1,14 @@
 import {
   ChevronRight,
   Copy,
+  Loader2,
   PencilLine,
   RotateCcw,
   ShieldAlert,
   Square,
   TriangleAlert,
 } from 'lucide-react'
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { toast } from 'sonner'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webChat'
@@ -164,8 +165,24 @@ function FailedTurn({ turn }: { turn: Turn }) {
   )
 }
 
+/** Nothing to show yet but the run is on: say so (send → first output, or a stop pending). */
+function LiveStatus({ turn, visible }: { turn: Turn; visible: Item[] }) {
+  const stopping = Boolean(turn.abortRequested)
+  const quiet =
+    !visible.some((i) => i.kind === 'text' && i.text.trim()) &&
+    !visible.some((i) => i.kind === 'toolCall' && i.state === 'running') &&
+    !visible.some((i) => i.kind === 'thinkingRef')
+  if (!stopping && !quiet) return null
+  return (
+    <p role="status" className="flex items-center gap-1.5 text-small text-text-muted">
+      <Loader2 className="motion-status size-3.5 animate-spin" aria-hidden data-status-icon />
+      {stopping ? t('webChat.stopping') : t('webChat.working')}
+    </p>
+  )
+}
+
 /** One turn: the user bubble, then the assistant's work and answer. */
-export function TurnView({
+export const TurnView = memo(function TurnView({
   turn,
   answered,
   waitingApproval,
@@ -186,12 +203,18 @@ export function TurnView({
       )}
     >
       {turn.userMessage ? <UserBubble turn={turn} /> : null}
+      {turn.textTruncated ? (
+        <p className="text-small text-text-muted">{t('webChat.textTruncated')}</p>
+      ) : null}
       {fold.folded ? (
         <WorkedFor work={fold.work} toolCount={fold.toolCount} durationMs={fold.durationMs} />
       ) : null}
       {fold.visible.map((item) => (
         <ItemView key={item.id} item={item} live={live} answered={answered} />
       ))}
+      {live && (!waitingApproval || turn.abortRequested) ? (
+        <LiveStatus turn={turn} visible={fold.visible} />
+      ) : null}
       {live && waitingApproval ? (
         <p role="status" className="flex items-center gap-1.5 text-small text-warn">
           <ShieldAlert className="size-4" aria-hidden data-status-icon />
@@ -207,4 +230,4 @@ export function TurnView({
       {turn.status === 'failed' ? <FailedTurn turn={turn} /> : null}
     </article>
   )
-}
+})

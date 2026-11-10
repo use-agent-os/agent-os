@@ -46,6 +46,8 @@ export function useFollowScroll(contentVersion: unknown): FollowScroll {
   const [following, setFollowing] = useState(true)
   const [hasNew, setHasNew] = useState(false)
   const programmatic = useRef(false)
+  // Older history going in above is not new content: no Latest for it.
+  const prepending = useRef(false)
 
   const scrollToEnd = useCallback((smooth: boolean) => {
     const el = elRef.current
@@ -90,7 +92,7 @@ export function useFollowScroll(contentVersion: unknown): FollowScroll {
   // New content: follow, or flag Latest.
   useLayoutEffect(() => {
     if (followingRef.current) scrollToEnd(false)
-    else setHasNew(true)
+    else if (!prepending.current) setHasNew(true)
   }, [contentVersion, scrollToEnd])
 
   useEffect(() => () => elRef.current?.removeEventListener('scroll', onScroll), [onScroll])
@@ -103,9 +105,11 @@ export function useFollowScroll(contentVersion: unknown): FollowScroll {
   const preserveOnPrepend = useCallback(() => {
     const el = elRef.current
     if (!el) return () => {}
+    prepending.current = true
     const before = el.scrollHeight
     const top = el.scrollTop
     return () => {
+      prepending.current = false
       const added = el.scrollHeight - before
       programmatic.current = true
       el.scrollTop = top + added
