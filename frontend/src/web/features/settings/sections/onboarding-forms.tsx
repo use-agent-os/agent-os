@@ -19,7 +19,6 @@ import {
   buildRouterConfigureParams,
   envRecoveryCommand,
   isVisibleTier,
-  mergeTiers,
   resolveJudgeModelParam,
   routerMode,
   TEXT_TIERS,
@@ -509,9 +508,13 @@ interface TierRow {
   model: string
   thinkingLevel: string
   supportsImage: boolean
+  /** Fields the form does not show (`description`, …), sent back as they are. */
+  extra: Record<string, unknown>
 }
 
 interface RouterDraft {
+  /** The provider the tier rows were seeded for. */
+  provider: string
   mode: RouterMode
   defaultTier: string
   judge: string
@@ -523,12 +526,52 @@ interface RouterDraft {
   rows: Record<string, TierRow>
 }
 
+const SHOWN_TIER_KEYS = new Set([
+  'provider',
+  'model',
+  'thinking_level',
+  'thinkingLevel',
+  'supports_image',
+  'supportsImage',
+])
+
 function tierRow(tier: TierSpec | undefined): TierRow {
+  const extra = Object.fromEntries(
+    Object.entries(tier ?? {}).filter(([key, value]) => !SHOWN_TIER_KEYS.has(key) && value != null),
+  )
   return {
     model: String(tier?.model ?? ''),
     thinkingLevel: String(tier?.thinkingLevel ?? tier?.thinking_level ?? ''),
     supportsImage: Boolean(tier?.supportsImage ?? tier?.supports_image),
+    extra,
   }
+}
+
+/**
+ * The tier table for `provider`: a saved tier where it belongs to that
+ * provider, else the provider's profile default. A saved tier of another
+ * provider (left behind by a provider switch while the router was off, or the
+ * shipped OpenRouter defaults) is that provider's model id: it is never
+ * offered, or sent, under this one.
+ */
+function providerTiers(
+  provider: string,
+  profileTiers: Record<string, TierSpec>,
+  savedTiers: Record<string, TierSpec>,
+): Record<string, TierSpec> {
+  const own = (tier: TierSpec | undefined) => {
+    const owner = String(tier?.provider ?? '')
+      .trim()
+      .toLowerCase()
+    return !owner || owner === provider.trim().toLowerCase()
+  }
+  const out: Record<string, TierSpec> = {}
+  for (const name of new Set([...Object.keys(profileTiers), ...Object.keys(savedTiers)])) {
+    const saved = savedTiers[name]
+    if (saved && own(saved)) out[name] = saved
+    else if (profileTiers[name]) out[name] = profileTiers[name]
+  }
+  return out
 }
 
 /** The tiers the form edits: the text tiers, then `image_model`. */
@@ -544,10 +587,11 @@ function routerSeed(snapshot: SettingsSnapshot): RouterDraft {
   const profiles = snapshot.catalog?.routerProfiles
   const provider = snapshot.config?.llm?.provider ?? ''
   const profileTiers = profiles?.profiles?.find((p) => p.providerId === provider)?.tiers ?? {}
-  const merged = mergeTiers(profileTiers, router.tiers ?? {})
+  const merged = providerTiers(provider, profileTiers, router.tiers ?? {})
   const threshold = (value: number | null | undefined, fallback: string) =>
     value === null || value === undefined ? fallback : String(value)
   return {
+    provider,
     mode: routerMode(router),
     defaultTier: router.default_tier || profiles?.defaultTier || 'c1',
     judge: router.judge_model || '',
@@ -592,12 +636,21 @@ export function RouterForm({ snapshot }: { snapshot: SettingsSnapshot }) {
   const provider = snapshot.config?.llm?.provider ?? ''
   const seed = useMemo(() => routerSeed(snapshot), [snapshot])
   const draft = useSeededDraft(seed, `${provider}|${JSON.stringify(seed)}`)
-  const d = draft.value
+  // An edited draft keeps its edits when the saved values move, but its tier
+  // rows belong to the provider they were seeded for: after a provider switch
+  // they are the new provider's, whatever was typed before it.
+  const forProvider = (v: RouterDraft): RouterDraft =>
+    v.provider === provider ? v : { ...v, provider, rows: seed.rows }
+  const d = forProvider(draft.value)
   const configure = useConfigure()
   const id = useId()
-  const set = (patch: Partial<RouterDraft>) => draft.update((v) => ({ ...v, ...patch }))
+  const set = (patch: Partial<RouterDraft>) =>
+    draft.update((v) => ({ ...forProvider(v), ...patch }))
   const setRow = (tier: string, patch: Partial<TierRow>) =>
-    draft.update((v) => ({ ...v, rows: { ...v.rows, [tier]: { ...v.rows[tier]!, ...patch } } }))
+    draft.update((v) => {
+      const cur = forProvider(v)
+      return { ...cur, rows: { ...cur.rows, [tier]: { ...cur.rows[tier]!, ...patch } } }
+    })
 
   const judgeProfile = snapshot.catalog?.routerProfiles?.judge?.profiles?.[provider] ?? {}
   const judgeModels = (judgeProfile.models ?? []).filter((m) => typeof m === 'string')

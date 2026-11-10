@@ -851,6 +851,12 @@ export interface RouterTierInput {
   model: string
   thinkingLevel: string
   supportsImage: boolean
+  /**
+   * The tier's other saved fields (`description`, …), sent back unchanged:
+   * the gateway rebuilds a tier from its profile default plus what is sent,
+   * so a field left out reverts to the default.
+   */
+  extra?: Record<string, unknown>
 }
 
 export interface RouterConfigureParams {
@@ -890,6 +896,7 @@ export function buildRouterConfigureParams(input: {
   const tiers: Record<string, Record<string, unknown>> = {}
   input.tiers.forEach((row) => {
     const tier: Record<string, unknown> = {
+      ...row.extra,
       provider: row.provider,
       model: row.model,
       thinkingLevel: row.thinkingLevel,

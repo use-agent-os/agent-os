@@ -188,6 +188,7 @@ const TIERS = {
   image_model: {
     provider: 'openai',
     model: 'my/custom-image',
+    description: 'My own image route',
     thinking_level: 'medium',
     supports_image: true,
     image_only: true,
@@ -569,12 +570,116 @@ describe('Settings › Models & routing', () => {
         image_model: {
           provider: 'openai',
           model: 'my/custom-image',
+          // Not shown in the form; sent back so the gateway keeps it.
+          description: 'My own image route',
           thinkingLevel: 'medium',
           supportsImage: true,
           image_only: true,
         },
       },
       expectedRevision: 'rev-1',
+    })
+  })
+
+  it("openrouter, Apply, back, Apply, then Pilot: sends the current provider's tiers", async () => {
+    const user = userEvent.setup()
+    // Router off, no tier_profile, and the shipped OpenRouter tiers saved.
+    const orTiers = Object.fromEntries(
+      ['c0', 'c1', 'c2', 'c3'].map((tier) => [
+        tier,
+        { provider: 'openrouter', model: `or-${tier}`, description: 'shipped' },
+      ]),
+    ) as unknown as typeof TIERS
+    const withProvider = (provider: string, revision: string) => {
+      const cfg = config()
+      cfg.llm = { ...cfg.llm, provider, model: provider === 'openai' ? 'oa-c1' : 'or-c1' }
+      cfg.agentos_router = {
+        ...cfg.agentos_router,
+        enabled: false,
+        strategy: 'pilot-v1',
+        tiers: orTiers,
+      }
+      return snapshot({ revision }, cfg)
+    }
+    let current = withProvider('openai', 'rev-1')
+    let n = 1
+    const rpc = formsRpc()
+      .handle('config.snapshot', () => current)
+      .handle('onboarding.provider.configure', (p: Record<string, unknown>) => {
+        // Provider switches leave the tiers of a disabled router alone.
+        current = withProvider(String(p.providerId), `rev-${++n}`)
+        return OK
+      })
+    renderShell('/settings/models', rpc)
+    const provider = await screen.findByRole('region', { name: 'Provider' })
+    const router = form('Pilot Router')
+    const c1 = () => within(router).getByRole('textbox', { name: 'c1 model' })
+    expect(c1()).toHaveValue('oa-c1')
+    const select = within(provider).getByRole('combobox', { name: 'Provider' })
+    await user.selectOptions(select, 'openrouter')
+    await apply(provider)
+    await waitFor(() => expect(c1()).toHaveValue('or-c1'))
+    await user.selectOptions(select, 'openai')
+    await apply(provider)
+    await waitFor(() => expect(c1()).toHaveValue('oa-c1'))
+    await user.selectOptions(
+      within(router).getByRole('combobox', { name: 'Routing mode' }),
+      'pilot-v1',
+    )
+    await apply(router)
+    await waitFor(() => expect(rpc.callsTo('onboarding.router.configure')).toHaveLength(1))
+    const sent = rpc.callsTo('onboarding.router.configure')[0]!.tiers as Record<
+      string,
+      { provider: string; model: string }
+    >
+    expect(Object.values(sent).map((tier) => [tier.provider, tier.model])).toEqual([
+      ['openai', 'oa-c0'],
+      ['openai', 'oa-c1'],
+      ['openai', 'oa-c2'],
+      ['openai', 'oa-c3'],
+      ['openai', 'oa-image'],
+    ])
+  })
+
+  it("an edited router draft takes the new provider's tiers after a switch", async () => {
+    const user = userEvent.setup()
+    let current = snapshot()
+    const rpc = formsRpc()
+      .handle('config.snapshot', () => current)
+      .handle('onboarding.provider.configure', () => {
+        const switched = config()
+        switched.llm = { ...switched.llm, provider: 'openrouter', model: 'or-c1' }
+        current = snapshot({ revision: 'rev-2' }, switched)
+        return OK
+      })
+    renderShell('/settings/models', rpc)
+    const provider = await screen.findByRole('region', { name: 'Provider' })
+    const router = form('Pilot Router')
+    await user.selectOptions(within(router).getByRole('combobox', { name: 'Default tier' }), 'c2')
+    const c3 = within(router).getByRole('textbox', { name: 'c3 model' })
+    await user.clear(c3)
+    await user.type(c3, 'typed-before')
+    await user.selectOptions(
+      within(provider).getByRole('combobox', { name: 'Provider' }),
+      'openrouter',
+    )
+    await apply(provider)
+    await waitFor(() =>
+      expect(within(router).getByRole('textbox', { name: 'c3 model' })).toHaveValue('or-c3'),
+    )
+    // Typed after the switch: that is the user's choice for this provider.
+    const c0 = within(router).getByRole('textbox', { name: 'c0 model' })
+    await user.clear(c0)
+    await user.type(c0, 'typed-after')
+    await apply(router)
+    await waitFor(() => expect(rpc.callsTo('onboarding.router.configure')).toHaveLength(1))
+    expect(rpc.callsTo('onboarding.router.configure')[0]).toMatchObject({
+      defaultTier: 'c2',
+      tiers: {
+        c0: { provider: 'openrouter', model: 'typed-after' },
+        c1: { provider: 'openrouter', model: 'or-c1' },
+        c3: { provider: 'openrouter', model: 'or-c3' },
+      },
     })
   })
 

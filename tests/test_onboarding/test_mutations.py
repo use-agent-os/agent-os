@@ -41,6 +41,18 @@ def test_upsert_provider_persists_fields():
     assert res.changed is True
 
 
+@pytest.mark.parametrize("provider_id", ["openrouter", "openai"])
+def test_upsert_provider_keeps_the_llm_tuning_the_form_does_not_show(provider_id: str):
+    cfg = GatewayConfig()
+    cfg.llm.circuit_breaker.failure_threshold = 7
+    cfg.llm.circuit_breaker.enabled = False
+    cfg.llm.repetition_guard.enabled = False
+    res = upsert_llm_provider(cfg, provider_id=provider_id, model="m", api_key="sk-test")
+    assert res.config.llm.circuit_breaker.failure_threshold == 7
+    assert res.config.llm.circuit_breaker.enabled is False
+    assert res.config.llm.repetition_guard.enabled is False
+
+
 def test_upsert_provider_strips_trailing_paste_punctuation_from_api_key():
     cfg = GatewayConfig()
     res = upsert_llm_provider(
