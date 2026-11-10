@@ -134,6 +134,17 @@ describe('model output cannot load remote resources', () => {
     expect(el.querySelector('a')).toHaveAttribute('href', 'http://evil.example/a.png')
   })
 
+  it('shows an image button as a link to its image, never as a checkbox', () => {
+    const el = dom(
+      renderMarkdown('<input type="IMAGE" src="https://evil.example/t.gif" alt="Track">', ORIGIN),
+    )
+    expect(el.querySelector('input')).toBeNull()
+    expect(el.querySelector('img')).toBeNull()
+    const link = el.querySelector('a')
+    expect(link).toHaveAttribute('href', 'https://evil.example/t.gif')
+    expect(link).toHaveTextContent('Track')
+  })
+
   it('keeps inline raster and blob images', () => {
     const png = 'data:image/png;base64,iVBORw0KGgo='
     const el = dom(renderMarkdown(`![p](${png})\n\n<img src="blob:${ORIGIN}/x">`, ORIGIN))

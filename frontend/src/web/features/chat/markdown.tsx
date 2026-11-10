@@ -273,8 +273,23 @@ function linkRemoteImages(root: DocumentFragment, origin: string, qrPrefix: stri
 }
 
 /**
+ * An image button (`<input type=image>`) is an image: it becomes an `<img>`
+ * with its source and text, so the image rule below links it like any other.
+ */
+function imageInputsToImages(root: DocumentFragment): void {
+  for (const input of root.querySelectorAll('input')) {
+    if ((input.getAttribute('type') || '').trim().toLowerCase() !== 'image') continue
+    const image = root.ownerDocument!.createElement('img')
+    const src = input.getAttribute('src')
+    if (src) image.setAttribute('src', src)
+    image.setAttribute('alt', input.getAttribute('alt') || input.getAttribute('value') || '')
+    input.replaceWith(image)
+  }
+}
+
+/**
  * The only input Markdown produces is a task-list checkbox: any other kind
- * (`type=image` loads its `src`) is turned into one, and none is editable.
+ * is turned into one, and none is editable.
  */
 function lockInputs(root: DocumentFragment): void {
   for (const input of root.querySelectorAll('input')) {
@@ -338,6 +353,7 @@ export function renderMarkdown(text: string, origin: string = window.location.or
   const template = document.createElement('template')
   template.innerHTML = String(DOMPurify.sanitize(html, PURIFY))
   stripForeignClasses(template.content)
+  imageInputsToImages(template.content)
   lockInputs(template.content)
   linkRemoteImages(template.content, origin, qrPrefix(nonce))
   routeLinks(template.content, origin)

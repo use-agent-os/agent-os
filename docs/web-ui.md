@@ -728,7 +728,8 @@ Markdown in messages is sanitized: scripts, event handlers, `javascript:` links,
 HTML classes written by the model and anything outside an allowlist are
 removed. Images in replies load only when they are inline (`data:` PNG, GIF,
 JPEG or WebP) or local (`blob:`); any other image, including same-origin and
-protocol-relative ones, is shown as a link. QR codes (`agentos-qr:`) are drawn
+protocol-relative ones and image buttons (`<input type=image>`), is shown as a
+link. QR codes (`agentos-qr:`) are drawn
 locally. Task-list checkboxes are read-only. Links to other sites open in a
 new tab with `rel="noopener noreferrer"`. Code blocks are highlighted in colours
 that suit the theme and have a **Copy** button; wide code and tables scroll
