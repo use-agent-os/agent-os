@@ -64,9 +64,15 @@ export function connectGateway(
   }, CONNECT_TIMEOUT_MS)
   // A refusal is an answer: the gateway was reached, the screen says why.
   const offRefused = rpc.on('_handshakeError', () => clearTimeout(timer))
+  // A socket that fails before it opens (connection refused) needs no wait.
+  const offUnreachable = rpc.on('_unreachable', () => {
+    clearTimeout(timer)
+    useConnectAttempt.setState({ unreachable: true })
+  })
   cancelPendingAttempt = () => {
     off()
     offRefused()
+    offUnreachable()
     clearTimeout(timer)
   }
   rpc.connect(url, token || undefined)

@@ -131,6 +131,22 @@ describe('Connect screen', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
+  it('a refused connection fails at once, before the 10 s bound', async () => {
+    const user = userEvent.setup()
+    const rpc = shellRpc()
+    tokenGateway(rpc)
+    const url = await screen.findByLabelText('WebSocket URL')
+    await user.clear(url)
+    await user.type(url, 'ws://127.0.0.1:1/ws')
+    await user.type(screen.getByLabelText('Gateway token'), 'tok')
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    act(() => useConnection.getState().setState('connecting'))
+    // The socket closed before it ever opened.
+    act(() => rpc.emit('_unreachable', 'ws://127.0.0.1:1/ws'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach 127.0.0.1:1')
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled()
+  })
+
   it('keeps the workspace through a drop when the tab cannot store the token', async () => {
     const user = userEvent.setup()
     vi.spyOn(sessionStorage, 'setItem').mockImplementation(() => {

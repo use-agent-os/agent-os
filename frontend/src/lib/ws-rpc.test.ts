@@ -51,6 +51,28 @@ beforeEach(() => {
 })
 afterEach(() => vi.useRealTimers())
 
+describe('unreachable address', () => {
+  it('reports a socket that closes before it opens, and keeps reconnecting', () => {
+    const client = new WsRpcClient({ WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket })
+    const seen: unknown[] = []
+    client.on('_unreachable', (url) => seen.push(url))
+    client.connect('ws://127.0.0.1:1/ws', 'tok')
+    FakeWebSocket.instances.at(-1)!.close()
+    expect(seen).toEqual(['ws://127.0.0.1:1/ws'])
+    expect(client.state).toBe('disconnected')
+    vi.advanceTimersByTime(5_000)
+    expect(FakeWebSocket.instances.length).toBeGreaterThan(1)
+  })
+
+  it('says nothing for a socket that opened and then dropped', () => {
+    const { client, ws } = newClient()
+    const seen: unknown[] = []
+    client.on('_unreachable', (url) => seen.push(url))
+    ws.close()
+    expect(seen).toEqual([])
+  })
+})
+
 describe('handshake', () => {
   it('answers connect.challenge with a protocol-3 connect request incl. auth token', () => {
     const { ws } = newClient()

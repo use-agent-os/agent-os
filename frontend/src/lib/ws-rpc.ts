@@ -200,9 +200,11 @@ export class WsRpcClient {
     // Every handler checks it still belongs to the current socket: a socket
     // that was replaced must never clear, close or feed the one after it.
     const current = () => this.ws === ws
+    let opened = false
 
     ws.onopen = () => {
       if (!current()) return
+      opened = true
       this.reconnectDelay = 800
       // Don't send connect yet — wait for connect.challenge from server
     }
@@ -331,6 +333,9 @@ export class WsRpcClient {
       for (const [, p] of this.pending) p.reject(new Error('Connection closed'))
       this.pending.clear()
       this.ws = null
+      // Closed before it ever opened: nothing answered at that address
+      // (refused, unresolvable, blocked). Reconnecting goes on as usual.
+      if (!opened) this.emit('_unreachable', this.url)
       if (this.startupRetry) {
         this.startupRetry = false
         this.scheduleReconnect()
