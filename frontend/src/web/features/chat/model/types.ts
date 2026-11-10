@@ -63,6 +63,8 @@ export type Item =
   | (ItemBase & { kind: 'compaction'; summary: string; removedCount?: number })
   | (ItemBase & { kind: 'routerDecision'; tier: string | null; model: string })
   | (ItemBase & { kind: 'steering'; text: string })
+  /** The gateway resumed a turn a restart cut off (its synthetic prompt is not shown). */
+  | (ItemBase & { kind: 'restartRecovery' })
   | (ItemBase & { kind: 'subagentCompletion'; payload: Record<string, unknown> })
   | (ItemBase & { kind: 'cronResult'; text: string })
   | (ItemBase & { kind: 'warning'; text: string })

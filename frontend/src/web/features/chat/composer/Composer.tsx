@@ -52,7 +52,13 @@ import {
 } from '@/web/components/ui/dropdown-menu'
 import { useMediaQuery } from '@/web/shell/use-media-query'
 import type { SendInput } from '../useChatSession'
-import { useElevated, usePilotRouter, usePlanMode, useSessionUsage } from './capabilities'
+import {
+  useElevated,
+  usePilotRouter,
+  usePlanMode,
+  useSessionUsage,
+  useUnpinnedRoute,
+} from './capabilities'
 import {
   clearDraft,
   loadDraft,
@@ -633,11 +639,12 @@ export function Composer(props: ComposerProps) {
 function RoutePicker({ sessionKey }: { sessionKey: string }) {
   const rpc = useRpc()
   const pin = useRoutePin(rpc, sessionKey)
+  const unpinned = useUnpinnedRoute()
   const label = pin.pinnedModel
     ? t('webChat.routePinnedModel', { model: pin.pinnedModel })
     : pin.pinned
       ? t('webChat.routePinnedTier', { tier: pin.pinned })
-      : t('webChat.routeAuto')
+      : unpinned
   return (
     <DropdownMenu onOpenChange={(open) => open && pin.reload()}>
       <DropdownMenuTrigger asChild>
@@ -656,7 +663,7 @@ function RoutePicker({ sessionKey }: { sessionKey: string }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
         <DropdownMenuCheckboxItem checked={!pin.isPinned} onSelect={() => pin.clear()}>
-          {t('webChat.routeAuto')}
+          {unpinned}
         </DropdownMenuCheckboxItem>
         {pin.tiers.length ? (
           <>

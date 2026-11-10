@@ -505,3 +505,70 @@ describe('a second stop while stopping', () => {
     expect(failedBoth.turns.at(-1)!.forceStop).toBeUndefined()
   })
 })
+
+describe('the restart-recovery prompt', () => {
+  const recovery = (id: string, timestamp: number): HistoryRow => ({
+    ...row(
+      id,
+      'user',
+      '[Restart recovery] The gateway restarted before you answered the latest message above.',
+      timestamp,
+    ),
+    provenance_kind: 'internal_system',
+    provenance_source_tool: 'restart_recovery',
+  })
+
+  it('shows as a notice over the resumed reply, not as a user message', () => {
+    const state = page(initialTranscript(), {
+      messages: [
+        row('u1', 'user', 'count to five', 1),
+        recovery('r1', 2),
+        row('a1', 'assistant', '1 2 3 4 5', 3),
+      ],
+    })
+    expect(state.turns.map((t) => t.userMessage?.text ?? null)).toEqual(['count to five', null])
+    const resumed = state.turns[1]!
+    expect(resumed.items.map((i) => i.kind)).toEqual(['restartRecovery', 'text'])
+    expect(textOf(state)).toBe('1 2 3 4 5')
+  })
+
+  it('a resumed turn still running shows the notice, not the prompt', () => {
+    const state = page(initialTranscript(), {
+      messages: [row('u1', 'user', 'count to five', 1), recovery('r1', 2)],
+      in_flight_run: { text: '1 2', through_stream_seq: 2, started_at: 2 },
+    })
+    const live = state.turns.at(-1)!
+    expect(live.status).toBe('live')
+    expect(live.userMessage).toBeNull()
+    expect(live.items.map((i) => i.kind)).toEqual(['restartRecovery', 'text'])
+    expect(state.turns.filter((t) => t.userMessage?.text.includes('[Restart recovery]'))).toEqual(
+      [],
+    )
+  })
+
+  it('does not take the place of the message the user sends next', () => {
+    let state = page(initialTranscript(), {
+      messages: [
+        row('u1', 'user', 'count to five', 1),
+        recovery('r1', 2),
+        row('a1', 'assistant', '1 2 3 4 5', 3),
+      ],
+    })
+    state = sent(state, 'thanks', 'k1', 10)
+    state = page(state, {
+      messages: [
+        row('u1', 'user', 'count to five', 1),
+        recovery('r1', 2),
+        row('a1', 'assistant', '1 2 3 4 5', 3),
+        row('u2', 'user', 'thanks', 11),
+        row('a2', 'assistant', 'any time', 12),
+      ],
+    })
+    expect(state.liveTurns).toEqual([])
+    expect(state.turns.map((t) => t.userMessage?.text ?? null)).toEqual([
+      'count to five',
+      null,
+      'thanks',
+    ])
+  })
+})

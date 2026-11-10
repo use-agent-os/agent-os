@@ -93,6 +93,18 @@ function userText(row: HistoryRow): string {
   return stripTimePrefix(str(row.text))
 }
 
+/**
+ * The synthetic prompt the gateway writes to resume a turn a restart cut off
+ * (`turn_recovery`): a user row the user never typed. It is shown as a notice.
+ */
+export function isRestartRecoveryPrompt(row: HistoryRow): boolean {
+  return (
+    row.role === 'user' &&
+    str(row.provenance_kind) === 'internal_system' &&
+    str(row.provenance_source_tool) === 'restart_recovery'
+  )
+}
+
 /** A persisted failure: the `system` row a failed turn leaves ("Error: …"). */
 function errorRowText(row: HistoryRow): string | null {
   if (row.role === 'error') return str(row.text)
@@ -380,6 +392,20 @@ export function foldHistory(
     const at = toMs(row.timestamp)
     flushSummaries(at)
     const rowId = str(row.message_id || row.id) || `r${n++}`
+
+    if (isRestartRecoveryPrompt(row)) {
+      // The resumed reply continues under a notice, not a user bubble.
+      current = {
+        id: `h:${rowId}`,
+        userMessage: null,
+        items: [{ kind: 'restartRecovery', id: `h:${rowId}:0` }],
+        status: 'done',
+        startedAt: at,
+        endedAt: at,
+      }
+      turns.push(current)
+      continue
+    }
 
     if (row.role === 'user') {
       current = {
@@ -1008,17 +1034,20 @@ function applySnapshot(
   if (index < 0) {
     const lastUser = [...rows].reverse().find((r) => r.role === 'user')
     const historyRowId = lastUser ? rowIdOf(lastUser) || undefined : undefined
+    // A resumed turn runs under the recovery notice, not its synthetic prompt.
+    const recovery = lastUser !== undefined && isRestartRecoveryPrompt(lastUser)
     const turn: Turn = {
       id: mint(),
-      userMessage: lastUser
-        ? {
-            id: historyRowId ?? '',
-            text: userText(lastUser),
-            timestamp: toMs(lastUser.timestamp),
-            attachments: Array.isArray(lastUser.attachments) ? lastUser.attachments : [],
-          }
-        : null,
-      items: snapshotItems([], run, mint),
+      userMessage:
+        lastUser && !recovery
+          ? {
+              id: historyRowId ?? '',
+              text: userText(lastUser),
+              timestamp: toMs(lastUser.timestamp),
+              attachments: Array.isArray(lastUser.attachments) ? lastUser.attachments : [],
+            }
+          : null,
+      items: snapshotItems(recovery ? [{ kind: 'restartRecovery', id: mint() }] : [], run, mint),
       status: 'live',
       startedAt: toMs(run.started_at),
       endedAt: null,
