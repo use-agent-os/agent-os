@@ -72,7 +72,10 @@ async def run_agent_loop[S: LoopState](
 
     Each step runs under ``aclosing``: when the consumer closes the loop, the
     step that is running is closed right away (its ``finally`` blocks run
-    before ``aclose`` returns), as if its code were inline in the loop.
+    before ``aclose`` returns), as if its code were inline in the loop. The
+    guarantee reaches as deep as the step carries it: a step that iterates
+    another async generator must close it with ``aclosing`` too, or that
+    generator is closed later by the event loop's asyncgen finalizer.
     """
     while True:
         state.next_iteration = False

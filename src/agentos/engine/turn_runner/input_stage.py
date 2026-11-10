@@ -46,11 +46,11 @@ class SessionAppendPort(Protocol):
 
 @runtime_checkable
 class ExtraContextResolver(Protocol):
-    """Adapter around the static helpers ``_extra_context_for_tool_context``
-    and ``_merge_extra_prompt_context`` on ``TurnRunner``.
+    """The static helpers ``_extra_context_for_tool_context`` and
+    ``_merge_extra_prompt_context`` on ``TurnRunner``.
 
-    Both helpers are static methods today; the harness binds a tiny
-    adapter at runtime so ``InputStage`` does not import the runtime.
+    ``TurnRunner`` implements this port itself and imports the helpers
+    lazily, so ``InputStage`` does not import the runtime.
     """
 
     def extra_context_for(self, ctx: ToolContext | None) -> dict[str, str]: ...

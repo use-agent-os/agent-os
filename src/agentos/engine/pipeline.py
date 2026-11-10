@@ -25,6 +25,7 @@ class PromptStepRegistry:
     ``agentos.engine.steps`` when a turn runs, so a replaced step (a test
     double, a plugin) is the one that runs. ``overrides`` swaps a named step
     for a wrapper, the way the runner bounds the router with its timeout.
+    The order itself is fixed: every turn runs :data:`DEFAULT_PROMPT_STEPS`.
     """
 
     names: tuple[str, ...]
@@ -32,25 +33,6 @@ class PromptStepRegistry:
     def __post_init__(self) -> None:
         if len(set(self.names)) != len(self.names):
             raise ValueError(f"duplicate prompt step in {self.names}")
-
-    def with_step(
-        self, name: str, *, after: str | None = None, before: str | None = None
-    ) -> PromptStepRegistry:
-        """A registry with ``name`` added after/before another step (default: last)."""
-        if (after is None) == (before is None) and after is not None:
-            raise ValueError("pass after= or before=, not both")
-        names = [n for n in self.names if n != name]
-        if after is not None:
-            index = names.index(after) + 1
-        elif before is not None:
-            index = names.index(before)
-        else:
-            index = len(names)
-        names.insert(index, name)
-        return PromptStepRegistry(tuple(names))
-
-    def without(self, name: str) -> PromptStepRegistry:
-        return PromptStepRegistry(tuple(n for n in self.names if n != name))
 
     def resolve(self, overrides: Mapping[str, TurnStep] | None = None) -> list[TurnStep]:
         """The step callables, in order, for one turn."""

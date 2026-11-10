@@ -74,9 +74,8 @@ class RunPipelineRequest:
 
 # ---------------------------------------------------------------------------
 # Ports — narrow Protocols so the stage is unit-testable without the full
-# TurnRunner. The runtime adapters in ``harness.py`` bind these to the
-# concrete TurnRunner methods (or to the module-level helper for prompt
-# report).
+# TurnRunner. ``TurnRunner`` implements them itself, except the prompt
+# report builder (``harness.ports.PromptReportBuilder``).
 # ---------------------------------------------------------------------------
 
 
@@ -108,7 +107,7 @@ class PipelineExecutionPort(Protocol):
     """Wraps ``TurnRunner._run_pipeline``.
 
     The port forwards a typed ``RunPipelineRequest`` to the underlying
-    helper. The adapter at the harness side unpacks the request into the
+    helper. ``TurnRunner``, which implements the port, unpacks the request into the
     helper's keyword arguments. The 6 inline ``accepts_keyword_arg``
     introspection branches are eliminated in favor of always passing every
     kwarg — the helper accepts all 6 today; the introspection is dead code.
