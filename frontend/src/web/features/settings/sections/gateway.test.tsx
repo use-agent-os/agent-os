@@ -70,6 +70,38 @@ describe('Settings › Gateway connection', () => {
     expect(localStorage.getItem('agentos.wsUrl')).toBe('ws://10.0.0.1:18791/ws')
   })
 
+  it('shows the new address and the outcome once the switch has connected', async () => {
+    const user = userEvent.setup()
+    const rpc = shellRpc()
+    rpc.currentUrl = 'ws://127.0.0.1:28811/ws'
+    vi.spyOn(rpc, 'connect').mockImplementation((...args: unknown[]) => {
+      rpc.currentUrl = String(args[0])
+      rpc.setState('connecting')
+      useConnection.getState().setState('connecting')
+    })
+    gatewayPage('token', rpc)
+    const details = await screen.findByText('ws://127.0.0.1:28811/ws')
+    expect(details).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Gateway token'), 'tokB')
+    const url = screen.getByLabelText('WebSocket URL')
+    await user.clear(url)
+    await user.type(url, 'ws://127.0.0.1:28812/ws')
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    expect(screen.getByText('Connecting with the new credentials…')).toBeInTheDocument()
+    act(() => {
+      rpc.emit('_hello', {})
+      rpc.setState('connected')
+      useConnection.getState().setState('connected')
+    })
+    expect(await screen.findByText('Connected to 127.0.0.1:28812.')).toBeInTheDocument()
+    expect(screen.queryByText('Connecting with the new credentials…')).toBeNull()
+    expect(screen.getAllByText('ws://127.0.0.1:28812/ws').length).toBeGreaterThan(0)
+    expect(screen.queryByText('ws://127.0.0.1:28811/ws')).toBeNull()
+    // A new token can be entered for another switch.
+    await user.type(screen.getByLabelText('Gateway token'), 'tokC')
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled()
+  })
+
   it('disconnects on request and offers Reconnect', async () => {
     const user = userEvent.setup()
     const rpc = shellRpc()

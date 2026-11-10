@@ -70,6 +70,7 @@ export const webSetSystem = defineNamespace('webSetSystem', {
   connect: 'Connect',
   connectNeedsToken: 'Enter a token to connect.',
   connectSent: 'Connecting with the new credentials…',
+  connectDone: 'Connected to {host}.',
   gatewayActions: 'Actions',
   reconnect: 'Reconnect',
   reconnecting: 'Reconnecting…',

@@ -67,7 +67,8 @@ function ConnectionDetails({ url }: { url: string }) {
   const bootstrap = useBootstrap()
   const connection = useDisplayedConnection()
   const status = useQuery({
-    queryKey: ['status'],
+    // Per address: after a switch the details describe the new gateway.
+    queryKey: ['status', url],
     queryFn: () => rpc.call<GatewayStatus>('status'),
     enabled: connection === 'connected',
     retry: false,
@@ -129,8 +130,12 @@ function Credentials({ url: currentUrl, defaultUrl }: { url: string; defaultUrl:
   const [sent, setSent] = useState<string | null>(null)
   const attemptUrl = useConnectAttempt((s) => s.url)
   const unreachable = useConnectAttempt((s) => s.unreachable)
+  const connection = useConnection((s) => s.state)
   const tokenRequired = bootstrap.auth_mode === 'token'
   const failed = sent !== null && attemptUrl === sent && unreachable
+  // The attempt is over once that gateway answers (connectGateway forgets
+  // its url on the handshake).
+  const joined = sent !== null && attemptUrl !== sent && connection === 'connected'
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault()
@@ -205,7 +210,11 @@ function Credentials({ url: currentUrl, defaultUrl }: { url: string; defaultUrl:
         {tokenRequired && !token.trim() && sent === null ? (
           <span className="text-small text-text-muted">{t('webSetSystem.connectNeedsToken')}</span>
         ) : null}
-        {failed ? (
+        {joined ? (
+          <span role="status" className="text-small text-text-muted">
+            {t('webSetSystem.connectDone', { host: hostOf(sent) })}
+          </span>
+        ) : failed ? (
           <span role="alert" className="text-small text-danger">
             {t('webConnection.settingsUnreachable', { host: hostOf(sent) })}
           </span>
@@ -319,6 +328,8 @@ function Actions() {
 export function GatewaySection() {
   const rpc = useRpc()
   const bootstrap = useBootstrap()
+  // Re-read the address whenever the connection changes (a switch).
+  useConnection((s) => s.state)
   const defaultUrl = resolveWsUrl(bootstrap.ws_url)
   // The address this tab is using; the saved one only changes once a new
   // address has connected.
