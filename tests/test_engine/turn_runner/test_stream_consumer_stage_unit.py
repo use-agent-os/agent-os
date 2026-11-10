@@ -725,17 +725,16 @@ async def test_compaction_handler_preserves_recoverable_state_on_persist_failure
 
 @pytest.mark.asyncio
 async def test_compaction_handler_forwards_the_events_trigger() -> None:
-    # Read defensively: the event's ``trigger`` reaches the persist port when
-    # the agent sets it, and None when the event carries none.
+    # The event's ``trigger`` reaches the persist port; an event built without
+    # one carries the default, ``overflow``.
     persist = _RecordingCompactionPersist()
     handler = _CompactionHandler(persist=persist, memory_snapshot=_RecordingMemorySnapshotRefresh())
-    with_trigger = CompactionEvent(summary="s", kept_entries=[])
-    with_trigger.trigger = "timeout"  # type: ignore[attr-defined]
+    with_trigger = CompactionEvent(summary="s", kept_entries=[], trigger="timeout")
 
     await handler.handle(with_trigger, _make_input())
     await handler.handle(CompactionEvent(summary="s", kept_entries=[]), _make_input())
 
-    assert [call["trigger"] for call in persist.calls] == ["timeout", None]
+    assert [call["trigger"] for call in persist.calls] == ["timeout", "overflow"]
 
 
 @pytest.mark.asyncio
