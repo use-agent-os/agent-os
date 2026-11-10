@@ -11,6 +11,8 @@ export class FakeRpc {
   capabilities: string[] = []
   policy: Record<string, unknown> = {}
   lastFrameTime = Date.now()
+  /** WsRpcClient's URL of the last connect(); tests set it to simulate a new gateway. */
+  currentUrl = ''
 
   /** Answer `method` with a value, or with a function of the params. */
   handle(method: string, answer: unknown): this {

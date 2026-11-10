@@ -405,8 +405,7 @@ describe('restart and protocol mismatch', () => {
 
   it('refreshes cached data on every handshake, and resets it for a new gateway URL', async () => {
     const rpc = shellRpc()
-    const client = rpc as unknown as { currentUrl: string }
-    client.currentUrl = 'ws://a/ws'
+    rpc.currentUrl = 'ws://a/ws'
     const { queryClient } = renderShell('/home', rpc)
     await screen.findByRole('navigation', { name: 'Main navigation' })
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
@@ -415,7 +414,7 @@ describe('restart and protocol mismatch', () => {
     act(() => rpc.emit('_hello', {}))
     expect(invalidate).toHaveBeenCalledTimes(2)
     expect(reset).not.toHaveBeenCalled()
-    client.currentUrl = 'ws://b/ws'
+    rpc.currentUrl = 'ws://b/ws'
     act(() => rpc.emit('_hello', {}))
     expect(reset).toHaveBeenCalledTimes(1)
   })

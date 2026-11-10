@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 import { CHAT_PATH, KEY, chatRpc, emit, openChat, resetChatState, userRow } from '@/test/web-chat'
-import { readQueue, resetQueuesForTests } from './composer/queue'
+import { readQueue } from './composer/queue'
 import { initialTranscript } from './model/reducer'
 import type { TranscriptState, Turn } from './model/types'
 import { contentVersion } from './transcript/TranscriptView'
@@ -12,10 +12,7 @@ import { contentVersion } from './transcript/TranscriptView'
 // The chat workspace's send / stop / queue paths and restored parity
 // features, driven through the real routes.
 
-beforeEach(() => {
-  resetChatState()
-  resetQueuesForTests()
-})
+beforeEach(resetChatState)
 afterEach(() => {
   vi.restoreAllMocks()
 })
