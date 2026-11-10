@@ -321,8 +321,13 @@ def _boot_runtime_restart_fingerprints(config: Any) -> dict[str, Any]:
     skills = skills if isinstance(skills, dict) else {}
     return {
         # TaskRuntime constructor captures these queue/semaphore/deadline values.
+        # ``subagents.max_concurrent_children`` is the runtime-wide fallback; the
+        # live per-parent resolver only reads agent entries and agent defaults.
         "task_runtime": {
             "max_concurrency": task_runtime.get("max_concurrency"),
+            "max_nested_concurrency": task_runtime.get("max_nested_concurrency"),
+            "turn_cancel_grace_seconds": task_runtime.get("turn_cancel_grace_seconds"),
+            "max_concurrent_children": subagents.get("max_concurrent_children"),
             "max_pending_per_session": task_runtime.get("max_pending_per_session"),
             "channel_inflight_cap": task_runtime.get("channel_inflight_cap"),
             "turn_hard_deadline_s": task_runtime.get("turn_hard_deadline_s"),
