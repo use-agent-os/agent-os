@@ -466,6 +466,12 @@ function ProjectDetail({
             value={nameDraft ?? name}
             maxLength={PROJECT_NAME_MAX}
             onChange={(e) => setNameDraft(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter saves the name, as Save name does; not mid-composition.
+              if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+              e.preventDefault()
+              if (!nameGate.disabled && saving === null) void saveName()
+            }}
           />
           {nameDraft !== null && nameDraft !== name ? (
             <Button

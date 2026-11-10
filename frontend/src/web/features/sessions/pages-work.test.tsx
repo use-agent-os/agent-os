@@ -608,6 +608,35 @@ describe('Projects page: rename then knowledge save', () => {
     await waitFor(() => expect(server.project.knowledge).toBe('old mine'))
   })
 
+  it('Enter in the name field saves the name', async () => {
+    const user = userEvent.setup()
+    const server = {
+      project: {
+        project_id: 'p1',
+        name: 'Alpha',
+        knowledge: '',
+        updated_at: 100,
+        agent_id: 'main',
+      },
+    }
+    const rpc = projectsRpc(server).handle('projects.update', (p: Record<string, unknown>) => {
+      server.project = { ...server.project, name: String(p.name), updated_at: 200 }
+      return { project: server.project }
+    })
+    renderShell('/projects/p1', rpc)
+    const name = await within(main()).findByRole('textbox', { name: 'Name' })
+    // Unchanged: Enter does nothing.
+    await user.type(name, '{Enter}')
+    expect(rpc.callsTo('projects.update')).toEqual([])
+    await user.clear(name)
+    await user.type(name, 'Gamma{Enter}')
+    await waitFor(() =>
+      expect(rpc.callsTo('projects.update')).toEqual([
+        { projectId: 'p1', name: 'Gamma', expectedUpdatedAt: 100 },
+      ]),
+    )
+  })
+
   it('notes when the project has more sessions than are loaded', async () => {
     const rpc = shellRpc([sessionRow(B, { display_name: 'Beta chat', project_id: 'p1' })]).handle(
       'projects.list',
