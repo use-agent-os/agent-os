@@ -220,6 +220,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   strings of the previous console.
 
 ### Fixed
+- A tool that returns a `dict` or `list` now hands the model JSON instead of
+  a Python repr, so its result (a pending approval, for example) can be read
+  back. String results are unchanged.
 - A turn refused or stopped by a spend ceiling (`budget_exceeded`) now ends
   with outcome `budgetLimited` instead of `failed`.
 - A turn stopped after its reply was recorded (including while memory was

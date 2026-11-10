@@ -1412,3 +1412,51 @@ async def test_dispatch_tracker_limits_concurrent_tool_results_per_turn() -> Non
 
     returned_total = sum(_strict_preview_chars(result.content) for result in results)
     assert returned_total <= 180
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("returned", "expected"),
+    [
+        (
+            {"status": "ok", "path": "notes.md", "note": "café"},
+            '{"status": "ok", "path": "notes.md", "note": "café"}',
+        ),
+        (["a", 1, None], '["a", 1, null]'),
+        ("{'kept': 'as is'}", "{'kept': 'as is'}"),
+        (42, "42"),
+    ],
+)
+async def test_a_dict_or_list_result_reaches_the_model_as_json(
+    returned: object, expected: str
+) -> None:
+    registry = ToolRegistry()
+
+    async def give() -> object:
+        return returned
+
+    registry.register(ToolSpec(name="give", description="give", parameters={}), give)
+    handler = build_tool_handler(registry, ToolContext())
+
+    result = await handler(ToolCall(tool_use_id="g1", tool_name="give", arguments={}))
+
+    assert result.content == expected
+    assert result.is_error is False
+
+
+@pytest.mark.asyncio
+async def test_a_pending_approval_dict_is_readable_from_the_result() -> None:
+    registry = ToolRegistry()
+
+    async def ask() -> dict:
+        return {"status": "approval_required", "approval_id": "ap-9", "command": "rm x"}
+
+    registry.register(ToolSpec(name="ask", description="ask", parameters={}), ask)
+    handler = build_tool_handler(
+        registry,
+        ToolContext(caller_kind=CallerKind.WEB, interaction_mode=InteractionMode.INTERACTIVE),
+    )
+
+    result = await handler(ToolCall(tool_use_id="a1", tool_name="ask", arguments={}))
+
+    assert json.loads(result.content)["approval_id"] == "ap-9"

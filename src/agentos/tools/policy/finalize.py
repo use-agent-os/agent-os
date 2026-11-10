@@ -84,6 +84,23 @@ def _has_live_approval_surface(ctx: ToolContext | None) -> bool:
     return False
 
 
+def _result_text(result: Any) -> str:
+    """A tool's return value as the text the model and the transcript get.
+
+    A ``dict`` / ``list`` is serialised as JSON, so readers that parse tool
+    results (pending approvals, router control, ask_user) can read it; a
+    string is kept as it is, and anything else is ``str()``-ed.
+    """
+    if isinstance(result, str):
+        return result
+    if isinstance(result, (dict, list)):
+        try:
+            return json.dumps(result, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            return str(result)
+    return str(result)
+
+
 async def finalize(
     call: ToolCall,
     ctx: ToolContext | None,
@@ -250,6 +267,7 @@ async def finalize(
     is_error = denial or status_is_error
 
     artifacts = list(ctx.published_artifacts[artifact_start:]) if ctx is not None else []
+    result = _result_text(result)
     if artifacts:
         content = result
     else:
