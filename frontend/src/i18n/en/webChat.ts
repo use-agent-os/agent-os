@@ -171,6 +171,9 @@ export const webChat = defineNamespace('webChat', {
   newStarting: 'Starting…',
   newLoading: 'Loading agents and projects…',
   newFailed: "Couldn't start the session: {message}",
+  newNoAgent: 'No agent to start the session with',
+  newAgentsFailed: "Couldn't load the agents",
+  newProjectsFailed: "Couldn't load the projects",
 
   // Side panel
   panelTitle: 'Side panel',
