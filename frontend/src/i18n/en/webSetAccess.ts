@@ -200,6 +200,8 @@ export const webSetAccess = defineNamespace('webSetAccess', {
   envSavedRestart: '{name} saved. Restart the gateway to apply it.',
   envImported: '{name} imported',
   envRemoved: '{name} removed',
+  envRevealTitle: 'Reveal {name}?',
+  envRevealBody: 'The value is shown on screen for thirty seconds, then hidden again.',
   envAddTitle: 'Add a variable',
   envAddBody: 'Stored in the AgentOS .env file and applied to the running gateway.',
   envAddName: 'Name',

@@ -11,7 +11,7 @@ import {
   RefreshCw,
   Trash2,
 } from 'lucide-react'
-import { useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { t } from '@/i18n'
@@ -54,14 +54,14 @@ import {
 } from '@/web/components/ui/dialog'
 import { ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
-import { useRegisterFields, useReveal } from '../fields'
+import { useRegisterFields } from '../fields'
 
 // Settings › Environment (overhaul-control-ui 7.7, Appendix A "Env"):
 // variables by category with a quiet tail, set, unset, reveal (hidden again
 // on its own), import, and shadowed / source indicators.
 
-/** How long a revealed value stays on screen. */
-const ENV_REVEAL_MS = 15_000
+/** How long a revealed value stays on screen (docs: "thirty seconds"). */
+const ENV_REVEAL_MS = 30_000
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -118,17 +118,22 @@ function EnvRow({ row, write }: { row: EnvVarRow; write: Gate }) {
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [confirmUnset, setConfirmUnset] = useState(false)
-  // The fetched value is only displayed while `shown`; useReveal masks it
-  // again after ENV_REVEAL_MS.
-  const [shown, toggleShown] = useReveal(ENV_REVEAL_MS)
+  const [confirmReveal, setConfirmReveal] = useState(false)
+  // The fetched value is held only while shown: hiding it, by hand or after
+  // ENV_REVEAL_MS, drops it from memory as well as from the screen.
   const [revealed, setRevealed] = useState<string | null>(null)
+  const shown = revealed !== null
+  useEffect(() => {
+    if (revealed === null) return
+    const id = window.setTimeout(() => setRevealed(null), ENV_REVEAL_MS)
+    return () => window.clearTimeout(id)
+  }, [revealed])
 
   const action = useMutation({
     mutationFn: async (kind: 'reveal' | 'import' | 'unset') => {
       if (kind === 'reveal') {
         const result = await rpc.call<{ value: string }>('env.reveal', { name: row.name })
         setRevealed(result?.value ?? '')
-        toggleShown()
         return
       }
       if (kind === 'import') {
@@ -225,11 +230,11 @@ function EnvRow({ row, write }: { row: EnvVarRow; write: Gate }) {
         <code
           className={cn(
             'max-w-full font-mono text-small break-all',
-            shown && revealed !== null ? 'text-text' : 'text-text-muted',
+            shown ? 'text-text' : 'text-text-muted',
           )}
           data-testid={`env-value-${row.name}`}
         >
-          {shown && revealed !== null ? revealed : (row.masked ?? '—')}
+          {shown ? revealed : (row.masked ?? '—')}
         </code>
       </div>
 
@@ -273,7 +278,7 @@ function EnvRow({ row, write }: { row: EnvVarRow; write: Gate }) {
                   ? t('webSetAccess.envHideLabel', { name: row.name })
                   : t('webSetAccess.envRevealLabel', { name: row.name })
               }
-              onClick={() => (shown ? toggleShown() : action.mutate('reveal'))}
+              onClick={() => (shown ? setRevealed(null) : setConfirmReveal(true))}
             >
               {action.isPending && action.variables === 'reveal' ? (
                 <Loader2 className="animate-spin" />
@@ -332,6 +337,22 @@ function EnvRow({ row, write }: { row: EnvVarRow; write: Gate }) {
         </p>
       ) : null}
 
+      <AlertDialog open={confirmReveal} onOpenChange={setConfirmReveal}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('webSetAccess.envRevealTitle', { name: row.name })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>{t('webSetAccess.envRevealBody')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('webCommon.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => action.mutate('reveal')}>
+              {t('webSetAccess.reveal')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <AlertDialog open={confirmUnset} onOpenChange={setConfirmUnset}>
         <AlertDialogContent>
           <AlertDialogHeader>
