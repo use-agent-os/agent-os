@@ -18,9 +18,14 @@ export async function exportSessionMarkdown(
     includeCanonical: false,
     includeSummaries: false,
   })
-  const { exportMarkdownDocument } = await import('@/views/chat/logic')
+  const { exportMarkdownDocument, stripTimePrefix } = await import('@/views/chat/logic')
   const md = exportMarkdownDocument(
-    (history?.messages ?? []).map((m) => ({ role: m.role, text: m.text, ts: m.timestamp })),
+    (history?.messages ?? []).map((m) => ({
+      role: m.role,
+      // The gateway's time prefix is for the model, not the reader.
+      text: m.role === 'user' ? stripTimePrefix(m.text) : m.text,
+      ts: m.timestamp,
+    })),
     key,
   )
   if (md === null) {
