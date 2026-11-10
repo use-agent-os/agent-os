@@ -1,8 +1,7 @@
-// Pure usage-view helpers ported 1:1 from the legacy view
-// (src/agentos/gateway/static/js/views/usage.js). Each function carries the
-// legacy line range it mirrors so the parity matrix stays auditable. RPC
-// calls, polling, DOM/render and event wiring live in UsagePage.tsx; this
-// module owns the pure derivations (range filtering, aggregation, formatting,
+// Pure usage helpers, first ported 1:1 from the retired console's usage.js
+// view (the line ranges cited below point into that source). RPC calls,
+// polling, rendering and event wiring live in the web console's Usage and Home
+// pages; this module owns the pure derivations (range filtering, aggregation, formatting,
 // sort keys, chart bar-scaling math, cost-source mapping, model grouping, CSV).
 
 /** A per-model breakdown entry (usage.status sessions[].modelBreakdown[]).

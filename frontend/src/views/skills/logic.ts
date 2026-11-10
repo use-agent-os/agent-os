@@ -1,8 +1,8 @@
-// Pure skills-view helpers ported 1:1 from the legacy view
-// (src/agentos/gateway/static/js/views/skills.js). Each function below carries
-// the legacy line range it mirrors so the parity matrix stays auditable. RPC
-// calls, mutations, dialogs and rendering live in SkillsPage.tsx; this module
-// owns the pure derivations (filtering, layer grouping/sort, stats, category
+// Pure skills helpers, first ported 1:1 from the retired console's skills.js
+// view (the line ranges cited below point into that source). RPC calls,
+// mutations, dialogs and rendering live in the callers (the web console's
+// Settings › Skills section, the desktop's Skills panel); this module owns the
+// pure derivations (filtering, layer grouping/sort, stats, category
 // derivation, registry filtering, install-action state, and small utilities).
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -346,8 +346,8 @@ export const SKILL_GROUP_ORDER: readonly SkillGroupKey[] = [
  * The chat URL behind a skill card's "Use" button. Naming a skill explicitly is
  * the documented way to pin the agent to it — the prompt opens with
  * `use skill <name>` and a newline so the user lands on a fresh line and types
- * the actual request. ChatPage reads `?prompt=` on mount, prefills the composer
- * and strips the param; nothing is sent automatically.
+ * the actual request. The chat route carries `?prompt=` to the composer, which
+ * prefills it once and drops the param; nothing is sent automatically.
  */
 export function skillChatPromptPath(name: string): string {
   return '/chat?prompt=' + encodeURIComponent('use skill ' + name + '\n')
@@ -834,9 +834,9 @@ export function safeUrl(url?: string): string {
  * than mutating, but preserves the legacy match semantics.
  *
  * Kept, not deleted: this is the optimistic half of the install/uninstall
- * round trip. It is applied from `installMutation.onSuccess` /
- * `uninstallMutation.onSuccess` in SkillsPage.tsx over the cached
- * `['skills.search', …]` data before the invalidation refetch lands, so the
+ * round trip. It is applied after a successful install or uninstall (the web
+ * console's Settings › Skills section, the desktop's Skills panel) over the
+ * cached `['skills.search', …]` data before the invalidation refetch lands, so the
  * Installed chip flips on the same tick instead of after a network round trip.
  * Both paths then invalidate `['skills.search']` so the server's own answer
  * replaces the optimistic one.

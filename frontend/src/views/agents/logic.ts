@@ -1,8 +1,8 @@
-// Pure agents-view helpers ported 1:1 from the legacy view
-// (src/agentos/gateway/static/js/views/agents.js). Each function below carries
-// the legacy line range it mirrors so the parity matrix stays auditable. RPC
-// calls, mutations, dialogs and rendering live in AgentsPage.tsx; this module
-// owns the pure derivations (stats, card display, form seed/diff, validation).
+// Pure agents helpers, first ported 1:1 from the retired console's agents.js
+// view (the line ranges cited below point into that source). RPC calls,
+// mutations, dialogs and rendering live in the web console's Settings › Agents
+// section (web/features/settings/sections/agents.tsx); this module owns the
+// pure derivations (stats, card display, form seed/diff, validation).
 
 /** A raw agent row from agents.list (all fields optional). */
 import { t } from '@/i18n'

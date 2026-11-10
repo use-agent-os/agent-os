@@ -17,8 +17,8 @@
  * meanwhile is dropped.
  *
  * The pending list + count are published to a zustand store (useApprovals) so
- * the nav badge and the <ApprovalPrompt /> modal render off React state instead
- * of the legacy imperative DOM writes (_setBadge / _openModal). elevatedMode
+ * every approval surface (the web console's Inbox badge, approval tray and chat
+ * dock; the desktop's approval dialog) renders off React state. elevatedMode
  * persistence, the toast-on-new-pending hook, and pollNow are preserved.
  */
 import { create } from 'zustand'

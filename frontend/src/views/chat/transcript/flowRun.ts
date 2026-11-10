@@ -16,8 +16,9 @@
 // editor; the web console has none).
 //
 // Styling: the markup carries `flowrun-*` classes plus `data-flowrun-status`.
-// The web console styles them in chat-unified.css; the desktop restyles the
-// same hooks in its own chat.css.
+// Only the desktop mounts this markup and skins the hooks in its own chat.css;
+// the web console renders its own React cards (web/features/chat/cards/) from
+// the pure helpers.
 //
 // SECURITY: every payload-derived string reaches the DOM through
 // `textContent` or an attribute setter, never `innerHTML` (flow names and file

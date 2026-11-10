@@ -1,9 +1,8 @@
-// Pure sessions-view helpers ported 1:1 from the legacy view
-// (src/agentos/gateway/static/js/views/sessions.js) and the shared UI helpers
-// it consumes (static/js/components.js sessionStatus*). Each function carries
-// the legacy line range it mirrors so the parity matrix stays auditable. RPC
-// calls, mutations, dialogs and rendering live in SessionsPage.tsx; this module
-// owns the pure derivations (status folding, filtering, sorting, stats, orphan
+// Pure sessions helpers, first ported 1:1 from the retired console's
+// sessions.js view and its components.js helpers (sessionStatus*); the line
+// ranges cited below point into that source. RPC calls, mutations, dialogs and
+// rendering live in the callers (the web console's Sessions page and session
+// list, the desktop's sidebar); this module owns the pure derivations (status folding, filtering, sorting, stats, orphan
 // resolution).
 
 /** A run-status task descriptor (active_task / last_task). */

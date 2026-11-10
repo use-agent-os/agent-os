@@ -1,8 +1,8 @@
-// Pure cron-view helpers ported 1:1 from the legacy view
-// (src/agentos/gateway/static/js/views/cron.js). Each function below carries the
-// legacy line range it mirrors so the parity matrix stays auditable. RPC calls,
-// event subscriptions, and rendering live in CronPage.tsx; this module owns the
-// pure derivations (cron parse/humanize + next-run computation, schedule/kind
+// Pure cron helpers, first ported 1:1 from the retired console's cron.js view
+// (the line ranges cited below point into that source). RPC calls, event
+// subscriptions and rendering live in the callers (the web console's
+// Automations page and editor, the desktop's Jobs and trading desk views); this
+// module owns the pure derivations (cron parse/humanize + next-run computation, schedule/kind
 // labels, run-status derivation, list sorting, and the time/duration
 // formatters).
 
@@ -725,8 +725,9 @@ export function explainCron(expr: string): string {
 // Create / Edit panel — pure form seeding, validation, and payload assembly
 // ported 1:1 from cron.js (_openPanel ~927, _populateDeliveryFields 1083,
 // _buildDeliveryFromForm 1114, _buildFailureDestinationFromForm 1154,
-// _saveJob 1180, session-key helpers 1485-1520). RPC/DOM/animation stay in
-// CronPage.tsx; everything decision-shaped lives here and is unit-tested.
+// _saveJob 1180, session-key helpers 1485-1520). RPC and rendering stay in the
+// editors that use them; everything decision-shaped lives here and is
+// unit-tested.
 // ═══════════════════════════════════════════════════════════════════════════
 
 export type ScheduleKind = 'cron' | 'every' | 'at'
@@ -839,8 +840,8 @@ export function jobSessionKey(job: RawJob | null | undefined): string {
 /**
  * the active chat session key: the URL `?session=` param
  * (canonicalized) wins, else the `agentos_active_session` localStorage value.
- * The raw inputs are injected so the helper stays pure/testable; CronPage reads
- * window.location.search + localStorage and passes them in.
+ * The raw inputs are injected so the helper stays pure/testable; the caller
+ * (the web console's Automations page) reads them and passes them in.
  */
 export function activeChatSessionKey(urlSession: string, storedSession: string): string {
   const fromUrl = canonicalSessionKey(urlSession)

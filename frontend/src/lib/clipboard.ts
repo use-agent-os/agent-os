@@ -1,8 +1,6 @@
-// Copy with a non-secure-context fallback, mirroring the shared CommandLine
-// copy contract (clipboard API, else a hidden-textarea execCommand). Legacy
-// sessions used a bare navigator.clipboard call with no fallback, so this is a
-// deliberate uplift (recorded as ported(uplift) in the parity matrix) that lets
-// the copy work when the page isn't served from a secure context.
+// Copy with a non-secure-context fallback: the clipboard API when the page has
+// it, else a hidden-textarea execCommand, so copying still works when the
+// console is not served from a secure context.
 export function copyWithFallback(text: string): Promise<void> {
   if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
     return navigator.clipboard.writeText(text)

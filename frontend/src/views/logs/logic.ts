@@ -1,7 +1,7 @@
-// Pure logs-view helpers ported 1:1 from the legacy view
-// (src/agentos/gateway/static/js/views/logs.js). Each function carries the
-// legacy line range it mirrors so the parity matrix stays auditable. The RPC
-// polling cadence + rendering live in LogsPage.tsx; this module owns the pure
+// Pure logs helpers, first ported 1:1 from the retired console's logs.js view
+// (the line ranges cited below point into that source). The RPC polling
+// cadence and rendering live in the web console's Settings › Logs section
+// (web/features/settings/sections/logs.tsx); this module owns the pure
 // derivations (level guessing, entry normalization, filtering, counts, ts
 // slicing, highlight segmentation, export text).
 

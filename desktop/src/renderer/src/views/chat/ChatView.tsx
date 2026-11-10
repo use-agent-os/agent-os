@@ -71,7 +71,10 @@ function genSessionKey(currentKey: string): string {
   return webchatSessionKey(agentIdFromSessionKey(currentKey) || 'main', suffix)
 }
 
-/** Export source read back from the rendered thread (see ChatPage.tsx). */
+/**
+ * Export source read back from the rendered thread: each `.msg[data-history-role]`
+ * row with its raw text, timestamp and artifact cards, in order.
+ */
 function collectExportMessages(thread: HTMLElement | null): ExportMessage[] {
   if (!thread) return []
   const out: ExportMessage[] = []
@@ -111,7 +114,7 @@ function runTone(status: string): 'ok' | 'warn' | 'danger' | 'dim' {
 }
 
 /**
- * The conversation. This is the console's ChatPage with the desktop's chrome:
+ * The conversation: the shared chat hooks and transcript with the desktop's chrome:
  * the session comes from the route (`/sessions/:key`, keyless = a fresh
  * session), there is no title (the sidebar names the chat), and before the
  * first send the composer sits centred under the wordmark and docks to the
