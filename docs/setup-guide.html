@@ -551,7 +551,7 @@ agentos agent -m "summarize today's commits"</pre>
       </h2>
       <p class="mt-5 max-w-[68ch] text-[16px] leading-relaxed text-[var(--text-dim)]">
         The console at <span class="mono text-[var(--text)]">/control/</span> is a single-page app. The views below are
-        client-side routes. For example <span class="mono text-[var(--text)]">/control/setup</span> and
+        client-side routes. For example <span class="mono text-[var(--text)]">/control/settings/setup</span> and
         <span class="mono text-[var(--text)]">/control/chat</span>.
       </p>
 
@@ -560,47 +560,42 @@ agentos agent -m "summarize today's commits"</pre>
         <div class="bg-[var(--bg-2)] p-5">
           <div class="mb-2 h-0.5 w-8 bg-[var(--accent)]"></div>
           <h3 class="mono text-[13px] text-[var(--text)]">/control/chat</h3>
-          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Run and resume sessions with streaming output, tool-call cards, and per-turn usage and savings.</p>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Run and resume sessions with streaming output, tool-call rows, cards and per-turn usage.</p>
         </div>
         <div class="bg-[var(--bg-2)] p-5">
           <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
-          <h3 class="mono text-[13px] text-[var(--text)]">/control/setup</h3>
-          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">First-run catalog. Provider and Router are the fast path; everything else lives in the Capability Center.</p>
+          <h3 class="mono text-[13px] text-[var(--text)]">/control/home</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Readiness at a glance: provider and route, uptime, usage, the next automation run and a live event feed.</p>
         </div>
         <div class="bg-[var(--bg-2)] p-5">
           <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
-          <h3 class="mono text-[13px] text-[var(--text)]">/control/approvals</h3>
-          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Durable human-in-the-loop queue for approving or denying sensitive tool calls.</p>
+          <h3 class="mono text-[13px] text-[var(--text)]">/control/settings/setup</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Guided setup. Provider and Router are the fast path; search, memory embeddings, image generation and audio follow.</p>
         </div>
         <div class="bg-[var(--bg-2)] p-5">
           <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
-          <h3 class="mono text-[13px] text-[var(--text)]">/control/health</h3>
-          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Readiness at a glance: provider state, memory, sandbox posture, and recovery hints.</p>
+          <h3 class="mono text-[13px] text-[var(--text)]">/control/inbox</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Everything waiting on you: approvals, agent questions and runtime issues, answered in place.</p>
         </div>
         <div class="bg-[var(--bg-2)] p-5">
           <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
-          <h3 class="mono text-[13px] text-[var(--text)]">/control/cron</h3>
-          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">View and manage scheduled runs driven by the SchedulerEngine.</p>
+          <h3 class="mono text-[13px] text-[var(--text)]">/control/automations</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">View and manage scheduled jobs and their run health.</p>
         </div>
         <div class="bg-[var(--bg-2)] p-5">
           <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
-          <h3 class="mono text-[13px] text-[var(--text)]">/control/logs</h3>
-          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Inspect runtime logs and diagnostics output.</p>
-        </div>
-        <div class="bg-[var(--bg-2)] p-5">
-          <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
-          <h3 class="mono text-[13px] text-[var(--text)]">/control/channels</h3>
-          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Check channel adapter status and jump to guided setup.</p>
+          <h3 class="mono text-[13px] text-[var(--text)]">/control/sessions</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Search, filter and manage every session.</p>
         </div>
         <div class="bg-[var(--bg-2)] p-5">
           <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
           <h3 class="mono text-[13px] text-[var(--text)]">/control/usage</h3>
-          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Token and estimated-cost rollups across sessions.</p>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Token and estimated-cost totals of the sessions active in a range.</p>
         </div>
         <div class="bg-[var(--bg-2)] p-5">
           <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
-          <h3 class="mono text-[13px] text-[var(--text)]">/control/skills</h3>
-          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Browse available skills.</p>
+          <h3 class="mono text-[13px] text-[var(--text)]">/control/settings/&lt;section&gt;</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Everything you configure: health, channels, skills, MCP, approvals, logs, the full config editor and more.</p>
         </div>
       </div>
     </section>

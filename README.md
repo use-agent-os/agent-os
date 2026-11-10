@@ -551,9 +551,10 @@ agentos configure channels
 
 Sections: `provider`, `router`, `channels`, `search`,
 `image-generation`, `memory-embedding`. The Web UI shows the same
-options at `/control/setup`. Provider and Router are the two main
-ones to set up first. Channels, Search, Image generation, and Memory
-embedding are in the Capability Center — you can set these up later.
+options in Guided setup at `/control/settings/setup`. Provider and
+Router are the two main ones to set up first. Channels, Search, Image
+generation, and Memory embedding have their own Settings sections —
+you can set these up later.
 If you leave channels empty, that's fine — it just means you chose
 not to use them.
 
@@ -602,7 +603,7 @@ agentos doctor --config ./agentos.toml --json
 ```
 
 `/health` and `/healthz` are simple checks — they just say if the
-process is alive. `agentos doctor` and the Web UI Health page check
+process is alive. `agentos doctor` and the Web UI's Settings › Health check
 much more: your provider setup, memory, logs, search, channels,
 sandbox safety, router, image generation, and how to fix problems.
 Press `Ctrl+C` to stop a gateway that is running in your terminal.

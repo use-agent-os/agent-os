@@ -268,7 +268,7 @@ More on this mode is in [Desktop app](desktop-app.md#using-a-gateway-on-another-
 
 The same address and token work for the other clients. Open the Web UI at the
 gateway's address (`http://127.0.0.1:18791/control/` through the tunnel) and enter
-the token under Overview › Gateway connection › Token. For the CLI on your own
+the token on the Connect screen (or in Settings › Gateway). For the CLI on your own
 machine:
 
 ```sh
@@ -375,7 +375,7 @@ reaches for: Python, a C toolchain, Node.js with `npm` and `npx`, `uv`, `git`, `
 **Anything else that installs without root goes on the volume.** The user's home is
 `/var/lib/agentos/home`, so a tool installed with `npm install -g` or `uv tool
 install`, and the login or config it keeps in its home directory, survives an
-upgrade. Skills offer these installs from the Skills page. To install one yourself:
+upgrade. Skills offer these installs from Settings › Skills. To install one yourself:
 
 ```sh
 docker compose exec gateway npm install -g gmgn-cli

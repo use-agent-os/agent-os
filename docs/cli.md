@@ -512,7 +512,7 @@ run:
 
 On gateway-connected commands the CLI checks PyPI at most once every 24h and,
 if a newer release exists, prints a one-line notice on stderr. Similarly, the Web UI
-queries the gateway on connection and displays a dismissible banner if an update is available.
+queries the gateway on connection and, if an update is available, shows an **Update available** badge in the status menu and a dismissible notice linking to Settings › Updates.
 The check is suppressed on non-interactive CLI runs (no TTY) and in CI. Control it with:
 
 - `updates.notify = false` in `agentos.toml` (or the setup UI's Finish step) —

@@ -450,8 +450,11 @@ Empty → `No triggers yet.`
 
 ### Web vs desktop
 
-The renderer lives in `frontend/`; the web console styles the hooks in
-`chat-unified.css`; the desktop restyles them in
+The payload normalizers live in `frontend/src/views/chat/transcript/`. The
+web console draws its own read-only React card from them
+(`frontend/src/web/features/chat/cards/TradingCards.tsx`): it refreshes on
+`trading.*.changed` but offers no actions. The desktop renders the full card
+with its actions and styles it in
 `desktop/src/renderer/src/views/chat/chat.css` as a desk instrument (rail,
 mono numerals, tinted status). `canWrite` is true only on the desktop desk.
 

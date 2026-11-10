@@ -117,8 +117,8 @@ admitted as if it sat at the keyboard.
    tailscale serve --bg --https=443 http://127.0.0.1:18791
    ```
 
-Open `https://<machine>.<tailnet>.ts.net/control/`, enter the token under
-Overview › Gateway connection › Token and press Connect. The desktop app
+Open `https://<machine>.<tailnet>.ts.net/control/`, enter the token on
+the Connect screen (or in Settings › Gateway) and press Connect. The desktop app
 connects the same way: **Run mode** External, **Protocol** HTTPS, host
 `<machine>.<tailnet>.ts.net`, port `443`, and the token. The same settings
 reach a gateway behind a [reverse proxy](#reverse-proxy-with-trusted-proxy-mode),
