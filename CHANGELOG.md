@@ -18,9 +18,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Each hook gets its own copy of the arguments; editing them in place
     changes nothing. Return `Rewrite` to change them.
   - A rewritten call stays in the transcript as the model made it; its result
-    tells the model which arguments a hook adjusted (names only, never
-    values), and `ToolResult.effective_arguments` holds the arguments the call
-    ran with. The reminder to verify code changes looks at the file the call
+    tells the model which arguments a hook adjusted (by name; the note never
+    repeats the values), and `ToolResult.effective_arguments` holds the
+    arguments the call ran with. Operators see the call that actually runs:
+    an approval prompt for a rewritten command shows the rewritten command. The reminder to verify code changes looks at the file the call
     actually wrote.
   - Every hook whose `before_tool` ran gets `after_tool` exactly once, also
     when the call was blocked, refused, denied by policy or skipped by the run

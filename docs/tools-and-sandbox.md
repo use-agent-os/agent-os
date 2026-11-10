@@ -318,7 +318,17 @@ class SpendGate:
   - The transcript keeps the call as the model made it. The tool result tells
     the model that a hook adjusted it and which arguments, by name only: a
     trailing note on a text result, a `tool_hook_adjusted_arguments` list on
-    a JSON object result. The values are never shown.
+    a JSON object result. The note never repeats the new values, and the
+    model's record of the call keeps its own arguments.
+  - Operators see the call that actually runs: an approval prompt for a
+    rewritten call (and the pending-approval result on its tool card) shows
+    the rewritten command, because that is what is being approved. The tool
+    card's argument list stays the model's.
+  - The result itself is the output of the call as it ran, so a tool that
+    echoes its arguments (a written path, the command in an approval
+    denial) echoes the rewritten value to the model too. A hook that puts
+    something into the arguments the model must not see redacts it in
+    `after_tool` with `ReplaceResult`.
   - Checks that describe the work done (the reminder to verify code changes)
     use the rewritten arguments. Guards that decide before the call runs use
     the model's arguments: the repeated-failure and loop guards, the

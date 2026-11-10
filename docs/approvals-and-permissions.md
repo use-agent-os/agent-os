@@ -161,6 +161,12 @@ readable `title` (`params.namespace` narrows it), and `exec.approval.resolve`
 (or `POST /api/approvals/resolve`) accepts an optional `payload` object for
 form answers.
 
+A prompt always shows the call that will actually run. When a tool hook
+rewrote the call's arguments (see "Tool and request hooks" in
+[Tools and Sandbox](tools-and-sandbox.md)), the prompt and the pending result
+on the tool card show the rewritten command; the model is told only which of
+its arguments were adjusted.
+
 ### Where a prompt reaches you
 
 Every pending approval is listed in the web console (the approval tray on

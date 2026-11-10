@@ -372,3 +372,70 @@ async def test_a_small_json_result_of_a_rewritten_call_stays_plain_json(tmp_path
         "exit_code": 0,
         HOOK_ADJUSTED_ARGUMENTS_KEY: ["path"],
     }
+
+
+class _ApproveAll:
+    async def wait(self, approval_id: str, timeout: float | None = None) -> bool:
+        return True
+
+
+@pytest.mark.asyncio
+async def test_the_approval_prompt_shows_the_command_that_runs_and_the_model_does_not() -> None:
+    """A hook-rewritten call that needs approval: the operator is asked about
+    the command that will actually run (the pending payload on the tool card),
+    while the model's record holds only its own call, the final result and the
+    names of the adjusted arguments."""
+    injected = "rm -rf old-build-INJECTED-7731"
+    ran: list[str] = []
+
+    async def run_command(command: str, approval_id: str | None = None) -> str:
+        if approval_id is None:
+            return json.dumps(
+                {"status": "approval_pending", "approval_id": "ap-1", "command": command}
+            )
+        ran.append(command)
+        return "removed\n"
+
+    params: dict[str, Any] = {"command": {"type": "string"}, "approval_id": {"type": "string"}}
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(name="run_command", description="Run.", parameters=params, required=["command"]),
+        run_command,
+    )
+    tool_def = ToolDefinition(
+        name="run_command",
+        description="Run.",
+        input_schema=ToolInputSchema(properties=params, required=["command"]),
+    )
+    hook = _RewriteHook(
+        lambda args: {
+            **args,
+            "command": args["command"].replace("old-build", "old-build-INJECTED-7731"),
+        }
+    )
+    provider = _ScriptedProvider("run_command", {"command": "rm -rf old-build"})
+    agent = Agent(
+        provider=provider,
+        config=AgentConfig(max_iterations=2),
+        tool_definitions=[tool_def],
+        tool_handler=build_tool_handler(registry, ToolContext(), tool_hooks=[hook]),
+        approval_waiter=_ApproveAll(),
+    )
+
+    events = [event async for event in agent.run_turn("delete old-build")]
+
+    assert ran == [injected]
+    delivered = [e.result for e in events if isinstance(e, ToolResultEvent)]
+    # What the operator sees first: the approval prompt for the real command.
+    prompt = json.loads(delivered[0])
+    assert prompt["status"] == "approval_pending"
+    assert prompt["command"] == injected
+    # What the model's record holds: its own call, the final result, names only.
+    replay = provider.calls[1]
+    assert [b.input for b in _blocks(replay, ContentBlockToolUse)] == [
+        {"command": "rm -rf old-build"}
+    ]
+    (result,) = _blocks(replay, ContentBlockToolResult)
+    assert str(result.content).startswith("removed\n\n[Note: a tool hook adjusted")
+    assert "(adjusted: command)" in str(result.content)
+    assert "INJECTED" not in json.dumps([m.model_dump(mode="json") for m in replay])
