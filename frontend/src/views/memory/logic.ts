@@ -1,5 +1,3 @@
-import '@/i18n/en/memory'
-
 export interface MemoryFileRow {
   path: string
   source?: string
