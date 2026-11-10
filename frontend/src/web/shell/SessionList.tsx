@@ -18,7 +18,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router'
+import { Link, useHref, useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { t, tPlural } from '@/i18n'
@@ -441,6 +441,17 @@ interface ItemProps {
 type ActionId =
   'rename' | 'pin' | 'move-up' | 'move-down' | 'project' | 'reset' | 'export' | 'copy' | 'delete'
 
+/**
+ * Open a console path in a new tab. Not `noopener`: a tab opened that way
+ * starts with empty sessionStorage, so on a token gateway it would land on the
+ * Connect screen. The opener link is cut right after instead, once the new
+ * tab has its copy of this tab's sessionStorage.
+ */
+export function openInNewTab(url: string): void {
+  const opened = window.open(url, '_blank')
+  if (opened) opened.opener = null
+}
+
 function SessionItem(props: ItemProps) {
   const { node, depth, currentKey, pins, setPins, pinnedIndex, projects, onNavigate } = props
   const row = node.row
@@ -459,6 +470,9 @@ function SessionItem(props: ItemProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const actionsRef = useRef<HTMLButtonElement>(null)
   const href = sessionKeyToPath(row.key)
+  // A new tab is a fresh document: it needs the full console path (router
+  // basename included), not the router-relative one.
+  const tabHref = useHref(href)
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY })
 
@@ -596,9 +610,7 @@ function SessionItem(props: ItemProps) {
     Sep: () => ReactNode,
   ) => (
     <>
-      <Item onSelect={() => window.open(href, '_blank', 'noopener')}>
-        {t('webShell.actionOpenNewTab')}
-      </Item>
+      <Item onSelect={() => openInNewTab(tabHref)}>{t('webShell.actionOpenNewTab')}</Item>
       <Item onSelect={() => onAction('rename')}>{t('webShell.actionRename')}</Item>
       <Item onSelect={() => onAction('pin')}>
         {pinned ? t('webShell.actionUnpin') : t('webShell.actionPin')}

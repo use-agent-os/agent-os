@@ -1,4 +1,3 @@
-import { useQueryClient } from '@tanstack/react-query'
 import { ArrowUpCircle, Loader2, RefreshCw, X } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Link } from 'react-router'
@@ -58,7 +57,6 @@ export function ConnectionNotices({
 }) {
   const rpc = useRpc()
   const bootstrap = useBootstrap()
-  const queryClient = useQueryClient()
   const state = useConnection((s) => s.state)
   const shutdown = useRuntimeSignals((s) => s.shutdown)
   const handshake = useRuntimeSignals((s) => s.handshake)
@@ -76,17 +74,9 @@ export function ConnectionNotices({
     [],
   )
 
-  // Back after an expected restart: refresh what the open view shows.
-  useEffect(
-    () =>
-      rpc.on('_hello', () => {
-        setRestartPending((was) => {
-          if (was) void queryClient.invalidateQueries()
-          return false
-        })
-      }),
-    [rpc, queryClient],
-  )
+  // Back after an expected restart (the shell refreshes cached data on every
+  // handshake, see use-gateway-cache-sync).
+  useEffect(() => rpc.on('_hello', () => setRestartPending(false)), [rpc])
 
   const mismatch = handshake?.kind === 'protocol_mismatch'
   useEffect(() => {

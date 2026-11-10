@@ -52,7 +52,6 @@ export const webShell = defineNamespace('webShell', {
   // List pane
   listPaneLabel: 'Sessions and pages',
   listPaneResize: 'Resize sidebar',
-  listPaneCollapse: 'Collapse sidebar',
   pagesHeading: 'Pages',
 
   // Session list
@@ -116,7 +115,6 @@ export const webShell = defineNamespace('webShell', {
   copiedKey: 'Session key copied',
   exportEmpty: 'No messages to export',
   exported: 'Exported as Markdown',
-  dragHandle: 'Reorder {title}',
 
   // Approval tray
   trayLabel: 'Pending approvals',
@@ -134,9 +132,6 @@ export const webShell = defineNamespace('webShell', {
   trayAnnounce: 'Approval needed: {tool}',
 
   // Status menu (placeholder until the connection work lands)
-  statusConnected: 'Connected',
-  statusConnecting: 'Connecting…',
-  statusOffline: 'Offline',
   themeLabel: 'Theme',
   themeSystem: 'System',
   themeLight: 'Light',
