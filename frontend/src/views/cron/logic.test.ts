@@ -357,10 +357,7 @@ describe('nextRuns', () => {
     expect(iso('')).toEqual(['2026-11-10T09:00:00.000Z', '2026-11-11T09:00:00.000Z'])
     expect(iso('UTC')).toEqual(iso(''))
     // 09:00 in Ho Chi Minh City (UTC+7) is 02:00Z: today's has passed.
-    expect(iso('Asia/Bangkok')).toEqual([
-      '2026-11-11T02:00:00.000Z',
-      '2026-11-12T02:00:00.000Z',
-    ])
+    expect(iso('Asia/Bangkok')).toEqual(['2026-11-11T02:00:00.000Z', '2026-11-12T02:00:00.000Z'])
     expect(nextRuns(parseCron('0 9 * * *'), 2, from, 'Not/A_Zone')).toEqual([])
   })
   it('follows a daylight-saving change in the job zone', () => {
