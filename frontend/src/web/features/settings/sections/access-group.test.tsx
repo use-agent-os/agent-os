@@ -208,4 +208,30 @@ describe('Approvals', () => {
     await userEvent.setup().click(screen.getByText('Full arguments'))
     expect(screen.getByText(/"cwd": "\/srv\/app"/)).toBeVisible()
   })
+
+  it('re-reads the pending queue when Refresh is pressed', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ pending: [], mode: 'prompt' }), { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    renderShell('/settings/approvals')
+    const refresh = await screen.findByRole('button', { name: 'Refresh' })
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const before = fetchMock.mock.calls.length
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          pending: [{ id: 'r1', namespace: 'exec', toolName: 'bash', command: 'make deploy' }],
+          mode: 'prompt',
+        }),
+        { status: 200 },
+      ),
+    )
+    await user.click(refresh)
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(before))
+    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain('/api/approvals')
+    expect(await screen.findByRole('heading', { name: '1 pending request' })).toBeInTheDocument()
+    vi.unstubAllGlobals()
+  })
 })

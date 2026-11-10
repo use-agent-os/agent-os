@@ -147,6 +147,7 @@ export const webSetAccess = defineNamespace('webSetAccess', {
   apElevatedFullDesc: 'Skip approval and sensitive-path prompts. Use with care.',
   apEffective: 'Effective execution mode',
   apPendingTitle: 'Pending requests',
+  apRefresh: 'Refresh',
   apPendingCount_one: '{count} pending request',
   apPendingCount_other: '{count} pending requests',
   apEmptyTitle: 'Nothing waiting',
