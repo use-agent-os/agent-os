@@ -19,8 +19,27 @@ import {
   undatedHiddenCount,
   usageMetrics,
   visibleSessions,
+  activeSinceCount,
+  startOfLocalDay,
   type UsageRow,
 } from './logic'
+
+describe('startOfLocalDay / activeSinceCount', () => {
+  it('starts the day at local midnight', () => {
+    const now = new Date(2026, 10, 10, 15, 30).getTime()
+    expect(startOfLocalDay(now)).toBe(new Date(2026, 10, 10, 0, 0, 0, 0).getTime())
+  })
+  it('counts sessions last active since the cutoff, in seconds or milliseconds', () => {
+    const since = new Date(2026, 10, 10).getTime()
+    const rows: UsageRow[] = [
+      { session: 'today-ms', updated_at: since + 1000, input_tokens: 5 },
+      { session: 'today-s', updated_at: Math.floor(since / 1000) + 5 },
+      { session: 'yesterday', updated_at: since - 1 },
+      { session: 'undated' },
+    ]
+    expect(activeSinceCount(rows, since)).toBe(2)
+  })
+})
 
 describe('normalizeRange', () => {
   it('accepts all/7/14/30', () => {
@@ -131,6 +150,10 @@ describe('rangeCutoffMs / visibleSessions / undatedHiddenCount', () => {
   })
   it('7d keeps only rows dated within window (undated dropped)', () => {
     expect(visibleSessions(makeRows(), '7').map((r) => r.session)).toEqual(['recent'])
+  })
+  it('reads an epoch-seconds timestamp as seconds, not as a 1970 millisecond', () => {
+    const rows: UsageRow[] = [{ session: 'secs', updated_at: Math.floor(Date.now() / 1000) - 60 }]
+    expect(visibleSessions(rows, '7').map((r) => r.session)).toEqual(['secs'])
   })
   it('undatedHiddenCount is 0 on all, counts undated otherwise', () => {
     expect(undatedHiddenCount(makeRows(), 'all')).toBe(0)
