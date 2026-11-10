@@ -762,6 +762,68 @@ describe('approval-monitor service', () => {
       expect(body.namespace).toBe('exec')
     })
 
+    it('sends a decision on a second approval while the first is still in flight', async () => {
+      const other: Approval = { id: 'b1', namespace: 'exec', command: 'pwd' }
+      useApprovals.getState().setFromPoll([item, other], 'prompt')
+      const firstPost = deferred<Response>()
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (init?.method !== 'POST') return okResponse({ pending: [], mode: 'prompt' })
+        const body = JSON.parse(init.body as string) as { id: string }
+        return body.id === 'a1' ? firstPost.promise : okResponse({ ok: true })
+      })
+      const mon = makeMonitor()
+      const first = mon.resolve(item, 'once')
+      await flush()
+      await mon.resolve(other, 'deny')
+      const posted = fetchMock.mock.calls
+        .filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST')
+        .map(([, init]) => JSON.parse((init as RequestInit).body as string).id)
+      expect(posted).toEqual(['a1', 'b1'])
+      expect(useApprovals.getState().pending.map((p) => p.id)).not.toContain('b1')
+      firstPost.resolve(okResponse({ ok: true }))
+      await first
+      expect(useApprovals.getState().pending).toEqual([])
+    })
+
+    it('ignores a repeated decision on the same approval while it is in flight', async () => {
+      const post = deferred<Response>()
+      fetchMock.mockImplementation(async (_url: string, init?: RequestInit) =>
+        init?.method === 'POST' ? post.promise : okResponse({ pending: [], mode: 'prompt' }),
+      )
+      const mon = makeMonitor()
+      const first = mon.resolve(item, 'once')
+      await mon.resolve(item, 'deny')
+      post.resolve(okResponse({ ok: true }))
+      await first
+      const posts = fetchMock.mock.calls.filter(
+        ([, init]) => (init as RequestInit | undefined)?.method === 'POST',
+      )
+      expect(posts).toHaveLength(1)
+    })
+
+    it('releases the guard before the trailing backfill', async () => {
+      const backfill = deferred<Response>()
+      fetchMock
+        .mockResolvedValueOnce(okResponse({ ok: true }))
+        .mockReturnValueOnce(backfill.promise)
+        .mockResolvedValue(okResponse({ ok: true }))
+      const mon = makeMonitor()
+      const first = mon.resolve(item, 'once')
+      await flush()
+      expect(backfillCalls(fetchMock)).toBe(1)
+      // The backfill hangs; decisions made meanwhile (even on the same
+      // approval, say after the gateway re-queued it) still go out.
+      const second = mon.resolve({ id: 'c1', namespace: 'exec' }, 'deny')
+      const third = mon.resolve(item, 'deny')
+      await flush()
+      const posted = fetchMock.mock.calls
+        .filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST')
+        .map(([, init]) => JSON.parse((init as RequestInit).body as string).id)
+      expect(posted).toEqual(['a1', 'c1', 'a1'])
+      backfill.resolve(okResponse({ pending: [], mode: 'prompt' }))
+      await Promise.all([first, second, third])
+    })
+
     it('rejects and error-toasts on a non-ok resolve, without persisting elevated mode', async () => {
       fetchMock.mockResolvedValue(okResponse({}, false, 500))
       const mon = makeMonitor()

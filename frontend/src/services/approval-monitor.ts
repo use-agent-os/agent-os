@@ -316,7 +316,8 @@ interface InFlightEvents {
  * but kept a class so tests can spin up isolated instances.
  */
 export class ApprovalMonitor {
-  private busy = false
+  // Approvals with a decision on its way to the gateway.
+  private resolving = new Set<string>()
   private started = false
   private unsubscribers: Array<() => void> = []
   // The running backfill (shared by concurrent callers) and whether another
@@ -481,12 +482,13 @@ export class ApprovalMonitor {
    * button action to the (approved, allowAlways, rememberIntent, elevatedMode)
    * tuple, POSTs it, persists elevated mode on success, drops the item from the
    * store so the prompt closes at once, toasts the outcome, and backfills.
-   * Reentrancy-guarded via `busy`. Rejects on HTTP error so the modal can
-   * re-enable its buttons; resolves on success.
+   * A second decision on the same approval while one is in flight is ignored;
+   * decisions on different approvals go out independently. Rejects on HTTP
+   * error so the modal can re-enable its buttons; resolves on success.
    */
   async resolve(item: Approval, action: ApprovalAction): Promise<void> {
-    if (this.busy) return
-    this.busy = true
+    if (this.resolving.has(item.id)) return
+    this.resolving.add(item.id)
     const approved = action === 'once' || action === 'always' || action === 'bypass'
     // A once-only approval (an agent's spend) never carries "always" or an
     // elevation, whichever surface sent it.
@@ -521,16 +523,17 @@ export class ApprovalMonitor {
       } else {
         toast.warning('Approval denied', { id: 'approval-outcome', duration: 2500 })
       }
-      // legacy re-polled after 150ms; backfill now
-      // (a bypass may have released other queued items server-side).
-      await this.poll()
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       toast.error('Approval failed: ' + message, { id: 'approval-error', duration: 4000 })
       throw err instanceof Error ? err : new Error(message)
     } finally {
-      this.busy = false
+      this.resolving.delete(item.id)
     }
+    // legacy re-polled after 150ms; backfill now (a bypass may have released
+    // other queued items server-side). The decision is already recorded, so
+    // the guard is released first and a slow backfill blocks nothing.
+    await this.poll()
   }
 }
 
