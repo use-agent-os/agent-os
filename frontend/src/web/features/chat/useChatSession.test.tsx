@@ -221,7 +221,7 @@ describe('useChatSession', () => {
   })
 
   it('done, then a reload that still names the run in flight: idle at once (F1)', async () => {
-    const PREFIX = '[2026-11-10T11:31+07:00 Tue Asia/Ho_Chi_Minh]\n'
+    const PREFIX = '[2026-11-10T11:31+07:00 Tue Asia/Bangkok]\n'
     let answered = false
     const rpc = chatRpc()
       .handle('chat.send', { ok: true, status: 'accepted', task_id: 'run-1' })

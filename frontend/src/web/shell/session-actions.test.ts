@@ -31,7 +31,7 @@ describe('exportSessionMarkdown', () => {
       messages: [
         {
           role: 'user',
-          text: '[2026-11-10T11:23+07:00 Tue Asia/Ho_Chi_Minh]\nhello there',
+          text: '[2026-11-10T11:23+07:00 Tue Asia/Bangkok]\nhello there',
           timestamp: 1,
         },
         { role: 'assistant', text: '[not a prefix] reply', timestamp: 2 },

@@ -67,7 +67,9 @@ export function chatRpc(
 
 export async function openChat(rpc: FakeRpc = chatRpc(), path = CHAT_PATH) {
   const utils = renderShell(path, rpc)
-  const composer = await screen.findByRole('textbox', { name: 'Message' })
+  // The first test of a file also pays for loading the lazy chat chunk, which
+  // can take longer than the default one second on a busy runner.
+  const composer = await screen.findByRole('textbox', { name: 'Message' }, { timeout: 5000 })
   return { ...utils, composer }
 }
 

@@ -13,7 +13,7 @@ describe('CronExplain', () => {
     const { rerender } = render(<CronExplain expr="0 9 * * *" timeZone="" />)
     const first = screen.getAllByRole('listitem')[0]!
     expect(first).toHaveTextContent(humanTime(new Date(Date.UTC(2026, 10, 10, 9, 0))))
-    rerender(<CronExplain expr="0 9 * * *" timeZone="Asia/Ho_Chi_Minh" />)
+    rerender(<CronExplain expr="0 9 * * *" timeZone="Asia/Bangkok" />)
     expect(screen.getAllByRole('listitem')[0]!).toHaveTextContent(
       humanTime(new Date(Date.UTC(2026, 10, 11, 2, 0))),
     )

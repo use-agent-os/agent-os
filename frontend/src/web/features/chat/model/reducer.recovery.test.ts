@@ -298,7 +298,7 @@ describe('local notes, stop requests and the fold cache', () => {
 })
 
 // The gateway's time prefix on a stored user message ("[<iso> <day> <tz>]\n").
-const PREFIX = '[2026-11-10T11:23+07:00 Tue Asia/Ho_Chi_Minh]\n'
+const PREFIX = '[2026-11-10T11:23+07:00 Tue Asia/Bangkok]\n'
 
 function task(
   state: TranscriptState,
