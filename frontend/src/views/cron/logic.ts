@@ -588,21 +588,98 @@ function matches(field: CronField, v: number): boolean {
  * scanning minute-by-minute up to a year out. Vixie DOM/DOW semantics: when both
  * are restricted, match either.
  */
-export function nextRuns(parsed: ParsedCron | null, count: number, fromTs?: number): Date[] {
+interface WallTime {
+  minute: number
+  hour: number
+  dom: number
+  month: number
+  dow: number
+}
+
+function localWallTime(d: Date): WallTime {
+  return {
+    minute: d.getMinutes(),
+    hour: d.getHours(),
+    dom: d.getDate(),
+    month: d.getMonth() + 1,
+    dow: d.getDay(),
+  }
+}
+
+/**
+ * Wall time in an IANA zone, or null for a zone this browser does not know.
+ * The zone's UTC offset is looked up once per hour of the scan.
+ */
+function zoneWallTime(timeZone: string): ((d: Date) => WallTime) | null {
+  let format: Intl.DateTimeFormat
+  try {
+    format = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+    })
+  } catch {
+    return null
+  }
+  const offsets = new Map<number, number>()
+  const offsetAt = (hourStart: number): number => {
+    const parts: Record<string, number> = {}
+    for (const part of format.formatToParts(new Date(hourStart))) {
+      if (part.type !== 'literal') parts[part.type] = Number(part.value)
+    }
+    const wall = Date.UTC(
+      parts.year!,
+      parts.month! - 1,
+      parts.day!,
+      parts.hour! % 24,
+      parts.minute!,
+    )
+    return wall - hourStart
+  }
+  return (d) => {
+    const hourStart = Math.floor(d.getTime() / 3_600_000) * 3_600_000
+    let offset = offsets.get(hourStart)
+    if (offset === undefined) {
+      offset = offsetAt(hourStart)
+      offsets.set(hourStart, offset)
+    }
+    const z = new Date(d.getTime() + offset)
+    return {
+      minute: z.getUTCMinutes(),
+      hour: z.getUTCHours(),
+      dom: z.getUTCDate(),
+      month: z.getUTCMonth() + 1,
+      dow: z.getUTCDay(),
+    }
+  }
+}
+
+/**
+ * The next `count` fire times of a cron expression. `timeZone` is the zone the
+ * scheduler evaluates it in: an IANA name, or '' for UTC (the gateway's rule
+ * for a job without one). Without it the browser's local time is used.
+ */
+export function nextRuns(
+  parsed: ParsedCron | null,
+  count: number,
+  fromTs?: number,
+  timeZone?: string,
+): Date[] {
   if (!parsed) return []
+  const wallTime = timeZone === undefined ? localWallTime : zoneWallTime(timeZone.trim() || 'UTC')
+  if (!wallTime) return []
   const results: Date[] = []
-  const now = Date.now()
-  const start = new Date(fromTs ?? now)
-  start.setSeconds(0, 0)
-  start.setMinutes(start.getMinutes() + 1)
-  let d = new Date(start)
+  const now = fromTs ?? Date.now()
+  // Minute steps on the absolute clock: the next whole minute after now.
+  let t = Math.floor(now / 60_000) * 60_000 + 60_000
   const endLimit = now + 365 * 24 * 3600 * 1000
-  while (results.length < count && d.getTime() < endLimit) {
-    const m = d.getMinutes()
-    const h = d.getHours()
-    const dom = d.getDate()
-    const mon = d.getMonth() + 1
-    const dow = d.getDay()
+  while (results.length < count && t < endLimit) {
+    const d = new Date(t)
+    const { minute: m, hour: h, dom, month: mon, dow } = wallTime(d)
     const domAll = parsed.dom.all
     const dowAll = parsed.dow.all
     const dayOk =
@@ -619,9 +696,9 @@ export function nextRuns(parsed: ParsedCron | null, count: number, fromTs?: numb
       matches(parsed.month, mon) &&
       dayOk
     ) {
-      results.push(new Date(d))
+      results.push(d)
     }
-    d = new Date(d.getTime() + 60_000)
+    t += 60_000
   }
   return results
 }

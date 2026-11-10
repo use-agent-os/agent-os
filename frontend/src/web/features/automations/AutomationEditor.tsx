@@ -123,11 +123,18 @@ function Field({
   )
 }
 
-/** The plain-language reading of a cron expression and its next three runs. */
-export function CronExplain({ expr }: { expr: string }) {
+/**
+ * The plain-language reading of a cron expression and its next three runs,
+ * computed in the job's timezone (empty: UTC, as the scheduler runs it) and
+ * shown in local time like the saved card.
+ */
+export function CronExplain({ expr, timeZone = '' }: { expr: string; timeZone?: string }) {
   const trimmed = expr.trim()
   const parsed = useMemo(() => (trimmed ? parseCron(trimmed) : null), [trimmed])
-  const upcoming = useMemo(() => (parsed ? nextRuns(parsed, 3) : []), [parsed])
+  const upcoming = useMemo(
+    () => (parsed ? nextRuns(parsed, 3, undefined, timeZone) : []),
+    [parsed, timeZone],
+  )
   if (!trimmed) {
     return <p className="text-small text-text-muted">{t('webPagesWork.explainPrompt')}</p>
   }
@@ -362,7 +369,7 @@ export function AutomationEditor({
                     onChange={(e) => set('cron', e.target.value)}
                   />
                 </Field>
-                <CronExplain expr={form.cron} />
+                <CronExplain expr={form.cron} timeZone={form.tz} />
                 <div
                   role="group"
                   aria-label={t('webPagesWork.presets')}
