@@ -37,10 +37,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `blocked`.
 - Hooks that return nothing keep working. `TurnRunner.tool_hooks` exposes the
   configured tool hooks (read-only).
-- `[task_runtime] max_nested_concurrency` caps the nested pool, the slots
-  child runs (subagents, ACP harness runs) take while their parent's turn is
-  running. Default: the value of `max_concurrency`. Running turns never
-  exceed `max_concurrency + max_nested_concurrency`.
+- `[task_runtime] max_nested_concurrency` sizes the nested pool, slots only
+  child runs (subagents, ACP harness runs) use, on top of `max_concurrency`.
+  Default: the value of `max_concurrency`. Running turns never exceed
+  `max_concurrency + max_nested_concurrency`.
 - `sessions.list` returns `total`, the number of sessions matching the filter
   regardless of `limit` (`count` still means "rows returned").
 
@@ -224,11 +224,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - A parent waiting on its child in the same turn (`sessions_yield` with a
   `session_key`) kept its slot. With the default reserved subagent slots,
   two such parents could leave their children no slot at all and both waited
-  until the timeout. Children of a parent whose turn is running now take a
-  slot in a separate nested pool (`[task_runtime] max_nested_concurrency`);
-  once the parent's turn ends they count against `max_concurrency` again,
-  and `subagent_reserved_slots` also applies to a child that waited for a
-  shared slot.
+  until the timeout. Child runs now also have a separate nested pool
+  (`[task_runtime] max_nested_concurrency`): a child of a parent whose turn
+  is running takes a nested slot first, any other child takes a shared slot
+  first and a nested one when the shared slots open to children are taken.
+  A child keeps its slot until it ends, and children never take the
+  `subagent_reserved_slots` shared slots, so a user's own message starts at
+  once even while children of finished turns are still running, and waiting
+  children use free nested slots instead of running one at a time.
 - Parent wakes for finished subagent groups are now durable. A wake that
   failed to reach the task runtime was dropped, and the "already woken"
   marker lived only in memory, so a restart could lose a wake or repeat it.

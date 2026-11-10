@@ -377,9 +377,11 @@ max_pending_per_session = 64
 # own before its task is cancelled (a second stop cancels at once; 0 = always
 # at once). A turn running tools is cancelled at once.
 # turn_cancel_grace_seconds = 5
-# Nested pool: slots child runs (subagents, ACP harness runs) take while their
-# parent's turn is still running, so a parent waiting on them cannot starve
-# them. Default: the value of max_concurrency. Running turns never exceed
+# Nested pool: slots only child runs (subagents, ACP harness runs) use, on top
+# of max_concurrency. A child of a parent whose turn is still running takes one
+# first, so a parent waiting on it cannot starve it; other children use one
+# when the shared slots open to them are taken. Default: the value of
+# max_concurrency. Running turns never exceed
 # max_concurrency + max_nested_concurrency.
 # max_nested_concurrency = 4
 
@@ -388,7 +390,8 @@ max_pending_per_session = 64
 # order. 0 = no per-parent limit (task_runtime still bounds them). An agent's
 # own subagents.max_concurrent_children wins.
 # max_concurrent_children = 2
-# Shared slots kept free of subagent runs so a fan-out cannot take them all.
+# Shared slots child runs never take, so a user's own message does not wait
+# behind them (at most max_concurrency - 1).
 # subagent_reserved_slots = 2
 
 [agentos_router]

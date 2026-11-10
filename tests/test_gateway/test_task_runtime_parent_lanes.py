@@ -6,9 +6,13 @@
 * A parent run that holds a slot (for example waiting on a child inline with
   ``sessions_yield(session_key=...)``) never starves its own children: they run
   in the nested pool, even when every shared slot is taken.
-* The nested pool is bounded (``max_nested_concurrency``), a child keeps its
-  nested slot only while its parent's run is alive, and running turns never
+* The nested pool is bounded (``max_nested_concurrency``) and only children
+  use it; a child keeps the slot it got until it ends, and running turns never
   exceed ``max_concurrency + max_nested_concurrency``.
+* ``subagent_reserved_slots`` holds in both directions: children never take
+  the reserved shared slots (a user's own turn starts beside them), and
+  children waiting for a slot use free nested slots instead of queueing for
+  the one shared slot left to them.
 """
 
 from __future__ import annotations
@@ -279,7 +283,7 @@ async def _drain(runtime: TaskRuntime, gate: _Gate, keys: list[str]) -> None:
     assert runtime._nested_in_flight == 0
 
 
-async def test_nested_slots_turn_into_shared_ones_when_the_parent_turn_ends() -> None:
+async def test_a_nested_child_keeps_its_slot_when_the_parent_turn_ends() -> None:
     gate = _Gate()
     runtime = TaskRuntime(storage=_Storage({}), turn_handler=gate, max_concurrency=1)
     parent = "agent:main:webchat:spawner"
@@ -291,21 +295,81 @@ async def test_nested_slots_turn_into_shared_ones_when_the_parent_turn_ends() ->
     assert runtime._nested_in_flight == 1
     assert runtime._global_in_flight == 1
 
-    # The parent ends its turn (spawn-then-``sessions_yield``); the child runs on.
+    # The parent ends its turn (spawn-then-``sessions_yield``); the child runs
+    # on in its nested slot.
     gate.open(parent)
     await _settle()
-    assert runtime._nested_in_flight == 0
-    assert runtime._global_in_flight == 1  # the child now holds the shared slot
+    assert runtime._nested_in_flight == 1
+    assert runtime._global_in_flight == 0
 
-    # So a new top-level turn waits for the child instead of running beside it.
+    # So the shared slot is free for a new top-level turn at once.
     other = "agent:main:webchat:other"
     await runtime.enqueue(_top(other), "hello", run_kind="default")
-    await _settle()
-    assert other not in gate.started
-    gate.open(kid)
     await gate.wait_started(3)
     assert gate.started[-1] == other
-    await _drain(runtime, gate, [other])
+    assert runtime.active_turns == 2  # max_concurrency + max_nested_concurrency
+    await _drain(runtime, gate, [kid, other])
+
+
+async def test_a_users_turn_does_not_wait_behind_children_of_ended_turns() -> None:
+    """The tester's scenario: ``max_concurrency=2`` with the default reserve
+    (2, clamped to 1). Two users' turns spawn three children each and end;
+    a third user's message must start at once, and the waiting children must
+    use the free nested slots rather than run one at a time."""
+    gate = _PeakGate()
+    runtime = TaskRuntime(
+        storage=_Storage({}),
+        turn_handler=gate,
+        max_concurrency=2,
+        subagent_reserved_slots=2,
+        max_concurrent_children=None,
+    )
+    parents = ["agent:main:webchat:u1", "agent:main:webchat:u2"]
+    kids: list[str] = []
+    for parent in parents:
+        await runtime.enqueue(_top(parent), "spawn three", run_kind="default")
+    await gate.wait_started(2)
+    for parent in parents:
+        for i in range(3):
+            key = parent.replace("webchat", "subagent") + f"c{i}"
+            kids.append(key)
+            await runtime.enqueue(_child(key, parent), "work", run_kind="subagent")
+    await gate.wait_started(4)
+    await _settle()
+    assert runtime._nested_in_flight == 2  # both shared slots are the parents'
+
+    # Both parents end their turns; their children are still running or queued.
+    for parent in parents:
+        gate.open(parent)
+    await gate.wait_started(5)
+    await _settle()
+    # Two nested children run on, and one more child took the one shared slot
+    # the reserve leaves to children. The reserved slot stays free.
+    assert runtime._nested_in_flight == 2
+    assert runtime._global_in_flight == 1
+    assert len(gate.started) == 5
+
+    # A third user's own message starts at once, beside the children.
+    third = "agent:main:webchat:u3"
+    await runtime.enqueue(_top(third), "hello", run_kind="default")
+    await gate.wait_started(6, timeout=1.0)
+    assert gate.started[-1] == third
+
+    # Children finishing hand their slots to the queued ones: more than one
+    # child runs at a time, never more turns than both pools hold.
+    running_kids = [key for key in gate.started if key in kids]
+    for key in running_kids:
+        gate.open(key)
+    await gate.wait_started(8, timeout=2.0)
+    await _settle()
+    # Two queued children took the nested slots; the last one waits, since
+    # the only free shared slot is the reserved one while u3 runs.
+    assert len(gate.started) == 8
+    assert runtime._nested_in_flight == 2
+    assert runtime.active_turns == 3  # u3 + two nested children
+    await _drain(runtime, gate, [*kids, third])
+    assert sorted(gate.started) == sorted([*parents, *kids, third])
+    assert gate.peak <= 4  # max_concurrency + max_nested_concurrency
 
 
 async def test_spawn_then_yield_parents_cannot_pile_up_children() -> None:
@@ -399,9 +463,10 @@ async def test_nesting_deeper_than_one_level_stays_bounded() -> None:
     assert runtime._nested_in_flight == 2
     assert runtime.active_turns == 3  # 1 shared + 2 nested: the ceiling
 
-    # The root ends: its child moves to the shared pool, the leaf stays nested.
-    # That frees a nested slot, and the mid child's run is alive: the second
-    # leaf takes it. The total never passes the ceiling.
+    # The root ends and frees the shared slot; the mid child and the first
+    # leaf keep their nested slots. The mid child's run is alive but the
+    # nested pool is full, so the second leaf takes the shared slot. The total
+    # never passes the ceiling.
     gate.open(parent)
     await gate.wait_started(4)
     await _settle()
@@ -448,12 +513,13 @@ async def test_a_child_landing_in_the_shared_pool_honours_reserved_slots() -> No
     await gate.wait_started(4)
     assert gate.started[-1] == other
 
-    # The parent's run ends: r0 converts and r2 still waits for the reserve.
+    # The parent's run ends: r0 keeps its nested slot (the pool's only one),
+    # and r2 still waits: the free shared slot is the reserved one.
     gate.open(parent)
     await _settle()
     assert kids[2] not in gate.started
-    assert runtime._global_in_flight == 3  # the parent's slot went to r0
-    assert runtime._nested_in_flight == 0
+    assert runtime._global_in_flight == 2
+    assert runtime._nested_in_flight == 1
     gate.open(other)
     gate.open(kids[0])
     gate.open(kids[1])

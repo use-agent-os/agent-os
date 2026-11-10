@@ -254,8 +254,8 @@ class _RuntimeTask:
     terminal_emitted: bool = False
     cancel_requested: bool = False
     acquired_slot: bool = False
-    #: The slot came from the nested pool: a child whose parent run held a
-    #: slot when it was admitted (see ``_acquire_fair_slot``).
+    #: The slot came from the nested pool, which only child runs use (see
+    #: ``_acquire_fair_slot``). A child keeps it until it ends.
     nested_slot: bool = False
     overflow_dropped: bool = False
     cancel_source: str | None = None
@@ -468,9 +468,9 @@ class TaskRuntime:
         # at once (``None`` = no per-parent limit); the resolver may override
         # it per parent (an agent's ``subagents.max_concurrent_children``).
         self._max_concurrent_children = max_concurrent_children
-        # Ceiling of the nested pool across every parent (``None`` = the same
-        # as ``max_concurrency``). With it, running turns never exceed
-        # ``max_concurrency + max_nested_concurrency`` (see
+        # Size of the nested pool, the slots only child runs use, on top of
+        # the shared pool (``None`` = the same as ``max_concurrency``). Running
+        # turns never exceed ``max_concurrency + max_nested_concurrency`` (see
         # ``_acquire_fair_slot_locked``), whatever the per-parent limit.
         self._max_nested_concurrency = (
             max_nested_concurrency if max_nested_concurrency is not None else max_concurrency
@@ -521,10 +521,11 @@ class TaskRuntime:
         # They drive the reserved-slot fairness gate for subagent runs.
         self._global_in_flight = 0
         self._subagent_in_flight = 0
-        # Children holding a nested slot: admitted while their parent's run
-        # was alive, not counted in ``_global_in_flight``. When the parent's
-        # run ends they are converted to shared slots (``_release_slot``).
+        # Children holding a nested slot, not counted in ``_global_in_flight``.
         self._nested_in_flight = 0
+        # Tasks waiting for the last shared slot only because of the
+        # round-robin tie-break, by session (``_shared_slot_free``).
+        self._slot_contenders: dict[str, set[str]] = {}
         # Per-parent lane state: running children and the FIFO of waiting ones.
         self._parent_in_flight: dict[str, int] = {}
         self._parent_queue: dict[str, deque[str]] = {}
@@ -1668,14 +1669,14 @@ class TaskRuntime:
     async def _acquire_fair_slot(self, task: _RuntimeTask) -> None:
         """Acquire one concurrency slot with per-agent_id round-robin enrollment.
 
-        A child run (subagent / ACP) whose parent's run is alive takes a slot
-        from the nested pool when one is free (see
-        ``_acquire_fair_slot_locked``). Every other task must satisfy these
-        predicates before it is granted a shared slot:
+        A child run (subagent / ACP) may take a slot from the nested pool,
+        which only child runs use (see ``_acquire_fair_slot_locked``). A
+        shared slot is granted when:
 
         1. A slot is available: ``_global_in_flight < _max_concurrency``.
         2. A child run also leaves ``subagent_reserved_slots`` shared slots
-           free for other work.
+           free for other work, so a user's own turn never waits behind
+           children for those.
 
         The per-agent RR deque is rotated on each acquire so that the *next*
         task to grab a free slot comes from the next session in enrollment
@@ -1756,80 +1757,129 @@ class TaskRuntime:
     ) -> None:
         """Claim a nested or a shared slot for *task*.
 
-        Bound on running turns: every admission below checks
-        ``_global_in_flight + _nested_in_flight < max_concurrency +
-        max_nested_concurrency`` (a shared admission through
-        ``_global_in_flight < max_concurrency``, a nested one explicitly), and
-        converting a nested slot to a shared one when the parent's run ends
-        moves a turn between the two counters without changing the sum. So no
-        more than ``max_concurrency + max_nested_concurrency`` turns ever run
-        at once, whatever the per-parent limit and however deep the nesting.
+        Child runs have two places to run: the nested pool
+        (``max_nested_concurrency`` slots, children only) and the shared pool
+        minus the reserve (``max_concurrency - subagent_reserved_slots``). A
+        child whose parent's run is alive (the parent may be waiting on it
+        inline) tries the nested pool first, so a parent holding a shared slot
+        cannot starve it; any other child tries the shared pool first, leaving
+        nested slots to such children. Every other turn uses the shared pool
+        only, and children never take its reserved slots.
+
+        A child keeps the slot it got until it ends, so the counters only move
+        on admission and release: ``_global_in_flight <= max_concurrency`` and
+        ``_nested_in_flight <= max_nested_concurrency``, hence no more than
+        ``max_concurrency + max_nested_concurrency`` turns ever run at once,
+        whatever the per-parent limit and however deep the nesting.
         """
-        async with cond:
-            while True:
-                if parent is not None:
-                    # Per-parent lane: FIFO among this parent's waiting
-                    # children, at most ``parent_limit`` running at once.
-                    queue = self._parent_queue.get(parent)
-                    if queue and queue[0] != task.task_id:
-                        await self._wait_for_slot_change(cond, recheck=True)
-                        continue
-                    if (
-                        parent_limit is not None
-                        and self._parent_in_flight.get(parent, 0) >= parent_limit
-                    ):
-                        await self._wait_for_slot_change(cond, recheck=True)
-                        continue
-                    # A parent run that holds a slot (for example waiting on
-                    # this child inline) must not starve it of one: while the
-                    # nested pool has room its children run there. A full
-                    # nested pool sends the child to the shared pool instead.
-                    if self._parent_run_alive(parent) and self._nested_slot_free():
-                        # Rotate like a shared admission: a running session
-                        # left at the head would hold back the last shared
-                        # slot from its agent's other sessions.
-                        rr = self._agent_session_rr.get(agent_id)
-                        if rr and rr[0] == session_key:
-                            rr.rotate(-1)
-                        self._nested_in_flight += 1
-                        self._subagent_in_flight += 1
-                        task.nested_slot = True
-                        self._parent_in_flight[parent] = self._parent_in_flight.get(parent, 0) + 1
-                        task.acquired_slot = True
-                        return
-                # Predicate 1: global slot available.
-                if self._global_in_flight >= self._max_concurrency:
-                    await self._wait_for_slot_change(cond, recheck=parent is not None)
+        is_child = task.run_kind in _CHILD_RUN_KINDS
+        try:
+            async with cond:
+                await self._claim_slot_locked(
+                    task, cond, agent_id, session_key, parent, parent_limit, is_child
+                )
+        finally:
+            self._drop_contender(session_key, task.task_id)
+
+    async def _claim_slot_locked(
+        self,
+        task: _RuntimeTask,
+        cond: asyncio.Condition,
+        agent_id: str,
+        session_key: str,
+        parent: str | None,
+        parent_limit: int | None,
+        is_child: bool,
+    ) -> None:
+        while True:
+            # Counted as contending for the last shared slot only while it is
+            # stopped by the tie-break alone (re-added by ``_shared_slot_free``).
+            self._drop_contender(session_key, task.task_id)
+            nested_first = False
+            if parent is not None:
+                # Per-parent lane: FIFO among this parent's waiting
+                # children, at most ``parent_limit`` running at once.
+                queue = self._parent_queue.get(parent)
+                if queue and queue[0] != task.task_id:
+                    await self._wait_for_slot_change(cond, recheck=True)
                     continue
-                # Predicate 2: a child run in the shared pool leaves the
-                # reserved slots to other work, so a fan-out cannot take them.
                 if (
-                    task.run_kind in _CHILD_RUN_KINDS
-                    and self._max_concurrency - self._global_in_flight
-                    <= self._subagent_reserved_slots
+                    parent_limit is not None
+                    and self._parent_in_flight.get(parent, 0) >= parent_limit
                 ):
-                    await self._wait_for_slot_change(cond, recheck=parent is not None)
+                    await self._wait_for_slot_change(cond, recheck=True)
                     continue
-                # Tie-break: when exactly one slot remains and this agent has
-                # multiple active sessions, only the deque-head session may
-                # take it.  All other sessions of this agent yield so that RR
-                # ordering is preserved without wasting the slot.
-                idle_slots = self._max_concurrency - self._global_in_flight
-                rr = self._agent_session_rr.get(agent_id)
-                if idle_slots == 1 and rr and len(rr) > 1 and rr[0] != session_key:
-                    await self._wait_for_slot_change(cond, recheck=parent is not None)
-                    continue
+                nested_first = self._parent_run_alive(parent)
+                if nested_first and self._nested_slot_free():
+                    self._claim_nested_slot(task, agent_id, session_key, parent)
+                    return
+            if self._shared_slot_free(task, agent_id, session_key):
                 # Predicates satisfied — rotate deque and claim the slot.
+                rr = self._agent_session_rr.get(agent_id)
                 if rr and rr[0] == session_key:
                     rr.rotate(-1)
                 self._global_in_flight += 1
-                if task.run_kind in _CHILD_RUN_KINDS:
+                if is_child:
                     self._subagent_in_flight += 1
                 if parent is not None:
                     self._parent_in_flight[parent] = self._parent_in_flight.get(parent, 0) + 1
                 self._agent_in_flight[agent_id] = self._agent_in_flight.get(agent_id, 0) + 1
                 task.acquired_slot = True
                 return
+            if parent is not None and not nested_first and self._nested_slot_free():
+                # The shared pool (less its reserve) is full: a child whose
+                # parent's turn has ended runs in a free nested slot
+                # rather than waiting for a shared one.
+                self._claim_nested_slot(task, agent_id, session_key, parent)
+                return
+            await self._wait_for_slot_change(cond, recheck=parent is not None)
+
+    def _shared_slot_free(self, task: _RuntimeTask, agent_id: str, session_key: str) -> bool:
+        # Predicate 1: global slot available.
+        if self._global_in_flight >= self._max_concurrency:
+            return False
+        # Predicate 2: a child run in the shared pool leaves the reserved
+        # slots to other work, so a fan-out cannot take them.
+        if (
+            task.run_kind in _CHILD_RUN_KINDS
+            and self._max_concurrency - self._global_in_flight <= self._subagent_reserved_slots
+        ):
+            return False
+        # Tie-break: when exactly one slot remains and several sessions of
+        # this agent want it, the one first in the agent's round-robin order
+        # takes it; the others yield so RR ordering is preserved. Only
+        # sessions that are contending count: one at the head that is
+        # running, or waiting on something else (its parent lane, the
+        # reserve), must not hold the slot back from the rest.
+        idle_slots = self._max_concurrency - self._global_in_flight
+        rr = self._agent_session_rr.get(agent_id)
+        if idle_slots != 1 or not rr or len(rr) < 2:
+            return True
+        self._slot_contenders.setdefault(session_key, set()).add(task.task_id)
+        first = next((key for key in rr if self._slot_contenders.get(key)), session_key)
+        return first == session_key
+
+    def _drop_contender(self, session_key: str, task_id: str) -> None:
+        waiting = self._slot_contenders.get(session_key)
+        if waiting is None:
+            return
+        waiting.discard(task_id)
+        if not waiting:
+            del self._slot_contenders[session_key]
+
+    def _claim_nested_slot(
+        self, task: _RuntimeTask, agent_id: str, session_key: str, parent: str
+    ) -> None:
+        # Rotate like a shared admission: a running session left at the head
+        # would hold back the last shared slot from its agent's other sessions.
+        rr = self._agent_session_rr.get(agent_id)
+        if rr and rr[0] == session_key:
+            rr.rotate(-1)
+        self._nested_in_flight += 1
+        self._subagent_in_flight += 1
+        task.nested_slot = True
+        self._parent_in_flight[parent] = self._parent_in_flight.get(parent, 0) + 1
+        task.acquired_slot = True
 
     def _parent_run_alive(self, parent: str) -> bool:
         """True while *parent* has a run holding a slot whose turn has not ended."""
@@ -1877,33 +1927,10 @@ class TaskRuntime:
                     self._global_in_flight = max(0, self._global_in_flight - 1)
                     self._drop_agent_in_flight(task.envelope.agent_id)
                 task.acquired_slot = False
-                if self._running_by_session.get(task.envelope.session_key) is task:
-                    self._convert_nested_children(task.envelope.session_key)
         # Wake every task waiting for a slot.
         if self._fair_cond is not None:
             async with self._fair_cond:
                 self._fair_cond.notify_all()
-
-    def _convert_nested_children(self, parent_session_key: str) -> None:
-        """Move the nested children of a run that just ended to the shared pool.
-
-        A nested slot exists only so a parent run cannot starve the children
-        it may be waiting on. Once that run is over, its still-running
-        children count against ``max_concurrency`` like any other turn (the
-        pool may run over by them until they finish; no new shared turn
-        starts meanwhile).
-        """
-        for child in self._tasks.values():
-            if (
-                child.nested_slot
-                and child.acquired_slot
-                and _parent_session_of(child) == parent_session_key
-            ):
-                child.nested_slot = False
-                self._nested_in_flight = max(0, self._nested_in_flight - 1)
-                self._global_in_flight += 1
-                agent_id = child.envelope.agent_id
-                self._agent_in_flight[agent_id] = self._agent_in_flight.get(agent_id, 0) + 1
 
     def _drop_agent_in_flight(self, agent_id: str) -> None:
         new_count = max(0, self._agent_in_flight.get(agent_id, 0) - 1)

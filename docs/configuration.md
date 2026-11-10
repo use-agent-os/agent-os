@@ -1071,16 +1071,18 @@ per-parent limit) children of one parent session run at once; further spawns
 wait in spawn order. An agent's own `subagents.max_concurrent_children`
 overrides it.
 
-Children of a parent whose turn is still running take a slot in the nested
-pool, so a parent waiting on its children cannot starve them.
-`[task_runtime] max_nested_concurrency` (default: the value of
-`max_concurrency`) is the size of that pool across all parents; when it is
-full, a child waits for a shared slot. When the parent's turn ends, its running
-children move to the shared pool and count against `max_concurrency`, and a
-child that starts after that uses the shared pool and leaves
-`subagent_reserved_slots` free. Whatever the per-parent limit and however deep
-the nesting, running turns never exceed
-`max_concurrency + max_nested_concurrency`. See [Sessions](sessions.md).
+Child runs (subagents, ACP harness runs) have a pool of their own on top of
+the shared one: `[task_runtime] max_nested_concurrency` (default: the value of
+`max_concurrency`) slots across all parents that only children use. A child of
+a parent whose turn is still running takes a nested slot first, so a parent
+waiting on its children cannot starve them; any other child takes a shared
+slot first and a nested one when the shared slots open to children are taken.
+In the shared pool a child always leaves `[subagents] subagent_reserved_slots`
+(default `2`, at most `max_concurrency - 1`) free, so a user's own message
+does not wait behind children. A child keeps the slot it got until it ends.
+Whatever the per-parent limit and however deep the nesting, running turns
+never exceed `max_concurrency + max_nested_concurrency`. See
+[Sessions](sessions.md).
 
 ```toml
 [task_runtime]
@@ -1089,11 +1091,12 @@ max_concurrency = 4
 
 [subagents]
 max_concurrent_children = 2
+# subagent_reserved_slots = 2  # shared slots children never take
 ```
 
-`max_nested_concurrency`, `turn_cancel_grace_seconds` and
-`max_concurrent_children` are read when the gateway starts; a change takes
-effect after a restart.
+`max_nested_concurrency`, `turn_cancel_grace_seconds`,
+`max_concurrent_children` and `subagent_reserved_slots` are read when the
+gateway starts; a change takes effect after a restart.
 
 ### Interrupted turns
 

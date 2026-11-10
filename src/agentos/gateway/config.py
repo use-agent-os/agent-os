@@ -327,10 +327,11 @@ class TaskRuntimeConfig(BaseModel):
     """Server-side task-runtime queue settings."""
 
     max_concurrency: int = Field(default=4, ge=1)
-    # Ceiling of the nested pool: child runs (subagent / ACP) admitted while
-    # their parent's run is alive, outside ``max_concurrency`` so a parent
-    # waiting on its children cannot starve them. ``None`` = the same as
-    # ``max_concurrency``. Running turns never exceed
+    # Size of the nested pool: slots only child runs (subagent / ACP) use,
+    # outside ``max_concurrency``. A child of a running parent turn takes one
+    # first, so a parent waiting on its children cannot starve them; other
+    # children when the shared slots open to them are taken. ``None`` = the
+    # same as ``max_concurrency``. Running turns never exceed
     # ``max_concurrency + max_nested_concurrency``.
     max_nested_concurrency: int | None = Field(default=None, ge=1)
     max_pending_per_session: int = Field(default=64, ge=1)
@@ -2221,8 +2222,9 @@ class SubagentsGatewayConfig(BaseModel):
     ``enabled=False``. Default off so existing deployments are unaffected."""
 
     subagent_reserved_slots: int = Field(default=2, ge=0)
-    """Number of slots in ``task_runtime.max_concurrency`` reserved for
-    non-subagent tasks so a fan-out parent never starves itself."""
+    """Number of slots in ``task_runtime.max_concurrency`` child runs never
+    take (clamped to ``max_concurrency - 1``), so a user's own turn does not
+    wait behind subagent or harness children."""
 
     max_concurrent_children: int = Field(default=2, ge=0)
     """Default per-parent lane: at most this many children of one parent

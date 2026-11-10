@@ -130,17 +130,18 @@ how many children a parent may have at all is still
 max_concurrent_children = 2
 ```
 
-While a parent's turn is still running (for example waiting on a child with
-`sessions_yield` and a `session_key`), its children take slots in a separate
-nested pool, so they still start when every shared slot is busy. The nested
-pool holds `task_runtime.max_nested_concurrency` children across all parents
-(default: the value of `max_concurrency`); when it is full, a child waits for a
-shared slot. When the parent's turn ends, its running children move to the
-shared pool and count against `max_concurrency` (no new turn starts until the
-pool is back under it), and a child that starts after that uses the shared pool
-and leaves `subagent_reserved_slots` free. Running turns never exceed
-`max_concurrency + max_nested_concurrency`, at any nesting depth, whatever
-`max_concurrent_children` is.
+Child runs have a separate nested pool of `task_runtime.max_nested_concurrency`
+slots across all parents (default: the value of `max_concurrency`) that only
+children use. While a parent's turn is still running (for example waiting on a
+child with `sessions_yield` and a `session_key`), its children take nested
+slots first, so they still start when every shared slot is busy. Any other
+child takes a shared slot first and a nested one when the shared slots open to
+children are taken. In the shared pool children always leave
+`subagents.subagent_reserved_slots` (default `2`, at most `max_concurrency - 1`)
+free, so your own message starts at once even while children of finished turns
+are still running. A child keeps its slot until it ends. Running turns never
+exceed `max_concurrency + max_nested_concurrency`, at any nesting depth,
+whatever `max_concurrent_children` is.
 
 ```toml
 [task_runtime]
