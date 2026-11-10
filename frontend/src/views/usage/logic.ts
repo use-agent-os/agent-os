@@ -127,14 +127,41 @@ export function rangeCutoffMs(range: UsageRange): number | null {
 
 /** — rows whose timestamp is within the range window. `all`
  * (or a range with no cutoff) returns the input list; undated rows drop out of
- * a dated window. */
+ * a dated window. A row is in range when the session was last active in it:
+ * its figures are still the session's lifetime totals. */
 export function visibleSessions(rows: UsageRow[], range: UsageRange): UsageRow[] {
   const cutoff = rangeCutoffMs(range)
   if (cutoff == null) return rows
   return rows.filter((row) => {
-    const timestamp = sessionTimestamp(row)
+    const timestamp = timestampMs(row)
     return timestamp != null && timestamp >= cutoff
   })
+}
+
+/** Local midnight (ms) of the day `now` falls in: the user's day, not UTC's. */
+export function startOfLocalDay(now: number = Date.now()): number {
+  const d = new Date(now)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+/** A row timestamp in ms; epoch seconds (below 1e10) are scaled up. */
+function timestampMs(row: UsageRow): number | null {
+  const ts = sessionTimestamp(row)
+  if (ts == null) return null
+  return ts < 10_000_000_000 ? ts * 1000 : ts
+}
+
+/**
+ * How many rows were last active at or after `sinceMs`. Usage rows carry each
+ * session's lifetime totals, so this counts sessions; it cannot say how much
+ * of their usage fell after `sinceMs`.
+ */
+export function activeSinceCount(rows: UsageRow[], sinceMs: number): number {
+  return rows.filter((row) => {
+    const ts = timestampMs(row)
+    return ts != null && ts >= sinceMs
+  }).length
 }
 
 /** — count of undated rows hidden by a dated range (0 on all). */
