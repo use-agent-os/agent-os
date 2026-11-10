@@ -4,11 +4,9 @@ import { useBootstrap, useRpc } from '@/app/providers'
 import { t } from '@/i18n'
 import '@/i18n/en/webConnection'
 import { resolveWsUrl } from '@/lib/bootstrap'
-import { readStoredWsUrl, storeToken, storeWsUrl } from '@/lib/credentials'
-import { useRuntimeSignals } from '@/lib/runtime-signals'
-import { useConnection } from '@/stores/connection'
+import { readStoredToken, readStoredWsUrl } from '@/lib/credentials'
 import { Button } from '@/web/components/ui/button'
-import { useConnectAttempt, type ConnectReason } from './connection-gate'
+import { connectGateway, useConnectAttempt, type ConnectReason } from './connection-gate'
 
 function hostOf(url: string): string {
   try {
@@ -25,28 +23,48 @@ function hostOf(url: string): string {
 export function ConnectScreen({ reason }: { reason: ConnectReason }) {
   const rpc = useRpc()
   const bootstrap = useBootstrap()
-  const connecting = useConnection((s) => s.state === 'connecting') && reason === 'connecting'
-  const defaultUrl = readStoredWsUrl() || resolveWsUrl(bootstrap.ws_url)
-  const [url, setUrl] = useState(defaultUrl)
+  const pageUrl = resolveWsUrl(bootstrap.ws_url)
+  const attemptUrl = useConnectAttempt((s) => s.url)
+  const attemptActive = useConnectAttempt((s) => s.active)
+  const unreachable = useConnectAttempt((s) => s.unreachable)
+  // The gateway being tried (a confirmed link, a submitted address), else the saved one.
+  const target = attemptUrl || readStoredWsUrl() || pageUrl
+  const [url, setUrl] = useState(target)
   const [token, setToken] = useState('')
+  const [shownTarget, setShownTarget] = useState(target)
+  // The target moved under the form (a gateway link was confirmed): show it,
+  // and drop a token typed for the previous address.
+  if (target !== shownTarget) {
+    setShownTarget(target)
+    if (target !== url.trim()) {
+      setUrl(target)
+      setToken('')
+    }
+  }
   const rateLimited = reason === 'auth_rate_limited'
+  const tokenRequired =
+    reason === 'token_required' || reason === 'auth_failed' || bootstrap.auth_mode === 'token'
+  const inFlight = reason === 'connecting' && attemptActive && !unreachable
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault()
-    if (rateLimited || !token.trim()) return
-    const target = url.trim() || defaultUrl
-    storeToken(token.trim())
-    storeWsUrl(target === resolveWsUrl(bootstrap.ws_url) ? null : target)
-    useRuntimeSignals.setState({ handshake: null })
-    useConnectAttempt.getState().set(true)
-    rpc.connect(target, token.trim())
+    if (rateLimited || (tokenRequired && !token.trim())) return
+    connectGateway(rpc, {
+      url: url.trim() || target,
+      token: token.trim() || null,
+      defaultUrl: pageUrl,
+      holdScreen: true,
+    })
   }
 
-  const error =
-    reason === 'auth_failed'
-      ? t('webConnection.connectRejected')
-      : rateLimited
-        ? t('webConnection.connectRateLimited')
+  // A refusal with no token sent is the gateway asking for one, not a rejection.
+  const rejected = reason === 'auth_failed' && !!readStoredToken()
+  const error = rejected
+    ? t('webConnection.connectRejected')
+    : rateLimited
+      ? t('webConnection.connectRateLimited')
+      : reason === 'connecting' && unreachable
+        ? t('webConnection.connectUnreachable', { host: hostOf(attemptUrl || url) })
         : null
 
   return (
@@ -65,13 +83,21 @@ export function ConnectScreen({ reason }: { reason: ConnectReason }) {
             {t('webConnection.connectTitle')}
           </h1>
         </div>
-        <p className="text-text-muted">{t('webConnection.connectBody')}</p>
+        <p className="text-text-muted">
+          {reason === 'connecting'
+            ? t('webConnection.connectBodyConnecting')
+            : t('webConnection.connectBody')}
+        </p>
         <p className="text-small text-text-muted">
-          {t('webConnection.connectAddress', { address: hostOf(url || defaultUrl) })}
+          {t('webConnection.connectAddress', { address: hostOf(url || target) })}
         </p>
         {error ? (
           <p role="alert" className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2">
             {error}
+          </p>
+        ) : inFlight ? (
+          <p role="status" className="text-small text-text-muted">
+            {t('webConnection.connectReaching', { host: hostOf(attemptUrl || url) })}
           </p>
         ) : null}
         <div className="flex flex-col gap-1">
@@ -90,7 +116,9 @@ export function ConnectScreen({ reason }: { reason: ConnectReason }) {
             className="h-10 rounded-md border border-border-control bg-surface-0 px-3"
           />
           <span id="connect-token-help" className="text-small text-text-muted">
-            {t('webConnection.connectTokenStored')}
+            {tokenRequired
+              ? t('webConnection.connectTokenStored')
+              : `${t('webConnection.connectTokenStored')} ${t('webConnection.connectTokenOptional')}`}
           </span>
         </div>
         <div className="flex flex-col gap-1">
@@ -114,11 +142,9 @@ export function ConnectScreen({ reason }: { reason: ConnectReason }) {
         <Button
           type="submit"
           variant="primary"
-          disabled={rateLimited || !token.trim() || reason === 'connecting'}
+          disabled={rateLimited || (tokenRequired && !token.trim())}
         >
-          {reason === 'connecting' || connecting
-            ? t('webConnection.connectConnecting')
-            : t('webConnection.connectSubmit')}
+          {t('webConnection.connectSubmit')}
         </Button>
       </form>
     </main>

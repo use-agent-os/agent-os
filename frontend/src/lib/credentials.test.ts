@@ -47,9 +47,29 @@ describe('consumeUrlCredentials', () => {
       history,
     )
     expect(out.gatewayUrl).toBe('wss://other.example/ws')
-    expect(pendingGatewayUrlRequest()).toBe('wss://other.example/ws')
+    expect(pendingGatewayUrlRequest()).toEqual({ url: 'wss://other.example/ws', token: null })
     expect(localStorage.getItem('agentos.wsUrl')).toBeNull()
     expect(history.replaceState).toHaveBeenCalledWith(expect.anything(), '', '/control/')
+  })
+
+  it('holds a token that comes with a gatewayUrl for that gateway, never storing it here', () => {
+    storeToken('current-gateway-token')
+    const history = fakeHistory()
+    const out = consumeUrlCredentials(
+      { href: 'http://h/control/?token=link-tok&gatewayUrl=wss%3A%2F%2Fother.example%2Fws' },
+      history,
+    )
+    expect(out).toEqual({ token: 'link-tok', gatewayUrl: 'wss://other.example/ws' })
+    expect(pendingGatewayUrlRequest()).toEqual({
+      url: 'wss://other.example/ws',
+      token: 'link-tok',
+    })
+    // The tab's own token is untouched until the user confirms the switch.
+    expect(readStoredToken()).toBe('current-gateway-token')
+    expect(localStorage.getItem('agentos.wsUrl')).toBeNull()
+    expect(history.replaceState).toHaveBeenCalledWith(expect.anything(), '', '/control/')
+    clearPendingGatewayUrl()
+    expect(pendingGatewayUrlRequest()).toBeNull()
   })
 
   it('leaves a URL without credentials untouched', () => {
@@ -85,5 +105,18 @@ describe('per-tab storage', () => {
     })
     expect(readStoredToken()).toBe('')
     spy.mockRestore()
+  })
+  it('keeps a token in memory for this page when sessionStorage refuses the write', () => {
+    const set = vi.spyOn(sessionStorage, 'setItem').mockImplementation(() => {
+      throw new Error('blocked')
+    })
+    storeToken('typed-token')
+    expect(sessionStorage.getItem(WS_TOKEN_KEY)).toBeNull()
+    expect(readStoredToken()).toBe('typed-token')
+    expect(sessionAuthToken()).toBe('typed-token')
+    set.mockRestore()
+    // A later successful write (or forget) replaces the in-memory copy.
+    storeToken(null)
+    expect(readStoredToken()).toBe('')
   })
 })

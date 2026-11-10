@@ -13,6 +13,7 @@ import { useEdgeSwipe } from './edge-swipe'
 import { Rail } from './Rail'
 import { useShell } from './shell-store'
 import { useDocumentTitle } from './use-document-title'
+import { useGatewayCacheSync } from './use-gateway-cache-sync'
 import { PHONE_QUERY, useMediaQuery } from './use-media-query'
 import { useRouteHandle } from './use-destination'
 
@@ -65,6 +66,7 @@ function ListPaneFallback() {
  * this tab's credentials, the Connect screen stands in for all of it.
  */
 export function Shell() {
+  useGatewayCacheSync()
   const gate = useConnectGate()
   if (gate) {
     return (

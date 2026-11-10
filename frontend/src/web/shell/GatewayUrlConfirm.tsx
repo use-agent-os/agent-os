@@ -1,13 +1,14 @@
 import { useState } from 'react'
-import { useRpc } from '@/app/providers'
+import { useBootstrap, useRpc } from '@/app/providers'
 import { t } from '@/i18n'
 import '@/i18n/en/webConnection'
+import { resolveWsUrl } from '@/lib/bootstrap'
 import {
   clearPendingGatewayUrl,
   pendingGatewayUrlRequest,
-  readStoredToken,
-  storeWsUrl,
+  type GatewayUrlRequest,
 } from '@/lib/credentials'
+import { connectGateway } from './connection-gate'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,26 +40,37 @@ function isTopLevel(): boolean {
 /**
  * Confirm a gateway URL that arrived in a link (connection spec "Changing the
  * gateway URL needs confirmation"). Never applied inside a frame.
+ *
+ * The token this tab holds belongs to the gateway it is using now, so it is
+ * never sent to the link's host: the switch carries only a token that came in
+ * the same link, or none, and the Connect screen asks for one if needed. The
+ * new address is saved only once that gateway completes a handshake.
  */
 export function GatewayUrlConfirm() {
   const rpc = useRpc()
-  const [url] = useState(() => {
+  const bootstrap = useBootstrap()
+  const [request] = useState<GatewayUrlRequest | null>(() => {
     const requested = pendingGatewayUrlRequest()
     if (!requested) return null
-    if (!isTopLevel() || !hostOf(requested)) {
+    if (!isTopLevel() || !hostOf(requested.url)) {
       clearPendingGatewayUrl()
       return null
     }
     return requested
   })
-  const [open, setOpen] = useState(url !== null)
-  if (!url) return null
+  const [open, setOpen] = useState(request !== null)
+  if (!request) return null
+  const { url } = request
   const host = hostOf(url)!
 
   const confirm = () => {
-    storeWsUrl(url)
     clearPendingGatewayUrl()
-    rpc.connect(url, readStoredToken() || undefined)
+    connectGateway(rpc, {
+      url,
+      token: request.token,
+      defaultUrl: resolveWsUrl(bootstrap.ws_url),
+      holdScreen: true,
+    })
   }
   const cancel = () => clearPendingGatewayUrl()
 
@@ -73,8 +85,22 @@ export function GatewayUrlConfirm() {
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{t('webConnection.gatewayUrlTitle')}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t('webConnection.gatewayUrlBody', { host })}
+          <AlertDialogDescription asChild>
+            <div className="flex flex-col gap-2">
+              <p>{t('webConnection.gatewayUrlBody', { host })}</p>
+              <code
+                data-testid="gateway-url-target"
+                className="rounded bg-surface-0 px-2 py-1 font-mono text-small break-all"
+              >
+                {url}
+              </code>
+              <p>
+                {request.token
+                  ? t('webConnection.gatewayUrlLinkToken', { host })
+                  : t('webConnection.gatewayUrlNoToken')}
+              </p>
+              <p>{t('webConnection.gatewayUrlSaved', { host })}</p>
+            </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
