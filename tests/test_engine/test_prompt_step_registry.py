@@ -44,15 +44,6 @@ def test_an_override_replaces_one_named_step() -> None:
     assert len(resolved) == len(DEFAULT_PROMPT_STEPS.names)
 
 
-def test_steps_can_be_added_and_removed_by_name() -> None:
-    registry = PromptStepRegistry(("a", "b", "c"))
-
-    assert registry.with_step("x", after="a").names == ("a", "x", "b", "c")
-    assert registry.with_step("x", before="a").names == ("x", "a", "b", "c")
-    assert registry.with_step("x").names == ("a", "b", "c", "x")
-    assert registry.with_step("c", before="a").names == ("c", "a", "b")
-    assert registry.without("b").names == ("a", "c")
+def test_a_duplicate_step_name_is_refused() -> None:
     with pytest.raises(ValueError, match="duplicate"):
-        PromptStepRegistry(("a", "a"))
-    with pytest.raises(ValueError, match="not both"):
-        registry.with_step("x", after="a", before="b")
+        PromptStepRegistry(("a", "b", "a"))

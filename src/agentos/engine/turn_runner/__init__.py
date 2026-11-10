@@ -2,10 +2,12 @@
 
 Re-exports the eight TurnRunner stages, their I/O dataclasses, the
 Protocol ports they accept, and the shared ``StageOutcome`` type.
-Internal adapters and private dataclasses live in their owning
-submodules (``harness``, ``stream_consumer_stage``,
-``agent_bootstrap_stage``) and are imported from there by code that
-needs them.
+Private dataclasses live in their owning submodules
+(``stream_consumer_stage``, ``agent_bootstrap_stage``) and are imported
+from there by code that needs them. ``TurnRunner`` implements most ports
+itself; the few that need no runner state are in
+``agentos.engine.harness.ports``, and ``agentos.engine.harness.turn``
+orchestrates the stages.
 """
 
 from __future__ import annotations

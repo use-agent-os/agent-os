@@ -17,10 +17,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentos.engine import Agent, AgentConfig
-from agentos.engine.runtime import TurnRunner
-from agentos.engine.turn_runner.harness import (
+from agentos.engine.harness.ports import (
     CompactionPersistRejectedError,
 )
+from agentos.engine.runtime import TurnRunner
 from agentos.session.manager import SessionManager, TranscriptSnapshot
 from agentos.session.storage import SessionStorage
 
