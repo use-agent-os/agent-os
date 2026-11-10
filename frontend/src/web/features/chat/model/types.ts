@@ -15,6 +15,12 @@ export interface UserMessage {
   /** Set while the send is in flight, or when it was not delivered. */
   delivery?: 'sending' | 'not_sent'
   idempotencyKey?: string
+  /**
+   * The newest history row the view held when this message was sent (null:
+   * none). History matches the message only to a user row after it, so an
+   * earlier message with the same text is never taken for this one.
+   */
+  anchor?: string | null
 }
 
 export interface TurnUsage {
@@ -61,6 +67,8 @@ export type Item =
   | (ItemBase & { kind: 'cronResult'; text: string })
   | (ItemBase & { kind: 'warning'; text: string })
   | (ItemBase & { kind: 'error'; text: string })
+  /** Local output of a slash command (`/model`): never sent, never in history. */
+  | (ItemBase & { kind: 'note'; text: string })
 
 export type ItemKind = Item['kind']
 
@@ -77,6 +85,14 @@ export interface Turn {
   endedAt: number | null
   /** The user asked to stop this turn. */
   abortRequested?: boolean
+  /** Live: when the view learned the run is accepted or running (ms). */
+  since?: number
+  /** Live: the highest `stream_seq` folded into this turn. */
+  lastSeq?: number
+  /** Live: the history row of this turn's user message, once matched. */
+  historyRowId?: string
+  /** Live: the gateway's snapshot dropped earlier streamed text. */
+  textTruncated?: boolean
 }
 
 /** A row of a `chat.history` page (only the fields the model reads). */
@@ -118,19 +134,53 @@ export interface HistoryPage {
   newest_cursor?: string | null
   compaction_summaries?: CompactionSummaryRow[]
   kind?: string
+  /** Absent on older gateways; `null` means nothing runs (authoritative). */
   in_flight_run?: InFlightRun | null
+  pending_inputs?: PendingInput[]
 }
 
 export interface InFlightRun {
   run_id?: string
+  task_id?: string
   status?: string
   started_at?: string | number
+  /** The snapshot covers the session's stream up to this `stream_seq`. */
+  through_stream_seq?: number
   text?: string
+  /** Earlier text did not fit the snapshot. */
+  text_truncated?: boolean
+  plan?: unknown
+  /** Compact progress records: kind, tool_use_id, tool_name, is_error, … */
+  events?: Array<Record<string, unknown>>
+}
+
+/** A message queued (or waiting to be steered) on the gateway. */
+export interface PendingInput {
+  task_id?: string
+  text?: string
+  text_truncated?: boolean
+  queued_at?: number
+  attachments?: number
+  steer?: boolean
+  /** Set when the transcript already lists the message. */
+  message_id?: string
 }
 
 export type TranscriptInput =
-  | { type: 'historyPage'; page: HistoryPage; mode: 'replace' | 'older' | 'delta' }
+  | {
+      type: 'historyPage'
+      page: HistoryPage
+      mode: 'replace' | 'older' | 'delta'
+      /** When the request went out (ms); a run accepted after it is not judged by it. */
+      issuedAt?: number
+    }
   | { type: 'event'; name: string; payload: Record<string, unknown>; at: number }
+  /** Several frames folded at once (coalesced per animation frame). */
+  | { type: 'events'; events: { name: string; payload: Record<string, unknown>; at: number }[] }
+  /** The run state a `sessions.messages.subscribe` answer reports. */
+  | { type: 'runState'; inFlight: InFlightRun | null; issuedAt: number }
+  /** The session's stream started over: low `stream_seq` values are new again. */
+  | { type: 'streamReset' }
   | {
       type: 'optimisticSend'
       text: string
@@ -138,10 +188,13 @@ export type TranscriptInput =
       idempotencyKey: string
       at: number
     }
-  | { type: 'sendAccepted'; idempotencyKey: string }
+  | { type: 'sendAccepted'; idempotencyKey: string; at?: number }
   | { type: 'sendFailed'; idempotencyKey: string; error: string; notSent: boolean }
   | { type: 'queue'; count: number }
   | { type: 'abortRequested' }
+  /** `chat.abort` failed: Stop is offered again. */
+  | { type: 'abortFailed' }
+  | { type: 'systemNote'; text: string; at: number }
   | { type: 'reset' }
 
 export interface TranscriptState {
@@ -165,4 +218,13 @@ export interface TranscriptState {
   notices: { id: string; text: string }[]
   /** Monotonic counter for local ids. */
   seq: number
+  /** Frames at or below this `stream_seq` are covered by an adopted snapshot. */
+  streamFloor: number
+  /**
+   * Failure reasons seen live, by the history row of the turn's user
+   * message, for turns history holds without an error row.
+   */
+  failures: Record<string, string>
+  /** Messages queued on the gateway that the transcript does not list yet. */
+  pendingInputs: PendingInput[]
 }
