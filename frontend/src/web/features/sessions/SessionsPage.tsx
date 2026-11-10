@@ -14,7 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import { useId, useMemo, useState, type ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link, useHref, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { formatNumber, t, tPlural } from '@/i18n'
@@ -84,6 +84,7 @@ import {
   sessionTitle,
   type SessionRow,
 } from '@/web/shell/session-list'
+import { openInNewTab } from '@/web/shell/SessionList'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import type { RpcState } from '@/lib/ws-rpc'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
@@ -736,6 +737,7 @@ function SessionTableRow({
   const rpc = useRpc()
   const queryClient = useQueryClient()
   const title = sessionTitle(row)
+  const tabHref = useHref(sessionKeyToPath(row.key))
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -905,6 +907,9 @@ function SessionTableRow({
             <DropdownMenuContent align="end">
               <DropdownMenuItem asChild>
                 <Link to={sessionKeyToPath(row.key)}>{t('webPagesWork.openChat')}</Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => openInNewTab(tabHref)}>
+                {t('webPagesWork.openNewTab')}
               </DropdownMenuItem>
               <DropdownMenuItem disabled={act.disabled} onSelect={startRename}>
                 {t('webPagesWork.rename')}

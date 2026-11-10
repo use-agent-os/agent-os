@@ -1,7 +1,7 @@
 import '@/test/web'
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { usePendingQuestions } from '@/lib/pending-questions'
 import { useRuntimeSignals } from '@/lib/runtime-signals'
 import { renderShell, resetShellState, sessionRow, shellRpc } from '@/test/web-shell'
@@ -86,6 +86,19 @@ describe('Sessions page', () => {
     await waitFor(() =>
       expect(rpc.callsTo('sessions.rename')).toEqual([{ key: A, name: 'Morning brief' }]),
     )
+  })
+
+  it('a row menu opens the chat in a new tab, like the sidebar menu', async () => {
+    const user = userEvent.setup()
+    const opened = { opener: window as Window | null }
+    const open = vi.spyOn(window, 'open').mockReturnValue(opened as unknown as Window)
+    renderShell('/sessions', sessionsRpc())
+    const rows = await table()
+    await user.click(rows.getByRole('button', { name: 'Actions for Alpha chat' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Open in new tab' }))
+    expect(open).toHaveBeenCalledWith('/chat/main/webchat/a', '_blank')
+    expect(opened.opener).toBeNull()
+    open.mockRestore()
   })
 
   it('bulk-deletes the selected sessions after confirming', async () => {

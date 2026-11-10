@@ -140,6 +140,25 @@ describe('row actions', () => {
     open.mockRestore()
   })
 
+  it('resets a session only after the confirmation', async () => {
+    const user = userEvent.setup()
+    const rpc = shellRpc([sessionRow(A, { display_name: 'Alpha' })]).handle('sessions.reset', {
+      ok: true,
+    })
+    renderShell('/home', rpc)
+    let menu = await openRowMenu(user, 'Alpha')
+    await user.click(within(menu).getByRole('menuitem', { name: 'Reset' }))
+    let dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('Reset “Alpha”?')
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(rpc.callsTo('sessions.reset')).toEqual([])
+    menu = await openRowMenu(user, 'Alpha')
+    await user.click(within(menu).getByRole('menuitem', { name: 'Reset' }))
+    dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Reset session' }))
+    await waitFor(() => expect(rpc.callsTo('sessions.reset')).toEqual([{ key: A }]))
+  })
+
   it('renames through sessions.rename and shows the new title', async () => {
     const user = userEvent.setup()
     const sessions = [sessionRow(A, { display_name: 'Old' })]

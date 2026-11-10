@@ -75,6 +75,7 @@ export const webPagesWork = defineNamespace('webPagesWork', {
     'Agent “{agent}” is no longer registered. The transcript is kept, but new turns can’t run.',
   rowActions: 'Actions for {title}',
   openChat: 'Open chat',
+  openNewTab: 'Open in new tab',
   rename: 'Rename',
   renameRow: 'Rename {title}',
   renameLabel: 'Session name',

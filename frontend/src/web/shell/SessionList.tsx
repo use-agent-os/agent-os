@@ -37,6 +37,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/web/components/ui/alert-dialog'
+import { ResetSessionDialog } from './ResetSessionDialog'
 import { Button } from '@/web/components/ui/button'
 import {
   ContextMenu,
@@ -468,6 +469,7 @@ function SessionItem(props: ItemProps) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmReset, setConfirmReset] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const actionsRef = useRef<HTMLButtonElement>(null)
   const href = sessionKeyToPath(row.key)
@@ -531,10 +533,7 @@ function SessionItem(props: ItemProps) {
         )
         return
       case 'reset':
-        void run(t('webShell.actionReset'), async () => {
-          const { resetSession } = await import('@/views/chat/resetSession')
-          await resetSession(rpc, row.key)
-        })
+        setConfirmReset(true)
         return
       case 'export':
         void run(t('webShell.actionExport'), () => exportSessionMarkdown(rpc, row.key))
@@ -806,6 +805,21 @@ function SessionItem(props: ItemProps) {
           ))}
         </ul>
       ) : null}
+      <ResetSessionDialog
+        open={confirmReset}
+        onOpenChange={setConfirmReset}
+        title={title}
+        onCloseAutoFocus={(e) => {
+          e.preventDefault()
+          actionsRef.current?.focus()
+        }}
+        onConfirm={() =>
+          void run(t('webShell.actionReset'), async () => {
+            const { resetSession } = await import('@/views/chat/resetSession')
+            await resetSession(rpc, row.key)
+          })
+        }
+      />
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent
           onCloseAutoFocus={(e) => {

@@ -225,12 +225,20 @@ describe('restored parity', () => {
     expect(composer).toHaveValue('Now chart ETH')
   })
 
-  it('resets the session from the header menu', async () => {
+  it('resets the session from the header menu after a confirmation', async () => {
     const user = userEvent.setup()
     const rpc = chatRpc([userRow('u1', 'a')]).handle('sessions.reset', { ok: true })
     await openChat(rpc)
     await user.click(screen.getByRole('button', { name: 'Session actions' }))
     await user.click(await screen.findByRole('menuitem', { name: 'Reset session' }))
+    let dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('The conversation starts over')
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(rpc.callsTo('sessions.reset')).toEqual([])
+    await user.click(screen.getByRole('button', { name: 'Session actions' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Reset session' }))
+    dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Reset session' }))
     await waitFor(() => expect(rpc.callsTo('sessions.reset')).toEqual([{ key: KEY }]))
   })
 

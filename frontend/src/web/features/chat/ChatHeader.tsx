@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from '@/web/components/ui/dropdown-menu'
 import { ChannelIcon } from '@/web/shell/channel-icon'
+import { ResetSessionDialog } from '@/web/shell/ResetSessionDialog'
 import { exportSessionMarkdown } from '@/web/shell/session-actions'
 import { SESSIONS_QUERY_KEY, useProjectNames } from '@/web/shell/session-data'
 import {
@@ -50,6 +51,7 @@ export function ChatHeader(props: ChatHeaderProps) {
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(title)
   const [error, setError] = useState<string | null>(null)
+  const [confirmReset, setConfirmReset] = useState(false)
   const project = row ? sessionProject(row) : null
 
   const submit = async (e: FormEvent) => {
@@ -174,7 +176,7 @@ export function ChatHeader(props: ChatHeaderProps) {
             <Scissors aria-hidden />
             {t('webChat.headerCompact')}
           </DropdownMenuItem>
-          <DropdownMenuItem disabled={props.running} onSelect={props.onReset}>
+          <DropdownMenuItem disabled={props.running} onSelect={() => setConfirmReset(true)}>
             <RotateCcw aria-hidden />
             {t('webChat.headerReset')}
           </DropdownMenuItem>
@@ -187,6 +189,12 @@ export function ChatHeader(props: ChatHeaderProps) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <ResetSessionDialog
+        open={confirmReset}
+        onOpenChange={setConfirmReset}
+        title={title}
+        onConfirm={props.onReset}
+      />
     </header>
   )
 }

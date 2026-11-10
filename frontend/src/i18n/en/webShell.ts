@@ -107,6 +107,10 @@ export const webShell = defineNamespace('webShell', {
   renameLabel: 'Session name',
   renameSave: 'Save',
   renameFailed: "Couldn't rename: {message}",
+  resetTitle: 'Reset “{title}”?',
+  resetBody:
+    'The conversation starts over with an empty context. The current transcript is backed up first.',
+  resetConfirm: 'Reset session',
   deleteTitle: 'Delete “{title}”?',
   deleteBody: 'The session and its transcript are removed. This cannot be undone.',
   deleteConfirm: 'Delete session',
