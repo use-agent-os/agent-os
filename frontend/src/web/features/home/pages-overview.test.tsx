@@ -435,6 +435,34 @@ describe('Inbox fixes', () => {
     expect(writeText).toHaveBeenCalledWith('rm -rf build')
   })
 
+  it('brings the approval a push notification links to into view', async () => {
+    const scrolled: Element[] = []
+    const scrollIntoView = vi
+      .spyOn(Element.prototype, 'scrollIntoView')
+      .mockImplementation(function (this: Element) {
+        scrolled.push(this)
+      })
+    useApprovals.getState().setFromPoll(
+      [
+        { id: 'a1', namespace: 'exec', toolName: 'shell', command: 'ls' },
+        { id: 'a2', namespace: 'exec', toolName: 'git', command: 'git push' },
+      ],
+      'prompt',
+    )
+    renderShell('/inbox?approval=a2')
+    const list = await screen.findByRole('region', { name: 'Waiting items' })
+    const target = await waitFor(() => {
+      const el = list.querySelector('[data-approval-id="a2"]')
+      expect(el).not.toBeNull()
+      return el as HTMLElement
+    })
+    expect(target).toHaveAttribute('data-highlighted')
+    expect(list.querySelector('[data-approval-id="a1"]')).not.toHaveAttribute('data-highlighted')
+    await waitFor(() => expect(target).toHaveFocus())
+    expect(scrolled).toEqual([target])
+    scrollIntoView.mockRestore()
+  })
+
   it('copies a fix-step command', async () => {
     const user = userEvent.setup()
     const writeText = vi.fn().mockResolvedValue(undefined)

@@ -7,7 +7,7 @@ import {
   ShieldAlert,
 } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { formatNumber, getLocale, t, tPlural } from '@/i18n'
@@ -26,7 +26,7 @@ import {
 import { useRuntimeSignals } from '@/lib/runtime-signals'
 import { useAttentionInbox } from '@/lib/useAttentionInbox'
 import { cn } from '@/lib/utils'
-import { approvalCommand, approvalMonitor, useApprovals } from '@/services/approval-monitor'
+import { approvalMonitor, useApprovals } from '@/services/approval-monitor'
 import { SESSIONS_LIST_LIMIT } from '@/views/sessions/logic'
 import { Button } from '@/web/components/ui/button'
 import { PageHeader } from '@/web/components/ui/page-header'
@@ -136,12 +136,9 @@ function CopyCommand({ command, label }: { command: string; label: string }) {
   )
 }
 
-function ApprovalItem({ item }: { item: AttentionItem }) {
+function ApprovalItem({ item, highlight }: { item: AttentionItem; highlight: string | null }) {
   const namespace = item.approval?.namespace || 'exec'
-  const command = item.approval ? approvalCommand(item.approval) : ''
-  const agents = [
-    ...new Set(item.members.map((m) => m.approval?.agent).filter((a): a is string => !!a)),
-  ]
+  // Each card names its agent and copies its command (ApprovalCard).
   return (
     <ItemCard
       item={item}
@@ -149,22 +146,15 @@ function ApprovalItem({ item }: { item: AttentionItem }) {
       kind={t('webPagesOverview.inboxKindApproval', { namespace })}
       tone="border-l-warn"
     >
-      {agents.length > 0 || command ? (
-        <div className="flex flex-wrap items-center gap-2 text-small text-text-muted">
-          {agents.length > 0 ? (
-            <span>{t('webPagesOverview.inboxAgent', { agent: agents.join(', ') })}</span>
-          ) : null}
-          {command ? (
-            <span className="inline-flex items-center gap-1">
-              {t('webPagesOverview.inboxCommand')}
-              <CopyCommand command={command} label={t('webPagesOverview.inboxCopyCommand')} />
-            </span>
-          ) : null}
-        </div>
-      ) : null}
       <ul role="list" className="flex flex-col gap-2">
         {item.members.map((member) =>
-          member.approval ? <ApprovalCard key={member.id} item={member.approval} /> : null,
+          member.approval ? (
+            <ApprovalCard
+              key={member.id}
+              item={member.approval}
+              highlighted={member.approval.id === highlight}
+            />
+          ) : null,
         )}
       </ul>
       <Link
@@ -431,6 +421,9 @@ function usePruneDeletedSessionQuestions() {
 export function InboxPage() {
   const { items, issues } = useAttentionInbox()
   usePruneDeletedSessionQuestions()
+  // A push notification opens /inbox?approval=<id>: that request is brought into view.
+  const [params] = useSearchParams()
+  const highlight = params.get('approval')
   const connection = useDisplayedConnection()
   const everConnected = useRuntimeSignals((s) => s.everConnected)
   const refresh = useRuntimeSignals((s) => s.refresh)
@@ -497,7 +490,7 @@ export function InboxPage() {
         <section aria-label={t('webPagesOverview.inboxList')} className="flex flex-col gap-3">
           {items.map((item) =>
             item.kind === 'approval' ? (
-              <ApprovalItem key={item.id} item={item} />
+              <ApprovalItem key={item.id} item={item} highlight={highlight} />
             ) : item.kind === 'question' ? (
               <QuestionItem key={item.id} item={item} answer={answer} />
             ) : item.issue ? (

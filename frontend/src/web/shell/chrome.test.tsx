@@ -127,6 +127,26 @@ describe('approval tray', () => {
     )
   })
 
+  it('names the requesting agent and copies the command', async () => {
+    const user = userEvent.setup()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    renderShell('/usage')
+    act(() => useApprovals.getState().upsert(approval({ agent: 'research' })))
+    const tray = await screen.findByRole('complementary', { name: 'Pending approvals' })
+    expect(within(tray).getByText('Agent research')).toBeInTheDocument()
+    await user.click(within(tray).getByRole('button', { name: 'Copy command' }))
+    expect(writeText).toHaveBeenCalledWith('rm -rf build')
+  })
+
+  it('offers no copy control when the request has no command', async () => {
+    renderShell('/usage')
+    act(() => useApprovals.getState().upsert(approval({ namespace: 'flow', command: undefined })))
+    const tray = await screen.findByRole('complementary', { name: 'Pending approvals' })
+    expect(within(tray).queryByRole('button', { name: 'Copy command' })).not.toBeInTheDocument()
+    expect(within(tray).queryByText(/^Agent /)).not.toBeInTheDocument()
+  })
+
   it('collapses to a count but cannot be dismissed while pending', async () => {
     const user = userEvent.setup()
     renderShell('/usage')
