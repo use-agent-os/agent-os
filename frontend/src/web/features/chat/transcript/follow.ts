@@ -1,27 +1,43 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 // Follow-to-latest scrolling (chat spec "Follow scrolling", "History paging").
 //
-// While the reader is within NEAR_END_PX of the bottom, new content keeps the
-// end in view. Scrolling up (away from the end) pauses following: content growth then leaves the
-// reading position alone (the browser's own scroll anchoring would move it,
-// so it is turned off on the scroller) and a Latest control appears once new
-// content exists. Latest, scrolling back to the end, or sending resumes.
+// While following, new content keeps the end in view. The reader pauses
+// following by scrolling up: that intent is read from input events (wheel,
+// touch drag, keyboard, a scrollbar drag) the moment they happen, and from a
+// scroll position above the last one seen. Nothing suppresses scroll events,
+// so a reader's scroll that lands between two chunks still wins. Once paused,
+// nothing scrolls programmatically until the reader returns to the end, or
+// presses Latest or sends. Content growth then leaves the reading position
+// alone (the browser's own scroll anchoring would move it, so it is turned off
+// on the scroller). Latest is shown whenever the view is away from the end
+// and not following, derived from the measured distance, not from a flag.
 // Older history inserted above keeps the visible content in place by
 // compensating scrollTop for the height added on top.
 //
 // Settled turns render with `content-visibility: auto`, so a turn's real
-// height is only known once it is near the viewport: jumping to the end
-// renders the last turns, which changes the height again without any new
-// content. While following, any size change of the content keeps the end in
-// view too (a ResizeObserver on the scroller's content), so opening or
-// reloading a session lands on the latest message.
+// height is only known once it is near the viewport: the height can change
+// with no new content, and a turn laid out at its placeholder height for one
+// frame clamps scrollTop. While following, any size change of the content
+// keeps the end in view (a ResizeObserver on the scroller's content), and two
+// frames after a content change the end is checked again, because a shrink and
+// a regrowth inside one frame leave the ResizeObserver silent.
 
 export const NEAR_END_PX = 48
+/** Sub-pixel rounding: closer than this to the end is at the end. */
+const AT_END_PX = 1
 
-export function isNearEnd(el: Pick<HTMLElement, 'scrollTop' | 'scrollHeight' | 'clientHeight'>) {
-  return el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_END_PX
+type Box = Pick<HTMLElement, 'scrollTop' | 'scrollHeight' | 'clientHeight'>
+
+function distanceFromEnd(el: Box) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight
 }
+
+export function isNearEnd(el: Box) {
+  return distanceFromEnd(el) <= NEAR_END_PX
+}
+
+const UP_KEYS = new Set(['PageUp', 'Home', 'ArrowUp'])
 
 function prefersReducedMotion(): boolean {
   try {
@@ -35,8 +51,8 @@ export interface FollowScroll {
   /** Attach to the scrolling element. */
   ref: (el: HTMLElement | null) => void
   following: boolean
-  /** True when following is paused and content arrived since. */
-  hasNew: boolean
+  /** Not following and the view is away from the end: offer Latest. */
+  showLatest: boolean
   /** Scroll to the end and follow again (Latest, send). */
   resume(): void
   /** Call when the reader reaches the top; returns a function to call after inserting older entries. */
@@ -51,51 +67,103 @@ export function useFollowScroll(contentVersion: unknown): FollowScroll {
   const elRef = useRef<HTMLElement | null>(null)
   const followingRef = useRef(true)
   const [following, setFollowing] = useState(true)
-  const [hasNew, setHasNew] = useState(false)
-  const programmatic = useRef(false)
-  // Older history going in above is not new content: no Latest for it.
-  const prepending = useRef(false)
-  // The last scrollTop seen, to tell a move up (the reader) from one down.
+  const [away, setAway] = useState(false)
+  // The last scrollTop seen or set, to tell a move up (the reader) from one down.
   const lastTop = useRef(0)
+  // The pointer is held on the scroller itself: a scrollbar drag.
+  const dragging = useRef(false)
+  const touchY = useRef<number | null>(null)
 
-  const scrollToEnd = useCallback((smooth: boolean) => {
+  const measure = useCallback(() => {
     const el = elRef.current
-    if (!el) return
-    programmatic.current = true
-    const top = el.scrollHeight
-    if (typeof el.scrollTo === 'function') {
-      el.scrollTo({ top, behavior: smooth && !prefersReducedMotion() ? 'smooth' : 'auto' })
-    } else {
-      el.scrollTop = top
-    }
-    lastTop.current = el.scrollTop
-    requestAnimationFrame(() => {
-      programmatic.current = false
-    })
+    if (el) setAway(distanceFromEnd(el) > AT_END_PX)
   }, [])
+
+  const scrollToEnd = useCallback(
+    (smooth: boolean) => {
+      const el = elRef.current
+      if (!el) return
+      const top = el.scrollHeight
+      if (typeof el.scrollTo === 'function') {
+        el.scrollTo({ top, behavior: smooth && !prefersReducedMotion() ? 'smooth' : 'auto' })
+      } else {
+        el.scrollTop = top
+      }
+      lastTop.current = el.scrollTop
+      measure()
+    },
+    [measure],
+  )
 
   const setFollow = useCallback((next: boolean) => {
     followingRef.current = next
     setFollowing(next)
-    if (next) setHasNew(false)
   }, [])
 
-  // Only a move up pauses following: a smooth scroll to the end (Latest)
-  // passes through positions short of the end on its way down, and turns
-  // rendering at their real height move the end while it runs.
+  /** The reader asked to look further up: stop following now. */
+  const readerUp = useCallback(() => {
+    const el = elRef.current
+    if (!el || el.scrollTop <= 0 || !followingRef.current) return
+    setFollow(false)
+  }, [setFollow])
+
+  // A move up pauses following; reaching the end by moving down resumes it.
+  // A smooth scroll to the end (Latest) only moves down, so it never pauses.
   const onScroll = useCallback(() => {
     const el = elRef.current
     if (!el) return
     const top = el.scrollTop
-    const movedUp = top < lastTop.current
+    const movedUp = top < lastTop.current - AT_END_PX
     lastTop.current = top
-    if (programmatic.current) return
-    if (isNearEnd(el)) {
-      if (!followingRef.current) setFollow(true)
-    } else if (movedUp && followingRef.current) {
-      setFollow(false)
+    if (followingRef.current) {
+      // Near the end without input this is scrollTop clamped by content
+      // that got shorter, not the reader.
+      if (movedUp && (dragging.current || !isNearEnd(el))) setFollow(false)
+    } else if (!movedUp && isNearEnd(el)) {
+      setFollow(true)
     }
-  }, [setFollow])
+    measure()
+  }, [measure, setFollow])
+
+  const onWheel = useCallback(
+    (e: WheelEvent) => {
+      if (e.deltaY < 0 && !e.ctrlKey) readerUp()
+    },
+    [readerUp],
+  )
+  const onKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (UP_KEYS.has(e.key) || (e.key === ' ' && e.shiftKey)) readerUp()
+    },
+    [readerUp],
+  )
+  const onTouchStart = useCallback((e: TouchEvent) => {
+    touchY.current = e.touches[0]?.clientY ?? null
+  }, [])
+  const onTouchMove = useCallback(
+    (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY
+      if (y === undefined) return
+      // The finger moving down drags the content down: scrolling up.
+      if (touchY.current !== null && y > touchY.current) readerUp()
+      touchY.current = y
+    },
+    [readerUp],
+  )
+  const onPointerDown = useCallback((e: PointerEvent) => {
+    if (e.target === elRef.current) dragging.current = true
+  }, [])
+  useEffect(() => {
+    const release = () => {
+      dragging.current = false
+    }
+    window.addEventListener('pointerup', release)
+    window.addEventListener('pointercancel', release)
+    return () => {
+      window.removeEventListener('pointerup', release)
+      window.removeEventListener('pointercancel', release)
+    }
+  }, [])
 
   // Size changes of the content (turns rendering at their real height) keep
   // the end in view while following; they are not new content.
@@ -106,42 +174,77 @@ export function useFollowScroll(contentVersion: unknown): FollowScroll {
       resizeObserver.current = null
       if (!el || typeof ResizeObserver === 'undefined') return
       const observer = new ResizeObserver(() => {
-        if (followingRef.current && !isNearEnd(el)) scrollToEnd(false)
+        if (followingRef.current && distanceFromEnd(el) > AT_END_PX) scrollToEnd(false)
+        else measure()
       })
       observer.observe(el.firstElementChild ?? el)
       resizeObserver.current = observer
     },
-    [scrollToEnd],
+    [measure, scrollToEnd],
   )
+
+  // Every handler is stable, so the list (and what gets detached) is too.
+  const listeners = useMemo(
+    (): Array<[string, EventListener]> => [
+      ['scroll', onScroll],
+      ['wheel', onWheel as EventListener],
+      ['keydown', onKeyDown as EventListener],
+      ['touchstart', onTouchStart as EventListener],
+      ['touchmove', onTouchMove as EventListener],
+      ['pointerdown', onPointerDown as EventListener],
+    ],
+    [onScroll, onWheel, onKeyDown, onTouchStart, onTouchMove, onPointerDown],
+  )
+  const detach = useCallback(() => {
+    const el = elRef.current
+    if (el) for (const [type, fn] of listeners) el.removeEventListener(type, fn)
+  }, [listeners])
 
   const ref = useCallback(
     (el: HTMLElement | null) => {
       if (el === elRef.current) return
-      if (elRef.current) elRef.current.removeEventListener('scroll', onScroll)
+      detach()
       elRef.current = el
       observeContent(el)
       if (el) {
         el.style.overflowAnchor = 'none'
-        el.addEventListener('scroll', onScroll, { passive: true })
+        for (const [type, fn] of listeners) {
+          el.addEventListener(type, fn, { passive: true })
+        }
         lastTop.current = el.scrollTop
         if (followingRef.current) scrollToEnd(false)
       }
     },
-    [onScroll, observeContent, scrollToEnd],
+    [detach, listeners, observeContent, scrollToEnd],
   )
 
-  // New content: follow, or flag Latest.
+  // New content: follow (and check again once it has rendered), or leave the
+  // reader where they are.
   useLayoutEffect(() => {
-    if (followingRef.current) scrollToEnd(false)
-    else if (!prepending.current) setHasNew(true)
-  }, [contentVersion, scrollToEnd])
+    if (!followingRef.current) {
+      measure()
+      return
+    }
+    scrollToEnd(false)
+    let inner = 0
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => {
+        const el = elRef.current
+        if (el && followingRef.current && distanceFromEnd(el) > AT_END_PX) scrollToEnd(false)
+      })
+    })
+    return () => {
+      cancelAnimationFrame(outer)
+      cancelAnimationFrame(inner)
+    }
+  }, [contentVersion, measure, scrollToEnd])
 
   useEffect(
     () => () => {
-      elRef.current?.removeEventListener('scroll', onScroll)
+      detach()
       resizeObserver.current?.disconnect()
     },
-    [onScroll],
+    [detach],
   )
 
   const resume = useCallback(() => {
@@ -152,20 +255,15 @@ export function useFollowScroll(contentVersion: unknown): FollowScroll {
   const preserveOnPrepend = useCallback(() => {
     const el = elRef.current
     if (!el) return () => {}
-    prepending.current = true
     const before = el.scrollHeight
     const top = el.scrollTop
     return () => {
-      prepending.current = false
       const added = el.scrollHeight - before
-      programmatic.current = true
       el.scrollTop = top + added
       lastTop.current = el.scrollTop
-      requestAnimationFrame(() => {
-        programmatic.current = false
-      })
+      measure()
     }
-  }, [])
+  }, [measure])
 
-  return { ref, following, hasNew, resume, preserveOnPrepend }
+  return { ref, following, showLatest: !following && away, resume, preserveOnPrepend }
 }

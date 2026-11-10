@@ -121,6 +121,7 @@ export function TranscriptView(props: TranscriptViewProps) {
                 turn={turn}
                 answered={i < lastUserIndex}
                 waitingApproval={waitingApproval}
+                last={i === state.turns.length - 1}
               />
             ))
           )}
@@ -143,7 +144,7 @@ export function TranscriptView(props: TranscriptViewProps) {
           ) : null}
         </div>
       </div>
-      {!follow.following && follow.hasNew ? (
+      {follow.showLatest ? (
         <Button
           variant="secondary"
           size="sm"
