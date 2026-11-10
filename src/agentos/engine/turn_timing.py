@@ -24,7 +24,8 @@ when an :class:`~agentos.engine.agent.Agent` runs outside a runtime turn.
 from __future__ import annotations
 
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -167,8 +168,14 @@ class TurnTiming:
 
     # ── tool batches and approvals ──────────────────────────────────────
 
-    async def tool_batch(self, stream: AsyncIterator[T], *, calls: int) -> AsyncIterator[T]:
-        """Iterate one tool batch's event stream, timing the batch."""
+    async def tool_batch(
+        self, stream: AsyncGenerator[T, None], *, calls: int
+    ) -> AsyncGenerator[T, None]:
+        """Iterate one tool batch's event stream, timing the batch.
+
+        Closing this generator closes *stream* at once, so the batch cancels
+        its running tools then rather than whenever the collector gets to it.
+        """
 
         batch = ToolBatchTiming(started=self._clock(), calls=calls)
         self._tool_batch_count += 1
@@ -177,8 +184,9 @@ class TurnTiming:
             self.tool_batches.append(batch)
         self._open_batch = batch
         try:
-            async for event in stream:
-                yield event
+            async with aclosing(stream) as events:
+                async for event in events:
+                    yield event
         finally:
             if batch.ended is None:
                 batch.ended = self._clock()
@@ -301,9 +309,12 @@ class _NullTurnTiming(TurnTiming):
         async for event in stream:
             yield event
 
-    async def tool_batch(self, stream: AsyncIterator[T], *, calls: int) -> AsyncIterator[T]:
-        async for event in stream:
-            yield event
+    async def tool_batch(
+        self, stream: AsyncGenerator[T, None], *, calls: int
+    ) -> AsyncGenerator[T, None]:
+        async with aclosing(stream) as events:
+            async for event in events:
+                yield event
 
     def timed_approval(
         self, wait: Callable[..., Awaitable[T]] | None

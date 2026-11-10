@@ -3424,10 +3424,13 @@ class Agent:
         if batch_signal is not None:
             batch_signal.in_tool_batch = True
         try:
-            async for event in self.turn_timing.tool_batch(
-                t.tool_batch.run(t.tool_calls), calls=len(t.tool_calls)
-            ):
-                yield event
+            # Closed at once when the turn is: the batch's ``finally`` then
+            # cancels its running tools here, not when the collector runs.
+            async with aclosing(
+                self.turn_timing.tool_batch(t.tool_batch.run(t.tool_calls), calls=len(t.tool_calls))
+            ) as batch_events:
+                async for event in batch_events:
+                    yield event
         finally:
             if batch_signal is not None:
                 batch_signal.in_tool_batch = False
