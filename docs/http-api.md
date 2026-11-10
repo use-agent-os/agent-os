@@ -270,13 +270,25 @@ is a category (`INVALID_REQUEST`, `FORBIDDEN`, `NOT_FOUND`, …) and
 | Status | Meaning |
 | --- | --- |
 | `200` `{"ok": true, "result": …}` | The tool ran. A tool that ran and failed answers `200` with `ok: false` and the tool's error class. |
-| `200` `{"dryRun": true, "allowed": …, "policy": {…}}` | `dry_run`: the resolved policy (profile, caller, sandboxed, read-only, may-require-approval); nothing ran. |
-| `403` `FORBIDDEN` / `POLICY_DENIED` | The configured tool policy (`[tools]` profile/allow/deny, the agent's own entry) refuses it; `details.error_class` names the refusal. |
+| `200` `{"dryRun": true, "allowed": …, "policy": {…}}` | `dry_run`: the resolved policy (profile, caller, sandboxed, read-only, may-require-approval); the tool did not run. The configured tool hooks' `before_tool` runs, so a hook's block shows as `allowed: false` (`errorClass: "ToolHookBlocked"`). |
+| `403` `FORBIDDEN` / `POLICY_DENIED` | The configured tool policy (`[tools]` profile/allow/deny, the agent's own entry) or a configured tool hook refuses it; `details.error_class` names the refusal (`ToolHookBlocked` for a hook). |
 | `403` `FORBIDDEN` / `APPROVAL_REQUIRED` | The tool needs a human approval. HTTP calls run unattended, so the tool refuses as on any unattended run; `details.approval_id` is included when it queued one. |
 | `400` `INVALID_REQUEST` | Bad body, an argument that writes a file (`output_path`, `save_path`, `output_file`, `destination`, …), refused for every tool, or arguments that do not match the tool's schema (`details.error_class = "ToolArgumentsRejected"`, the message names each failing argument). |
 | `404` `NOT_FOUND` | Unknown tool **or** one the endpoint does not run — the two look the same. |
 | `409` `INVALID_REQUEST` / `REQUEST_CONFLICT` | The `idempotency_key` was used for a different request in the last ten minutes (a repeat of the same request replays its first answer with `idempotentReplay: true`). |
 | `504` `UNAVAILABLE` / `TOOL_TIMEOUT` | The tool did not finish within the tool timeout. |
+
+**Tool hooks.** The call runs through the gateway's configured tool hooks, the
+same ones agent turns run, once per request. The policy is checked on the
+arguments as you sent them before any hook runs: a call it refuses is answered
+`403 POLICY_DENIED` and no hook sees it, even if a hook would have rewritten
+it. A call that passes then goes through the hooks: a hook's block is
+`403 POLICY_DENIED` with `details.error_class = "ToolHookBlocked"`, a rewrite
+is validated against the tool's schema and checked by the policy again before
+the tool runs, and an `after_tool` replacement is what `result` returns. With
+`dry_run: true` the hooks' `before_tool` runs first, as in a turn, so `allowed`
+reflects a hook's block. See
+[Tool and request hooks](tools-and-sandbox.md#tool-and-request-hooks-python-api).
 
 The endpoint denies by default: it runs only tools whose registration
 declares them read-only (`read_file`, `list_dir`, `grep_search`, `web_search`,
@@ -409,6 +421,9 @@ overwriting the other writer's edit.
 `sessions.create` accepts an optional `projectId`, `sessions.patch` moves a
 session with `projectId` (explicit `null` detaches), and `sessions.list`
 accepts a `projectId` filter and emits `project_id`/`projectId` on every row.
+Its answer carries `count` (rows returned) and `total` (sessions matching the
+`projectId` filter regardless of `limit`; equal to `count` when the page is not
+full).
 `sessions.patch` and `sessions.rename` on an ephemeral WebChat key
 (`agent:<id>:webchat:<suffix>`) that has no row yet create it first — the WebUI
 mints that key client-side and only sends it on the first message; every other

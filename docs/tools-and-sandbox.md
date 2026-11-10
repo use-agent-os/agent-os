@@ -63,8 +63,8 @@ Approvals are most important for:
 - generated artifacts that will be published;
 - actions that affect another service.
 
-Use the Web UI approvals page when you want durable review outside the chat
-scrollback.
+Use the Web UI's Inbox or Settings › Approvals when you want durable review
+outside the chat scrollback.
 
 ## How a Tool Call Is Admitted
 
@@ -105,8 +105,15 @@ same policy an agent's tool call gets — the `[tools]` profile, allow and deny
 lists, the agent's own entry, the runtime capability surface and the dispatch
 policy chain — in an unattended, sandboxed context, so a tool that needs an
 approval refuses (`403` with `details.code = "APPROVAL_REQUIRED"` and the
-`details.approval_id` when one was queued). `dry_run: true` returns the
-resolved policy without running anything.
+`details.approval_id` when one was queued).
+
+The call also goes through the tool hooks configured for agent turns (see
+[Tool and request hooks](#tool-and-request-hooks-python-api)), once per
+request. The policy first judges the arguments as you sent them; a call it
+refuses never reaches a hook. A hook's block is then a `403` like a policy
+refusal, and a rewrite or a result replacement applies. `dry_run: true` returns
+the resolved policy without running the tool; the hooks' `before_tool` runs in
+it too, so a hook's block shows as `allowed: false`.
 
 It denies by default: only tools whose registration declares them read-only
 run. A name floor holds on top, whatever the configuration says: shell,
@@ -301,17 +308,47 @@ class SpendGate:
     reason (`error_class: ToolHookBlocked`).
   - Rewritten arguments are checked against the tool's schema again, and
     the tool policy and approvals still apply to them. A hook cannot use a
-    rewrite to bypass either.
-- **`after_tool`** may return `ReplaceResult(content, is_error=None)`. The
-  replacement is what the model sees and what the transcript stores.
+    rewrite to bypass either. On an approval retry the granted
+    `approval_id` is kept even if the rewrite leaves it out.
+  - Each hook gets its own copy of the arguments: editing
+    `call.tool_call.arguments` in place changes nothing. Return `Rewrite`
+    to change them.
+  - When a rewrite was applied, the result carries the arguments the call
+    ran with in `ToolResult.effective_arguments`.
+  - The transcript keeps the call as the model made it. The tool result tells
+    the model that a hook adjusted it and which arguments, by name only: a
+    trailing note on a text result, a `tool_hook_adjusted_arguments` list on
+    a JSON object result. The values are never shown.
+  - Checks that describe the work done (the reminder to verify code changes)
+    use the rewritten arguments. Guards that decide before the call runs use
+    the model's arguments: the repeated-failure and loop guards, the
+    per-call timeout taken from an argument (a hook cannot extend it), and
+    the concurrency key of a keyed tool.
+- **`after_tool`** runs after the result is settled. `outcome.result` is the
+  `ToolResult` the model and the transcript will see: `content` is a string,
+  and `is_error` and `execution_status` are set. `outcome.raw_result` is what
+  the tool itself returned, and `outcome.exception` is set when it raised.
+  - Every hook whose `before_tool` ran gets `after_tool` once, also when the
+    call was blocked, its rewrite refused, denied by policy or skipped by the
+    run budget; `outcome.result` is then that error result.
+  - It may return `ReplaceResult(content, is_error=None)`. The replacement
+    is what the model sees and what the transcript stores, on every one of
+    those paths. Hooks after it see the replaced result. It is held to the
+    same size cap as a tool's own result, and when it flips `is_error` the
+    execution status is reset to match.
 - **`before_request`** may return `Amend(context)` or `Veto(reason)`.
   - An amendment is added after the cached prompt prefix, for that request
     only, and is not persisted.
-  - A veto fails the turn with error code `request_vetoed`.
+  - A veto ends the turn with error code `request_vetoed` and outcome
+    `blocked`.
 - **Errors in a hook** are logged and treated as "no decision". With
-  `fail_closed = True`, the error blocks the tool call or vetoes the request
-  instead.
+  `fail_closed = True`, a failing `before_tool` blocks the call, a failing
+  `after_tool` withholds the result (the model gets an error,
+  `error_class: ToolHookFailed`; the tool itself may already have run), and
+  a failing `before_request` vetoes the request.
 - **Older hooks** whose methods return nothing keep working unchanged.
+- The same tool hooks also guard `POST /api/v1/tools/invoke`
+  ([Calling a Tool Directly](#calling-a-tool-directly)).
 
 ---
 
