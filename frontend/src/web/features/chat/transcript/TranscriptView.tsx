@@ -92,6 +92,8 @@ export function TranscriptView(props: TranscriptViewProps) {
       <div
         ref={attachScroller}
         onScroll={maybeLoadOlder}
+        // The log scrolls on its own: keyboard users scroll it once it has focus.
+        tabIndex={0}
         role="log"
         aria-label={t('webChat.transcriptLabel')}
         aria-busy={loading || undefined}
