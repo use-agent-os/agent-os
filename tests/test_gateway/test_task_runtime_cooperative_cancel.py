@@ -209,3 +209,38 @@ async def test_a_turn_that_stops_near_the_deadline_still_records_its_outcome() -
     record = storage.records[handle.task_id]
     assert record.status == AgentTaskStatus.CANCELLED
     assert record.terminal_reason == "cancelled"
+
+
+async def test_a_second_stop_during_the_grace_cancels_at_once() -> None:
+    started = asyncio.Event()
+    outcome: dict[str, Any] = {}
+
+    async def handler(run: Any) -> None:
+        signal = current_turn_stop_signal()
+        assert signal is not None
+        signal.accepts_abort = True
+        started.set()
+        try:
+            await asyncio.sleep(30)  # ignores the cooperative abort
+        except asyncio.CancelledError:
+            outcome["hard_cancelled"] = True
+            raise
+
+    storage = _Storage({})
+    runtime = TaskRuntime(storage=storage, turn_handler=handler, cancel_grace_s=30.0)
+    handle = await _start(runtime, started)
+
+    await runtime.cancel(task_id=handle.task_id, source="user")
+    assert len(runtime._cancel_fallbacks) == 1
+    assert runtime.is_task_active(handle.task_id)
+
+    # The user presses stop again: no second grace, no second fallback.
+    await runtime.cancel(task_id=handle.task_id, source="user")
+    assert len(runtime._cancel_fallbacks) <= 1
+    await runtime.wait(handle.task_id, timeout=1)
+
+    assert outcome == {"hard_cancelled": True}
+    assert storage.records[handle.task_id].status == AgentTaskStatus.CANCELLED
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert runtime._cancel_fallbacks == set()

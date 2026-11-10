@@ -13,7 +13,7 @@ import socket
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -622,6 +622,39 @@ def _gateway_home(config: GatewayConfig) -> Path:
 
 def _task_runtime_max_concurrency(config: GatewayConfig) -> int:
     return int(config.task_runtime.max_concurrency)
+
+
+def _task_runtime_max_nested_concurrency(config: GatewayConfig) -> int:
+    configured = getattr(config.task_runtime, "max_nested_concurrency", None)
+    if configured is None:
+        return _task_runtime_max_concurrency(config)
+    return int(configured)
+
+
+def _task_runtime_max_concurrent_children(config: GatewayConfig) -> int | None:
+    """``[subagents] max_concurrent_children``; ``0`` means no per-parent limit."""
+    subagents = getattr(config, "subagents", None)
+    return int(getattr(subagents, "max_concurrent_children", 0) or 0) or None
+
+
+def _task_runtime_cancel_grace_s(config: GatewayConfig) -> float:
+    return float(getattr(config.task_runtime, "turn_cancel_grace_seconds", 5.0))
+
+
+def _make_children_limit_resolver(
+    session_manager: Any,
+) -> Callable[[str], Awaitable[int | None]]:
+    """Resolve an agent's ``subagents.max_concurrent_children`` for its parent sessions."""
+
+    async def _resolve(parent_session_key: str) -> int | None:
+        from agentos.session.keys import parse_agent_id
+        from agentos.tools.builtin.sessions import _resolve_subagent_policy
+
+        policy = await _resolve_subagent_policy(session_manager, parse_agent_id(parent_session_key))
+        value = policy.get("max_concurrent_children")
+        return int(value) if isinstance(value, int) and value >= 1 else None
+
+    return _resolve
 
 
 def _task_runtime_max_pending_per_session(config: GatewayConfig) -> int:
@@ -3047,18 +3080,6 @@ async def start_gateway_server(
 
         subagent_wake_worker = SubagentWakeWorker(_wake_outbox, _deliver_pending_wake)
 
-    async def _children_limit_resolver(parent_session_key: str) -> int | None:
-        """An agent's ``subagents.max_concurrent_children`` for its parent sessions."""
-
-        from agentos.session.keys import parse_agent_id
-        from agentos.tools.builtin.sessions import _resolve_subagent_policy
-
-        policy = await _resolve_subagent_policy(
-            svc.session_manager, parse_agent_id(parent_session_key)
-        )
-        value = policy.get("max_concurrent_children")
-        return int(value) if isinstance(value, int) and value >= 1 else None
-
     background_completion_manager = BackgroundCompletionManager(
         session_manager=svc.session_manager,
         event_emitter=runtime_event_bridge.emit,
@@ -3100,15 +3121,11 @@ async def start_gateway_server(
         subagent_reserved_slots=int(
             getattr(getattr(config, "subagents", None), "subagent_reserved_slots", 0)
         ),
-        max_concurrent_children=(
-            int(getattr(getattr(config, "subagents", None), "max_concurrent_children", 0) or 0)
-            or None
-        ),
-        children_limit_resolver=_children_limit_resolver,
+        max_concurrent_children=_task_runtime_max_concurrent_children(config),
+        max_nested_concurrency=_task_runtime_max_nested_concurrency(config),
+        children_limit_resolver=_make_children_limit_resolver(svc.session_manager),
         turn_hard_deadline_s=_task_runtime_turn_hard_deadline_s(config),
-        cancel_grace_s=float(
-            getattr(getattr(config, "task_runtime", None), "turn_cancel_grace_seconds", 5.0)
-        ),
+        cancel_grace_s=_task_runtime_cancel_grace_s(config),
         pending_overflow_policy=getattr(
             config.task_runtime, "pending_overflow_policy", "reject_newest"
         ),
