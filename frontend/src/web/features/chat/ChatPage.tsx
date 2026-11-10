@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Navigate, useLocation } from 'react-router'
+import { Navigate, useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { useKeyboardShortcut } from '@/components/KeyboardShortcuts'
@@ -8,15 +8,17 @@ import { t } from '@/i18n'
 import '@/i18n/en/webChat'
 import { gate, requireConnection } from '@/lib/disabled-reason'
 import { useApprovals } from '@/services/approval-monitor'
+import { readPromptFromUrl } from '@/views/chat/logic'
 import { computeHasPendingForSession } from '@/views/chat/useApprovalPending'
 import { Sheet, SheetContent, SheetTitle } from '@/web/components/ui/sheet'
-import { useSessionsList } from '@/web/shell/session-data'
+import { SESSIONS_QUERY_KEY, useSessionsList } from '@/web/shell/session-data'
 import { pathToSessionKey, sessionKeyToPath, defaultSessionKey } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { PHONE_QUERY, useMediaQuery } from '@/web/shell/use-media-query'
 import { ApprovalDock } from './ApprovalDock'
 import { ChatHeader } from './ChatHeader'
 import { Composer } from './composer/Composer'
+import { enqueueMessage } from './composer/queue'
 import { isRunning } from './model/reducer'
 import type { Turn } from './model/types'
 import { DetailsPanel } from './panels/DetailsPanel'
@@ -42,8 +44,19 @@ function errorMessage(error: unknown): string {
 
 /** `/chat`: the last active session, or the default webchat session. */
 export function ChatIndex() {
+  // `?prompt=` (the Skills page's Use) rides along to prefill the composer.
+  const { search } = useLocation()
   const target = readLastSession() || defaultSessionKey('main')
-  return <Navigate replace to={sessionKeyToPath(target)} />
+  return <Navigate replace to={`${sessionKeyToPath(target)}${search}`} />
+}
+
+/** The turn whose ending decides what the queue does (local notes skip). */
+function lastTurnStatus(turns: readonly Turn[]): Turn['status'] | undefined {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i]!
+    if (turn.userMessage || turn.items.some((item) => item.kind !== 'note')) return turn.status
+  }
+  return undefined
 }
 
 /** Width of an element, live (ResizeObserver). */
@@ -93,8 +106,23 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
   const closeAllPanels = usePanels((s) => s.closeAll)
   const showDetails = detailsVisible(explicit, canDock)
   const [followSignal, setFollowSignal] = useState(0)
-  const [editRequest, setEditRequest] = useState<{ text: string; nonce: number } | null>(null)
-  const { send, abort, retry } = session
+  const navigate = useNavigate()
+  const { search } = useLocation()
+  // `?prompt=` prefills the composer once, then leaves the address.
+  const [editRequest, setEditRequest] = useState<{ text: string; nonce: number } | null>(() => {
+    const prompt = readPromptFromUrl(search)
+    return prompt ? { text: prompt, nonce: 0 } : null
+  })
+  useEffect(() => {
+    if (readPromptFromUrl(search) !== null)
+      navigate(sessionKeyToPath(sessionKey), { replace: true })
+  }, [search, navigate, sessionKey])
+  const [compacting, setCompacting] = useState(false)
+  const { send, abort, retry, reload, setQueued, addNote } = session
+  const runningRef = useRef(running)
+  useEffect(() => {
+    runningRef.current = running
+  }, [running])
 
   useEffect(() => {
     try {
@@ -108,23 +136,55 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
 
   const compact = useCallback(() => {
     toast.info(t('webChat.compactStarted'))
+    setCompacting(true)
     rpc
       .call('sessions.contextCompact', { key: sessionKey })
       .catch((e: unknown) => toast.error(t('webChat.compactFailed', { message: errorMessage(e) })))
+      .finally(() => setCompacting(false))
   }, [rpc, sessionKey])
+
+  const stop = useCallback(() => {
+    abort().catch((e: unknown) =>
+      toast.error(t('webChat.stopFailed', { message: errorMessage(e) })),
+    )
+  }, [abort])
+
+  const reset = useCallback(async () => {
+    const { resetSession } = await import('@/views/chat/resetSession')
+    await resetSession(rpc, sessionKey)
+    void reload()
+    void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY })
+  }, [rpc, sessionKey, reload, queryClient])
+
+  // A message from a card (an answer, a plan approval, Try again) sent while
+  // a turn still runs would split that turn's answer: it waits in the queue.
+  const sendOrQueue = useCallback(
+    async (text: string): Promise<boolean> => {
+      if (runningRef.current) {
+        return enqueueMessage(sessionKey, { text, attachments: [], intent: null })
+      }
+      return send({ text })
+    },
+    [send, sessionKey],
+  )
 
   const actions: ChatActions = useMemo(
     () => ({
       sessionKey,
       openPanel,
-      retry: (turn: Turn) => void retry(turn),
+      retry: (turn: Turn) => {
+        const message = turn.userMessage
+        if (!runningRef.current || !message) return void retry(turn)
+        if (message.attachments.length) toast.info(t('webChat.waitForTurn'))
+        else enqueueMessage(sessionKey, { text: message.text, attachments: [], intent: null })
+      },
       edit: (turn: Turn) =>
         setEditRequest({ text: turn.userMessage?.text ?? '', nonce: Date.now() }),
-      answer: (text: string) => send({ text }),
+      answer: (text: string) => sendOrQueue(text),
       approvePlan: async () => {
         try {
           await rpc.call('plan.mode.set', { key: sessionKey, mode: 'off' })
-          await send({ text: t('webChat.planApprovedMessage') })
+          await sendOrQueue(t('webChat.planApprovedMessage'))
         } catch (e) {
           toast.error(errorMessage(e))
         } finally {
@@ -132,19 +192,21 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
         }
       },
     }),
-    [sessionKey, openPanel, retry, send, rpc, queryClient],
+    [sessionKey, openPanel, retry, sendOrQueue, rpc, queryClient],
   )
 
   // Escape in chat: stop the running turn (the composer handles its own
   // Escape, including recovering the queue).
+  const stopping = Boolean(session.state.liveTurns.at(-1)?.abortRequested)
   useKeyboardShortcut(
     { combo: 'escape', description: t('webChat.stop'), category: 'Chat' },
     (e) => {
-      if (!running) return
+      if (!running || e.isComposing) return
       e.preventDefault()
-      void abort()
+      if (!stopping) stop()
     },
   )
+  const onSent = useCallback(() => setFollowSignal((n) => n + 1), [])
 
   const toggleDetails = () => setDetails(sessionKey, !showDetails)
   const details = (
@@ -169,6 +231,7 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
             onToggleDetails={toggleDetails}
             onTogglePanels={() => (panelTabs ? closeAllPanels() : undefined)}
             onCompact={compact}
+            onReset={() => void reset()}
           />
           <div className="flex min-h-0 flex-1">
             <div className="flex min-w-0 flex-1 flex-col">
@@ -185,12 +248,18 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
               <Composer
                 sessionKey={sessionKey}
                 running={running}
+                ready={!session.loading}
+                stopping={stopping}
+                compacting={compacting}
+                lastStatus={lastTurnStatus(session.state.turns)}
                 blockedReason={blocked.reason}
                 onSend={send}
-                onAbort={() => void abort()}
+                onAbort={stop}
                 onCompact={compact}
+                onQueueChange={setQueued}
+                onNote={addNote}
                 editRequest={editRequest}
-                onSent={() => setFollowSignal((n) => n + 1)}
+                onSent={onSent}
               />
             </div>
             {showDetails && canDock ? (

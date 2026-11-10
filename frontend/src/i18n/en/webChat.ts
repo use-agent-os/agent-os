@@ -91,6 +91,8 @@ export const webChat = defineNamespace('webChat', {
   queuedEdit: 'Edit queued message {index}',
   queuedRemove: 'Remove queued message {index}',
   queuedRecover: 'Move queued messages back into the composer',
+  queueFull: 'The queue is full ({max}). Wait for the current turn or clear it.',
+  queuedToast: 'Queued ({count}/{max})',
   capabilities: 'Capabilities',
   planMode: 'Plan mode',
   elevated: 'Execution mode (elevated)',

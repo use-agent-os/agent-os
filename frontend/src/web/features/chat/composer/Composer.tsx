@@ -31,11 +31,13 @@ import { usePreferences } from '@/stores/preferences'
 import { useAttachments } from '@/views/chat/Attachments'
 import {
   outgoingAttachment,
+  popAllPendingIntoComposer,
+  popPendingTail,
   slashCommandKey,
   type PendingAttachment,
   type SlashCommand,
 } from '@/views/chat/logic'
-import { usePendingQueue } from '@/views/chat/usePendingQueue'
+import { useNextSuggestion } from '@/views/chat/useNextSuggestion'
 import { useRoutePin } from '@/views/chat/useRoutePin'
 import { useSlashCommands } from '@/views/chat/useSlashCommands'
 import { Button } from '@/web/components/ui/button'
@@ -59,18 +61,32 @@ import {
   saveStagedAttachments,
 } from './drafts'
 import { composerEnterAction } from './keys'
+import { enqueueMessage, readQueue, useQueue, writeQueue } from './queue'
 
 const MAX_HEIGHT_PX = 240
+
+/** Delay before a queued message goes out after a turn ends (legacy 50 ms). */
+export const DRAIN_DELAY_MS = 50
 
 export interface ComposerProps {
   sessionKey: string
   running: boolean
+  /** The transcript has loaded, so `running` can be trusted. */
+  ready?: boolean
+  /** Stop was asked for; the gateway is in its grace period. */
+  stopping?: boolean
+  /** A compaction is in flight: queued messages wait for it. */
+  compacting?: boolean
+  /** How the newest turn ended: the queue does not drain after a stop or failure. */
+  lastStatus?: 'live' | 'done' | 'failed' | 'aborted'
   /** Why sending is impossible right now (offline), or null. */
   blockedReason: string | null
   onSend(input: SendInput): Promise<boolean>
   onAbort(): void
   onCompact(): void
   onQueueChange?(count: number): void
+  /** Show a slash command's output (`/model`) in the transcript. */
+  onNote?(text: string): void
   /** A message to put back in the composer (Edit message). */
   editRequest?: { text: string; nonce: number } | null
   /** Called after a send so the transcript follows again. */
@@ -92,8 +108,21 @@ export function filterSlash(commands: SlashCommand[], text: string): SlashComman
     .slice(0, 12)
 }
 
+/** A line that may be a slash command: `/word…`, but not the `//` literal escape. */
+function slashLine(text: string): string | null {
+  const trimmed = text.trim()
+  return trimmed.startsWith('/') && !trimmed.startsWith('//') ? trimmed : null
+}
+
+/** `//text` sends `/text` as a plain message. */
+export function unescapeSlash(text: string): string {
+  return text.trimStart().startsWith('//') ? text.replace('//', '/') : text
+}
+
 export function Composer(props: ComposerProps) {
   const { sessionKey, running, blockedReason, onSend, onAbort, onCompact, onQueueChange } = props
+  const { ready = true, stopping = false, compacting = false, lastStatus, onNote } = props
+  const rpc = useRpc()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const sendShortcut = usePreferences((s) => s.sendShortcut)
@@ -105,11 +134,8 @@ export function Composer(props: ComposerProps) {
   const textarea = useRef<HTMLTextAreaElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const attachments = useAttachments()
-  const runningRef = useRef(running)
-  useEffect(() => {
-    runningRef.current = running
-  }, [running])
   const intentRef = useRef<string | null>(null)
+  const next = useNextSuggestion(rpc, sessionKey, running)
 
   // Drafts per session: restore on switch, save as the user types.
   const [loadedFor, setLoadedFor] = useState(sessionKey)
@@ -129,8 +155,9 @@ export function Composer(props: ComposerProps) {
   }, [sessionKey, attachments.attachments])
 
   // Edit message: put a failed turn's text back.
+  // One present at mount (a `?prompt=` prefill) is applied too.
   const editNonce = props.editRequest?.nonce
-  const [seenEdit, setSeenEdit] = useState(editNonce)
+  const [seenEdit, setSeenEdit] = useState<number | undefined>(undefined)
   if (props.editRequest && editNonce !== seenEdit) {
     setSeenEdit(editNonce)
     setText(props.editRequest.text)
@@ -145,45 +172,83 @@ export function Composer(props: ComposerProps) {
     el.style.overflowY = el.scrollHeight > MAX_HEIGHT_PX ? 'auto' : 'hidden'
   }, [text])
 
+  const { onSent } = props
   const deliver = useCallback(
     async (raw: string, atts: PendingAttachment[], intent: string | null) => {
+      const body = unescapeSlash(raw).trim()
       const ok = await onSend({
-        text: raw.trim() || t('webChat.attachmentsPrompt'),
-        displayText: raw.trim(),
+        text: body || t('webChat.attachmentsPrompt'),
+        displayText: body,
         attachments: atts.length ? atts.map(outgoingAttachment) : undefined,
         intent,
       })
-      props.onSent?.()
+      onSent?.()
       return ok
     },
-    [onSend, props],
+    [onSend, onSent],
   )
 
-  const queue = usePendingQueue(
-    {
-      getComposerText: () => textarea.current?.value ?? '',
-      setComposerText: setText,
-      getAttachments: () => attachments.attachments,
-      setAttachments: attachments.setAll,
-      getIntent: () => intentRef.current,
-      setIntent: (intent) => {
-        intentRef.current = intent
-      },
-      sendDrainedHead: (head, atts, intent) => void deliver(head, atts, intent),
-      isStreaming: () => runningRef.current,
-      isCompactInFlight: () => false,
-    },
-    sessionKey,
-  )
+  const queue = useQueue(sessionKey)
   useEffect(() => onQueueChange?.(queue.length), [queue.length, onQueueChange])
 
-  // A turn ended: send the next queued message.
-  const wasRunning = useRef(running)
-  const { scheduleDrainAfterTerminal } = queue
+  // The composer's current content, for recovering queued messages into it.
+  const contentRef = useRef({ text, attachments: attachments.attachments })
   useEffect(() => {
-    if (wasRunning.current && !running) scheduleDrainAfterTerminal()
+    contentRef.current = { text, attachments: attachments.attachments }
+  }, [text, attachments.attachments])
+  const { setAll: setAttachments } = attachments
+  const recoverQueue = useCallback((): boolean => {
+    const current = contentRef.current
+    const out = popAllPendingIntoComposer(
+      readQueue(sessionKey),
+      current.text,
+      current.attachments,
+      intentRef.current,
+    )
+    if (!out.recovered) return false
+    writeQueue(sessionKey, out.queue)
+    setText(out.text)
+    setAttachments(out.attachments)
+    intentRef.current = out.intent
+    return true
+  }, [sessionKey, setAttachments])
+  const recoverTail = () => {
+    const out = popPendingTail(readQueue(sessionKey))
+    if (!out.recovered) return
+    writeQueue(sessionKey, out.queue)
+    setText(out.text)
+    attachments.setAll(out.attachments)
+    intentRef.current = out.intent
+  }
+
+  // Send the next queued message once nothing runs: after a turn ends
+  // normally, a compaction settles, or on opening a session whose turn ended
+  // while it was not shown. After a stop or a failure the queue comes back
+  // into the composer instead, to be looked at before it goes.
+  const idle = ready && !running && !compacting
+  const wasRunning = useRef(running)
+  const lastStatusRef = useRef(lastStatus)
+  const deliverRef = useRef(deliver)
+  useEffect(() => {
+    lastStatusRef.current = lastStatus
+    deliverRef.current = deliver
+  }, [lastStatus, deliver])
+  useEffect(() => {
+    const ended = wasRunning.current && !running
     wasRunning.current = running
-  }, [running, scheduleDrainAfterTerminal])
+    if (!idle || readQueue(sessionKey).length === 0) return
+    if (ended && (lastStatusRef.current === 'aborted' || lastStatusRef.current === 'failed')) {
+      recoverQueue()
+      return
+    }
+    const timer = setTimeout(() => {
+      const [head, ...rest] = readQueue(sessionKey)
+      if (!head) return
+      writeQueue(sessionKey, rest)
+      void deliverRef.current(head.text, head.attachments, head.intent)
+    }, DRAIN_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [idle, running, sessionKey, recoverQueue])
 
   const slash = useSlashCommands({
     sessionKey,
@@ -191,10 +256,11 @@ export function Composer(props: ComposerProps) {
       if (action === 'new_chat') navigate('/new')
       else if (action === 'compact_context') onCompact()
     },
+    addSystemMessage: onNote,
     onRouteHoldChange: () => void queryClient.invalidateQueries({ queryKey: ['router.hold.get'] }),
   })
   const matches = useMemo(
-    () => (text.startsWith('/') ? filterSlash(slash.commands, text) : []),
+    () => (slashLine(text) !== null ? filterSlash(slash.commands, text) : []),
     [slash.commands, text],
   )
   const slashOpen = matches.length > 0
@@ -214,21 +280,24 @@ export function Composer(props: ComposerProps) {
   const submit = async () => {
     if (sendReason || !hasDraft) return
     const value = text
-    if (value.trim().startsWith('/')) {
+    const line = slashLine(value)
+    // Only a command the catalog knows runs; "/var/log is full" is a message.
+    if (line !== null && (await slash.isCommand(line))) {
       setText('')
       clearDraft(sessionKey)
-      await slash.execute(value.trim())
+      await slash.execute(line)
       return
     }
-    if (running) {
-      if (
-        queue.enqueue({
-          text: value,
-          attachments: attachments.attachments,
-          intent: intentRef.current,
-        })
-      ) {
+    next.clear()
+    if (running || compacting) {
+      const queued = enqueueMessage(sessionKey, {
+        text: value,
+        attachments: attachments.attachments,
+        intent: intentRef.current,
+      })
+      if (queued) {
         clearComposer()
+        intentRef.current = null
       }
       return
     }
@@ -238,6 +307,12 @@ export function Composer(props: ComposerProps) {
     await deliver(normalized.text, normalized.attachments, intentRef.current)
   }
 
+  const removeQueued = (index: number) =>
+    writeQueue(
+      sessionKey,
+      readQueue(sessionKey).filter((_, i) => i !== index),
+    )
+
   const runSlash = async (cmd: SlashCommand) => {
     setText('')
     clearDraft(sessionKey)
@@ -245,6 +320,7 @@ export function Composer(props: ComposerProps) {
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    const composing = e.nativeEvent.isComposing || e.keyCode === 229
     if (slashOpen) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault()
@@ -257,7 +333,7 @@ export function Composer(props: ComposerProps) {
         void runSlash(matches[activeSlash]!)
         return
       }
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !composing) {
         e.preventDefault()
         e.stopPropagation()
         setText('')
@@ -265,13 +341,35 @@ export function Composer(props: ComposerProps) {
       }
     }
     if (e.key === 'Escape') {
+      // Escape that cancels an IME composition is the input method's.
+      if (composing) return
       if (running) {
         e.preventDefault()
-        onAbort()
+        if (!stopping) onAbort()
       } else if (queue.length > 0) {
         e.preventDefault()
-        queue.popAllIntoComposer()
+        recoverQueue()
       }
+      return
+    }
+    // Alt+↑ takes the newest queued message back into the composer.
+    if (e.key === 'ArrowUp' && e.altKey && !composing && queue.length > 0) {
+      e.preventDefault()
+      recoverTail()
+      return
+    }
+    // Tab over an empty composer takes the suggested next prompt.
+    if (
+      e.key === 'Tab' &&
+      !e.shiftKey &&
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !text &&
+      next.suggestion
+    ) {
+      e.preventDefault()
+      setText(next.suggestion)
       return
     }
     const action = composerEnterAction(
@@ -306,7 +404,9 @@ export function Composer(props: ComposerProps) {
     attachments.addFiles(e.dataTransfer.files)
   }
 
-  const primary: 'send' | 'stop' | 'queue' = running ? (hasDraft ? 'queue' : 'stop') : 'send'
+  // While a turn runs, Stop stays reachable next to Queue: a phone has no Escape.
+  const primary: 'send' | 'queue' | null = running ? (hasDraft ? 'queue' : null) : 'send'
+  const suggestion = !text && !running ? next.suggestion : null
 
   return (
     <div
@@ -320,7 +420,7 @@ export function Composer(props: ComposerProps) {
           className="mb-2 rounded-lg border border-border bg-surface-1 p-2"
         >
           <ol className="flex flex-col gap-1">
-            {queue.queue.map((item, i) => (
+            {queue.map((item, i) => (
               <li key={i} className="flex items-center gap-2 text-ui">
                 <span className="min-w-0 flex-1 truncate">{item.text}</span>
                 <Button
@@ -328,8 +428,9 @@ export function Composer(props: ComposerProps) {
                   variant="ghost"
                   aria-label={t('webChat.queuedEdit', { index: i + 1 })}
                   onClick={() => {
-                    queue.remove(i)
+                    removeQueued(i)
                     setText(item.text)
+                    attachments.setAll(item.attachments)
                   }}
                 >
                   <Pencil />
@@ -338,7 +439,7 @@ export function Composer(props: ComposerProps) {
                   size="icon-sm"
                   variant="ghost"
                   aria-label={t('webChat.queuedRemove', { index: i + 1 })}
-                  onClick={() => queue.remove(i)}
+                  onClick={() => removeQueued(i)}
                 >
                   <Trash2 />
                 </Button>
@@ -420,7 +521,11 @@ export function Composer(props: ComposerProps) {
           data-composer-input
           aria-label={t('webChat.composerLabel')}
           placeholder={
-            touch ? t('webChat.composerPlaceholderTouch') : t('webChat.composerPlaceholder')
+            suggestion ??
+            (touch ? t('webChat.composerPlaceholderTouch') : t('webChat.composerPlaceholder'))
+          }
+          aria-description={
+            suggestion ? t('webChat.nextSuggestion', { text: suggestion }) : undefined
           }
           rows={1}
           value={text}
@@ -465,17 +570,32 @@ export function Composer(props: ComposerProps) {
               {sendReason}
             </span>
           ) : null}
-          {primary === 'stop' ? (
+          {suggestion && !touch ? (
+            <kbd
+              title={t('webChat.nextSuggestionKeyTitle')}
+              className="hidden rounded border border-border px-1 text-small text-text-muted sm:inline"
+            >
+              {t('webChat.nextSuggestionKey')}
+            </kbd>
+          ) : null}
+          {running ? (
             <Button
               size="icon-sm"
               variant="secondary"
-              aria-label={t('webChat.stop')}
+              aria-label={stopping ? t('webChat.stopping') : t('webChat.stop')}
+              title={stopping ? t('webChat.stopping') : undefined}
+              disabled={stopping}
               onClick={onAbort}
               className="rounded-full"
             >
-              <Square className="fill-current" />
+              {stopping ? (
+                <Loader2 className="motion-status animate-spin" />
+              ) : (
+                <Square className="fill-current" />
+              )}
             </Button>
-          ) : (
+          ) : null}
+          {primary === null ? null : (
             <Button
               size={primary === 'queue' ? 'sm' : 'icon-sm'}
               variant="primary"

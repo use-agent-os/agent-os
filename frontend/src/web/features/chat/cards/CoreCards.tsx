@@ -324,6 +324,16 @@ export function CardItem({ item, answered }: { item: Item; answered: boolean }) 
             : t('webChat.warning', { text: item.text })}
         </p>
       )
+    case 'note':
+      // Local output (`/model`): plain text, shown as written.
+      return (
+        <pre
+          data-role="note"
+          className="rounded-lg border border-border bg-surface-1 px-3 py-2 font-sans text-small whitespace-pre-wrap text-text-muted"
+        >
+          {item.text}
+        </pre>
+      )
     default:
       return null
   }
