@@ -113,4 +113,21 @@ describe('useFollowScroll', () => {
     done()
     expect(s.top).toBe(800)
   })
+
+  it('does not offer Latest for older entries loaded above', async () => {
+    const s = fakeScroller()
+    let api!: FollowScroll
+    const { rerender } = render(<Harness el={s.el} version={0} onApi={(a) => (api = a)} />)
+    await frame()
+    act(() => s.userScroll(0))
+    const done = api.preserveOnPrepend()
+    s.grow(800)
+    rerender(<Harness el={s.el} version={1} onApi={(a) => (api = a)} />)
+    act(() => done())
+    expect(api.hasNew).toBe(false)
+    // Content that does arrive afterwards still does.
+    s.grow(100)
+    rerender(<Harness el={s.el} version={2} onApi={(a) => (api = a)} />)
+    expect(api.hasNew).toBe(true)
+  })
 })

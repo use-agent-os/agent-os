@@ -51,6 +51,12 @@ export const webChat = defineNamespace('webChat', {
   routerDecision: 'Routed to {model}',
   notSent: 'Not sent',
   retrySend: 'Retry',
+  working: 'Working…',
+  textTruncated: 'Earlier output from this run is not shown.',
+  missedEvents: 'Some live updates were missed; the conversation was reloaded.',
+  gatewayQueued: 'Waiting on the gateway',
+  gatewayQueuedSteer: 'Will be added to the running turn: {text}',
+  gatewayQueuedNext: 'Queued for the next turn: {text}',
 
   // Header
   headerRename: 'Rename session',
@@ -58,6 +64,7 @@ export const webChat = defineNamespace('webChat', {
   headerPanels: 'Panels',
   headerMenu: 'Session actions',
   headerCompact: 'Compact',
+  headerReset: 'Reset session',
   chipAgent: 'Agent: {value}',
   chipChannel: 'Channel: {value}',
   chipProject: 'Project: {value}',
@@ -70,7 +77,10 @@ export const webChat = defineNamespace('webChat', {
   composerPlaceholderTouch: 'Message',
   send: 'Send',
   stop: 'Stop',
+  stopping: 'Stopping…',
+  stopFailed: "Couldn't stop the turn: {message}",
   queue: 'Queue',
+  waitForTurn: 'Wait for the current turn to finish first.',
   attach: 'Attach files',
   attachmentsPrompt: 'Describe these attachments.',
   removeAttachment: 'Remove {name}',
@@ -81,6 +91,8 @@ export const webChat = defineNamespace('webChat', {
   queuedEdit: 'Edit queued message {index}',
   queuedRemove: 'Remove queued message {index}',
   queuedRecover: 'Move queued messages back into the composer',
+  queueFull: 'The queue is full ({max}). Wait for the current turn or clear it.',
+  queuedToast: 'Queued ({count}/{max})',
   capabilities: 'Capabilities',
   planMode: 'Plan mode',
   elevated: 'Execution mode (elevated)',
@@ -98,6 +110,8 @@ export const webChat = defineNamespace('webChat', {
   slashMenu: 'Slash commands',
   slashEmpty: 'No matching command',
   nextSuggestion: 'Suggestion: {text}',
+  nextSuggestionKey: 'Tab',
+  nextSuggestionKeyTitle: 'Press Tab to use the suggestion',
 
   // Approval dock
   dockTitle: 'Approval needed: {tool}',
@@ -157,6 +171,9 @@ export const webChat = defineNamespace('webChat', {
   newStarting: 'Starting…',
   newLoading: 'Loading agents and projects…',
   newFailed: "Couldn't start the session: {message}",
+  newNoAgent: 'No agent to start the session with',
+  newAgentsFailed: "Couldn't load the agents",
+  newProjectsFailed: "Couldn't load the projects",
 
   // Side panel
   panelTitle: 'Side panel',

@@ -409,36 +409,6 @@ export function inFlightDecision(
 }
 
 /**
- * Read `?session=` from a search string, pure over the
- * injected search rather than `window.location.search`. Returns the value or
- * `null` when absent / unparseable (legacy returns '' from `_readSessionFromUrl`;
- * the caller treats falsy as "no session", so `null` is the faithful pure form).
- */
-export function readSessionFromUrl(search: string): string | null {
-  try {
-    const params = new URLSearchParams(search)
-    return params.get('session')
-  } catch {
-    return null
-  }
-}
-
-/**
- * Read `?agent=` from a search string. Pure over the injected
- * search; returns the value or `null` when absent / unparseable. The initial
- * session priority is URL `?session=` > `?agent=` (→ webchat key) > stored
- *.
- */
-export function readAgentFromUrl(search: string): string | null {
-  try {
-    const params = new URLSearchParams(search)
-    return params.get('agent')
-  } catch {
-    return null
-  }
-}
-
-/**
  * The longest `?prompt=` we will accept. A prefill is meant to be a one-line
  * lead-in ("use skill foo"), not a payload — anything past this is a malformed
  * or hostile link, so we truncate rather than dump it into the composer.
@@ -447,9 +417,9 @@ export const MAX_URL_PROMPT_LENGTH = 2000
 
 /**
  * Read `?prompt=` from a search string — the composer prefill used by the
- * Skills screen's "Use" button (`navigate('/chat?prompt=use skill <name>\n')`).
- * Unlike `?session=` / `?agent=` this lands in user-editable text, so it is
- * sanitised: control characters other than newline are dropped (a stray `\r`
+ * Skills screen's "Use" button (`navigate('/chat?prompt=use skill <name>\n')`),
+ * read by the chat and new-session pages. It lands in user-editable text, so
+ * it is sanitised: control characters other than newline are dropped (a stray `\r`
  * or ANSI escape has no business in a textarea) and the result is capped at
  * `MAX_URL_PROMPT_LENGTH`. Returns `null` when absent, unparseable, or empty
  * after sanitising, so the caller's "no prefill" branch is a single falsy test.

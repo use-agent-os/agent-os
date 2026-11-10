@@ -1,13 +1,22 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useReducer, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef } from 'react'
+import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
+import { t } from '@/i18n'
+import '@/i18n/en/webChat'
 import { newIdempotencyKey } from '@/lib/ws-rpc'
 import { useApprovals } from '@/services/approval-monitor'
 import { CHAT_HISTORY_PAGE_SIZE } from '@/views/chat/transcript/history'
-import { createSeqGate } from '@/views/chat/transcript/stream'
+import { createSeqGate, DEFAULT_STREAM_IDLE_TIMEOUT_MS } from '@/views/chat/transcript/stream'
 import { SESSIONS_QUERY_KEY } from '@/web/shell/session-data'
-import { initialTranscript, reduce } from './model/reducer'
-import type { HistoryPage, TranscriptState, Turn } from './model/types'
+import { initialTranscript, isRunning, reduce } from './model/reducer'
+import type {
+  HistoryPage,
+  InFlightRun,
+  TranscriptInput,
+  TranscriptState,
+  Turn,
+} from './model/types'
 import { sendOnce } from './send'
 
 // The chat subscription (overhaul-control-ui D7, task 6.5): chat.history
@@ -15,14 +24,45 @@ import { sendOnce } from './send'
 // Frames for another session, from an older epoch or already seen (the kept
 // createSeqGate) are dropped; a gap, an epoch change or a reconnect reloads
 // the history window, which the reducer reconciles by entry id.
+//
+// The first subscribe asks for no replay: its answer and the history page
+// carry the running turn as a snapshot (`in_flight_run`), and frames after it
+// arrive live. A reconnect replays from the last frame seen. Streamed text is
+// folded once per animation frame; anything else flushes at once.
 
 interface SubscribeResponse {
   current_stream_seq?: number
   replay_complete?: boolean
   replay_gap_reason?: string | null
+  in_flight_run?: InFlightRun | null
 }
 
 const RESYNC_GAP_REASONS = new Set(['stream_buffer_reset', 'cursor_ahead_of_stream'])
+
+/** Frames worth batching: they arrive many per second while a turn streams. */
+const COALESCED = new Set([
+  'session.event.text_delta',
+  'session.event.thinking',
+  'session.event.run_heartbeat',
+])
+
+/** Without any frame for this long, a running turn is checked against the gateway. */
+export const STREAM_IDLE_TIMEOUT_MS = DEFAULT_STREAM_IDLE_TIMEOUT_MS
+
+type FrameInput = { name: string; payload: Record<string, unknown>; at: number }
+
+function nextFrame(callback: () => void): () => void {
+  if (typeof requestAnimationFrame === 'function') {
+    const id = requestAnimationFrame(callback)
+    return () => cancelAnimationFrame(id)
+  }
+  const id = setTimeout(callback, 16)
+  return () => clearTimeout(id)
+}
+
+function warnMissedEvents(): void {
+  toast.warning(t('webChat.missedEvents'), { id: 'chat-missed-events' })
+}
 
 export interface SendInput {
   text: string
@@ -40,9 +80,14 @@ export interface ChatSession {
   send(input: SendInput): Promise<boolean>
   /** Resend a failed turn's message with a fresh idempotency key. */
   retry(turn: Turn): Promise<boolean>
+  /** Ask the gateway to stop the running turn; throws when it refused. */
   abort(): Promise<void>
   loadOlder(): Promise<void>
   reload(): Promise<void>
+  /** The composer's queue length, for Details. */
+  setQueued(count: number): void
+  /** Show local output (a slash command's) in the transcript. */
+  addNote(text: string): void
 }
 
 function frameSessionKey(payload: Record<string, unknown>): string {
@@ -57,7 +102,7 @@ function errorMessage(error: unknown): string {
 export function useChatSession(sessionKey: string | null): ChatSession {
   const rpc = useRpc()
   const queryClient = useQueryClient()
-  const [state, dispatch] = useReducer(reduce, undefined, initialTranscript)
+  const [state, dispatchNow] = useReducer(reduce, undefined, initialTranscript)
   const [status, setStatus] = useReducer(
     (
       _: { loading: boolean; error: string | null },
@@ -69,13 +114,46 @@ export function useChatSession(sessionKey: string | null): ChatSession {
   const keyRef = useRef(sessionKey)
   const stateRef = useRef(state)
   const loadSeq = useRef(0)
+  const buffered = useRef<FrameInput[]>([])
+  const cancelFlush = useRef<(() => void) | null>(null)
 
-  useEffect(() => {
+  // Layout timing: the transcript's own effects (paging) read it right after.
+  useLayoutEffect(() => {
     stateRef.current = state
   }, [state])
 
+  // Frames held for the next animation frame go first, so order is kept.
+  const flush = useCallback(() => {
+    cancelFlush.current?.()
+    cancelFlush.current = null
+    const events = buffered.current
+    if (events.length === 0) return
+    buffered.current = []
+    dispatchNow(events.length === 1 ? { type: 'event', ...events[0]! } : { type: 'events', events })
+  }, [])
+  const dispatch = useCallback(
+    (input: TranscriptInput) => {
+      flush()
+      dispatchNow(input)
+    },
+    [flush],
+  )
+  const enqueueFrame = useCallback(
+    (frame: FrameInput) => {
+      if (!COALESCED.has(frame.name)) {
+        flush()
+        dispatchNow({ type: 'event', ...frame })
+        return
+      }
+      buffered.current.push(frame)
+      if (!cancelFlush.current) cancelFlush.current = nextFrame(flush)
+    },
+    [flush],
+  )
+  useEffect(() => () => cancelFlush.current?.(), [])
+
   const loadHistory = useCallback(
-    async (key: string, mode: 'replace' | 'older' | 'delta') => {
+    async function load(key: string, mode: 'replace' | 'older' | 'delta'): Promise<void> {
       const id = ++loadSeq.current
       const params: Record<string, unknown> = {
         sessionKey: key,
@@ -87,17 +165,20 @@ export function useChatSession(sessionKey: string | null): ChatSession {
       if (mode === 'delta') params.delta_cursor = stateRef.current.newestCursor
       try {
         await rpc.waitForConnection()
+        const issuedAt = Date.now()
         const page = await rpc.call<HistoryPage>('chat.history', params)
         if (keyRef.current !== key || (mode !== 'older' && id !== loadSeq.current)) return
-        dispatch({ type: 'historyPage', page: page ?? {}, mode })
+        dispatch({ type: 'historyPage', page: page ?? {}, mode, issuedAt })
         if (mode === 'replace') setStatus({ loading: false, error: null })
       } catch (e) {
         if (keyRef.current !== key) return
         if (mode === 'replace') setStatus({ loading: false, error: errorMessage(e) })
-        else throw e
+        // A failed delta resyncs with a full window instead.
+        else if (mode === 'delta') void load(key, 'replace')
+        else toast.error(t('webChat.loadOlderFailed'))
       }
     },
-    [rpc],
+    [rpc, dispatch],
   )
 
   // Open / switch / close a session.
@@ -112,23 +193,36 @@ export function useChatSession(sessionKey: string | null): ChatSession {
     const key = sessionKey
     let active = true
 
+    const resetStream = () => {
+      gate.current.reset(key)
+      dispatch({ type: 'streamReset' })
+    }
+
     const subscribe = async () => {
       try {
         await rpc.waitForConnection()
         const since = gate.current.highWater(key)
-        const res = await rpc.call<SubscribeResponse>('sessions.messages.subscribe', {
-          key,
-          since_stream_seq: since,
-        })
+        const params: Record<string, unknown> = { key }
+        // Replay only what this view missed; a first open takes the snapshot.
+        if (since > 0) params.since_stream_seq = since
+        const issuedAt = Date.now()
+        const res = await rpc.call<SubscribeResponse>('sessions.messages.subscribe', params)
         if (!active) return
         const current = Number(res?.current_stream_seq)
         if (
           (Number.isFinite(current) && current < since) ||
           RESYNC_GAP_REASONS.has(String(res?.replay_gap_reason ?? ''))
         ) {
-          gate.current.reset(key)
+          resetStream()
         }
-        if (res?.replay_complete === false) void loadHistory(key, 'replace')
+        if (Number.isFinite(current)) gate.current.sync(key, current)
+        if (res && Object.prototype.hasOwnProperty.call(res, 'in_flight_run')) {
+          dispatch({ type: 'runState', inFlight: res.in_flight_run ?? null, issuedAt })
+        }
+        if (res?.replay_complete === false) {
+          if (since > 0) warnMissedEvents()
+          void loadHistory(key, 'replace')
+        }
       } catch {
         /* the reconnect handler subscribes again */
       }
@@ -149,7 +243,7 @@ export function useChatSession(sessionKey: string | null): ChatSession {
       if (!frameKey && name.startsWith('task.')) return
       const seq = Number(payload.stream_seq)
       if (Number.isFinite(seq) && !gate.current.accept(key, seq)) return
-      dispatch({ type: 'event', name, payload, at: Date.now() })
+      enqueueFrame({ name, payload, at: Date.now() })
       // A finished run: reload the window so entries carry their history ids.
       if (name === 'session.event.done' || name === 'session.event.error') {
         void loadHistory(key, 'replace')
@@ -163,7 +257,8 @@ export function useChatSession(sessionKey: string | null): ChatSession {
       void loadHistory(key, stateRef.current.newestCursor ? 'delta' : 'replace')
     })
     const offGap = rpc.on('_gap', () => {
-      gate.current.reset(key)
+      resetStream()
+      warnMissedEvents()
       void loadHistory(key, 'replace')
     })
 
@@ -177,12 +272,21 @@ export function useChatSession(sessionKey: string | null): ChatSession {
       offGap()
       void rpc.call('sessions.messages.unsubscribe', { key }).catch(() => {})
     }
-  }, [sessionKey, rpc, loadHistory, queryClient])
+  }, [sessionKey, rpc, loadHistory, queryClient, dispatch, enqueueFrame])
 
   // The reducer asked for a fresh window (epoch change, unusable delta).
   useEffect(() => {
     if (state.needsResync && sessionKey) void loadHistory(sessionKey, 'replace')
   }, [state.needsResync, sessionKey, loadHistory])
+
+  // Backstop: a running turn that has been silent this long is checked
+  // against the gateway (its history page says whether anything still runs).
+  const running = isRunning(state)
+  useEffect(() => {
+    if (!running || !sessionKey) return
+    const timer = setTimeout(() => void loadHistory(sessionKey, 'replace'), STREAM_IDLE_TIMEOUT_MS)
+    return () => clearTimeout(timer)
+  }, [running, state.turns, sessionKey, loadHistory])
 
   const deliver = useCallback(
     async (input: SendInput, shown: string): Promise<boolean> => {
@@ -211,7 +315,7 @@ export function useChatSession(sessionKey: string | null): ChatSession {
       }
       const outcome = await sendOnce(rpc, 'chat.send', params)
       if (outcome.status === 'sent') {
-        dispatch({ type: 'sendAccepted', idempotencyKey })
+        dispatch({ type: 'sendAccepted', idempotencyKey, at: Date.now() })
         return true
       }
       dispatch({
@@ -222,7 +326,7 @@ export function useChatSession(sessionKey: string | null): ChatSession {
       })
       return false
     },
-    [rpc],
+    [rpc, dispatch],
   )
 
   const send = useCallback(
@@ -248,9 +352,16 @@ export function useChatSession(sessionKey: string | null): ChatSession {
   const abort = useCallback(async () => {
     const key = keyRef.current
     if (!key) return
+    // Already asked: the gateway is in its grace period; do not ask again.
+    if (stateRef.current.liveTurns.at(-1)?.abortRequested) return
     dispatch({ type: 'abortRequested' })
-    await rpc.call('chat.abort', { sessionKey: key, source: 'web' })
-  }, [rpc])
+    try {
+      await rpc.call('chat.abort', { sessionKey: key, source: 'web' })
+    } catch (e) {
+      if (keyRef.current === key) dispatch({ type: 'abortFailed' })
+      throw e
+    }
+  }, [rpc, dispatch])
 
   const loadOlder = useCallback(async () => {
     const key = keyRef.current
@@ -262,6 +373,17 @@ export function useChatSession(sessionKey: string | null): ChatSession {
     if (keyRef.current) await loadHistory(keyRef.current, 'replace')
   }, [loadHistory])
 
+  const setQueued = useCallback(
+    (count: number) => {
+      if (stateRef.current.queued !== count) dispatch({ type: 'queue', count })
+    },
+    [dispatch],
+  )
+  const addNote = useCallback(
+    (text: string) => dispatch({ type: 'systemNote', text, at: Date.now() }),
+    [dispatch],
+  )
+
   return {
     state,
     loading: status.loading,
@@ -271,5 +393,7 @@ export function useChatSession(sessionKey: string | null): ChatSession {
     abort,
     loadOlder,
     reload,
+    setQueued,
+    addNote,
   }
 }

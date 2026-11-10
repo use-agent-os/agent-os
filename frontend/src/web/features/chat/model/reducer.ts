@@ -14,6 +14,7 @@ import type {
   CompactionSummaryRow,
   HistoryPage,
   HistoryRow,
+  InFlightRun,
   Item,
   TranscriptInput,
   TranscriptState,
@@ -58,6 +59,9 @@ export function initialTranscript(): TranscriptState {
     queued: 0,
     notices: [],
     seq: 0,
+    streamFloor: 0,
+    failures: {},
+    pendingInputs: [],
   }
 }
 
@@ -487,6 +491,10 @@ function applyEvent(
 ): TranscriptState {
   const epoch = Number(p.epoch)
   if (Number.isFinite(epoch) && epoch < state.epoch) return state
+  // Already folded into an adopted in-flight snapshot (a replay after it).
+  const streamSeq = Number(p.stream_seq)
+  const hasSeq = p.stream_seq != null && Number.isFinite(streamSeq)
+  if (hasSeq && streamSeq <= state.streamFloor) return state
 
   if (name === 'session.epoch_changed') {
     return {
@@ -589,12 +597,13 @@ function applyEvent(
       status: 'live',
       startedAt: at,
       endedAt: null,
+      since: at,
     }
     next.liveTurns = [...state.liveTurns, live]
   }
 
   let items = live.items
-  let turn: Turn = live
+  let turn: Turn = hasSeq ? { ...live, lastSeq: Math.max(live.lastSeq ?? 0, streamSeq) } : live
   switch (kind) {
     case 'text_delta':
       items = appendText(items, str(p.text), mint)
@@ -683,67 +692,284 @@ function applyEvent(
 
 // ── reconciliation ──────────────────────────────────────────────────────────
 
+function rowIdOf(row: HistoryRow): string {
+  return str(row.message_id || row.id)
+}
+
+/** The id of the newest row the view holds: a message sent now comes after it. */
+function newestRowId(rows: readonly HistoryRow[]): string | null | undefined {
+  // Nothing loaded yet: no anchor, history matches by text from the newest.
+  if (rows.length === 0) return undefined
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const id = rowIdOf(rows[i]!)
+    if (id) return id
+  }
+  return undefined
+}
+
+/**
+ * The history row of a live turn's user message. With an anchor, only rows
+ * after it count and the oldest such row wins (two sends of the same text
+ * match in order); without one, the newest row with that text.
+ */
+function matchUserRow(
+  rows: readonly HistoryRow[],
+  used: ReadonlySet<number>,
+  text: string,
+  anchor: string | null | undefined,
+): number {
+  const isMatch = (i: number) =>
+    !used.has(i) && rows[i]!.role === 'user' && str(rows[i]!.text) === text
+  let start = -1
+  if (anchor === null) start = 0
+  else if (anchor !== undefined) {
+    const at = rows.findIndex((r) => rowIdOf(r) === anchor)
+    if (at >= 0) start = at + 1
+  }
+  if (start >= 0) {
+    for (let i = start; i < rows.length; i++) if (isMatch(i)) return i
+    return -1
+  }
+  for (let i = rows.length - 1; i >= 0; i--) if (isMatch(i)) return i
+  return -1
+}
+
+/** Only local notes (slash-command output): history never holds them. */
+function isNoteTurn(turn: Turn): boolean {
+  return !turn.userMessage && turn.items.length > 0 && turn.items.every((i) => i.kind === 'note')
+}
+
 /**
  * Drop live turns history now holds; keep a still-running one (history hides
  * a turn in progress) and let it supersede history's copy of its user row.
+ * A turn that failed live while history kept no error row for it leaves its
+ * reason behind in `failures`, keyed by its user row.
  */
-function reconcile(liveTurns: Turn[], rows: readonly HistoryRow[]): Turn[] {
+function reconcile(
+  liveTurns: Turn[],
+  rows: readonly HistoryRow[],
+  failures: Record<string, string>,
+): { liveTurns: Turn[]; failures: Record<string, string> } {
   const used = new Set<number>()
   const kept: Turn[] = []
+  let nextFailures = failures
   for (const turn of liveTurns) {
     if (!turn.userMessage) {
-      if (turn.status === 'live') kept.push(turn)
+      if (turn.status === 'live' || isNoteTurn(turn)) kept.push(turn)
       continue
     }
     if (turn.userMessage.delivery === 'not_sent') {
       kept.push(turn)
       continue
     }
-    let match = -1
-    for (let i = rows.length - 1; i >= 0; i--) {
-      if (used.has(i)) continue
-      const row = rows[i]!
-      if (row.role === 'user' && str(row.text) === turn.userMessage.text) {
-        match = i
-        break
-      }
-    }
+    const match = matchUserRow(rows, used, turn.userMessage.text, turn.userMessage.anchor)
     if (match < 0) {
       kept.push(turn)
       continue
     }
     used.add(match)
-    const answered = rows.slice(match + 1).some((r) => r.role === 'assistant' || r.role === 'error')
-    if (turn.status === 'live' && !answered) kept.push(turn)
+    const after = rows.slice(match + 1)
+    const answered = after.some((r) => r.role === 'assistant' || r.role === 'error')
+    if (turn.status === 'live' && !answered) {
+      kept.push({ ...turn, historyRowId: rowIdOf(rows[match]!) || undefined })
+      continue
+    }
+    if (turn.status === 'failed' && turn.failure) {
+      const nextUser = after.findIndex((r) => r.role === 'user')
+      const own = nextUser < 0 ? after : after.slice(0, nextUser)
+      const id = rowIdOf(rows[match]!)
+      if (id && !own.some((r) => r.role === 'error') && nextFailures[id] !== turn.failure) {
+        nextFailures = { ...nextFailures, [id]: turn.failure }
+      }
+    }
   }
-  return kept
+  return { liveTurns: kept, failures: nextFailures }
+}
+
+/**
+ * A history turn as shown: a failure seen live is restored, and a tool call
+ * that never got a result in a finished turn ends as failed instead of
+ * spinning forever.
+ */
+function settleHistoryTurn(turn: Turn, failure: string | undefined): Turn {
+  let out = turn
+  if (failure && out.status === 'done') out = { ...out, status: 'failed', failure }
+  if (out.items.some((i) => i.kind === 'toolCall' && i.state === 'running')) {
+    out = {
+      ...out,
+      items:
+        out.status === 'aborted'
+          ? cancelRunningTools(out.items)
+          : out.items.map((i) =>
+              i.kind === 'toolCall' && i.state === 'running'
+                ? { ...i, state: 'failed' as const, isError: true }
+                : i,
+            ),
+    }
+  }
+  return out
+}
+
+// The history fold only changes with its rows, summaries and the failures map;
+// a live frame reuses it (and its turn objects, so memoized turns skip render).
+const foldCache = new WeakMap<
+  readonly HistoryRow[],
+  {
+    summaries: readonly CompactionSummaryRow[]
+    failures: Record<string, string>
+    turns: Turn[]
+  }
+>()
+
+function historyTurns(state: TranscriptState): Turn[] {
+  const hit = foldCache.get(state.rows)
+  if (hit && hit.summaries === state.summaries && hit.failures === state.failures) return hit.turns
+  const turns = foldHistory(state.rows, state.summaries).map((turn) =>
+    settleHistoryTurn(turn, turn.userMessage ? state.failures[turn.userMessage.id] : undefined),
+  )
+  foldCache.set(state.rows, { summaries: state.summaries, failures: state.failures, turns })
+  return turns
 }
 
 function deriveTurns(state: TranscriptState): Turn[] {
-  const history = foldHistory(state.rows, state.summaries)
-  const liveUsers = new Set(
-    state.liveTurns
-      .filter((t) => t.userMessage && t.status === 'live')
-      .map((t) => t.userMessage!.text),
-  )
+  const history = historyTurns(state)
   // A turn still running live supersedes history's partial copy of it.
-  const trimmed = liveUsers.size
-    ? history.filter(
-        (t, i) =>
-          !(
-            i >= history.length - liveUsers.size &&
-            t.userMessage &&
-            liveUsers.has(t.userMessage.text)
-          ),
+  const superseded = new Set(
+    state.liveTurns
+      .filter((t) => t.status === 'live' && t.historyRowId)
+      .map((t) => `h:${t.historyRowId}`),
+  )
+  const shown = superseded.size ? history.filter((t) => !superseded.has(t.id)) : history
+  const live = state.liveTurns.filter((t) => !isNoteTurn(t))
+  const merged = [...shown, ...live]
+  const notes = state.liveTurns.filter(isNoteTurn)
+  if (notes.length === 0) return merged
+  // Notes sit where they were written among the turns around them.
+  for (const note of notes) {
+    const at = note.startedAt ?? Number.POSITIVE_INFINITY
+    const index = merged.findIndex((t) => (t.startedAt ?? Number.NEGATIVE_INFINITY) > at)
+    if (index < 0) merged.push(note)
+    else merged.splice(index, 0, note)
+  }
+  return merged
+}
+
+/**
+ * The gateway says nothing runs (`in_flight_run: null`). Every live turn the
+ * view knew of before the question was asked is over, so its terminal frame
+ * was missed: end it (a turn from elsewhere goes; history holds it). A send
+ * still in flight, or a run learned of after the question, is left alone.
+ */
+function endStaleLive(liveTurns: Turn[], issuedAt: number): { turns: Turn[]; changed: boolean } {
+  let changed = false
+  const turns: Turn[] = []
+  for (const turn of liveTurns) {
+    const known = turn.since ?? turn.startedAt ?? 0
+    if (turn.status !== 'live' || turn.userMessage?.delivery === 'sending' || known > issuedAt) {
+      turns.push(turn)
+      continue
+    }
+    changed = true
+    if (!turn.userMessage) continue
+    const at = Number.isFinite(issuedAt) ? issuedAt : (turn.startedAt ?? 0)
+    turns.push(endTurn(turn, 'done', at))
+  }
+  return { turns, changed }
+}
+
+/** The items a gateway snapshot of a running turn describes. */
+function snapshotItems(base: Item[], run: InFlightRun, mint: Mint): Item[] {
+  // Keep what the snapshot does not carry (reasoning, routing, artifacts);
+  // its text and tool calls replace the view's.
+  let items: Item[] = base.filter((i) => i.kind !== 'text')
+  for (const event of Array.isArray(run.events) ? run.events : []) {
+    const kind = str(event.kind)
+    const toolUseId = str(event.tool_use_id)
+    if (!toolUseId) continue
+    if (kind === 'tool_use_start') {
+      items = startTool(items, toolUseId, str(event.tool_name), undefined, undefined, mint)
+    } else if (kind === 'tool_result') {
+      const known = items.find((i) => i.kind === 'toolCall' && i.toolUseId === toolUseId)
+      if (known && known.kind === 'toolCall' && known.state !== 'running') continue
+      items = settleTool(
+        items,
+        { tool_use_id: toolUseId, tool_name: event.tool_name, is_error: event.is_error },
+        undefined,
+        mint,
       )
-    : history
-  return [...trimmed, ...state.liveTurns]
+    }
+  }
+  const plan = typeof run.plan === 'string' ? run.plan.trim() : ''
+  if (plan && !items.some((i) => i.kind === 'plan')) {
+    items = insertContent(items, { kind: 'plan', id: mint(), plan, toolUseId: 'in-flight' })
+  }
+  return appendText(items, str(run.text), mint)
+}
+
+/**
+ * Show a running turn the gateway reports: adopt it when the view has none,
+ * or rebuild the view's live turn when the snapshot covers frames it missed.
+ * Replayed frames the snapshot already holds are dropped (`streamFloor`).
+ */
+function applySnapshot(
+  state: TranscriptState,
+  liveTurns: Turn[],
+  rows: readonly HistoryRow[],
+  run: InFlightRun,
+  issuedAt: number,
+): { liveTurns: Turn[]; streamFloor: number } {
+  const mint = mintFor(state)
+  const through = num(run.through_stream_seq)
+  const floor = through === undefined ? state.streamFloor : Math.max(state.streamFloor, through)
+  let index = liveTurns.length - 1
+  while (index >= 0 && liveTurns[index]!.status !== 'live') index--
+  if (index < 0) {
+    const lastUser = [...rows].reverse().find((r) => r.role === 'user')
+    const historyRowId = lastUser ? rowIdOf(lastUser) || undefined : undefined
+    const turn: Turn = {
+      id: mint(),
+      userMessage: lastUser
+        ? {
+            id: historyRowId ?? '',
+            text: str(lastUser.text),
+            timestamp: toMs(lastUser.timestamp),
+            attachments: Array.isArray(lastUser.attachments) ? lastUser.attachments : [],
+          }
+        : null,
+      items: snapshotItems([], run, mint),
+      status: 'live',
+      startedAt: toMs(run.started_at),
+      endedAt: null,
+      since: Number.isFinite(issuedAt) ? issuedAt : 0,
+      lastSeq: through,
+      historyRowId,
+      textTruncated: run.text_truncated === true || undefined,
+    }
+    return { liveTurns: [...liveTurns, turn], streamFloor: floor }
+  }
+  const live = liveTurns[index]!
+  const hasContent = Boolean(str(run.text)) || Boolean(run.events?.length) || run.plan != null
+  if (through === undefined || (live.lastSeq ?? -1) >= through || !hasContent) {
+    return { liveTurns, streamFloor: state.streamFloor }
+  }
+  const rebuilt: Turn = {
+    ...live,
+    items: snapshotItems(live.items, run, mint),
+    lastSeq: through,
+    textTruncated: run.text_truncated === true || undefined,
+  }
+  return { liveTurns: liveTurns.map((t, i) => (i === index ? rebuilt : t)), streamFloor: floor }
+}
+
+function hasRunState(page: HistoryPage): boolean {
+  return Object.prototype.hasOwnProperty.call(page, 'in_flight_run')
 }
 
 function applyHistory(
   state: TranscriptState,
   page: HistoryPage,
   mode: 'replace' | 'older' | 'delta',
+  issuedAt: number,
 ): TranscriptState {
   const messages = (page.messages ?? []) as HistoryRow[]
   let rows: HistoryRow[]
@@ -786,32 +1012,31 @@ function applyHistory(
     mode === 'replace'
       ? (page.compaction_summaries ?? [])
       : [...state.summaries, ...(page.compaction_summaries ?? [])]
-  let liveTurns = mode === 'older' ? state.liveTurns : reconcile(state.liveTurns, rows)
 
-  // Opened mid-run: adopt the in-flight run as the live turn.
-  const inFlight = page.in_flight_run
   const next: TranscriptState = { ...state }
-  if (mode !== 'older' && inFlight && !liveTurns.some((t) => t.status === 'live')) {
-    const mint = mintFor(next)
-    const lastUser = [...rows].reverse().find((r) => r.role === 'user')
-    liveTurns = [
-      ...liveTurns,
-      {
-        id: mint(),
-        userMessage: lastUser
-          ? {
-              id: str(lastUser.message_id || lastUser.id),
-              text: str(lastUser.text),
-              timestamp: toMs(lastUser.timestamp),
-              attachments: Array.isArray(lastUser.attachments) ? lastUser.attachments : [],
-            }
-          : null,
-        items: appendText([], str(inFlight.text), mint),
-        status: 'live',
-        startedAt: toMs(inFlight.started_at),
-        endedAt: null,
-      },
-    ]
+  let liveTurns = state.liveTurns
+  let failures = state.failures
+  let activeGroups = state.activeGroups
+  let pendingInputs = state.pendingInputs
+  let streamFloor = state.streamFloor
+  const runState = mode !== 'older' && hasRunState(page)
+  if (runState && !page.in_flight_run) {
+    liveTurns = endStaleLive(liveTurns, issuedAt).turns
+    activeGroups = []
+  }
+  if (mode !== 'older') {
+    const reconciled = reconcile(liveTurns, rows, failures)
+    liveTurns = reconciled.liveTurns
+    failures = reconciled.failures
+  }
+  // Opened mid-run, or the view missed frames: show the run as reported.
+  if (runState && page.in_flight_run) {
+    const adopted = applySnapshot(next, liveTurns, rows, page.in_flight_run, issuedAt)
+    liveTurns = adopted.liveTurns
+    streamFloor = adopted.streamFloor
+  }
+  if (mode !== 'older' && Array.isArray(page.pending_inputs)) {
+    pendingInputs = page.pending_inputs.filter((p) => !p.message_id)
   }
 
   const out: TranscriptState = {
@@ -822,7 +1047,42 @@ function applyHistory(
     oldestCursor,
     newestCursor,
     liveTurns,
+    failures,
+    activeGroups,
+    pendingInputs,
+    streamFloor,
     needsResync: mode === 'replace' ? false : needsResync || state.needsResync,
+  }
+  return { ...out, turns: deriveTurns(out) }
+}
+
+/** `sessions.messages.subscribe` reported the run state. */
+function applyRunState(
+  state: TranscriptState,
+  inFlight: InFlightRun | null,
+  issuedAt: number,
+): TranscriptState {
+  if (!inFlight) {
+    const ended = endStaleLive(state.liveTurns, issuedAt)
+    if (!ended.changed && state.activeGroups.length === 0) return state
+    // Reload so the turns that ended unseen show what history kept of them.
+    const out: TranscriptState = {
+      ...state,
+      liveTurns: ended.turns,
+      activeGroups: [],
+      needsResync: state.needsResync || ended.changed,
+    }
+    return { ...out, turns: deriveTurns(out) }
+  }
+  const next: TranscriptState = { ...state }
+  const adopted = applySnapshot(next, state.liveTurns, state.rows, inFlight, issuedAt)
+  if (adopted.liveTurns === state.liveTurns && adopted.streamFloor === state.streamFloor) {
+    return state
+  }
+  const out: TranscriptState = {
+    ...next,
+    liveTurns: adopted.liveTurns,
+    streamFloor: adopted.streamFloor,
   }
   return { ...out, turns: deriveTurns(out) }
 }
@@ -834,15 +1094,25 @@ export function reduce(state: TranscriptState, input: TranscriptInput): Transcri
     case 'reset':
       return initialTranscript()
     case 'historyPage':
-      return applyHistory(state, input.page, input.mode)
+      return applyHistory(state, input.page, input.mode, input.issuedAt ?? Number.POSITIVE_INFINITY)
+    case 'runState':
+      return applyRunState(state, input.inFlight, input.issuedAt)
+    case 'streamReset':
+      return state.streamFloor === 0 ? state : { ...state, streamFloor: 0 }
     case 'event': {
       const next = applyEvent(state, input.name, input.payload, input.at)
+      return next === state ? state : { ...next, turns: deriveTurns(next) }
+    }
+    case 'events': {
+      let next = state
+      for (const e of input.events) next = applyEvent(next, e.name, e.payload, e.at)
       return next === state ? state : { ...next, turns: deriveTurns(next) }
     }
     case 'optimisticSend': {
       const next: TranscriptState = { ...state }
       const mint = mintFor(next)
       // A previous live turn that never got its terminal frame is over now.
+      // (Sends while a turn runs go through the composer's queue instead.)
       const prior = state.liveTurns.map((t) =>
         t.status === 'live' ? endTurn(t, 'done', input.at) : t,
       )
@@ -855,6 +1125,7 @@ export function reduce(state: TranscriptState, input: TranscriptInput): Transcri
           attachments: input.attachments ?? [],
           delivery: 'sending',
           idempotencyKey: input.idempotencyKey,
+          anchor: newestRowId(state.rows),
         },
         items: [],
         status: 'live',
@@ -871,7 +1142,7 @@ export function reduce(state: TranscriptState, input: TranscriptInput): Transcri
         const userMessage = { ...t.userMessage }
         if (input.type === 'sendAccepted') {
           delete userMessage.delivery
-          return { ...t, userMessage }
+          return { ...t, userMessage, since: input.at ?? t.startedAt ?? 0 }
         }
         userMessage.delivery = input.notSent ? 'not_sent' : undefined
         return {
@@ -887,10 +1158,30 @@ export function reduce(state: TranscriptState, input: TranscriptInput): Transcri
     }
     case 'queue':
       return { ...state, queued: input.count }
-    case 'abortRequested': {
+    case 'abortRequested':
+    case 'abortFailed': {
       const live = currentLive(state)
       if (!live) return state
-      const out = { ...state, liveTurns: replaceLast(state, { ...live, abortRequested: true }) }
+      const requested = input.type === 'abortRequested'
+      if (Boolean(live.abortRequested) === requested) return state
+      const out = {
+        ...state,
+        liveTurns: replaceLast(state, { ...live, abortRequested: requested || undefined }),
+      }
+      return { ...out, turns: deriveTurns(out) }
+    }
+    case 'systemNote': {
+      const next: TranscriptState = { ...state }
+      const mint = mintFor(next)
+      const turn: Turn = {
+        id: mint(),
+        userMessage: null,
+        items: [{ kind: 'note', id: mint(), text: input.text }],
+        status: 'done',
+        startedAt: input.at,
+        endedAt: input.at,
+      }
+      const out = { ...next, liveTurns: [...state.liveTurns, turn] }
       return { ...out, turns: deriveTurns(out) }
     }
   }

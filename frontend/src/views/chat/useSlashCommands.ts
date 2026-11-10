@@ -50,6 +50,12 @@ export interface UseSlashCommands {
    * warning for but still swallows rather than sending as text.
    */
   execute: (text: string) => Promise<boolean>
+  /**
+   * True when the line's first word names a command in the catalog (loading
+   * it first if needed). A caller that sends unknown `/…` text as a message
+   * asks this before `execute`.
+   */
+  isCommand: (text: string) => Promise<boolean>
 }
 
 /** `/model` without a transcript: how many rows its toast lists, and for how long. */
@@ -453,5 +459,13 @@ export function useSlashCommands(opts?: {
     [dispatch, loadCatalog],
   )
 
-  return { commands, execute }
+  const isCommand = useCallback(
+    async (text: string): Promise<boolean> => {
+      if (!catalogLoadedRef.current) await loadCatalog()
+      return commandMapRef.current.has(slashCommandKey(text))
+    },
+    [loadCatalog],
+  )
+
+  return { commands, execute, isCommand }
 }

@@ -31,7 +31,6 @@ import {
   pageDumpMarkerScore,
   parseSlashInput,
   readPromptFromUrl,
-  readSessionFromUrl,
   replayGapShouldWarn,
   renderMessageAttachmentHtml,
   resolveAttachmentMime,
@@ -115,20 +114,6 @@ describe('canonicalSessionKey', () => {
   })
   it('passes an already-canonical key through unchanged', () => {
     expect(canonicalSessionKey('agent:trader:webchat:default')).toBe('agent:trader:webchat:default')
-  })
-})
-
-// read ?session= from the search string, else ''.
-// Ported pure over an injected search string; returns null when absent.
-describe('readSessionFromUrl', () => {
-  it('reads ?session= from a search string, else null', () => {
-    expect(readSessionFromUrl('?session=agent%3Amain%3Awebchat%3Adefault')).toBe(
-      'agent:main:webchat:default',
-    )
-    expect(readSessionFromUrl('')).toBeNull()
-  })
-  it('returns null when session is absent but other params exist', () => {
-    expect(readSessionFromUrl('?agent=main')).toBeNull()
   })
 })
 

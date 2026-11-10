@@ -1,6 +1,6 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Paperclip, X } from 'lucide-react'
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useRpc } from '@/app/providers'
 import { t } from '@/i18n'
@@ -8,8 +8,10 @@ import '@/i18n/en/webChat'
 import { blockedBecause, gate, requireConnection } from '@/lib/disabled-reason'
 import { newIdempotencyKey } from '@/lib/ws-rpc'
 import { useAttachments } from '@/views/chat/Attachments'
-import { outgoingAttachment } from '@/views/chat/logic'
+import { outgoingAttachment, readPromptFromUrl } from '@/views/chat/logic'
+import { projectId, type RawProject } from '@/views/projects/logic'
 import { Button } from '@/web/components/ui/button'
+import { ErrorState } from '@/web/components/ui/states'
 import { createSessionOptimistic, useAgents, useProjectNames } from '@/web/shell/session-data'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import { useShell } from '@/web/shell/shell-store'
@@ -17,6 +19,25 @@ import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** The agent each project belongs to: a chat in a project starts under it. */
+function useProjectOwners() {
+  const rpc = useRpc()
+  return useQuery({
+    queryKey: ['projects', 'list', 'owners'],
+    queryFn: async (): Promise<Map<string, string>> => {
+      await rpc.waitForConnection()
+      const data = await rpc.call<{ projects?: RawProject[] }>('projects.list', {})
+      const owners = new Map<string, string>()
+      for (const p of data?.projects ?? []) {
+        const owner = String(p.agent_id || p.agentId || '')
+        if (projectId(p) && owner) owners.set(projectId(p), owner)
+      }
+      return owners
+    },
+    staleTime: 30_000,
+  })
 }
 
 const fieldClass =
@@ -31,16 +52,27 @@ export function NewSessionPage() {
   const rpc = useRpc()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const agents = useAgents()
   const projects = useProjectNames()
+  const owners = useProjectOwners()
   const activeAgent = useShell((s) => s.activeAgent)
   const connection = useDisplayedConnection()
-  const [agent, setAgent] = useState<string | null>(params.get('agent') ?? activeAgent)
+  const [agent, setAgent] = useState<string | null>(params.get('agent'))
   const [project, setProject] = useState<string>(params.get('project') ?? '')
-  const [text, setText] = useState('')
+  // `?prompt=` (the Skills page's Use) prefills the message once.
+  const [text, setText] = useState(() => readPromptFromUrl(params.toString()) ?? '')
+  useEffect(() => {
+    if (!params.has('prompt')) return
+    const next = new URLSearchParams(params)
+    next.delete('prompt')
+    setParams(next, { replace: true })
+  }, [params, setParams])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // A session created by a Start whose first message then failed: a retry
+  // with the same choices sends into it instead of creating another.
+  const created = useRef<{ key: string; agent: string; project: string } | null>(null)
   const attachments = useAttachments()
   const fileInput = useRef<HTMLInputElement>(null)
   const agentId = useId()
@@ -48,13 +80,23 @@ export function NewSessionPage() {
   const promptId = useId()
 
   const loading = agents.isPending || projects.isPending
-  const chosenAgent = agent ?? agents.data?.[0]?.id ?? null
+  // A preselected agent or project (from the address, the switcher, the
+  // project's owner) counts only if it is still there.
+  const isAgent = (id: string | null | undefined): id is string =>
+    Boolean(id) && Boolean(agents.data?.some((a) => a.id === id))
+  const chosenProject = project && projects.data?.has(project) ? project : ''
+  const chosenAgent =
+    [agent, owners.data?.get(chosenProject), activeAgent].find(isAgent) ??
+    agents.data?.[0]?.id ??
+    null
+  const listError = agents.isError ? agents.error : projects.isError ? projects.error : null
   const uploading = attachments.attachments.some(
     (a) => a.kind === 'uploading' || a.kind === 'inline_pending',
   )
   const startGate = gate(
     requireConnection(connection),
     loading ? blockedBecause(t('webChat.newLoading')) : null,
+    !loading && !chosenAgent ? blockedBecause(t('webChat.newNoAgent')) : null,
     uploading ? blockedBecause(t('webChat.waitingUploads')) : null,
     !text.trim() && attachments.attachments.length === 0
       ? blockedBecause(t('webChat.emptyDraft'))
@@ -66,10 +108,17 @@ export function NewSessionPage() {
     setBusy(true)
     setError(null)
     try {
-      const key = await createSessionOptimistic(rpc, queryClient, {
-        agentId: chosenAgent,
-        projectId: project || null,
-      })
+      const reuse =
+        created.current?.agent === chosenAgent && created.current.project === chosenProject
+          ? created.current.key
+          : null
+      const key =
+        reuse ??
+        (await createSessionOptimistic(rpc, queryClient, {
+          agentId: chosenAgent,
+          projectId: chosenProject || null,
+        }))
+      created.current = { key, agent: chosenAgent, project: chosenProject }
       const payload = await attachments.normalizeForSend(text, false)
       const message = payload?.text.trim() || t('webChat.attachmentsPrompt')
       await rpc.call('chat.send', {
@@ -80,6 +129,7 @@ export function NewSessionPage() {
           ? { attachments: payload.attachments.map(outgoingAttachment), displayText: text.trim() }
           : {}),
       })
+      created.current = null
       navigate(sessionKeyToPath(key))
     } catch (e) {
       // The draft and attachments are still in place: nothing was cleared.
@@ -92,6 +142,17 @@ export function NewSessionPage() {
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-4 md:p-8">
       <h1 className="text-xl font-semibold">{t('webChat.newTitle')}</h1>
+      {listError ? (
+        <ErrorState
+          title={agents.isError ? t('webChat.newAgentsFailed') : t('webChat.newProjectsFailed')}
+          message={errorMessage(listError)}
+          retrying={agents.isFetching || projects.isFetching}
+          onRetry={() => {
+            if (agents.isError) void agents.refetch()
+            if (projects.isError) void projects.refetch()
+          }}
+        />
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1">
           <label htmlFor={agentId} className="font-medium">
@@ -118,7 +179,7 @@ export function NewSessionPage() {
           <select
             id={projectId}
             className={fieldClass}
-            value={project}
+            value={chosenProject}
             disabled={loading}
             onChange={(e) => setProject(e.target.value)}
           >

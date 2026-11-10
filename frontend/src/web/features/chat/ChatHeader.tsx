@@ -1,4 +1,4 @@
-import { MoreHorizontal, PanelRight, PanelRightOpen, Scissors } from 'lucide-react'
+import { MoreHorizontal, PanelRight, PanelRightOpen, RotateCcw, Scissors } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useRpc } from '@/app/providers'
@@ -37,6 +37,7 @@ export interface ChatHeaderProps {
   onToggleDetails(): void
   onTogglePanels(): void
   onCompact(): void
+  onReset(): void
 }
 
 /** The conversation header: title (rename in place), chips, toggles and ⋯ menu. */
@@ -172,6 +173,10 @@ export function ChatHeader(props: ChatHeaderProps) {
           <DropdownMenuItem disabled={props.running} onSelect={props.onCompact}>
             <Scissors aria-hidden />
             {t('webChat.headerCompact')}
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={props.running} onSelect={props.onReset}>
+            <RotateCcw aria-hidden />
+            {t('webChat.headerReset')}
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => void exportSessionMarkdown(rpc, sessionKey)}>
             {t('webShell.actionExport')}

@@ -63,4 +63,83 @@ describe('New session page', () => {
     expect(screen.getByRole('textbox', { name: 'First message' })).toHaveValue('Hello there')
     expect(screen.getByRole('button', { name: 'Remove pic.png' })).toBeInTheDocument()
   })
+
+  it('sends a retry into the session the failed Start already created', async () => {
+    const user = userEvent.setup()
+    let attempts = 0
+    const rpc = newRpc(() => ({ key: 'agent:main:webchat:n1' })).handle('chat.send', () => {
+      if (++attempts === 1) throw new Error('provider down')
+      return { ok: true }
+    })
+    const { router } = renderShell('/new', rpc)
+    const prompt = await screen.findByRole('textbox', { name: 'First message' })
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Agent' })).toBeEnabled())
+    await user.type(prompt, 'Hello')
+    await user.click(screen.getByRole('button', { name: 'Start' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('provider down')
+    await user.click(screen.getByRole('button', { name: 'Start' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/chat/main/webchat/n1'))
+    expect(rpc.callsTo('sessions.create')).toHaveLength(1)
+    expect(rpc.callsTo('chat.send').map((p) => p.sessionKey)).toEqual([
+      'agent:main:webchat:n1',
+      'agent:main:webchat:n1',
+    ])
+  })
+
+  it('shows a failed agent list with Retry and keeps Start disabled with a reason', async () => {
+    const user = userEvent.setup()
+    let fail = true
+    const rpc = newRpc(() => ({ key: 'k' })).handle('agents.list', () => {
+      if (fail) throw new Error('agents unavailable')
+      return { agents: [{ id: 'main', name: 'main' }] }
+    })
+    renderShell('/new', rpc)
+    expect(await screen.findByText("Couldn't load the agents")).toBeInTheDocument()
+    await user.type(screen.getByRole('textbox', { name: 'First message' }), 'Hi')
+    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled()
+    expect(screen.getByText('No agent to start the session with')).toBeInTheDocument()
+    fail = false
+    await user.click(screen.getByRole('button', { name: /Retry/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled())
+  })
+
+  it('drops a preselected agent or project that no longer exists', async () => {
+    const user = userEvent.setup()
+    const rpc = newRpc(() => ({ key: 'agent:main:webchat:n2' }))
+    renderShell('/new?agent=ghost&project=deleted', rpc)
+    const project = await screen.findByRole('combobox', { name: 'Project' })
+    await waitFor(() => expect(project).not.toBeDisabled())
+    expect(project).toHaveValue('')
+    await user.type(screen.getByRole('textbox', { name: 'First message' }), 'Hi')
+    await user.click(screen.getByRole('button', { name: 'Start' }))
+    await waitFor(() => expect(rpc.callsTo('sessions.create')).toHaveLength(1))
+    expect(rpc.callsTo('sessions.create')[0]).toEqual({ agentId: 'main' })
+  })
+
+  it('starts a chat in a project under the agent that owns it', async () => {
+    const user = userEvent.setup()
+    const rpc = newRpc(() => ({ key: 'agent:research:webchat:n3' })).handle('projects.list', {
+      projects: [{ project_id: 'p-trading', name: 'Trading', agent_id: 'research' }],
+    })
+    renderShell('/new?project=p-trading', rpc)
+    const agent = await screen.findByRole('combobox', { name: 'Agent' })
+    await waitFor(() => expect(agent).toHaveValue('research'))
+    await user.type(screen.getByRole('textbox', { name: 'First message' }), 'Hi')
+    await user.click(screen.getByRole('button', { name: 'Start' }))
+    await waitFor(() =>
+      expect(rpc.callsTo('sessions.create')[0]).toEqual({
+        agentId: 'research',
+        projectId: 'p-trading',
+      }),
+    )
+  })
+
+  it('prefills the first message from ?prompt= and drops it from the address', async () => {
+    const rpc = newRpc(() => ({ key: 'k' }))
+    const { router } = renderShell('/new?prompt=use%20skill%20pdf', rpc)
+    expect(await screen.findByRole('textbox', { name: 'First message' })).toHaveValue(
+      'use skill pdf',
+    )
+    await waitFor(() => expect(router.state.location.search).toBe(''))
+  })
 })
