@@ -20,8 +20,10 @@ export const buttonVariants = cva(
           'bg-accent [background-image:var(--accent-gradient)] text-accent-fg shadow-[var(--elevation-primary)]',
           'hover:shadow-[var(--elevation-primary-hover)] hover:brightness-[1.04]',
         ].join(' '),
+        // Secondary and outline read as one family (an outlined control on
+        // the surface beneath); secondary only adds the dark top highlight.
         secondary:
-          'border border-border bg-surface-3 text-text shadow-highlight hover:border-border-strong hover:bg-[color-mix(in_oklab,var(--surface-3),var(--text)_6%)]',
+          'border border-border-control bg-transparent text-text shadow-highlight hover:border-[color-mix(in_oklab,var(--border-control),var(--text)_28%)] hover:bg-surface-3',
         outline:
           'border border-border-control bg-transparent text-text hover:border-[color-mix(in_oklab,var(--border-control),var(--text)_28%)] hover:bg-surface-3',
         ghost: 'bg-transparent text-text hover:bg-surface-3',
