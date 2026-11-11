@@ -8,7 +8,7 @@ import { useFollowScroll, type FollowScroll } from './follow'
 function fakeScroller() {
   const el = document.createElement('div')
   let scrollHeight = 1000
-  const clientHeight = 400
+  let clientHeight = 400
   let scrollTop = 0
   Object.defineProperties(el, {
     scrollHeight: { get: () => scrollHeight },
@@ -31,6 +31,11 @@ function fakeScroller() {
     /** Change the height the way layout does: scrollTop is clamped, no event. */
     setHeight(h: number) {
       scrollHeight = h
+      scrollTop = Math.max(0, Math.min(scrollTop, scrollHeight - clientHeight))
+    },
+    /** The view itself gets shorter or taller (the composer below it grows). */
+    setClientHeight(h: number) {
+      clientHeight = h
       scrollTop = Math.max(0, Math.min(scrollTop, scrollHeight - clientHeight))
     },
     userScroll(to: number) {
@@ -172,11 +177,43 @@ describe('useFollowScroll', () => {
     s.el.appendChild(content)
     render(<Harness el={s.el} version={0} onApi={() => {}} />)
     await frame()
-    expect(ro.observed()).toEqual([content])
+    expect(ro.observed()).toEqual([content, s.el])
     expect(s.top).toBe(s.bottom)
     s.grow(250)
     act(() => ro.resized())
     expect(s.top).toBe(s.bottom)
+  })
+
+  it('keeps the end in view when the view gets shorter while following', async () => {
+    // Attachments or a long draft make the composer taller: the scroller
+    // shrinks at the same scrollTop, which hid the newest content under it.
+    const ro = captureResizeObserver()
+    const s = fakeScroller()
+    s.el.appendChild(document.createElement('div'))
+    let api!: FollowScroll
+    render(<Harness el={s.el} version={0} onApi={(a) => (api = a)} />)
+    await frame()
+    expect(s.top).toBe(s.bottom)
+    s.setClientHeight(250)
+    act(() => ro.resized())
+    expect(s.top).toBe(s.bottom)
+    expect(api.following).toBe(true)
+    expect(api.showLatest).toBe(false)
+  })
+
+  it('leaves a paused reader in place when the view gets shorter', async () => {
+    const ro = captureResizeObserver()
+    const s = fakeScroller()
+    s.el.appendChild(document.createElement('div'))
+    let api!: FollowScroll
+    render(<Harness el={s.el} version={0} onApi={(a) => (api = a)} />)
+    await frame()
+    act(() => s.userScroll(200))
+    expect(api.following).toBe(false)
+    s.setClientHeight(250)
+    act(() => ro.resized())
+    expect(s.top).toBe(200)
+    expect(api.showLatest).toBe(true)
   })
 
   it('leaves a paused reader where they are when the content changes size', async () => {

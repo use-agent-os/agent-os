@@ -166,7 +166,10 @@ export function useFollowScroll(contentVersion: unknown): FollowScroll {
   }, [])
 
   // Size changes of the content (turns rendering at their real height) keep
-  // the end in view while following; they are not new content.
+  // the end in view while following; they are not new content. So do size
+  // changes of the scroller itself: the composer below it grows with text,
+  // attachments and the queue, and a shorter view at the same scrollTop
+  // would leave the newest content under the composer.
   const resizeObserver = useRef<ResizeObserver | null>(null)
   const observeContent = useCallback(
     (el: HTMLElement | null) => {
@@ -177,7 +180,9 @@ export function useFollowScroll(contentVersion: unknown): FollowScroll {
         if (followingRef.current && distanceFromEnd(el) > AT_END_PX) scrollToEnd(false)
         else measure()
       })
-      observer.observe(el.firstElementChild ?? el)
+      const content = el.firstElementChild
+      if (content) observer.observe(content)
+      observer.observe(el)
       resizeObserver.current = observer
     },
     [measure, scrollToEnd],
