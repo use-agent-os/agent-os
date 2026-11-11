@@ -51,6 +51,7 @@ import { useRestartNotice } from './config-editor'
 import { useSettingsFields } from './fields'
 import { findSection, SETTINGS_GROUPS, SETTINGS_SECTIONS } from './registry'
 import { searchSettings } from './search'
+import { Docked } from './tray-clearance'
 import { Notice } from './ui'
 
 function section(load: () => Promise<Record<string, unknown>>, name: string) {
@@ -391,7 +392,7 @@ function RestartNotice() {
   // at the top: it usually arrives right after a save, and inserting it
   // above the section pushed everything the reader was looking at down.
   return (
-    <div className="set-restart-dock sticky bottom-4 z-[var(--z-sticky)] mt-8">
+    <Docked className="set-restart-dock sticky bottom-4 z-[var(--z-sticky)] mt-8">
       <Notice
         role="status"
         tone="warn"
@@ -430,7 +431,7 @@ function RestartNotice() {
             : t('webSettings.restartBodyGeneric')}
         </p>
       </Notice>
-    </div>
+    </Docked>
   )
 }
 
