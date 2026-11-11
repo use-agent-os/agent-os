@@ -225,6 +225,33 @@ describe('Usage', () => {
     await user.click(screen.getByRole('button', { name: /^Input/ }))
     expect(sessionLinks()).toEqual(['small', 'large'])
   })
+
+  it('cuts long session keys in the middle so the distinguishing tail always shows', async () => {
+    const long = 'agent:main:webchat:2f9c1d7e-4b8a-4e0f-9a51-tail-one'
+    const rpc = shellRpc().handle('usage.status', {
+      sessions: [
+        { session: long, inputTokens: 900, updatedAt: NOW },
+        { session: 'a:b', inputTokens: 10, updatedAt: NOW },
+      ],
+    })
+    renderShell('/usage', rpc)
+    const table = within(await screen.findByRole('table'))
+    const chart = within(
+      (await screen.findByRole('heading', { name: 'Top sessions' })).closest('section')!,
+    )
+    for (const scope of [table, chart]) {
+      // The whole key stays the link's text (accessible name, copy) and title.
+      const link = scope.getByRole('link', { name: long })
+      expect(link).toHaveAttribute('title', expect.stringContaining(long))
+      // The head truncates; the last characters sit in their own unshrinking span.
+      const [head, tail] = Array.from(link.children)
+      expect(head).toHaveClass('truncate')
+      expect(tail).toHaveTextContent(/^tail-one$|-tail-one$/)
+      expect(tail).toHaveClass('shrink-0')
+      expect(head!.textContent! + tail!.textContent!).toBe(long)
+      expect(scope.getByRole('link', { name: 'a:b' })).toBeInTheDocument()
+    }
+  })
 })
 
 describe('Inbox', () => {
