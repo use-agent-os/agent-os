@@ -5,7 +5,6 @@ import { useRpc } from '@/app/providers'
 import { t } from '@/i18n'
 import '@/i18n/en/webSetSystem'
 import { blockedBecause, gate, requireConnection } from '@/lib/disabled-reason'
-import { cn } from '@/lib/utils'
 import {
   browserWebPushEnv,
   disableWebPush,
@@ -18,6 +17,7 @@ import {
 } from '@/services/web-push'
 import { usePreferences, type SendShortcut, type TextSize } from '@/stores/preferences'
 import { useTheme, type ThemePreference } from '@/stores/theme'
+import { SegmentedControl } from '@/web/components/ui/segmented-control'
 import { Switch } from '@/web/components/ui/switch'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { useRegisterFields } from '../fields'
@@ -41,42 +41,23 @@ function ChoiceRow<V extends string>({
   options: readonly { value: V; label: string }[]
   onChange: (value: V) => void
 }) {
-  const name = useId()
+  const legendId = useId()
   return (
     // A rendered <legend> sits on the fieldset's top edge, above its padding, so the
     // row's spacing lives on a wrapper or the title touches the divider above it.
     <div className="py-3">
       <fieldset data-field-id={id} className="flex flex-col gap-1">
-        <legend className="font-medium">{label}</legend>
+        <legend id={legendId} className="font-medium">
+          {label}
+        </legend>
         {help ? <p className="text-small text-text-muted">{help}</p> : null}
-        <div
-          data-segmented
-          className="mt-1 inline-flex w-fit rounded-md border border-border-control p-0.5"
-        >
-          {options.map((option) => (
-            // `target` grows the item to 44px on touch screens: centre the text in it.
-            // Forced colors drop the fill, so the chosen item takes the system highlight.
-            <label
-              key={option.value}
-              className={cn(
-                'target inline-flex cursor-pointer items-center justify-center rounded px-3 py-1 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent',
-                value === option.value
-                  ? 'bg-surface-3 font-medium forced-colors:bg-[Highlight] forced-colors:text-[HighlightText] forced-colors:forced-color-adjust-none'
-                  : 'hover:bg-surface-2',
-              )}
-            >
-              <input
-                type="radio"
-                name={name}
-                value={option.value}
-                checked={value === option.value}
-                onChange={() => onChange(option.value)}
-                className="sr-only"
-              />
-              {option.label}
-            </label>
-          ))}
-        </div>
+        <SegmentedControl
+          aria-labelledby={legendId}
+          className="mt-1"
+          value={value}
+          onChange={onChange}
+          options={options}
+        />
       </fieldset>
     </div>
   )

@@ -33,6 +33,7 @@ import {
   type UsageRow,
 } from '@/views/usage/logic'
 import { Button } from '@/web/components/ui/button'
+import { StatCard } from '@/web/components/ui/card'
 import { PageHeader } from '@/web/components/ui/page-header'
 import {
   EmptyState,
@@ -166,15 +167,9 @@ function Metric({
   children?: ReactNode
 }) {
   return (
-    <section
-      aria-label={label}
-      className="flex min-w-0 flex-col gap-1 rounded-lg border border-border bg-surface-1 p-4"
-    >
-      <h2 className="text-small font-medium text-text-muted">{label}</h2>
-      <p className="truncate text-xl font-semibold tabular-nums">{value}</p>
-      {hint ? <p className="text-small text-text-muted">{hint}</p> : null}
+    <StatCard label={label} value={value} hint={hint}>
       {children}
-    </section>
+    </StatCard>
   )
 }
 

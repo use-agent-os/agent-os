@@ -5,6 +5,7 @@ import { t } from '@/i18n'
 import '@/i18n/en/webSettings'
 import { cn } from '@/lib/utils'
 import { Button } from '@/web/components/ui/button'
+import { Input, Select, Textarea } from '@/web/components/ui/input'
 import { Switch } from '@/web/components/ui/switch'
 import type { ConfigEditor } from './config-editor'
 
@@ -97,8 +98,7 @@ export function FieldRow({
   )
 }
 
-const inputClass =
-  'h-9 w-full max-w-xl rounded-md border border-border-control bg-surface-0 px-3 aria-[invalid=true]:border-danger touch:h-11 touch:text-base'
+const inputClass = 'max-w-xl'
 
 /** The `<select>` value standing for "unset: use the gateway default". */
 const UNSET = ''
@@ -156,7 +156,7 @@ export function ConfigField({
   switch (type.kind) {
     case 'boolean':
       control = optional ? (
-        <select
+        <Select
           {...common}
           className={inputClass}
           value={unset ? UNSET : value ? 'true' : 'false'}
@@ -167,14 +167,14 @@ export function ConfigField({
           <option value={UNSET}>{t('webSettings.optionDefault')}</option>
           <option value="true">{t('webSettings.optionOn')}</option>
           <option value="false">{t('webSettings.optionOff')}</option>
-        </select>
+        </Select>
       ) : (
         <Switch {...common} checked={Boolean(value)} onCheckedChange={(v) => editor.set(path, v)} />
       )
       break
     case 'number':
       control = (
-        <input
+        <Input
           {...common}
           type="number"
           className={inputClass}
@@ -185,7 +185,7 @@ export function ConfigField({
       break
     case 'enum':
       control = (
-        <select
+        <Select
           {...common}
           className={inputClass}
           value={unset ? UNSET : String(value)}
@@ -201,15 +201,15 @@ export function ConfigField({
               {option}
             </option>
           ))}
-        </select>
+        </Select>
       )
       break
     case 'json':
       control = (
-        <textarea
+        <Textarea
           {...common}
           rows={4}
-          className={cn(inputClass, 'h-auto py-2 font-mono text-small')}
+          className={cn(inputClass, 'font-mono text-small')}
           value={draftText ?? JSON.stringify(value ?? null, null, 2)}
           onChange={(e) => {
             const text = e.target.value
@@ -238,7 +238,7 @@ export function ConfigField({
     default:
       control = (
         <div className="flex max-w-xl items-center gap-2">
-          <input
+          <Input
             {...common}
             type={type.secret && !shown ? 'password' : 'text'}
             autoComplete="off"

@@ -2,6 +2,8 @@ import { t } from '@/i18n'
 import '@/i18n/en/webPalette'
 import { comboParts } from '@/components/shortcut-combo'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/web/components/ui/dialog'
+import { Kbd } from '@/web/components/ui/kbd'
+import { SectionHeader } from '@/web/components/ui/section-header'
 import { COMPOSER_BINDINGS, GLOBAL_BINDINGS, NAVIGATION_CHORDS, type Binding } from './bindings'
 
 function Keys({ combo }: { combo: string }) {
@@ -14,12 +16,9 @@ function Keys({ combo }: { combo: string }) {
             <span className="text-small text-text-muted">{t('webPalette.keyThen')}</span>
           ) : null}
           {comboParts(step).map((part, j) => (
-            <kbd
-              key={j}
-              className="min-w-6 rounded border border-border-control bg-surface-0 px-1.5 py-0.5 text-center text-small"
-            >
+            <Kbd key={j} className="min-w-6">
               {part}
-            </kbd>
+            </Kbd>
           ))}
         </span>
       ))}
@@ -30,9 +29,7 @@ function Keys({ combo }: { combo: string }) {
 function Section({ title, bindings }: { title: string; bindings: readonly Binding[] }) {
   return (
     <section aria-label={title}>
-      <h3 className="mb-1 text-small font-semibold tracking-wide text-text-muted uppercase">
-        {title}
-      </h3>
+      <SectionHeader as="h3" size="sm" title={title} className="mb-1" />
       <ul role="list" className="flex flex-col">
         {bindings.map((b) => (
           <li key={b.combo} className="flex items-center justify-between gap-4 py-1">

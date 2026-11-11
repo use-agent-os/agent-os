@@ -15,6 +15,7 @@ export function PagesList({ onNavigate }: { onNavigate?: () => void }) {
           <li key={page.id}>
             <NavLink
               to={page.path}
+              viewTransition
               onClick={onNavigate}
               className={({ isActive }) =>
                 cn(
