@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import {
   ArrowUp,
+  Check,
   ChevronDown,
   FileText,
   Loader2,
@@ -20,6 +21,7 @@ import {
   useRef,
   useState,
   type ClipboardEvent,
+  type ComponentProps,
   type DragEvent,
   type KeyboardEvent,
 } from 'react'
@@ -47,6 +49,7 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuItemIndicator,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -69,6 +72,7 @@ import {
 } from './drafts'
 import { composerEnterAction } from './keys'
 import { enqueueMessage, readQueue, useQueue, writeQueue } from './queue'
+import { useTrayClearance } from './tray-clearance'
 
 const MAX_HEIGHT_PX = 240
 
@@ -143,6 +147,8 @@ export function Composer(props: ComposerProps) {
   const [slashIndex, setSlashIndex] = useState(0)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
+  const wrapper = useRef<HTMLDivElement>(null)
+  useTrayClearance(wrapper)
   const attachments = useAttachments()
   const intentRef = useRef<string | null>(null)
   const next = useNextSuggestion(rpc, sessionKey, running)
@@ -424,6 +430,7 @@ export function Composer(props: ComposerProps) {
 
   return (
     <div
+      ref={wrapper}
       onDragOver={(e) => {
         if (!e.dataTransfer.types.includes('Files')) return
         e.preventDefault()
@@ -486,12 +493,8 @@ export function Composer(props: ComposerProps) {
                 e.preventDefault()
                 void runSlash(cmd)
               }}
-              className={cn(
-                'flex cursor-default gap-3 rounded-control px-2.5 py-1.5',
-                // surface-3 alone is ~1.1:1; the ring marks the active option at 3:1.
-                i === activeSlash &&
-                  'bg-accent-tint outline-1 -outline-offset-1 outline-ring outline-solid',
-              )}
+              // The active option: a soft fill and a slim accent edge (chat.css).
+              className="chat-menu-item relative flex cursor-default gap-3 rounded-control px-2.5 py-1.5"
             >
               <span className="font-mono text-accent">{cmd.cmd}</span>
               <span className="truncate text-text-muted">{cmd.desc}</span>
@@ -658,6 +661,22 @@ export function Composer(props: ComposerProps) {
   )
 }
 
+/** A menu toggle that shows its state: a check on the right of the chosen row. */
+function CheckItem({
+  children,
+  className,
+  ...props
+}: ComponentProps<typeof DropdownMenuCheckboxItem>) {
+  return (
+    <DropdownMenuCheckboxItem {...props} className={cn('chat-menu-item pr-8', className)}>
+      {children}
+      <DropdownMenuItemIndicator className="absolute right-2 inline-flex">
+        <Check className="text-accent!" aria-hidden />
+      </DropdownMenuItemIndicator>
+    </DropdownMenuCheckboxItem>
+  )
+}
+
 function RoutePicker({ sessionKey }: { sessionKey: string }) {
   const rpc = useRpc()
   const pin = useRoutePin(rpc, sessionKey)
@@ -684,21 +703,21 @@ function RoutePicker({ sessionKey }: { sessionKey: string }) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
-        <DropdownMenuCheckboxItem checked={!pin.isPinned} onSelect={() => pin.clear()}>
+        <CheckItem checked={!pin.isPinned} onSelect={() => pin.clear()}>
           {unpinned}
-        </DropdownMenuCheckboxItem>
+        </CheckItem>
         {pin.tiers.length ? (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuLabel>{t('webChat.routeTiers')}</DropdownMenuLabel>
             {pin.tiers.map((tier) => (
-              <DropdownMenuCheckboxItem
+              <CheckItem
                 key={tier.tier}
                 checked={pin.pinned === tier.tier}
                 onSelect={() => pin.pin(tier.tier)}
               >
                 {tier.tier} · {tier.model}
-              </DropdownMenuCheckboxItem>
+              </CheckItem>
             ))}
           </>
         ) : null}
@@ -707,18 +726,20 @@ function RoutePicker({ sessionKey }: { sessionKey: string }) {
             <DropdownMenuSeparator />
             <DropdownMenuLabel>{t('webChat.routeModels')}</DropdownMenuLabel>
             {pin.models.map((model) => (
-              <DropdownMenuCheckboxItem
+              <CheckItem
                 key={model.id}
                 checked={pin.pinnedModel === model.id}
                 onSelect={() => pin.pinModel(model.id)}
               >
                 {model.name}
-              </DropdownMenuCheckboxItem>
+              </CheckItem>
             ))}
           </>
         ) : null}
         {!pin.tiers.length && !pin.models.length ? (
-          <DropdownMenuItem disabled>{t('webChat.routeLoading')}</DropdownMenuItem>
+          <DropdownMenuItem disabled className="chat-menu-item">
+            {t('webChat.routeLoading')}
+          </DropdownMenuItem>
         ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -750,13 +771,10 @@ function CapabilityMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
-        <DropdownMenuCheckboxItem
-          checked={plan.on}
-          onCheckedChange={(v) => void plan.set(Boolean(v))}
-        >
+        <CheckItem checked={plan.on} onCheckedChange={(v) => void plan.set(Boolean(v))}>
           {t('webChat.planMode')}
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuCheckboxItem
+        </CheckItem>
+        <CheckItem
           checked={elevated.bypass}
           disabled={elevated.unavailable}
           onCheckedChange={(v) => void elevated.set(Boolean(v))}
@@ -769,19 +787,13 @@ function CapabilityMenu({
               </span>
             ) : null}
           </span>
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuCheckboxItem
-          checked={router.enabled}
-          onCheckedChange={(v) => void router.set(Boolean(v))}
-        >
+        </CheckItem>
+        <CheckItem checked={router.enabled} onCheckedChange={(v) => void router.set(Boolean(v))}>
           {t('webChat.pilotRouter')}
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuCheckboxItem
-          checked={visualEffects}
-          onCheckedChange={(v) => setVisualEffects(Boolean(v))}
-        >
+        </CheckItem>
+        <CheckItem checked={visualEffects} onCheckedChange={(v) => setVisualEffects(Boolean(v))}>
           {t('webChat.visualEffects')}
-        </DropdownMenuCheckboxItem>
+        </CheckItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )
