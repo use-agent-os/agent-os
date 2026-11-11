@@ -142,7 +142,9 @@ async def _probe_chat(provider: Any, model: str, timeout: float) -> str | None:
     async def _run() -> str | None:
         stream = provider.chat(
             messages=[Message(role="user", content="ping")],
-            config=ChatConfig(max_tokens=1, temperature=0.0),
+            # No sampling knobs: reasoning models (gpt-5.x, o-series) 400 on a
+            # non-default temperature, which would read as a rejected key.
+            config=ChatConfig(max_tokens=1),
         )
         async for event in stream:
             kind = getattr(event, "kind", "")

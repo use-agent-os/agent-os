@@ -108,6 +108,53 @@ describe('ProviderForm · Test key', () => {
     expect(screen.getByTestId('key-probe')).toHaveTextContent('Invalid API key')
   })
 
+  it('tries the key the gateway reads from its environment the moment the form opens', async () => {
+    rpcCall.mockImplementation(async (method: string, params?: { provider?: string }) => {
+      if (method === 'providers.status') {
+        return {
+          providers: [
+            { providerId: params?.provider, apiKeyEnv: 'OPENCAP_API_KEY', apiKeyConfigured: true },
+          ],
+        }
+      }
+      if (method === 'providers.probe') {
+        return { ok: true, models: [{ id: 'gpt-5.6-terra' }], error: null, latencyMs: 90 }
+      }
+      return []
+    })
+    renderForm(openai)
+
+    await waitFor(() =>
+      expect(screen.getByTestId('key-probe')).toHaveAttribute('data-verdict', 'ok'),
+    )
+    const probeCall = rpcCall.mock.calls.find((c) => c[0] === 'providers.probe')
+    expect(probeCall?.[1]).toMatchObject({ providerId: 'openai', apiKeyEnv: 'OPENCAP_API_KEY' })
+    expect(probeCall?.[1].apiKey).toBeUndefined()
+    expect(screen.getByTestId('key-probe-button')).not.toBeDisabled()
+  })
+
+  it('does not call out when the gateway has no key for the provider', async () => {
+    rpcCall.mockImplementation(async (method: string, params?: { provider?: string }) =>
+      method === 'providers.status'
+        ? {
+            providers: [
+              {
+                providerId: params?.provider,
+                apiKeyEnv: 'OPENCAP_API_KEY',
+                apiKeyConfigured: false,
+              },
+            ],
+          }
+        : [],
+    )
+    renderForm(openai)
+    await waitFor(() =>
+      expect(rpcCall.mock.calls.some((c) => c[0] === 'providers.status')).toBe(true),
+    )
+    expect(rpcCall.mock.calls.some((c) => c[0] === 'providers.probe')).toBe(false)
+    expect(screen.getByTestId('key-probe-button')).toBeDisabled()
+  })
+
   it('links to the page where the key is issued when one is known', () => {
     renderForm(openai)
     fireEvent.click(screen.getByRole('button', { name: /Get an API key/ }))

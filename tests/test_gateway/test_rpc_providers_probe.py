@@ -151,3 +151,24 @@ def test_probe_chat_maps_a_timeout_to_an_error(monkeypatch: pytest.MonkeyPatch) 
 
     error = asyncio.run(rpc_tools._probe_chat(_Hanging(), "m", timeout=0.05))
     assert error is not None and "no answer" in error
+
+
+def test_probe_chat_sends_no_sampling_params() -> None:
+    """A key check must not fail on a sampling knob the model rejects.
+
+    OpenAI's reasoning models (gpt-5.6-terra, o-series) 400 on any
+    non-default ``temperature``; a probe that pinned 0.0 reported a valid
+    key as "rejected".
+    """
+    import asyncio
+
+    seen: list[Any] = []
+
+    class _Recording:
+        async def chat(self, messages: Any, config: Any):  # noqa: ANN202
+            seen.append(config)
+            yield DoneEvent(input_tokens=1, output_tokens=1)
+
+    error = asyncio.run(rpc_tools._probe_chat(_Recording(), "m", timeout=1.0))
+    assert error is None
+    assert seen[0].temperature is None

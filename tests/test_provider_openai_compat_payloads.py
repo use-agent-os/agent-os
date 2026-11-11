@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 import httpx
+import pytest
 
 from agentos.engine.types import ThinkingLevel
 from agentos.provider.openai import OpenAIProvider
@@ -1213,6 +1214,55 @@ def test_direct_openai_gpt_5_5_reasoning_uses_max_completion_tokens_without_temp
     assert "max_tokens" not in captured["payload"]
     assert captured["payload"]["reasoning_effort"] == "medium"
     assert "temperature" not in captured["payload"]
+
+
+@pytest.mark.parametrize("model", ["gpt-5.6-terra", "gpt-5", "o3-mini", "o4-mini"])
+def test_direct_openai_reasoning_family_omits_non_default_temperature(
+    monkeypatch: Any, model: str
+) -> None:
+    """These models 400 on a non-default temperature even with thinking off."""
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    provider = OpenAIProvider(
+        api_key="test",
+        model=model,
+        base_url="https://api.openai.com/v1",
+        provider_kind="openai",
+    )
+
+    _collect(provider, ChatConfig(temperature=0.0))
+
+    assert "temperature" not in captured["payload"]
+
+
+def test_direct_openai_reasoning_family_keeps_default_temperature(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    provider = OpenAIProvider(
+        api_key="test",
+        model="gpt-5.6-terra",
+        base_url="https://api.openai.com/v1",
+        provider_kind="openai",
+    )
+
+    _collect(provider, ChatConfig(temperature=1.0))
+
+    assert captured["payload"]["temperature"] == 1.0
+
+
+def test_direct_openai_gpt_4o_still_sends_temperature(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    provider = OpenAIProvider(
+        api_key="test",
+        model="gpt-4o-mini",
+        base_url="https://api.openai.com/v1",
+        provider_kind="openai",
+    )
+
+    _collect(provider, ChatConfig(temperature=0))
+
+    assert captured["payload"]["temperature"] == 0
 
 
 def test_openrouter_still_sends_temperature(monkeypatch: Any) -> None:
