@@ -251,6 +251,12 @@
   --offset-top: 12px !important;
   --mobile-offset-top: 8px !important;
 }
+/* Sonner's close button is 20px: give it more than the 24px minimum target
+   (the toast is scaled slightly while it settles, so 24px measures under). */
+.toast-layer [data-sonner-toast][data-styled] [data-close-button] {
+  width: 28px;
+  height: 28px;
+}
 /* Sonner's own focus marker is a faint grey shadow: use the console ring. */
 [data-sonner-toaster] :is([data-sonner-toast], [data-close-button], [data-button]):focus-visible {
   outline: 2px solid var(--ring) !important;
