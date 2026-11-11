@@ -169,7 +169,7 @@ function ApprovalItem({ item, highlight }: { item: AttentionItem; highlight: str
       </ul>
       <Link
         to="/settings/approvals"
-        className="self-start text-small text-accent underline-offset-2 hover:underline"
+        className="target inline-flex items-center self-start text-small text-accent underline-offset-2 hover:underline"
       >
         {t('webPagesOverview.inboxApprovalSettings')}
       </Link>
@@ -288,9 +288,9 @@ function QuestionItem({ item, answer }: { item: AttentionItem; answer: Gate }) {
               key={key}
               to={sessionKeyToPath(key)}
               title={t('webPagesOverview.inboxOpenSession', { session: key })}
-              className="max-w-full truncate font-mono text-small text-accent underline-offset-2 hover:underline"
+              className="target inline-flex max-w-full items-center font-mono text-small text-accent underline-offset-2 hover:underline"
             >
-              {key}
+              <span className="truncate">{key}</span>
             </Link>
           ))}
         </span>
@@ -399,7 +399,7 @@ function IssueItem({ item, issue }: { item: AttentionItem; issue: RuntimeIssue }
         {issue.fixSteps.length > 0 ? (
           <Link
             to="/settings/health"
-            className="text-small text-accent underline-offset-2 hover:underline"
+            className="target inline-flex items-center text-small text-accent underline-offset-2 hover:underline"
           >
             {t('webPagesOverview.inboxOpenHealth')}
           </Link>
@@ -421,17 +421,22 @@ function Stat({
   tone: OverviewTone
 }) {
   const shown = useCountUp(value)
+  // A dl may only hold dt/dd (optionally grouped in one div), so the card is
+  // that div and the tile sits inside the dt, placed beside both lines.
   return (
-    <Card padding="sm" className="flex min-w-0 items-center gap-3">
-      <IconTile tone={value > 0 ? tone : 'neutral'} className="max-sm:hidden">
-        {icon}
-      </IconTile>
-      <div className="min-w-0">
-        <dt className="truncate text-label text-text-muted">{label}</dt>
-        <dd className="text-[22px] leading-tight font-semibold tracking-[-0.015em] tabular-nums">
-          {formatNumber(shown)}
-        </dd>
-      </div>
+    <Card padding="sm" className="relative min-w-0 sm:pl-14">
+      <dt className="truncate text-label text-text-muted">
+        <IconTile
+          tone={value > 0 ? tone : 'neutral'}
+          className="absolute top-1/2 left-3 -translate-y-1/2 max-sm:hidden"
+        >
+          {icon}
+        </IconTile>
+        {label}
+      </dt>
+      <dd className="text-[22px] leading-tight font-semibold tracking-[-0.015em] tabular-nums">
+        {formatNumber(shown)}
+      </dd>
     </Card>
   )
 }
