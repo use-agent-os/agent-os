@@ -24,14 +24,15 @@ function findItem(state: TranscriptState, id: string): Item | undefined {
 function TabBody({ item }: { item: Item | undefined }) {
   if (!item) return <p className="text-text-muted">{t('webChat.panelEmpty')}</p>
   if (item.kind === 'toolCall') {
-    return <pre className="font-mono text-small whitespace-pre-wrap">{item.result ?? ''}</pre>
+    return <pre className="chat-well">{item.result ?? ''}</pre>
   }
   if (item.kind === 'thinkingRef') {
-    return <div className="whitespace-pre-wrap">{item.text ?? ''}</div>
+    return <div className="whitespace-pre-wrap text-text-muted">{item.text ?? ''}</div>
   }
   if (item.kind === 'artifact' || item.kind === 'card') {
     const url = artifactDownloadUrl(item.artifact)
-    if (isImageArtifact(item.artifact)) return <img src={url} alt="" className="max-w-full" />
+    if (isImageArtifact(item.artifact))
+      return <img src={url} alt="" className="max-w-full rounded-card border border-border" />
     const mime = artifactMime(item.artifact)
     if (
       mime === 'text/markdown' ||
@@ -44,7 +45,7 @@ function TabBody({ item }: { item: Item | undefined }) {
           title={String(item.artifact.name ?? '')}
           src={url}
           sandbox=""
-          className="h-full min-h-[60dvh] w-full rounded border border-border bg-white"
+          className="h-full min-h-[60dvh] w-full rounded-card border border-border bg-white shadow-card"
         />
       )
     }
@@ -98,7 +99,7 @@ export function SidePanel({ transcript, phone }: { transcript: TranscriptState; 
       onKeyDown={onKeyDown}
       style={phone ? undefined : { width }}
       className={cn(
-        'flex flex-col border-l border-border bg-surface-1',
+        'chat-panel-in chat-side flex flex-col border-l border-border bg-surface-1',
         phone ? 'fixed inset-0 z-[var(--z-drawer)]' : 'relative h-full shrink-0',
       )}
     >
@@ -118,24 +119,30 @@ export function SidePanel({ transcript, phone }: { transcript: TranscriptState; 
             if (e.key === 'ArrowLeft') setWidth(width + 16)
             else if (e.key === 'ArrowRight') setWidth(width - 16)
           }}
-          className="absolute inset-y-0 -left-1 w-2 cursor-col-resize hover:bg-accent/40"
+          className="chat-resize"
         />
       ) : null}
       <div
         role="tablist"
         aria-label={t('webChat.panelTitle')}
-        className="flex items-center gap-1 overflow-x-auto border-b border-border px-2 py-1"
+        className="flex min-h-12 items-center gap-1 overflow-x-auto border-b border-border px-2 py-1.5"
       >
         {tabs.map((tab) => (
-          <div key={tab.id} className="flex items-center">
+          <div
+            key={tab.id}
+            className={cn(
+              'flex items-center rounded-control transition-colors duration-[var(--duration-fast)]',
+              tab.id === active.id ? 'bg-surface-3 shadow-highlight' : 'hover:bg-surface-2',
+            )}
+          >
             <button
               type="button"
               role="tab"
               aria-selected={tab.id === active.id}
               onClick={() => setActive(tab.id)}
               className={cn(
-                'target max-w-48 truncate rounded px-2 text-ui',
-                tab.id === active.id ? 'bg-surface-3' : 'text-text-muted',
+                'target max-w-48 truncate rounded-control py-1 pr-1 pl-2.5 text-ui',
+                tab.id === active.id ? 'font-medium text-text' : 'text-text-muted',
               )}
             >
               {tab.title}
@@ -144,21 +151,27 @@ export function SidePanel({ transcript, phone }: { transcript: TranscriptState; 
               type="button"
               aria-label={t('webChat.panelCloseTab', { title: tab.title })}
               onClick={() => closeTab(tab.id)}
-              className="target inline-flex items-center justify-center rounded text-text-muted hover:text-text"
+              className="target mr-0.5 inline-flex items-center justify-center rounded-md text-text-muted hover:text-text"
             >
               <X className="size-3.5" aria-hidden />
             </button>
           </div>
         ))}
         <span className="flex-1" />
-        <Button size="icon-sm" variant="ghost" aria-label={t('webChat.panelClose')} onClick={close}>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label={t('webChat.panelClose')}
+          onClick={close}
+          className="text-text-muted hover:text-text"
+        >
           <X />
         </Button>
       </div>
       <div
         role="tabpanel"
         tabIndex={0}
-        className="scroll-contained flex-1 p-3 focus-visible:-outline-offset-2"
+        className="scroll-contained flex-1 p-4 focus-visible:-outline-offset-2"
       >
         <TabBody item={findItem(transcript, active.id)} />
       </div>

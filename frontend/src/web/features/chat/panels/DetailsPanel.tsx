@@ -21,8 +21,8 @@ import type { TranscriptState } from '../model/types'
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-0.5 py-1.5">
-      <dt className="text-small text-text-muted">{label}</dt>
+    <div className="flex flex-col gap-1 py-2.5">
+      <dt className="text-label text-text-muted">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
   )
@@ -66,18 +66,19 @@ export function DetailsPanel({
       aria-label={t('webChat.detailsTitle')}
       className="flex h-full w-full flex-col bg-surface-1"
     >
-      <header className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <h2 className="flex-1 font-semibold">{t('webChat.detailsTitle')}</h2>
+      <header className="flex min-h-14 items-center gap-2 border-b border-border px-4 py-2">
+        <h2 className="flex-1 text-section">{t('webChat.detailsTitle')}</h2>
         <Button
           size="icon-sm"
           variant="ghost"
           aria-label={t('webChat.detailsClose')}
           onClick={onClose}
+          className="text-text-muted hover:text-text"
         >
           <X />
         </Button>
       </header>
-      <dl className="scroll-contained flex-1 divide-y divide-border px-3">
+      <dl className="scroll-contained flex-1 divide-y divide-border px-4">
         <Row label={t('webChat.detailsAgent')}>{row ? sessionAgent(row) : '—'}</Row>
         <Row label={t('webChat.detailsRoute')}>
           {route && route.kind === 'routerDecision'

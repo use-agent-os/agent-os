@@ -27,6 +27,7 @@ import {
   isImageArtifact,
 } from '@/views/chat/transcript/artifacts'
 import { modelDisplayName } from '@/views/chat/transcript/routerFx'
+import { cn } from '@/lib/utils'
 import { Button, buttonVariants } from '@/web/components/ui/button'
 import { Markdown } from '../markdown'
 import type { Item } from '../model/types'
@@ -37,23 +38,54 @@ const TradingCard = lazy(async () => ({ default: (await import('./TradingCards')
 
 const TRADING = new Set(['dca', 'lp', 'markets', 'trigger'])
 
-function CardShell({
+/** The surface every transcript card shares: a raised card, icon in a tile. */
+export const CARD = 'rounded-card border border-border bg-surface-1 p-4 shadow-card'
+export const CARD_PLACEHOLDER =
+  'skeleton-shimmer h-24 rounded-card border border-border bg-surface-1'
+
+export function CardHeader({
   icon,
   title,
+  tone,
   children,
 }: {
   icon: React.ReactNode
   title: React.ReactNode
+  /** `accent`: the card asks for a decision (plan, question). */
+  tone?: 'accent'
   children?: React.ReactNode
 }) {
   return (
-    <section className="rounded-lg border border-border bg-surface-1 p-3 text-[length:var(--text-prose)]">
-      <header className="mb-2 flex items-center gap-2 text-ui font-medium">
-        <span className="text-text-muted [&_svg]:size-4" aria-hidden>
-          {icon}
-        </span>
-        <h3 className="min-w-0 flex-1 truncate">{title}</h3>
-      </header>
+    <header className="mb-3 flex items-center gap-2.5 text-ui font-semibold">
+      <span
+        className={cn(
+          'chat-tile',
+          tone === 'accent' && 'border-accent/30 bg-accent-tint text-accent',
+        )}
+        aria-hidden
+      >
+        {icon}
+      </span>
+      <h3 className="min-w-0 flex-1 truncate">{title}</h3>
+      {children}
+    </header>
+  )
+}
+
+function CardShell({
+  icon,
+  title,
+  tone,
+  children,
+}: {
+  icon: React.ReactNode
+  title: React.ReactNode
+  tone?: 'accent'
+  children?: React.ReactNode
+}) {
+  return (
+    <section className={cn(CARD, 'text-[length:var(--text-prose)]')}>
+      <CardHeader icon={icon} title={title} tone={tone} />
       {children}
     </section>
   )
@@ -63,11 +95,11 @@ export function PlanCard({ plan, locked }: { plan: string; locked: boolean }) {
   const { approvePlan } = useChatActions()
   const [done, setDone] = useState(false)
   return (
-    <CardShell icon={<ListChecks />} title={t('webChat.planTitle')}>
+    <CardShell icon={<ListChecks />} title={t('webChat.planTitle')} tone="accent">
       <Markdown text={plan} />
-      <div className="mt-3">
+      <div className="mt-4 border-t border-border pt-3">
         {done || locked ? (
-          <span className="inline-flex items-center gap-1 text-small text-text-muted">
+          <span className="anim-fade-in inline-flex items-center gap-1.5 text-small text-text-muted">
             <CheckCircle2 className="size-4 text-ok" aria-hidden data-status-icon />
             {t('webChat.planApproved')}
           </span>
@@ -117,18 +149,15 @@ export function AskCard({ payload, answered }: { payload: unknown; answered: boo
   }
 
   return (
-    <CardShell icon={<HelpCircle />} title={t('webChat.askTitle')}>
+    <CardShell icon={<HelpCircle />} title={t('webChat.askTitle')} tone="accent">
       <div className="flex flex-col gap-3">
         {questions.map((q, qi) => (
           <fieldset key={qi} disabled={locked} className="flex flex-col gap-1.5">
-            <legend className="mb-1 font-medium">{q.question}</legend>
+            <legend className="mb-1.5 font-medium">{q.question}</legend>
             {q.options.map((opt) => {
               const checked = picks[qi]?.includes(opt.label) ?? false
               return (
-                <label
-                  key={opt.label}
-                  className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1 hover:bg-surface-2"
-                >
+                <label key={opt.label} className="chat-option">
                   <input
                     type={q.multiSelect ? 'checkbox' : 'radio'}
                     name={`ask-${qi}`}
@@ -148,7 +177,7 @@ export function AskCard({ payload, answered }: { payload: unknown; answered: boo
           </fieldset>
         ))}
         {locked ? (
-          <span className="inline-flex items-center gap-1 text-small text-text-muted">
+          <span className="anim-fade-in inline-flex items-center gap-1.5 text-small text-text-muted">
             <CheckCircle2 className="size-4 text-ok" aria-hidden data-status-icon />
             {t('webChat.askAnswered')}
           </span>
@@ -176,11 +205,18 @@ export function ArtifactChip({ item }: { item: Extract<Item, { kind: 'artifact' 
   const kind = artifactKind(artifact)
   const url = artifactDownloadUrl(artifact)
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border bg-surface-1 px-3 py-2">
+    <div className={cn(CARD, 'lift flex items-center gap-3 p-2.5 pr-2')}>
       {isImageArtifact(artifact) && url ? (
-        <img src={url} alt="" className="size-10 rounded object-cover" data-decorative />
+        <img
+          src={url}
+          alt=""
+          className="size-11 rounded-lg border border-border object-cover"
+          data-decorative
+        />
       ) : (
-        <FileText className="size-5 text-text-muted" aria-hidden />
+        <span className="chat-tile size-11 rounded-lg" aria-hidden>
+          <FileText />
+        </span>
       )}
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium">{name}</p>
@@ -257,11 +293,7 @@ export function CardItem({ item, answered }: { item: Item; answered: boolean }) 
       return <ArtifactChip item={item} />
     case 'card':
       return (
-        <Suspense
-          fallback={
-            <div className="h-24 rounded-lg border border-border bg-surface-1" aria-hidden />
-          }
-        >
+        <Suspense fallback={<div className={CARD_PLACEHOLDER} aria-hidden />}>
           {TRADING.has(item.category) ? (
             <TradingCard category={item.category} artifact={item.artifact} />
           ) : (
@@ -274,12 +306,12 @@ export function CardItem({ item, answered }: { item: Item; answered: boolean }) 
         <div
           role="separator"
           aria-label={t('webChat.compacted')}
-          className="flex items-center gap-3 py-2 text-small text-text-muted"
+          className="flex items-center gap-3 py-2 text-label text-text-muted"
         >
-          <span className="h-px flex-1 bg-border" />
+          <span className="chat-rule" />
           <Scissors className="size-3.5" aria-hidden />
           {t('webChat.compacted')}
-          <span className="h-px flex-1 bg-border" />
+          <span className="chat-rule -scale-x-100" />
         </div>
       )
     case 'routerDecision':
@@ -287,7 +319,11 @@ export function CardItem({ item, answered }: { item: Item; answered: boolean }) 
         <p className="flex items-center gap-1.5 text-small text-text-muted">
           <Route className="size-3.5" aria-hidden />
           {t('webChat.routerDecision', { model: modelDisplayName(item.model) })}
-          {item.tier ? <span className="rounded bg-surface-3 px-1">{item.tier}</span> : null}
+          {item.tier ? (
+            <span className="rounded-md border border-border bg-surface-2 px-1.5 font-mono text-small">
+              {item.tier}
+            </span>
+          ) : null}
         </p>
       )
     case 'steering':
@@ -337,7 +373,7 @@ export function CardItem({ item, answered }: { item: Item; answered: boolean }) 
       return (
         <pre
           data-role="note"
-          className="rounded-lg border border-border bg-surface-1 px-3 py-2 font-sans text-small whitespace-pre-wrap text-text-muted"
+          className="rounded-card border border-dashed border-border-strong bg-surface-1/60 px-3.5 py-2.5 font-sans text-small whitespace-pre-wrap text-text-muted"
         >
           {item.text}
         </pre>

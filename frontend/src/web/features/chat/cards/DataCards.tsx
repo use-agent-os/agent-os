@@ -26,6 +26,7 @@ import {
   type FlowRunCard,
 } from '@/views/chat/transcript/flowRun'
 import { ErrorState } from '@/web/components/ui/states'
+import { CARD, CARD_PLACEHOLDER, CardHeader } from './CoreCards'
 import { useArtifactJson } from './payload'
 
 function Shell({
@@ -38,13 +39,8 @@ function Shell({
   children: React.ReactNode
 }) {
   return (
-    <section className="rounded-lg border border-border bg-surface-1 p-3">
-      <header className="mb-2 flex items-center gap-2 text-ui font-medium">
-        <span className="text-text-muted [&_svg]:size-4" aria-hidden>
-          {icon}
-        </span>
-        <h3 className="min-w-0 flex-1 truncate">{title}</h3>
-      </header>
+    <section className={CARD}>
+      <CardHeader icon={icon} title={title} />
       {children}
     </section>
   )
@@ -172,10 +168,14 @@ function FlowRunView({ initial, name }: { initial: FlowRunCard; name: string }) 
                   key={img.sha256}
                   src={thumbs[img.sha256]}
                   alt={img.name ?? ''}
-                  className="size-24 rounded object-cover"
+                  className="anim-fade-in size-24 rounded-lg border border-border object-cover"
                 />
               ) : (
-                <div key={img.sha256} className="size-24 rounded bg-surface-3" aria-hidden />
+                <div
+                  key={img.sha256}
+                  className="skeleton-shimmer size-24 rounded-lg bg-surface-3"
+                  aria-hidden
+                />
               ),
             )}
         </div>
@@ -192,13 +192,7 @@ export function DataCard({ category, artifact }: { category: string; artifact: A
   const query = useArtifactJson(artifact)
   const name = String(artifact.name ?? '')
   if (query.isPending) {
-    return (
-      <div
-        className="h-24 rounded-lg border border-border bg-surface-1"
-        role="status"
-        aria-label={t('webChat.cardLoading')}
-      />
-    )
+    return <div className={CARD_PLACEHOLDER} role="status" aria-label={t('webChat.cardLoading')} />
   }
   if (query.isError) {
     return (
@@ -229,11 +223,11 @@ export function DataCard({ category, artifact }: { category: string; artifact: A
       <Shell icon={<LayoutGrid />} title={payload.title || name}>
         <ul role="list" className="grid gap-2 sm:grid-cols-2">
           {payload.cards.map((card, i) => (
-            <li key={i} className="rounded-md border border-border p-2">
+            <li key={i} className="rounded-control border border-border bg-surface-2/50 p-3">
               <p className="font-medium">{card.title}</p>
               {card.subtitle ? <p className="text-small text-text-muted">{card.subtitle}</p> : null}
               {card.badge ? <span className="text-small text-text-muted">{card.badge}</span> : null}
-              <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 text-small">
+              <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-small">
                 {card.fields.map((f, j) => (
                   <div key={j} className="contents">
                     <dt className="text-text-muted">{f.label}</dt>
