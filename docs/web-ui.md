@@ -232,10 +232,10 @@ Chat is the center of the console; everything else is a page in the rail's
 | Page | Route | Use it for |
 | --- | --- | --- |
 | Chat | `/chat/…` | Run and resume sessions, follow tool activity, read artifacts and cards, compact. |
-| Home | `/home` | Readiness, provider and route, uptime, sessions, usage (all time, plus how many sessions were active today), the next automation run, and a live event feed. Each figure loads on its own and links to its detail. |
+| Home | `/home` | Readiness (when not ready, the findings that need attention), provider and route, uptime, sessions, usage (all time, plus how many sessions were active today), the next automation run, and a live event feed. Each figure loads on its own and links to its detail. |
 | Sessions | `/sessions` | Search and filter every session, stat tiles with an open/completed/failed/aborted breakdown and how many are executing now, a lifecycle chip per row, inline rename, a row menu with Open chat and Open in new tab, bulk delete, move to a project, a new-session dialog that can create an agent, orphan flags. |
 | Projects | `/projects` | Group sessions, edit each project's shared knowledge (injected into every member session), and start a new chat inside a project at once, under the project's agent. |
-| Usage | `/usage` | The sessions active in a range with their token and estimated-cost totals, the top sessions charted, a rollup by model, CSV export. |
+| Usage | `/usage` | The sessions active in a range with their token and estimated-cost totals, the top sessions charted, a rollup by model, CSV export. The sessions table fits its card: a narrower one drops the cache columns, a phone-width one shows each session as a card of labelled values. |
 | Automations | `/automations` | Scheduled jobs and their run health; create, edit, run now, pause, delete, run history. |
 | Inbox | `/inbox` | Everything waiting on you: approvals, agent questions and runtime issues, answered in place. |
 
@@ -541,7 +541,8 @@ and **Overwrite** reapplies your edits on top of it; when a refetch shows the
 configuration moved while edits are unsaved, that choice is shown straight
 away. A validation error is shown at the field it names and every edit stays in
 place. While the gateway reports a pending restart (`config.snapshot`'s
-`pendingRestart` / `restartReasons`), a notice names the reasons and offers
+`pendingRestart` / `restartReasons`), a notice docked at the bottom of the
+section (where the save bar was, so the page does not move) names the reasons and offers
 **Restart gateway** or **Later**; it appears for restarts caused by any client
 and survives a reload, and **Later** hides it until another change needs a
 restart. A one-time secret (a provider, search, media or Jev key) is cleared

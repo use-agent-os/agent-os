@@ -17,6 +17,9 @@ export const webPagesOverview = defineNamespace('webPagesOverview', {
   homeReadinessHint: 'From the doctor report',
   homeReadinessLink: 'Details: Health',
   homeReadinessFix: 'Review and fix',
+  homeReadinessFindings: 'What needs attention',
+  homeReadinessMore_one: '{count} more finding',
+  homeReadinessMore_other: '{count} more findings',
   homeProvider: 'Provider and route',
   homeProviderLink: 'Details: Models settings',
   homeProviderNone: 'Not configured',
@@ -68,6 +71,10 @@ export const webPagesOverview = defineNamespace('webPagesOverview', {
   usageRangeDays: 'Last {days} days',
   usageSpend: 'Spend',
   usageNoCostSource: 'No cost source reported',
+  // One part of the Spend card's hint per cost source, e.g. "Estimated for 3
+  // sessions"; {label} is the source badge's label.
+  usageSpendSource_one: '{label} for {count} session',
+  usageSpendSource_other: '{label} for {count} sessions',
   usageTokensTitle: 'Tokens',
   usageInput: 'Input',
   usageOutput: 'Output',

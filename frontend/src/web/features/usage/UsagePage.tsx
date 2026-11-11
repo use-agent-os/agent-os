@@ -35,7 +35,6 @@ import {
   sessionExpandRows,
   sessionTimestamp,
   sortSessions,
-  sourceCompositionHint,
   usageMetrics,
   visibleSessions,
   type ChartMode,
@@ -57,7 +56,7 @@ import {
   StaleBadge,
 } from '@/web/components/ui/states'
 import { useCountUp } from '@/web/components/ui/use-count-up'
-import { IconTile, Meter } from '@/web/features/home/overview-ui'
+import { IconTile, Meter, PAGE_CLASS, STAT_CARD } from '@/web/features/home/overview-ui'
 import { useDocumentVisible } from '@/web/shell/session-data'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
@@ -155,6 +154,24 @@ const SOURCE_TONE = {
   unavailable: 'danger',
 } as const
 
+/**
+ * Where the Spend figure's cost comes from, as a sentence per source:
+ * "Estimated for 3 sessions · Actual for 1 session". Sessions with no cost
+ * source recorded are left out; null when no session has one.
+ */
+function spendSourceHint(rows: UsageRow[]): string | null {
+  const counts = new Map<string, number>()
+  for (const row of rows) {
+    const badge = costSourceBadge(row as Record<string, unknown>)
+    if (badge.cls === 'none' && !badge.ephemeral) continue
+    counts.set(badge.label, (counts.get(badge.label) ?? 0) + 1)
+  }
+  if (counts.size === 0) return null
+  return [...counts]
+    .map(([label, count]) => tPlural('webPagesOverview.usageSpendSource', count, { label }))
+    .join(' · ')
+}
+
 function SourceBadge({ badge }: { badge: CostSourceBadge }) {
   const tone = badge.ephemeral
     ? 'neutral'
@@ -212,7 +229,26 @@ function ModelBreakdown({ row }: { row: UsageRow }) {
   )
 }
 
-const CELL = 'px-3 py-2.5'
+// Cells carry data-col (the layout hooks in overview.css) and, for the
+// narrow card layout, data-label (the column name shown above the value).
+const CELL = 'px-2 py-2.5 first:pl-4 last:pr-4'
+
+const COL_ID: Record<Column['key'], string> = {
+  session: 'session',
+  updated_at: 'updated',
+  input_tokens: 'input',
+  output_tokens: 'output',
+  cache_read_tokens: 'cache',
+  cache_write_tokens: 'cache',
+  cost_usd: 'cost',
+  cost_source: 'source',
+  model: 'model',
+}
+
+/** The layout hooks of one cell (see `.ov-table` in overview.css). */
+function cellProps(key: Column['key']) {
+  return { 'data-col': COL_ID[key], 'data-label': columnLabel(key) }
+}
 
 function SessionsTable({ rows }: { rows: UsageRow[] }) {
   const [sortCol, setSortCol] = useState<SortColumn>('updated_at')
@@ -236,12 +272,14 @@ function SessionsTable({ rows }: { rows: UsageRow[] }) {
     })
 
   return (
-    <Card variant="plain" padding="none" className="overflow-hidden shadow-card">
-      {/* Scrolls on its own, so the header can stick while the rows move. */}
+    <Card variant="plain" padding="none" className="ov-table-wrap overflow-hidden shadow-card">
+      {/* Scrolls on its own, so the header can stick while the rows move.
+          The columns fit the card at desktop widths; a narrower card drops
+          the cache columns, and a phone-width one turns rows into cards. */}
       <div className="scroll-contained max-h-[36rem] overflow-auto">
-        <table className="w-full min-w-[52rem] text-left">
+        <table className="ov-table">
           <caption className="sr-only">{t('webPagesOverview.usageTable')}</caption>
-          <thead className="sticky top-0 z-10 bg-surface-2 text-small text-text-muted shadow-[inset_0_-1px_0_var(--border)]">
+          <thead className="text-small text-text-muted">
             <tr>
               {COLUMNS.map((col) => {
                 const active = col.key === sortCol
@@ -249,10 +287,15 @@ function SessionsTable({ rows }: { rows: UsageRow[] }) {
                   <th
                     key={col.key}
                     scope="col"
+                    data-col={COL_ID[col.key]}
+                    data-sortable={col.sortable || undefined}
                     aria-sort={
                       col.sortable && active ? (sortAsc ? 'ascending' : 'descending') : undefined
                     }
-                    className={cn('px-3 py-2 font-medium', col.numeric && 'text-right')}
+                    className={cn(
+                      'px-2 py-2 font-medium whitespace-nowrap first:pl-4 last:pr-4',
+                      col.numeric && 'text-right',
+                    )}
                   >
                     {col.sortable ? (
                       <button
@@ -298,51 +341,70 @@ function SessionsTable({ rows }: { rows: UsageRow[] }) {
                       open && 'bg-surface-2',
                     )}
                   >
-                    <td className={cn(CELL, 'max-w-44')}>
+                    <td className={CELL} {...cellProps('session')}>
                       {key ? (
                         <Link
                           to={sessionKeyToPath(key)}
                           title={t('webPagesOverview.usageOpenSession', { session: key })}
-                          className="block truncate font-mono text-small text-accent underline-offset-2 hover:underline"
+                          className="target flex items-center font-mono text-small text-accent underline-offset-2 hover:underline"
                         >
-                          {key}
+                          <span className="truncate">{key}</span>
                         </Link>
                       ) : (
                         '—'
                       )}
                     </td>
-                    <td className={cn(CELL, 'whitespace-nowrap text-text-muted')}>
+                    <td
+                      className={cn(CELL, 'whitespace-nowrap text-text-muted')}
+                      {...cellProps('updated_at')}
+                    >
                       {ts != null ? formatRelTime(ts) : '—'}
                     </td>
-                    <td className={cn(CELL, 'text-right tabular-nums')}>
+                    <td
+                      className={cn(CELL, 'text-right tabular-nums')}
+                      {...cellProps('input_tokens')}
+                    >
                       {rowNumber(row, 'input_tokens', 'inputTokens')}
                     </td>
-                    <td className={cn(CELL, 'text-right tabular-nums')}>
+                    <td
+                      className={cn(CELL, 'text-right tabular-nums')}
+                      {...cellProps('output_tokens')}
+                    >
                       {rowNumber(row, 'output_tokens', 'outputTokens')}
                     </td>
-                    <td className={cn(CELL, 'text-right text-text-muted tabular-nums')}>
+                    <td
+                      className={cn(CELL, 'text-right text-text-muted tabular-nums')}
+                      {...cellProps('cache_read_tokens')}
+                    >
                       {rowNumber(row, 'cache_read_tokens', 'cacheReadTokens')}
                     </td>
-                    <td className={cn(CELL, 'text-right text-text-muted tabular-nums')}>
+                    <td
+                      className={cn(CELL, 'text-right text-text-muted tabular-nums')}
+                      {...cellProps('cache_write_tokens')}
+                    >
                       {rowNumber(row, 'cache_write_tokens', 'cacheWriteTokens')}
                     </td>
-                    <td className={cn(CELL, 'text-right font-medium tabular-nums')}>
+                    <td
+                      className={cn(CELL, 'text-right font-medium tabular-nums')}
+                      {...cellProps('cost_usd')}
+                    >
                       {formatCost(
                         Number(rowVal(row as Record<string, unknown>, 'cost_usd', 'costUsd') ?? 0),
                       )}
                     </td>
-                    <td className={CELL}>
+                    <td className={CELL} {...cellProps('cost_source')}>
                       <SourceBadge badge={costSourceBadge(row as Record<string, unknown>)} />
                     </td>
-                    <td className={CELL}>
+                    <td className={CELL} {...cellProps('model')}>
                       {canExpand ? (
                         <button
                           type="button"
                           aria-expanded={open}
+                          title={modelDisplayLabel(row)}
                           onClick={() => toggle(key)}
-                          className="press target -mx-1.5 inline-flex items-center gap-1 rounded-control px-1.5 text-small hover:bg-surface-3"
+                          className="press target -mx-1.5 inline-flex max-w-full items-center gap-1 rounded-control px-1.5 text-small hover:bg-surface-3"
                         >
-                          {modelDisplayLabel(row)}
+                          <span className="truncate">{modelDisplayLabel(row)}</span>
                           <ChevronDown
                             className={cn(
                               'size-3.5 text-text-muted transition-transform duration-[var(--duration-base)] ease-[var(--ease-out)]',
@@ -352,12 +414,17 @@ function SessionsTable({ rows }: { rows: UsageRow[] }) {
                           />
                         </button>
                       ) : (
-                        <span className="font-mono text-small">{modelDisplayLabel(row)}</span>
+                        <span
+                          title={modelDisplayLabel(row)}
+                          className="block truncate font-mono text-small"
+                        >
+                          {modelDisplayLabel(row)}
+                        </span>
                       )}
                     </td>
                   </tr>
                   {canExpand && open ? (
-                    <tr>
+                    <tr data-breakdown>
                       <td colSpan={COLUMNS.length} className="p-0">
                         <div className="anim-enter">
                           <ModelBreakdown row={row} />
@@ -526,12 +593,12 @@ function ModelGrid({ rows }: { rows: UsageRow[] }) {
 
 // The tokens card is wider: it carries the input/output/cache breakdown.
 const STAT_GRID =
-  'grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)_minmax(0,1fr)_minmax(0,1fr)]'
+  'grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)]'
 
 function UsageBody({ all, range }: { all: UsageRow[]; range: UsageRange }) {
   const visible = useMemo(() => visibleSessions(all, range), [all, range])
   const metrics = useMemo(() => usageMetrics(visible), [visible])
-  const composition = useMemo(() => sourceCompositionHint(visible), [visible])
+  const composition = useMemo(() => spendSourceHint(visible), [visible])
   const hidden = rangeHiddenHint(all, range)
   const ioTotal = metrics.input + metrics.output
 
@@ -539,6 +606,7 @@ function UsageBody({ all, range }: { all: UsageRow[]; range: UsageRange }) {
     <div className="flex flex-col gap-6">
       <div className={cn('anim-stagger', STAT_GRID)}>
         <StatCard
+          className={STAT_CARD}
           label={t('webPagesOverview.usageSpend')}
           icon={
             <IconTile tone="accent">
@@ -550,6 +618,7 @@ function UsageBody({ all, range }: { all: UsageRow[]; range: UsageRange }) {
           hint={composition || t('webPagesOverview.usageNoCostSource')}
         />
         <StatCard
+          className={STAT_CARD}
           label={t('webPagesOverview.usageTokensTitle')}
           icon={
             <IconTile>
@@ -566,7 +635,7 @@ function UsageBody({ all, range }: { all: UsageRow[]; range: UsageRange }) {
               { pct: ioTotal ? (metrics.output / ioTotal) * 100 : 0, series: 'output' },
             ]}
           />
-          <dl className="mt-1 grid grid-cols-2 gap-x-5 gap-y-0.5 text-small">
+          <dl className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 text-small">
             {(
               [
                 ['input', t('webPagesOverview.usageInput'), metrics.input],
@@ -590,6 +659,7 @@ function UsageBody({ all, range }: { all: UsageRow[]; range: UsageRange }) {
           </dl>
         </StatCard>
         <StatCard
+          className={STAT_CARD}
           label={t('webPagesOverview.usageSessions')}
           icon={
             <IconTile>
@@ -601,6 +671,7 @@ function UsageBody({ all, range }: { all: UsageRow[]; range: UsageRange }) {
           hint={t('webPagesOverview.usageSessionsHint')}
         />
         <StatCard
+          className={STAT_CARD}
           label={t('webPagesOverview.usageAverage')}
           icon={
             <IconTile>
@@ -755,7 +826,7 @@ export function UsagePage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 md:p-8">
+    <div className={PAGE_CLASS}>
       <PageHeader
         title={t('webPagesOverview.usageTitle')}
         badge={connection !== 'connected' && all ? <StaleBadge /> : null}
