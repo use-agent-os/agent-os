@@ -84,8 +84,14 @@ function StatusPills({ status }: { status: LogsStatus | null | undefined }) {
 function LineRow({ line, search }: { line: LogLine; search: string }) {
   const ts = sliceTs(line.ts)
   return (
-    <div className="set-log-line max-sm:grid-cols-[auto_minmax(0,1fr)]">
-      <span className="text-text-muted tabular-nums max-sm:hidden">{ts}</span>
+    <div
+      className={cn(
+        'set-log-line',
+        !ts && 'grid-cols-[auto_minmax(0,1fr)]',
+        'max-sm:grid-cols-[auto_minmax(0,1fr)]',
+      )}
+    >
+      {ts ? <span className="text-text-muted tabular-nums max-sm:hidden">{ts}</span> : null}
       <span className="set-log-level" data-level={line.level}>
         {line.level}
       </span>

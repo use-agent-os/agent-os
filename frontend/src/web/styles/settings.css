@@ -119,6 +119,11 @@
     box-shadow: var(--shadow-card);
     padding: 1rem 1.25rem;
   }
+  /* An EmptyState drawn as a card fills the column instead of its 28rem. */
+  .set-card[data-slot='empty-state'] {
+    max-width: none;
+    width: 100%;
+  }
   .set-card-title {
     font-size: var(--text-section);
     line-height: var(--text-section--line-height);
