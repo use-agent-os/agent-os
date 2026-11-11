@@ -166,3 +166,12 @@ describe('Badge, StatusDot, Kbd, SectionHeader', () => {
     expect(screen.getByRole('button', { name: 'Add' })).toBeInTheDocument()
   })
 })
+
+describe('cn', () => {
+  it('keeps a named type size beside a text colour', async () => {
+    const { cn } = await import('@/lib/utils')
+    expect(cn('text-stat', 'text-danger')).toBe('text-stat text-danger')
+    expect(cn('text-ui', 'text-text-muted')).toBe('text-ui text-text-muted')
+    expect(cn('text-small', 'text-label')).toBe('text-label')
+  })
+})
