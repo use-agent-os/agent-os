@@ -1,17 +1,26 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
-  ArrowDown,
   ArrowUp,
+  BellRing,
   CalendarClock,
+  CheckCircle2,
+  ChevronRight,
+  CircleAlert,
   Copy,
   History,
   Loader2,
   Pause,
+  PauseCircle,
   Pencil,
   Play,
+  PlayCircle,
   Plus,
   Search,
+  SearchX,
+  ShieldAlert,
+  Sparkles,
+  Timer,
   Trash2,
   Zap,
 } from 'lucide-react'
@@ -61,9 +70,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/web/components/ui/alert-dialog'
+import { Badge, StatusDot } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
+import { Card } from '@/web/components/ui/card'
+import { Input, Select } from '@/web/components/ui/input'
 import { PageHeader } from '@/web/components/ui/page-header'
-import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
+import { EmptyState, ErrorState, Skeleton } from '@/web/components/ui/states'
+import { StatStrip, useArrival, WorkSkeleton } from '@/web/features/sessions/StatStrip'
 import { useDocumentVisible } from '@/web/shell/session-data'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { AutomationEditor, type SaveRequest } from './AutomationEditor'
@@ -238,6 +251,8 @@ export function AutomationsPage() {
     () => sortJobs(filterJobs(list, search), sortCol, sortAsc),
     [list, search, sortCol, sortAsc],
   )
+  // Cards rise in once, when the jobs first arrive; never on a poll or a tick.
+  const arriving = useArrival(!jobs.isPending)
 
   const openCreate = (template: Partial<RawJob> | null) => {
     setSaveError(null)
@@ -288,146 +303,201 @@ export function AutomationsPage() {
   let body
   if (jobs.isPending) {
     body = (
-      <LoadingRegion label={t('webPagesWork.automationsLoading')}>
-        <div className="grid gap-3 md:grid-cols-2">
-          {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-44" />
+      <WorkSkeleton label={t('webPagesWork.automationsLoading')} cells={4}>
+        <div className="flex gap-2">
+          <Skeleton className="h-9 flex-1" />
+          <Skeleton className="h-9 w-40" />
+          <Skeleton className="size-9" />
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          {Array.from({ length: 2 }, (_, i) => (
+            <Card key={i} padding="md" className="flex flex-col gap-4">
+              <div className="flex items-center gap-2">
+                <Skeleton className="size-2.5 rounded-full" />
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="ml-auto h-5 w-16 rounded-full" />
+              </div>
+              <Skeleton className="h-[5.5rem] rounded-card" />
+              <div className="flex flex-col gap-2">
+                <Skeleton className="h-3 w-2/3" />
+                <Skeleton className="h-3 w-1/2" />
+                <Skeleton className="h-3 w-3/5" />
+              </div>
+              <Skeleton className="h-7 w-full" />
+            </Card>
           ))}
         </div>
-      </LoadingRegion>
+      </WorkSkeleton>
     )
   } else if (total === 0 && jobs.isError) {
     // The error notice above says what failed; there is nothing to show under it.
     body = null
   } else if (total === 0) {
     body = (
-      <EmptyState
-        icon={<CalendarClock />}
-        title={t('webPagesWork.automationsEmpty')}
-        description={t('webPagesWork.automationsEmptyBody')}
-        action={
-          <div className="flex flex-col items-center gap-4">
-            <Button variant="primary" onClick={() => openCreate(null)}>
-              <Plus />
-              {t('webPagesWork.automationsNew')}
-            </Button>
-            <div className="flex flex-col items-center gap-2">
-              <span className="text-small text-text-muted">{t('webPagesWork.presetsLabel')}</span>
-              <ul role="list" className="flex flex-col gap-2">
-                {emptyTemplates().map((tpl) => (
-                  <li key={tpl.expression}>
-                    <button
-                      type="button"
-                      onClick={() => openCreate(tpl)}
-                      className="target flex w-full flex-col items-start gap-0.5 rounded-md border border-border px-3 py-2 text-left hover:bg-surface-2"
-                    >
-                      <span className="font-medium">{tpl.name}</span>
-                      <span className="text-small text-text-muted">
-                        <code className="font-mono">{tpl.expression}</code> · {tpl.hint}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+      <Card variant="plain" padding="none">
+        <EmptyState
+          icon={<CalendarClock />}
+          title={t('webPagesWork.automationsEmpty')}
+          description={t('webPagesWork.automationsEmptyBody')}
+          action={
+            <div className="flex w-full flex-col items-center gap-5">
+              <Button variant="primary" onClick={() => openCreate(null)}>
+                <Plus />
+                {t('webPagesWork.automationsNew')}
+              </Button>
+              <div className="flex w-full flex-col gap-2">
+                <span className="text-label tracking-[0.04em] text-text-muted uppercase">
+                  {t('webPagesWork.presetsLabel')}
+                </span>
+                <ul role="list" className="anim-stagger flex flex-col gap-2">
+                  {emptyTemplates().map((tpl) => (
+                    <li key={tpl.expression}>
+                      <button
+                        type="button"
+                        onClick={() => openCreate(tpl)}
+                        className="lift group target flex w-full items-center gap-3 rounded-card border border-border bg-surface-1 px-3 py-2.5 text-left shadow-card"
+                      >
+                        <span
+                          aria-hidden
+                          className="grid size-8 shrink-0 place-items-center rounded-control bg-surface-2 text-text-muted transition-colors duration-[var(--duration-fast)] group-hover:bg-accent-tint group-hover:text-accent [&_svg]:size-4"
+                        >
+                          {tpl.payloadKind === 'reminder' ? <BellRing /> : <Sparkles />}
+                        </span>
+                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                          <span className="font-medium">{tpl.name}</span>
+                          <span className="truncate text-small text-text-muted">
+                            <code className="font-mono">{tpl.expression}</code> · {tpl.hint}
+                          </span>
+                        </span>
+                        <ChevronRight
+                          aria-hidden
+                          className="size-4 shrink-0 text-text-muted transition-transform duration-[var(--duration-base)] group-hover:translate-x-0.5"
+                        />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
-          </div>
-        }
-      />
+          }
+        />
+      </Card>
     )
   } else {
     body = (
       <>
-        <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {[
-            { label: t('webPagesWork.statActive'), value: enabledCount },
-            { label: t('webPagesWork.statPaused'), value: total - enabledCount },
-            { label: t('webPagesWork.statUpcoming'), value: upcoming },
-            { label: t('webPagesWork.statDegraded'), value: degraded },
-          ].map((tile) => (
-            <div
-              key={tile.label}
-              className="rounded-lg border border-border bg-surface-1 px-3 py-2"
-            >
-              <dt className="text-small text-text-muted">{tile.label}</dt>
-              <dd className="text-lg font-semibold tabular-nums">{formatNumber(tile.value)}</dd>
-            </div>
-          ))}
-        </dl>
+        <StatStrip
+          items={[
+            {
+              label: t('webPagesWork.statActive'),
+              icon: <PlayCircle />,
+              value: formatNumber(enabledCount),
+            },
+            {
+              label: t('webPagesWork.statPaused'),
+              icon: <PauseCircle />,
+              value: formatNumber(total - enabledCount),
+            },
+            {
+              label: t('webPagesWork.statUpcoming'),
+              icon: <CalendarClock />,
+              value: formatNumber(upcoming),
+            },
+            {
+              label: t('webPagesWork.statDegraded'),
+              icon: <CircleAlert />,
+              value: formatNumber(degraded),
+              tone: degraded > 0 ? 'danger' : 'default',
+            },
+          ]}
+        />
         <div className="flex flex-wrap items-center gap-2">
-          <label className="relative block min-w-0 flex-[1_1_14rem]">
-            <span className="sr-only">{t('webPagesWork.automationsSearch')}</span>
-            <Search
-              className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-muted"
-              aria-hidden
-            />
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t('webPagesWork.automationsSearch')}
-              className="h-9 w-full rounded-md border border-border-control bg-surface-0 pr-2 pl-8 touch:h-11 max-md:text-base"
-            />
-          </label>
-          <label className="flex items-center gap-2">
-            <span className="text-small text-text-muted">{t('webPagesWork.sortBy')}</span>
-            <select
-              className="h-9 rounded-md border border-border-control bg-surface-0 px-2 touch:h-11"
-              value={sortCol}
-              onChange={(e) => setSortCol(e.target.value as SortCol)}
-            >
-              {sortOptions().map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Button
-            size="icon"
-            variant="outline"
-            aria-label={
-              sortAsc ? t('webPagesWork.sortAscending') : t('webPagesWork.sortDescending')
-            }
-            onClick={() => setSortAsc((v) => !v)}
-          >
-            {sortAsc ? <ArrowUp /> : <ArrowDown />}
-          </Button>
-        </div>
-        {visible.length === 0 ? (
-          <EmptyState
-            title={t('webPagesWork.automationsNoMatch')}
-            action={
-              <Button variant="outline" onClick={() => setSearch('')}>
-                {t('webPagesWork.clearFilters')}
-              </Button>
-            }
+          <Input
+            type="search"
+            aria-label={t('webPagesWork.automationsSearch')}
+            icon={<Search />}
+            wrapperClassName="flex-[1_1_14rem]"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('webPagesWork.automationsSearch')}
           />
-        ) : (
-          <ul role="list" className="grid gap-3 md:grid-cols-2">
-            {visible.map((job, i) => (
-              <li key={String(job.id ?? i)} className="min-w-0">
-                <JobCard
-                  job={job}
-                  control={control}
-                  onSchedulerError={noteSchedulerError}
-                  onChanged={() => void refresh()}
-                  onEdit={() => {
-                    setSaveError(null)
-                    setEditor({ kind: 'edit', job })
-                  }}
-                  onHistory={() => setHistory(job)}
-                  onDelete={() => setPendingDelete(job)}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
+          <div className="flex items-center gap-2 max-sm:w-full">
+            <label className="flex min-w-0 flex-1 items-center gap-2">
+              <span className="shrink-0 text-label text-text-muted">
+                {t('webPagesWork.sortBy')}
+              </span>
+              <Select
+                className="sm:w-40"
+                value={sortCol}
+                onChange={(e) => setSortCol(e.target.value as SortCol)}
+              >
+                {sortOptions().map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <Button
+              size="icon"
+              variant="outline"
+              aria-label={
+                sortAsc ? t('webPagesWork.sortAscending') : t('webPagesWork.sortDescending')
+              }
+              onClick={() => setSortAsc((v) => !v)}
+            >
+              <ArrowUp
+                className={cn(
+                  'transition-[rotate] duration-[var(--duration-base)] ease-[var(--ease-out)]',
+                  !sortAsc && 'rotate-180',
+                )}
+              />
+            </Button>
+          </div>
+        </div>
+        <div className="@container">
+          {visible.length === 0 ? (
+            <Card variant="plain" padding="none">
+              <EmptyState
+                icon={<SearchX />}
+                title={t('webPagesWork.automationsNoMatch')}
+                action={
+                  <Button variant="outline" onClick={() => setSearch('')}>
+                    {t('webPagesWork.clearFilters')}
+                  </Button>
+                }
+              />
+            </Card>
+          ) : (
+            <ul
+              role="list"
+              className={cn('grid gap-4 @3xl:grid-cols-2', arriving && 'anim-stagger')}
+            >
+              {visible.map((job, i) => (
+                <li key={String(job.id ?? i)} className="min-w-0">
+                  <JobCard
+                    job={job}
+                    control={control}
+                    onSchedulerError={noteSchedulerError}
+                    onChanged={() => void refresh()}
+                    onEdit={() => {
+                      setSaveError(null)
+                      setEditor({ kind: 'edit', job })
+                    }}
+                    onHistory={() => setHistory(job)}
+                    onDelete={() => setPendingDelete(job)}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </>
     )
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-6">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 md:p-6">
       <PageHeader
         title={t('webPagesWork.automationsTitle')}
         description={t('webPagesWork.automationsSubtitle')}
@@ -549,6 +619,32 @@ export function runNowStatus(res: ManualRunResult | null): {
   return { tone: 'ok', text: t('webPagesWork.runTriggered') }
 }
 
+/** The current time, refreshed every `ms` while `active`. */
+function useNow(active: boolean, ms = 1000): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!active) return
+    const id = window.setInterval(() => setNow(Date.now()), ms)
+    return () => window.clearInterval(id)
+  }, [active, ms])
+  return now
+}
+
+/**
+ * The next-run countdown. It ticks every second on its own, so only this
+ * text re-renders: nothing around it remounts or replays an entrance.
+ */
+function NextRun({ job }: { job: RawJob }) {
+  const now = useNow(!!job.enabled && !!job.next_run)
+  const abs = nextRunAbs(job, now)
+  return (
+    <>
+      <p className="text-title tabular-nums">{nextRunText(job, now)}</p>
+      {abs ? <p className="text-small text-text-muted">{abs}</p> : null}
+    </>
+  )
+}
+
 function JobCard({
   job,
   control,
@@ -583,9 +679,13 @@ function JobCard({
   const elevated = jobElevated(job)
   const createdFrom = jobCreatedFrom(job)
   const human = explainCron(job.expression || '')
+  const schedule = jobSchedule(job)
   const lastStatus = job.last_status || (job.last_run ? 'ok' : null)
   const message = String(job.message || job.prompt || '').trim()
   const failures = health ? tPlural('webPagesWork.failures', health.consecutiveFailures) : ''
+  const running = job.status === 'running'
+  const failing = !!health?.degraded || dot === 'error'
+  const troubled = !!health && (health.degraded || health.consecutiveFailures > 0)
 
   const act = async (
     kind: 'run' | 'toggle' | 'concurrency',
@@ -631,8 +731,6 @@ function JobCard({
     }
   }
 
-  const dotClass =
-    health?.degraded || dot === 'error' ? 'bg-danger' : dot === 'off' ? 'bg-text-muted' : 'bg-ok'
   const stateLabel = health?.degraded
     ? t('webPagesWork.stateDegraded')
     : dot === 'error'
@@ -640,210 +738,265 @@ function JobCard({
       : enabled
         ? t('webPagesWork.stateActive')
         : t('webPagesWork.statePaused')
+  const stateTone = failing ? 'danger' : enabled ? 'ok' : 'neutral'
 
   return (
-    <article
-      aria-label={name}
-      data-degraded={health?.degraded ? 'true' : undefined}
+    <Card
+      asChild
+      padding="none"
       className={cn(
-        'flex h-full flex-col gap-3 rounded-lg border bg-surface-1 p-4',
-        health?.degraded ? 'border-danger/50' : 'border-border',
+        'flex h-full flex-col transition-[border-color,box-shadow] duration-[var(--duration-base)] ease-[var(--ease-out)] hover:border-border-strong',
+        failing && 'border-danger/35',
       )}
     >
-      <header className="flex flex-wrap items-center gap-2">
-        <span
-          role="img"
-          aria-label={stateLabel}
-          className={cn('size-2.5 shrink-0 rounded-full', dotClass)}
-        />
-        <h2 className="min-w-0 flex-1 truncate font-semibold">{name}</h2>
-        <span className="rounded-full bg-surface-3 px-2 text-small">{jobKindLabel(job)}</span>
-        {elevated ? (
-          <span className="rounded-full border border-danger/50 px-2 text-small text-danger">
-            {t('webPagesWork.elevated', { mode: elevated })}
+      <article
+        aria-label={name}
+        data-degraded={health?.degraded ? 'true' : undefined}
+        className="@container"
+      >
+        <header className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 px-4 pt-4">
+          <StatusDot tone={running ? 'accent' : stateTone} live={running} className="size-2.5" />
+          <h2 className="min-w-0 flex-1 truncate text-section">{name}</h2>
+          <span className="flex flex-wrap items-center gap-1.5">
+            <Badge tone="neutral">{jobKindLabel(job)}</Badge>
+            {elevated ? (
+              <Badge tone="danger">
+                <ShieldAlert aria-hidden data-status-icon />
+                {t('webPagesWork.elevated', { mode: elevated })}
+              </Badge>
+            ) : null}
+            <Badge tone={stateTone} title={health?.degraded ? failures : undefined}>
+              {failing ? <AlertTriangle aria-hidden data-status-icon /> : null}
+              {stateLabel}
+            </Badge>
           </span>
-        ) : null}
-        {health?.degraded ? (
-          <span
-            className="inline-flex items-center gap-1 rounded-full border border-danger/50 px-2 text-small text-danger"
-            title={failures}
-          >
-            <AlertTriangle className="size-3" aria-hidden data-status-icon />
-            {t('webPagesWork.stateDegraded')}
-          </span>
-        ) : null}
-      </header>
+        </header>
 
-      <div className="flex flex-col gap-0.5">
-        <code className="font-mono text-small">{jobSchedule(job)}</code>
-        {human ? <span className="text-small text-text-muted">{human}</span> : null}
-      </div>
-
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-small">
-        <dt className="text-text-muted">{t('webPagesWork.cardNextRun')}</dt>
-        <dd className="min-w-0">
-          {enabled ? (
-            <>
-              {nextRunText(job)}
-              {nextRunAbs(job) ? (
-                <span className="text-text-muted"> · {nextRunAbs(job)}</span>
-              ) : null}
-            </>
-          ) : (
-            <span className="text-text-muted">{t('webPagesWork.statePaused')}</span>
+        <div
+          className={cn(
+            'mx-4 mt-3 grid gap-x-4 gap-y-2 rounded-card bg-surface-inset px-4 py-3 shadow-inset sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end',
+            !enabled && 'opacity-80',
           )}
-        </dd>
-        <dt className="text-text-muted">{t('webPagesWork.cardLastRun')}</dt>
-        <dd className="min-w-0">
-          {job.last_run
-            ? humanCountdownPast(new Date(job.last_run as string | number))
-            : t('webPagesWork.dash')}
-          {lastStatus ? (
-            <span className={isOkStatus(lastStatus) ? 'text-ok' : 'text-danger'}>
-              {' · '}
-              {lastStatus}
+        >
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <p className="flex items-center gap-1.5 text-label text-text-muted [&_svg]:size-3.5">
+              <CalendarClock aria-hidden />
+              {t('webPagesWork.sortSchedule')}
+            </p>
+            <p className="text-section text-pretty">{human || schedule}</p>
+            {human ? (
+              <code className="truncate font-mono text-small text-text-muted" title={schedule}>
+                {schedule}
+              </code>
+            ) : null}
+          </div>
+          <div className="flex min-w-0 flex-col gap-0.5 sm:items-end sm:text-right">
+            <p className="flex items-center gap-1.5 text-label text-text-muted [&_svg]:size-3.5">
+              <Timer aria-hidden />
+              {t('webPagesWork.cardNextRun')}
+            </p>
+            {enabled ? (
+              <NextRun job={job} />
+            ) : (
+              <p className="flex items-center gap-1.5 text-title text-text-muted [&_svg]:size-4">
+                <Pause aria-hidden />
+                {t('webPagesWork.statePaused')}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {troubled || health?.lastError ? (
+          <dl className="mx-4 mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 rounded-card border border-danger/25 bg-danger/[0.06] px-3 py-2 text-small">
+            {troubled ? (
+              <>
+                <dt className="text-text-muted">{t('webPagesWork.cardHealth')}</dt>
+                <dd className="font-medium text-danger">{failures}</dd>
+              </>
+            ) : null}
+            {health?.lastError ? (
+              <>
+                <dt className="text-text-muted">{t('webPagesWork.cardLastError')}</dt>
+                <dd className="line-clamp-3 min-w-0 font-mono break-words text-danger">
+                  {health.lastError}
+                </dd>
+              </>
+            ) : null}
+          </dl>
+        ) : null}
+
+        <dl className="mx-4 mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-small">
+          <dt className="text-text-muted">{t('webPagesWork.cardLastRun')}</dt>
+          <dd className="min-w-0">
+            {job.last_run
+              ? humanCountdownPast(new Date(job.last_run as string | number))
+              : t('webPagesWork.dash')}
+            {lastStatus ? (
+              <span className={isOkStatus(lastStatus) ? 'text-ok' : 'text-danger'}>
+                {' · '}
+                {lastStatus}
+              </span>
+            ) : null}
+          </dd>
+          {health && !troubled && job.last_run ? (
+            <>
+              <dt className="text-text-muted">{t('webPagesWork.cardHealth')}</dt>
+              <dd className="text-ok">{t('webPagesWork.healthy')}</dd>
+            </>
+          ) : null}
+          <dt className="text-text-muted">{t('webPagesWork.cardTarget')}</dt>
+          <dd className="min-w-0 truncate" title={jobTarget(job)}>
+            {jobTarget(job)}
+          </dd>
+          {createdFrom ? (
+            <>
+              <dt className="text-text-muted">{t('webPagesWork.cardCreatedFrom')}</dt>
+              <dd className="min-w-0 truncate font-mono" title={createdFrom}>
+                {createdFrom}
+              </dd>
+            </>
+          ) : null}
+          {id ? (
+            <>
+              <dt className="self-center text-text-muted">{t('webPagesWork.cardId')}</dt>
+              <dd className="flex min-w-0 items-center gap-1 font-mono text-text-muted" title={id}>
+                {shortCronId(id)}
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  className="text-text-muted"
+                  aria-label={t('webPagesWork.copyId', { id })}
+                  onClick={() => void copyId()}
+                >
+                  <Copy />
+                </Button>
+              </dd>
+            </>
+          ) : null}
+          {concurrency ? (
+            <>
+              <dt className="self-center text-text-muted">{t('webPagesWork.cardOverlap')}</dt>
+              <dd className="min-w-0">
+                <Select
+                  size="sm"
+                  aria-label={t('webPagesWork.cardOverlapFor', { name })}
+                  className="w-auto max-w-full text-small"
+                  value={concurrency}
+                  disabled={busy !== null || control.disabled}
+                  title={control.reason ?? undefined}
+                  onChange={(e) => void setConcurrency(e.target.value as ConcurrencyPolicy)}
+                >
+                  {CONCURRENCY_POLICIES.map((policy) => (
+                    <option key={policy} value={policy}>
+                      {concurrencyLabel(policy)}
+                    </option>
+                  ))}
+                </Select>
+              </dd>
+            </>
+          ) : null}
+        </dl>
+
+        {message ? (
+          <p className="mx-4 mt-3 line-clamp-2 border-l-2 border-border-strong pl-3 text-small text-text-muted">
+            {message}
+          </p>
+        ) : null}
+
+        {status ? (
+          <p
+            role={status.tone === 'danger' ? 'alert' : 'status'}
+            className={cn(
+              'anim-fade-in mx-4 mt-3 flex items-start gap-1.5 text-small break-words [&_svg]:mt-px [&_svg]:size-3.5 [&_svg]:shrink-0',
+              status.tone === 'danger'
+                ? 'text-danger'
+                : status.tone === 'warn'
+                  ? 'text-warn'
+                  : 'text-ok',
+            )}
+          >
+            {status.tone === 'ok' ? (
+              <CheckCircle2 aria-hidden data-status-icon />
+            ) : (
+              <AlertTriangle aria-hidden data-status-icon />
+            )}
+            <span className="min-w-0">{status.text}</span>
+          </p>
+        ) : null}
+
+        <div aria-hidden className="min-h-4 flex-1" />
+        <footer className="flex flex-wrap items-center gap-1 border-t border-border px-3 py-2.5">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy !== null || control.disabled}
+            aria-describedby={control.reason ? reasonId : undefined}
+            aria-label={t('webPagesWork.runNowFor', { name })}
+            onClick={() => void runNow()}
+          >
+            {busy === 'run' ? <Loader2 className="animate-spin" /> : <Zap />}
+            {t('webPagesWork.runNow')}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy !== null || control.disabled}
+            aria-describedby={control.reason ? reasonId : undefined}
+            aria-label={
+              enabled ? t('webPagesWork.pauseFor', { name }) : t('webPagesWork.resumeFor', { name })
+            }
+            onClick={() => void toggle()}
+          >
+            {busy === 'toggle' ? (
+              <Loader2 className="animate-spin" />
+            ) : enabled ? (
+              <Pause />
+            ) : (
+              <Play />
+            )}
+            {enabled ? t('webPagesWork.pause') : t('webPagesWork.resume')}
+          </Button>
+          <span className="flex-1" />
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-text-muted hover:text-text @max-[26rem]:w-7 @max-[26rem]:px-0"
+            title={t('webPagesWork.history')}
+            aria-label={t('webPagesWork.historyFor', { name })}
+            onClick={onHistory}
+          >
+            <History />
+            <span className="@max-[26rem]:sr-only">{t('webPagesWork.history')}</span>
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-text-muted hover:text-text @max-[26rem]:w-7 @max-[26rem]:px-0"
+            title={t('webPagesWork.edit')}
+            aria-label={t('webPagesWork.editFor', { name })}
+            onClick={onEdit}
+          >
+            <Pencil />
+            <span className="@max-[26rem]:sr-only">{t('webPagesWork.edit')}</span>
+          </Button>
+          <span aria-hidden className="mx-0.5 h-5 w-px bg-border-strong" />
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className="text-danger hover:bg-danger/10"
+            aria-label={t('webPagesWork.deleteFor', { name })}
+            title={t('webPagesWork.delete')}
+            onClick={onDelete}
+          >
+            <Trash2 />
+          </Button>
+          {control.reason ? (
+            <span id={reasonId} className="w-full px-1 text-small text-text-muted">
+              {control.reason}
             </span>
           ) : null}
-        </dd>
-        {health && (health.degraded || health.consecutiveFailures > 0 || job.last_run) ? (
-          <>
-            <dt className="text-text-muted">{t('webPagesWork.cardHealth')}</dt>
-            <dd className={health.consecutiveFailures ? 'text-danger' : 'text-ok'}>
-              {health.consecutiveFailures ? failures : t('webPagesWork.healthy')}
-            </dd>
-          </>
-        ) : null}
-        {health?.lastError ? (
-          <>
-            <dt className="text-text-muted">{t('webPagesWork.cardLastError')}</dt>
-            <dd className="line-clamp-3 min-w-0 break-words text-danger">{health.lastError}</dd>
-          </>
-        ) : null}
-        <dt className="text-text-muted">{t('webPagesWork.cardTarget')}</dt>
-        <dd className="min-w-0 truncate" title={jobTarget(job)}>
-          {jobTarget(job)}
-        </dd>
-        {createdFrom ? (
-          <>
-            <dt className="text-text-muted">{t('webPagesWork.cardCreatedFrom')}</dt>
-            <dd className="min-w-0 truncate font-mono" title={createdFrom}>
-              {createdFrom}
-            </dd>
-          </>
-        ) : null}
-        {id ? (
-          <>
-            <dt className="text-text-muted">{t('webPagesWork.cardId')}</dt>
-            <dd className="flex min-w-0 items-center gap-1 font-mono" title={id}>
-              {shortCronId(id)}
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label={t('webPagesWork.copyId', { id })}
-                onClick={() => void copyId()}
-              >
-                <Copy />
-              </Button>
-            </dd>
-          </>
-        ) : null}
-        {concurrency ? (
-          <>
-            <dt className="text-text-muted">{t('webPagesWork.cardOverlap')}</dt>
-            <dd>
-              <select
-                aria-label={t('webPagesWork.cardOverlapFor', { name })}
-                className="h-7 rounded-md border border-border-control bg-surface-0 px-1 touch:h-11"
-                value={concurrency}
-                disabled={busy !== null || control.disabled}
-                title={control.reason ?? undefined}
-                onChange={(e) => void setConcurrency(e.target.value as ConcurrencyPolicy)}
-              >
-                {CONCURRENCY_POLICIES.map((policy) => (
-                  <option key={policy} value={policy}>
-                    {concurrencyLabel(policy)}
-                  </option>
-                ))}
-              </select>
-            </dd>
-          </>
-        ) : null}
-      </dl>
-
-      {message ? (
-        <p className="line-clamp-3 rounded-md bg-surface-2 px-2 py-1 text-small">{message}</p>
-      ) : null}
-
-      {status ? (
-        <p
-          role={status.tone === 'danger' ? 'alert' : 'status'}
-          className={cn(
-            'text-small break-words',
-            status.tone === 'danger' ? 'text-danger' : status.tone === 'warn' ? 'text-warn' : '',
-          )}
-        >
-          {status.text}
-        </p>
-      ) : null}
-
-      <footer className="mt-auto flex flex-wrap items-center gap-1.5">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy !== null || control.disabled}
-          aria-describedby={control.reason ? reasonId : undefined}
-          aria-label={t('webPagesWork.runNowFor', { name })}
-          onClick={() => void runNow()}
-        >
-          {busy === 'run' ? <Loader2 className="animate-spin" /> : <Zap />}
-          {t('webPagesWork.runNow')}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy !== null || control.disabled}
-          aria-describedby={control.reason ? reasonId : undefined}
-          aria-label={
-            enabled ? t('webPagesWork.pauseFor', { name }) : t('webPagesWork.resumeFor', { name })
-          }
-          onClick={() => void toggle()}
-        >
-          {enabled ? <Pause /> : <Play />}
-          {enabled ? t('webPagesWork.pause') : t('webPagesWork.resume')}
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          aria-label={t('webPagesWork.historyFor', { name })}
-          onClick={onHistory}
-        >
-          <History />
-          {t('webPagesWork.history')}
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          aria-label={t('webPagesWork.editFor', { name })}
-          onClick={onEdit}
-        >
-          <Pencil />
-          {t('webPagesWork.edit')}
-        </Button>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          className="ml-auto text-danger"
-          aria-label={t('webPagesWork.deleteFor', { name })}
-          onClick={onDelete}
-        >
-          <Trash2 />
-        </Button>
-        {control.reason ? (
-          <span id={reasonId} className="w-full text-small text-text-muted">
-            {control.reason}
-          </span>
-        ) : null}
-      </footer>
-    </article>
+        </footer>
+      </article>
+    </Card>
   )
 }

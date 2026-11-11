@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, X } from 'lucide-react'
-import { Fragment, useState } from 'react'
+import { Check, ChevronRight, History, MessageSquare, Send, Timer, X } from 'lucide-react'
+import { useState } from 'react'
 import { Link } from 'react-router'
 import { useRpc } from '@/app/providers'
 import { t } from '@/i18n'
@@ -8,9 +8,11 @@ import '@/i18n/en/webPagesWork'
 import { cn } from '@/lib/utils'
 import { runRow, type RawRun } from '@/views/cron/logic'
 import { relTimeLabel } from '@/views/sessions/logic'
+import { Badge } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/web/components/ui/sheet'
-import { ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
+import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
+import '@/web/styles/work.css'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 
 // Run history for one automation: the last ten runs from cron.runs, each with
@@ -54,10 +56,16 @@ export function RunHistory({
 
   return (
     <Sheet open onOpenChange={(open) => !open && onClose()}>
-      <SheetContent side="right" className="w-[min(100vw,40rem)]">
-        <div className="flex items-start gap-2 border-b border-border px-4 py-3">
+      <SheetContent side="right" className="w-[min(100vw,36rem)]">
+        <div className="flex items-start gap-3 border-b border-border px-5 py-4">
+          <span
+            aria-hidden
+            className="grid size-9 shrink-0 place-items-center rounded-control border border-border bg-surface-2 text-text-muted shadow-highlight [&_svg]:size-4"
+          >
+            <History />
+          </span>
           <div className="min-w-0 flex-1">
-            <SheetTitle className="text-base font-semibold">
+            <SheetTitle className="truncate text-section">
               {t('webPagesWork.historyTitle', { name: jobName })}
             </SheetTitle>
             <SheetDescription className="text-small text-text-muted">
@@ -73,7 +81,7 @@ export function RunHistory({
             <X />
           </Button>
         </div>
-        <div className="scroll-contained flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+        <div className="scroll-contained flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-5 py-5">
           {runs.isError ? (
             <ErrorState
               title={t('webPagesWork.historyFailed')}
@@ -83,102 +91,101 @@ export function RunHistory({
             />
           ) : null}
           {runs.isPending ? (
-            <LoadingRegion label={t('webPagesWork.historyLoading')}>
+            <LoadingRegion label={t('webPagesWork.historyLoading')} className="flex flex-col gap-5">
               {Array.from({ length: 4 }, (_, i) => (
-                <Skeleton key={i} className="my-2 h-8" />
+                <div key={i} className="flex gap-3">
+                  <Skeleton className="size-6 shrink-0 rounded-full" />
+                  <div className="flex flex-1 flex-col gap-2 pt-1">
+                    <Skeleton className="h-3.5 w-40" />
+                    <Skeleton className="h-3 w-full" />
+                  </div>
+                </div>
               ))}
             </LoadingRegion>
           ) : list.length === 0 && !runs.isError ? (
-            <p className="text-text-muted">{t('webPagesWork.historyEmpty')}</p>
+            <EmptyState size="sm" icon={<History />} title={t('webPagesWork.historyEmpty')} />
           ) : list.length ? (
-            <div
-              role="region"
+            <ol
+              role="list"
               aria-label={t('webPagesWork.historyTable')}
-              tabIndex={0}
-              className="overflow-x-auto rounded-md border border-border"
+              className="work-timeline anim-stagger flex flex-col gap-4"
             >
-              <table className="w-full min-w-[34rem] border-collapse text-left text-small">
-                <thead className="bg-surface-2 text-text-muted">
-                  <tr>
-                    <th scope="col" className="px-2 py-1.5 font-medium">
-                      {t('webPagesWork.runWhen')}
-                    </th>
-                    <th scope="col" className="px-2 py-1.5 font-medium">
-                      {t('webPagesWork.runStatus')}
-                    </th>
-                    <th scope="col" className="px-2 py-1.5 font-medium">
-                      {t('webPagesWork.runDuration')}
-                    </th>
-                    <th scope="col" className="px-2 py-1.5 font-medium">
-                      {t('webPagesWork.runDelivery')}
-                    </th>
-                    <th scope="col" className="px-2 py-1.5 font-medium">
-                      {t('webPagesWork.runOutput')}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {list.map((run, i) => {
-                    const row = runRow(run, relTimeLabel)
-                    const rowKey = row.runId || String(i)
-                    const open = openRun === rowKey
-                    return (
-                      <Fragment key={rowKey}>
-                        <tr className="border-t border-border align-top">
-                          <td className="px-2 py-1.5 whitespace-nowrap">{row.timeLabel}</td>
-                          <td
+              {list.map((run, i) => {
+                const row = runRow(run, relTimeLabel)
+                const rowKey = row.runId || String(i)
+                const open = openRun === rowKey
+                return (
+                  <li key={rowKey} className="flex gap-3">
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'relative z-[1] grid size-6 shrink-0 place-items-center rounded-full border bg-surface-overlay [&_svg]:size-3.5',
+                        row.statusOk ? 'border-ok/40 text-ok' : 'border-danger/40 text-danger',
+                      )}
+                    >
+                      {row.statusOk ? <Check /> : <X />}
+                    </span>
+                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <Badge tone={row.statusOk ? 'ok' : 'danger'}>
+                          <span className="sr-only">{t('webPagesWork.runStatus')}: </span>
+                          {row.status}
+                        </Badge>
+                        <span className="font-medium">{row.timeLabel}</span>
+                        <span className="ml-auto inline-flex items-center gap-1 text-small text-text-muted tabular-nums">
+                          <Timer className="size-3.5" aria-hidden />
+                          <span className="sr-only">{t('webPagesWork.runDuration')}: </span>
+                          {row.duration}
+                        </span>
+                      </div>
+                      <p className="flex min-w-0 items-center gap-1.5 text-small text-text-muted">
+                        <Send className="size-3.5 shrink-0" aria-hidden />
+                        <span className="sr-only">{t('webPagesWork.runDelivery')}: </span>
+                        <span className="truncate font-mono">{row.delivery}</span>
+                      </p>
+                      {row.replyFull ? (
+                        <button
+                          type="button"
+                          aria-expanded={open}
+                          onClick={() => setOpenRun(open ? null : rowKey)}
+                          className="press target flex w-full items-start gap-1.5 rounded-control border border-border bg-surface-2 px-2.5 py-2 text-left text-small hover:border-border-strong"
+                        >
+                          <ChevronRight
                             className={cn(
-                              'px-2 py-1.5 font-medium',
-                              row.statusOk ? 'text-ok' : 'text-danger',
+                              'mt-0.5 size-3.5 shrink-0 text-text-muted transition-[rotate] duration-[var(--duration-base)] ease-[var(--ease-out)]',
+                              open && 'rotate-90',
                             )}
-                          >
-                            {row.status}
-                          </td>
-                          <td className="px-2 py-1.5 tabular-nums">{row.duration}</td>
-                          <td className="px-2 py-1.5">{row.delivery}</td>
-                          <td className="max-w-[16rem] px-2 py-1.5">
-                            {row.replyFull ? (
-                              <button
-                                type="button"
-                                aria-expanded={open}
-                                onClick={() => setOpenRun(open ? null : rowKey)}
-                                className="target flex w-full items-start gap-1 rounded text-left hover:underline"
-                              >
-                                <ChevronRight
-                                  className={cn(
-                                    'mt-0.5 size-3.5 shrink-0 transition-transform',
-                                    open && 'rotate-90',
-                                  )}
-                                  aria-hidden
-                                />
-                                <span className="line-clamp-2">{row.reply}</span>
-                              </button>
-                            ) : (
-                              <span className="text-text-muted">{row.reply}</span>
-                            )}
-                            {row.sessionKey && row.chatAvailable ? (
-                              <Link
-                                to={sessionKeyToPath(row.sessionKey)}
-                                className="target mt-1 inline-flex text-accent hover:underline"
-                              >
-                                {t('webPagesWork.runOpenChat')}
-                              </Link>
-                            ) : null}
-                          </td>
-                        </tr>
-                        {open ? (
-                          <tr>
-                            <td colSpan={5} className="px-2 pb-2">
-                              <RunOutput jobId={jobId} runId={row.runId} preview={row.replyFull} />
-                            </td>
-                          </tr>
-                        ) : null}
-                      </Fragment>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+                            aria-hidden
+                          />
+                          <span className="sr-only">{t('webPagesWork.runOutput')}: </span>
+                          <span className="line-clamp-2 min-w-0 break-words">{row.reply}</span>
+                        </button>
+                      ) : (
+                        <p className="text-small text-text-muted">
+                          <span className="sr-only">{t('webPagesWork.runOutput')}: </span>
+                          {row.reply}
+                        </p>
+                      )}
+                      {open ? (
+                        <div className="anim-enter">
+                          <RunOutput jobId={jobId} runId={row.runId} preview={row.replyFull} />
+                        </div>
+                      ) : null}
+                      {row.sessionKey && row.chatAvailable ? (
+                        <Link
+                          to={sessionKeyToPath(row.sessionKey)}
+                          viewTransition
+                          className="target inline-flex w-fit items-center gap-1 text-small text-accent hover:underline"
+                        >
+                          <MessageSquare className="size-3.5" aria-hidden />
+                          {t('webPagesWork.runOpenChat')}
+                        </Link>
+                      ) : null}
+                    </div>
+                  </li>
+                )
+              })}
+            </ol>
           ) : null}
         </div>
       </SheetContent>
@@ -201,14 +208,14 @@ function RunOutput({ jobId, runId, preview }: { jobId: string; runId: string; pr
     <div className="flex flex-col gap-1">
       <pre
         tabIndex={0}
-        className="max-h-80 overflow-auto rounded-md bg-code-bg p-2 font-mono whitespace-pre-wrap text-code-text"
+        className="max-h-80 overflow-auto rounded-control bg-code-bg p-3 font-mono text-small whitespace-pre-wrap text-code-text shadow-inset"
       >
         {output.data?.output ?? preview}
       </pre>
       {output.isFetching && !output.data ? (
-        <p className="text-text-muted">{t('webPagesWork.runOutputLoading')}</p>
+        <p className="text-small text-text-muted">{t('webPagesWork.runOutputLoading')}</p>
       ) : output.isError ? (
-        <p role="alert" className="text-danger">
+        <p role="alert" className="text-small text-danger">
           {t('webPagesWork.runOutputFailed')}
         </p>
       ) : null}

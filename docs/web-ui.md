@@ -956,7 +956,8 @@ the same approvals next to agent questions and runtime issues.
 **Automations** (`/automations`, `g r`) is the former Cron view. Each job is a
 card with its schedule (and a plain-language explanation with the next runs,
 worked out in the job's timezone, UTC when it has none, and shown in local time),
-delivery target, payload and run health. **New automation** opens the editor,
+a next-run countdown that ticks every second, delivery target, payload and run
+health. **New automation** opens the editor,
 which also sets the failure destination; an empty page explains that scheduled
 jobs appear there and offers **New automation** with presets. Cards offer
 **Run now**, **Pause**/**Resume**, **Delete** (confirmed first) and the run

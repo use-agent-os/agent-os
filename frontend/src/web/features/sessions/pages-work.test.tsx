@@ -402,7 +402,11 @@ describe('Automations page', () => {
     )
     await user.clear(within(sheet).getByRole('textbox', { name: 'Name' }))
     await user.click(within(sheet).getByRole('button', { name: 'Create automation' }))
-    expect(await within(sheet).findByRole('alert')).toBeInTheDocument()
+    const alert = await within(sheet).findByRole('alert')
+    // The message sits with the field it is about.
+    const name = within(sheet).getByRole('textbox', { name: 'Name' })
+    expect(name).toHaveAttribute('aria-invalid', 'true')
+    expect(name).toHaveAttribute('aria-describedby', alert.id)
     expect(rpc.callsTo('cron.create')).toEqual([])
   })
 
