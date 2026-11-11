@@ -60,7 +60,11 @@
   }
   .chat-turns {
     gap: 40px;
-    padding-block: 32px 40px;
+    /* The approval tray's collapsed pill floats above the composer (shell
+       publishes its height as --tray-stack): leave it room so it never sits
+       on the last turn's actions. An expanded tray is an overlay the reader
+       opened, so the allowance is capped at the pill's size. */
+    padding-block: 32px calc(40px + min(var(--tray-stack, 0px), 4.5rem));
   }
   @media (max-width: 639px) {
     .chat-column {
