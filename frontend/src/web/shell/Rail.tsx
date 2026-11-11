@@ -104,7 +104,8 @@ export function Rail({ onNavigate }: { onNavigate?: () => void }) {
         </Button>
       </SimpleTooltip>
       <span aria-hidden className="rail-sep" />
-      <div {...track(viewIndex)}>
+      {/* Pane toggles, not destinations: a quieter pill, no accent edge bar. */}
+      <div {...track(viewIndex)} data-toggle>
         <RailButton
           label={t('webShell.railSessions')}
           pressed={selected('sessions')}

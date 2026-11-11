@@ -90,7 +90,7 @@ export function ApprovalCard({
       data-approval-id={item.id}
       data-highlighted={highlighted ? '' : undefined}
       className={cn(
-        'flex flex-col gap-2.5 rounded-card border border-border bg-surface-1 p-3 shadow-card',
+        'flex min-w-0 flex-col gap-2.5 rounded-card border border-border bg-surface-1 p-3 shadow-card',
         highlighted && 'border-accent ring-2 ring-accent',
         className,
       )}
@@ -102,8 +102,10 @@ export function ApprovalCard({
         >
           <Terminal />
         </span>
-        <div className="min-w-0 flex-1">
-          <p className="font-mono text-[13px] font-semibold tracking-tight">{tool}</p>
+        {/* w-0: the truncated lines must not set the card's min-content width,
+            or a narrow host (the inbox at 360 px) is pushed off screen. */}
+        <div className="w-0 min-w-0 flex-1">
+          <p className="truncate font-mono text-[13px] font-semibold tracking-tight">{tool}</p>
           {item.agent ? (
             <p className="truncate text-small text-text-muted">
               {t('webShell.trayAgent', { agent: item.agent })}
@@ -119,7 +121,7 @@ export function ApprovalCard({
           <Link
             to={sessionKeyToPath(item.sessionKey)}
             viewTransition
-            className="target inline-flex shrink-0 items-center gap-0.5 rounded-md px-1 text-small font-medium text-accent underline-offset-2 hover:underline"
+            className="target -mt-0.5 -mr-1 inline-flex h-7 shrink-0 items-center gap-0.5 rounded-md px-1.5 text-small font-medium text-accent underline-offset-2 hover:underline"
           >
             {t('webShell.trayOpenSession')}
             <ArrowUpRight className="size-3.5" aria-hidden />
@@ -130,7 +132,7 @@ export function ApprovalCard({
         <div className="group/cmd relative">
           <pre
             tabIndex={0}
-            className={`scroll-contained max-h-28 rounded-md border border-border bg-surface-inset py-2 pl-2.5 text-small whitespace-pre-wrap shadow-inset ${command ? 'pr-9' : 'pr-2.5'}`}
+            className={`scroll-contained max-h-28 rounded-md border border-border bg-surface-inset py-2 pl-2.5 text-small whitespace-pre-wrap shadow-inset [overflow-wrap:anywhere] ${command ? 'pr-9' : 'pr-2.5'}`}
           >
             {command || detail}
           </pre>
@@ -198,6 +200,24 @@ export function ApprovalCard({
 }
 
 /**
+ * Publishes the tray's height as `--tray-stack` on the root while it is shown,
+ * so toasts stack above it rather than on it (shell.css "Floating layers").
+ * Module-level so React attaches it once, not on every render.
+ */
+function publishTrayStack(el: HTMLElement | null) {
+  if (!el || typeof ResizeObserver === 'undefined') return
+  const root = document.documentElement.style
+  const observer = new ResizeObserver(() =>
+    root.setProperty('--tray-stack', `${el.offsetHeight}px`),
+  )
+  observer.observe(el)
+  return () => {
+    observer.disconnect()
+    root.removeProperty('--tray-stack')
+  }
+}
+
+/**
  * The non-modal approval tray (shell spec "Approval tray"): every pending
  * request whose session is not the open one. It may collapse to a count but
  * never disappears while a request is pending.
@@ -243,13 +263,14 @@ export function ApprovalTray() {
   const firstTool = first.toolName || first.title || first.namespace || EXEC
   return (
     <aside
+      ref={publishTrayStack}
       aria-label={t('webShell.trayLabel')}
       data-collapsed={collapsed || undefined}
       className={cn(
-        'approval-tray fixed right-4 bottom-4 z-[calc(var(--z-drawer)-1)] flex max-h-[min(70dvh,560px)] flex-col overflow-hidden border border-transparent bg-surface-overlay [view-transition-name:agentos-tray] max-sm:right-2 max-sm:bottom-[max(0.5rem,env(safe-area-inset-bottom))]',
+        'approval-tray fixed z-[calc(var(--z-drawer)-1)] flex flex-col overflow-hidden border border-transparent bg-surface-overlay [view-transition-name:agentos-tray]',
         collapsed
           ? 'w-auto max-w-[calc(100vw-1rem)] rounded-full'
-          : 'w-[min(calc(100vw-1rem),400px)] rounded-overlay max-sm:left-2 max-sm:w-auto',
+          : 'w-[min(calc(100vw-1rem),400px)] rounded-overlay max-sm:w-auto',
       )}
     >
       <span role="status" aria-live="polite" className="sr-only">

@@ -7,7 +7,8 @@ import { Toaster } from '@/web/components/ui/toaster'
  * Alt+T hotkey (which focuses the list itself) but turns sequential Tab into a
  * loop between a toast and the control before it. Focus that arrives on a
  * toast or its buttons by Tab is hidden from sonner, so Tab moves on normally.
- * Placement (below the top bars, centred on the main column) is in shell.css.
+ * Placement (bottom-right, stacked above the docked bar and the approval
+ * tray) is in shell.css.
  */
 export function ShellToaster() {
   const onFocusCapture = (e: FocusEvent<HTMLDivElement>) => {

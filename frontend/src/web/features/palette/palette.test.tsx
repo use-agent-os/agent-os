@@ -1,10 +1,13 @@
 import '@/test/web'
+import { readFileSync } from 'node:fs'
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTheme } from '@/stores/theme'
 import { renderShell, resetShellState, sessionRow, shellRpc } from '@/test/web-shell'
 import { buildActions, type ActionContext } from './actions'
+
+const shellCss = readFileSync('src/web/styles/shell.css', 'utf8')
 
 beforeEach(resetShellState)
 afterEach(() => {
@@ -37,7 +40,7 @@ describe('command palette', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
-  it('marks the highlighted option with the ring (3:1), not only the surface-3 fill', async () => {
+  it('marks the highlighted option with a 3:1 accent bar over a soft fill, not an outline', async () => {
     const user = userEvent.setup()
     renderShell('/home', shellRpc(rows))
     await screen.findByText('Weekly DCA')
@@ -49,7 +52,11 @@ describe('command palette', () => {
       expect(option).toBeDefined()
       return option as HTMLElement
     })
-    expect(selected.className).toMatch(/data-\[selected=true\]:outline-ring/)
+    expect(selected).toHaveClass('palette-item')
+    expect(selected.className).not.toMatch(/outline-ring/)
+    // shell.css draws the selected row's leading bar in the ring colour (3:1).
+    expect(shellCss).toMatch(/\.palette-item\[data-selected='true'\]::before \{\s*opacity: 1;/)
+    expect(shellCss).toMatch(/\.palette-item::before \{[^}]*background: var\(--ring\);/)
     expect(within(dialog).getByRole('combobox').className).toMatch(/focus:border-ring/)
   })
 
