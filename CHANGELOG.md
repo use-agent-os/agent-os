@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.12] - 2026-11-12
+
 ### Fixed
 - Settings → Providers: "Test key" no longer reports a valid OpenAI key as
   rejected. The 1-token check pinned `temperature=0`, which GPT-5.x and
