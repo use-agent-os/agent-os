@@ -246,6 +246,23 @@ describe('header', () => {
   })
 })
 
+describe('session actions menu', () => {
+  it('gives every action an icon, so the labels line up', async () => {
+    const user = userEvent.setup()
+    await openChat(chatRpc())
+    await user.click(screen.getByRole('button', { name: 'Session actions' }))
+    const items = await screen.findAllByRole('menuitem')
+    expect(items.map((item) => item.textContent)).toEqual([
+      'Rename',
+      'Compact',
+      'Reset session',
+      'Export as Markdown',
+      'Copy session key',
+    ])
+    for (const item of items) expect(item.querySelector('svg')).not.toBeNull()
+  })
+})
+
 describe('composer', () => {
   it('marks focus with a ring as well as the border (the border alone is ~1.6:1 in light)', async () => {
     const { composer } = await openChat(chatRpc())
@@ -255,6 +272,25 @@ describe('composer', () => {
     const rule = /\.chat-composer:focus-within\s*\{([^}]*)\}/.exec(css)?.[1] ?? ''
     expect(rule).toMatch(/border-color:\s*var\(--ring\)/)
     expect(rule).toMatch(/0 0 0 1px var\(--ring\)/)
+    expect(rule).toMatch(/var\(--focus-glow\)/)
+    // No resting composer shadow (a theme override, say) may out-rank the
+    // focus rule: that is how light once lost its ring and glow.
+    const specificity = (selector: string) =>
+      (selector.replace(/:where\([^)]*\)/g, '').match(/\.[\w-]+|\[[^\]]+\]|:(?!:)[\w-]+/g) ?? [])
+        .length
+    const focus = specificity('.chat-composer:focus-within')
+    const resting = [
+      ...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g),
+    ].filter(
+      ([, selector, body]) =>
+        /\.chat-composer(?![\w-])/.test(selector!) &&
+        !/:focus-within|:hover|data-dragging/.test(selector!) &&
+        /box-shadow/.test(body!),
+    )
+    expect(resting.length).toBeGreaterThan(0)
+    for (const [, selector] of resting) {
+      expect(specificity(selector!.trim()), selector).toBeLessThanOrEqual(focus)
+    }
   })
 
   it('Enter mode: Shift+Enter adds a line and nothing is sent', async () => {
@@ -352,6 +388,28 @@ describe('composer', () => {
     expect(screen.getByText('Waiting for attachments to finish uploading')).toBeInTheDocument()
     void finish
     vi.unstubAllGlobals()
+  })
+
+  it('publishes its height for the approval tray, and takes it back on leaving', async () => {
+    const { unmount } = await openChat(chatRpc())
+    const root = document.documentElement
+    await waitFor(() => expect(root.style.getPropertyValue('--tray-clearance')).toMatch(/^\d+px$/))
+    unmount()
+    expect(root.style.getPropertyValue('--tray-clearance')).toBe('')
+  })
+
+  it('checks the current route in the route picker', async () => {
+    const user = userEvent.setup()
+    await openChat(chatRpc())
+    await user.click(screen.getByRole('button', { name: /^Model route:/ }))
+    const items = await screen.findAllByRole('menuitemcheckbox')
+    const checked = items.filter((item) => item.getAttribute('aria-checked') === 'true')
+    expect(checked).toHaveLength(1)
+    // The state is visible, not only announced: a check mark on that row alone.
+    expect(checked[0]!.querySelector('svg')).not.toBeNull()
+    for (const item of items.filter((i) => i !== checked[0])) {
+      expect(item.querySelector('svg')).toBeNull()
+    }
   })
 
   it('pins a named model in the route picker', async () => {

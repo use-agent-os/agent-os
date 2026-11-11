@@ -1,4 +1,13 @@
-import { MoreHorizontal, PanelRight, PanelRightOpen, RotateCcw, Scissors } from 'lucide-react'
+import {
+  Copy,
+  Download,
+  MoreHorizontal,
+  PanelRight,
+  PanelRightOpen,
+  Pencil,
+  RotateCcw,
+  Scissors,
+} from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { cn } from '@/lib/utils'
 import { useQueryClient } from '@tanstack/react-query'
@@ -185,26 +194,44 @@ export function ChatHeader(props: ChatHeaderProps) {
         </SimpleTooltip>
         <DropdownMenuContent align="end">
           <DropdownMenuItem
+            className="chat-menu-item"
             onSelect={() => {
               setValue(title)
               setEditing(true)
             }}
           >
+            <Pencil aria-hidden />
             {t('webShell.actionRename')}
           </DropdownMenuItem>
-          <DropdownMenuItem disabled={props.running} onSelect={props.onCompact}>
+          <DropdownMenuItem
+            className="chat-menu-item"
+            disabled={props.running}
+            onSelect={props.onCompact}
+          >
             <Scissors aria-hidden />
             {t('webChat.headerCompact')}
           </DropdownMenuItem>
-          <DropdownMenuItem disabled={props.running} onSelect={() => setConfirmReset(true)}>
+          <DropdownMenuItem
+            className="chat-menu-item"
+            disabled={props.running}
+            onSelect={() => setConfirmReset(true)}
+          >
             <RotateCcw aria-hidden />
             {t('webChat.headerReset')}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void exportSessionMarkdown(rpc, sessionKey)}>
+          <DropdownMenuItem
+            className="chat-menu-item"
+            onSelect={() => void exportSessionMarkdown(rpc, sessionKey)}
+          >
+            <Download aria-hidden />
             {t('webShell.actionExport')}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => void navigator.clipboard?.writeText(sessionKey)}>
+          <DropdownMenuItem
+            className="chat-menu-item"
+            onSelect={() => void navigator.clipboard?.writeText(sessionKey)}
+          >
+            <Copy aria-hidden />
             {t('webShell.actionCopyKey')}
           </DropdownMenuItem>
         </DropdownMenuContent>

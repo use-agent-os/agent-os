@@ -4,7 +4,9 @@ import { t } from '@/i18n'
 import '@/i18n/en/webChat'
 import { artifactName } from '@/views/chat/transcript/artifacts'
 import { sessionRunStatus } from '@/views/sessions/logic'
+import { cn } from '@/lib/utils'
 import { Button } from '@/web/components/ui/button'
+import { Card } from '@/web/components/ui/card'
 import { useProjectNames, useSessionsList } from '@/web/shell/session-data'
 import {
   sessionAgent,
@@ -19,12 +21,30 @@ import { sessionKeyToPath } from '@/web/shell/session-url'
 import { usePlanMode, useSessionUsage, useUnpinnedRoute } from '../composer/capabilities'
 import type { TranscriptState } from '../model/types'
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+/** One term of a group: label and value side by side on the group's grid. */
+function Row({
+  label,
+  children,
+  className,
+}: {
+  label: string
+  children: React.ReactNode
+  className?: string
+}) {
   return (
-    <div className="flex flex-col gap-1 py-2.5">
-      <dt className="text-label text-text-muted">{label}</dt>
-      <dd className="min-w-0 break-words">{children}</dd>
-    </div>
+    <>
+      <dt className="pt-px text-label text-text-muted">{label}</dt>
+      <dd className={cn('min-w-0 break-words', className)}>{children}</dd>
+    </>
+  )
+}
+
+/** A group of terms on a raised well; all groups share one label column. */
+function Group({ children }: { children: React.ReactNode }) {
+  return (
+    <Card asChild variant="plain" padding="sm" className="bg-surface-2 shadow-highlight">
+      <dl className="col-span-2 grid grid-cols-subgrid items-baseline gap-y-2.5">{children}</dl>
+    </Card>
   )
 }
 
@@ -78,77 +98,87 @@ export function DetailsPanel({
           <X />
         </Button>
       </header>
-      <dl className="scroll-contained flex-1 divide-y divide-border px-4">
-        <Row label={t('webChat.detailsAgent')}>{row ? sessionAgent(row) : '—'}</Row>
-        <Row label={t('webChat.detailsRoute')}>
-          {route && route.kind === 'routerDecision'
-            ? `${route.tier ? `${route.tier} · ` : ''}${route.model}`
-            : (row?.model ?? unpinned)}
-        </Row>
-        <Row label={t('webChat.detailsChannel')}>{row ? sessionChannel(row) : '—'}</Row>
-        <Row label={t('webChat.detailsProject')}>
-          {project ? (projects.data?.get(project) ?? project) : t('webChat.detailsNone')}
-        </Row>
-        <Row label={t('webChat.detailsCreated')}>
-          {when(
-            created
-              ? typeof created === 'number'
-                ? created < 1e10
-                  ? created * 1000
-                  : created
-                : Date.parse(created)
-              : null,
-          )}
-        </Row>
-        <Row label={t('webChat.detailsUpdated')}>{when(row ? sessionUpdatedMs(row) : null)}</Row>
-        <Row label={t('webChat.detailsUsage')}>
-          {usage.data ? `${(usage.data.input + usage.data.output).toLocaleString()} tokens` : '—'}
-        </Row>
-        <Row label={t('webChat.detailsCost')}>
-          {usage.data?.cost !== null && usage.data?.cost !== undefined
-            ? `$${usage.data.cost.toFixed(4)}`
-            : '—'}
-        </Row>
-        <Row label={t('webChat.detailsTask')}>{task}</Row>
-        <Row label={t('webChat.detailsSubagents')}>
-          {children.length ? (
-            <ul className="flex flex-col gap-0.5">
-              {children.map((child) => (
-                <li key={child.key}>
-                  <Link
-                    to={sessionKeyToPath(child.key)}
-                    className="text-accent underline-offset-2 hover:underline"
-                  >
-                    {sessionTitle(child)}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            t('webChat.detailsNone')
-          )}
-        </Row>
-        <Row label={t('webChat.detailsPlan')}>
-          {plan.on ? t('webChat.planOn') : t('webChat.planOff')}
-        </Row>
-        <Row label={t('webChat.detailsArtifacts')}>
-          {artifacts.length ? (
-            <ul className="flex flex-col gap-0.5">
-              {artifacts.map((item) =>
-                item.kind === 'artifact' || item.kind === 'card' ? (
-                  <li key={item.id} className="flex items-center gap-1.5">
-                    <FileText className="size-3.5 text-text-muted" aria-hidden />
-                    <span className="truncate">{artifactName(item.artifact)}</span>
+      <div className="scroll-contained anim-stagger grid flex-1 grid-cols-[max-content_minmax(0,1fr)] content-start gap-x-4 gap-y-3 p-4">
+        <Group>
+          <Row label={t('webChat.detailsAgent')}>{row ? sessionAgent(row) : '—'}</Row>
+          <Row label={t('webChat.detailsRoute')} className="font-mono text-small">
+            {route && route.kind === 'routerDecision'
+              ? `${route.tier ? `${route.tier} · ` : ''}${route.model}`
+              : (row?.model ?? unpinned)}
+          </Row>
+          <Row label={t('webChat.detailsChannel')}>{row ? sessionChannel(row) : '—'}</Row>
+          <Row label={t('webChat.detailsProject')}>
+            {project ? (projects.data?.get(project) ?? project) : t('webChat.detailsNone')}
+          </Row>
+        </Group>
+        <Group>
+          <Row label={t('webChat.detailsCreated')} className="tabular-nums">
+            {when(
+              created
+                ? typeof created === 'number'
+                  ? created < 1e10
+                    ? created * 1000
+                    : created
+                  : Date.parse(created)
+                : null,
+            )}
+          </Row>
+          <Row label={t('webChat.detailsUpdated')} className="tabular-nums">
+            {when(row ? sessionUpdatedMs(row) : null)}
+          </Row>
+          <Row label={t('webChat.detailsUsage')} className="tabular-nums">
+            {usage.data ? `${(usage.data.input + usage.data.output).toLocaleString()} tokens` : '—'}
+          </Row>
+          <Row label={t('webChat.detailsCost')} className="tabular-nums">
+            {usage.data?.cost !== null && usage.data?.cost !== undefined
+              ? `$${usage.data.cost.toFixed(4)}`
+              : '—'}
+          </Row>
+        </Group>
+        <Group>
+          <Row label={t('webChat.detailsTask')}>{task}</Row>
+          <Row label={t('webChat.detailsSubagents')}>
+            {children.length ? (
+              <ul className="flex flex-col gap-1">
+                {children.map((child) => (
+                  <li key={child.key}>
+                    <Link
+                      to={sessionKeyToPath(child.key)}
+                      className="text-accent underline-offset-2 hover:underline"
+                    >
+                      {sessionTitle(child)}
+                    </Link>
                   </li>
-                ) : null,
-              )}
-            </ul>
-          ) : (
-            t('webChat.detailsNone')
-          )}
-        </Row>
-        <Row label={t('webChat.detailsQueued')}>{transcript.queued}</Row>
-      </dl>
+                ))}
+              </ul>
+            ) : (
+              t('webChat.detailsNone')
+            )}
+          </Row>
+          <Row label={t('webChat.detailsPlan')}>
+            {plan.on ? t('webChat.planOn') : t('webChat.planOff')}
+          </Row>
+          <Row label={t('webChat.detailsArtifacts')}>
+            {artifacts.length ? (
+              <ul className="flex flex-col gap-1">
+                {artifacts.map((item) =>
+                  item.kind === 'artifact' || item.kind === 'card' ? (
+                    <li key={item.id} className="flex items-center gap-1.5">
+                      <FileText className="size-3.5 text-text-muted" aria-hidden />
+                      <span className="truncate">{artifactName(item.artifact)}</span>
+                    </li>
+                  ) : null,
+                )}
+              </ul>
+            ) : (
+              t('webChat.detailsNone')
+            )}
+          </Row>
+          <Row label={t('webChat.detailsQueued')} className="tabular-nums">
+            {transcript.queued}
+          </Row>
+        </Group>
+      </div>
     </aside>
   )
 }

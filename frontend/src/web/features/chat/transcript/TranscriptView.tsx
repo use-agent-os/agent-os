@@ -1,10 +1,10 @@
 import { ArrowDown, Loader2, MessageSquareText } from 'lucide-react'
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webChat'
 import { Button } from '@/web/components/ui/button'
 import { ErrorState } from '@/web/components/ui/states'
-import type { TranscriptState } from '../model/types'
+import type { TranscriptState, Turn } from '../model/types'
 import { useFollowScroll } from './follow'
 import { TurnView } from './TurnView'
 
@@ -29,6 +29,11 @@ export function contentVersion(state: TranscriptState): string {
     settled,
     state.pendingInputs.length,
   ].join(':')
+}
+
+/** A local note (a slash command's output), not a turn of the conversation. */
+function isNoteTurn(turn: Turn): boolean {
+  return !turn.userMessage && turn.items.every((item) => item.kind === 'note')
 }
 
 export interface TranscriptViewProps {
@@ -85,6 +90,22 @@ export function TranscriptView(props: TranscriptViewProps) {
     if (el && el.scrollHeight <= el.clientHeight + 40) maybeLoadOlder()
   }, [loading, state.hasMore, rows, maybeLoadOlder])
 
+  // The newest turn finishing on screen (live → done): its work folds away
+  // instead of snapping shut. Settling swaps the live turn for its history
+  // copy (a new id, and for a moment both are listed), so until the next turn
+  // goes live the newest turn keeps one key: it mounts once, with the fold
+  // starting open. A turn loaded from history is never marked.
+  const lastTurn = state.turns.at(-1)
+  const lastLive = lastTurn?.status === 'live'
+  const [wasLive, setWasLive] = useState(lastLive)
+  const [settleKey, setSettleKey] = useState<string | null>(null)
+  if (wasLive !== lastLive) {
+    setWasLive(lastLive)
+    setSettleKey(!lastLive && lastTurn?.status === 'done' ? `settled:${lastTurn.id}` : null)
+  }
+  const settlingIndex =
+    settleKey && lastTurn?.status === 'done' && !isNoteTurn(lastTurn) ? state.turns.length - 1 : -1
+
   const lastUserIndex = state.turns.reduce((acc, turn, i) => (turn.userMessage ? i : acc), -1)
 
   const empty = !error && !loading && state.turns.length === 0
@@ -123,11 +144,12 @@ export function TranscriptView(props: TranscriptViewProps) {
           ) : (
             state.turns.map((turn, i) => (
               <TurnView
-                key={turn.id}
+                key={i === settlingIndex ? settleKey! : turn.id}
                 turn={turn}
                 answered={i < lastUserIndex}
                 waitingApproval={waitingApproval}
                 last={i === state.turns.length - 1}
+                settled={i === settlingIndex}
               />
             ))
           )}

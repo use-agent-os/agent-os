@@ -371,7 +371,9 @@
       border-color var(--duration-base) var(--ease-out),
       box-shadow var(--duration-base) var(--ease-out);
   }
-  :root[data-theme='light'] .chat-composer {
+  /* `:where()` keeps this at the specificity of `.chat-composer`, so the
+   * focus rule below still replaces the shadow in the light theme. */
+  :where(:root[data-theme='light']) .chat-composer {
     box-shadow:
       0 1px 2px hsl(var(--shadow-color) / 0.05),
       0 12px 32px -12px hsl(var(--shadow-color) / 0.18);
@@ -381,12 +383,13 @@
       border-color: color-mix(in oklab, var(--border-control), transparent 20%);
     }
   }
-  /* Focus: the accent boundary (3:1) plus a soft glow. */
+  /* Focus, both themes: the accent boundary (3:1) thickened by a 1px ring,
+   * plus the soft focus glow the form fields use. */
   .chat-composer:focus-within {
     border-color: var(--ring);
     box-shadow:
       0 0 0 1px var(--ring),
-      0 0 0 4px color-mix(in oklab, var(--ring), transparent 88%),
+      var(--focus-glow),
       var(--elevation-overlay);
   }
   .chat-composer[data-dragging='true'] {
@@ -614,6 +617,15 @@
     opacity: 0;
     visibility: hidden;
   }
+  /* A turn that just finished: its work starts open and folds away, so the
+   * hand-over from the live list is a collapse, not a jump. */
+  .chat-settle[data-open='false'] {
+    grid-template-rows: 1fr;
+  }
+  .chat-settle[data-open='false'] > * {
+    opacity: 1;
+    visibility: visible;
+  }
 }
 
 /* Unlayered on purpose: these restyle Button variants, whose utilities
@@ -643,6 +655,21 @@
   }
 }
 
+/* Unlayered: the chat's menus (model picker, capabilities, slash commands,
+ * session actions), matching the command palette. The highlighted row is a
+ * soft lime-washed fill with a 3px bar in the ring colour on its left edge
+ * (the bar carries the 3:1 the fill alone cannot), never an outline.
+ * Radix moves DOM focus to the highlighted item (pointer and keys alike),
+ * so `:focus` is the highlight; `data-highlighted` only follows it a render
+ * later. The slash menu keeps focus in the composer: its active option is
+ * `aria-selected`. */
+.chat-menu-item:is(:focus, [aria-selected='true']) {
+  outline: none;
+  background: var(--accent-tint);
+  color: var(--text);
+  box-shadow: inset 3px 0 0 var(--ring);
+}
+
 @media (pointer: coarse) {
   .chat-send {
     width: 44px;
@@ -662,6 +689,10 @@
   .chat-composer,
   .chat-user-bubble {
     border: 1px solid CanvasText;
+  }
+  .chat-menu-item:is(:focus, [aria-selected='true']) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
   }
   .chat-streaming > .prose-chat :last-child::after {
     forced-color-adjust: none;

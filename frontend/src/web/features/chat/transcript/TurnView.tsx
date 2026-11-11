@@ -213,14 +213,19 @@ function WorkedFor({
   work,
   toolCount,
   durationMs,
+  settled = false,
 }: {
   work: Item[]
   toolCount: number
   durationMs: number | null
+  /** The turn just finished on screen: the live work folds away, not snaps. */
+  settled?: boolean
 }) {
   const [open, setOpen] = useState(false)
-  // Mounted on first open, then kept so closing animates too.
-  const [mounted, setMounted] = useState(false)
+  // Mounted on first open, then kept so closing animates too. A turn that
+  // just settled mounts it closed, starting from open (chat.css), so the
+  // work it was showing collapses into the summary line.
+  const [mounted, setMounted] = useState(settled)
   const duration = formatWorkDuration(durationMs)
   const label =
     toolCount > 0
@@ -241,7 +246,7 @@ function WorkedFor({
         <ChevronRight className="chat-chevron" aria-hidden />
       </button>
       {mounted ? (
-        <div className="collapsible chat-collapse" data-open={open}>
+        <div className={cn('collapsible chat-collapse', settled && 'chat-settle')} data-open={open}>
           <div>
             <div className="chat-fold-body">
               <Items items={work} live={false} answered={false} />
@@ -313,6 +318,7 @@ export const TurnView = memo(function TurnView({
   answered,
   waitingApproval,
   last = false,
+  settled = false,
 }: {
   turn: Turn
   /** A later user message exists (ask/plan cards lock). */
@@ -324,6 +330,8 @@ export const TurnView = memo(function TurnView({
    * the placeholder height first and clamp the scroll position.
    */
   last?: boolean
+  /** It finished while on screen (live → done), not loaded from history. */
+  settled?: boolean
 }) {
   const fold = foldTurn(turn)
   const live = turn.status === 'live'
@@ -342,7 +350,12 @@ export const TurnView = memo(function TurnView({
         <p className="text-small text-text-muted">{t('webChat.textTruncated')}</p>
       ) : null}
       {fold.folded ? (
-        <WorkedFor work={fold.work} toolCount={fold.toolCount} durationMs={fold.durationMs} />
+        <WorkedFor
+          work={fold.work}
+          toolCount={fold.toolCount}
+          durationMs={fold.durationMs}
+          settled={settled}
+        />
       ) : null}
       <Items
         items={fold.visible}
