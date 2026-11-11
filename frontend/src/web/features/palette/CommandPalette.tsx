@@ -1,6 +1,6 @@
 import { Command } from 'cmdk'
 import { CornerDownLeft, FileText, MessageSquare, Search, Settings, Zap } from 'lucide-react'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
@@ -49,6 +49,20 @@ function EnterHint() {
   )
 }
 
+/**
+ * The results list whose highlight glides. Its own component so the glide
+ * hook mounts with the dialog content: called in the palette itself, it ran
+ * while the dialog was closed (no element) and never measured.
+ */
+function PaletteTrack({ children }: { children: ReactNode }) {
+  const track = useGlide<HTMLDivElement>('[cmdk-item][aria-selected="true"]')
+  return (
+    <div ref={track} className="palette-track glide-track [--glide-radius:8px]">
+      {children}
+    </div>
+  )
+}
+
 /** The ⌘K palette (command-palette spec "Command palette"). */
 export function CommandPalette({
   open,
@@ -66,7 +80,6 @@ export function CommandPalette({
   const overview = useShortcutOverlay()
   const phone = usePhone()
   const [query, setQuery] = useState('')
-  const track = useGlide<HTMLDivElement>('[cmdk-item][aria-selected="true"]')
 
   const currentKey = pathname.startsWith('/chat/') ? pathToSessionKey(pathname) : null
   const currentRow = currentKey ? sessions.rows.find((r) => r.key === currentKey) : undefined
@@ -147,7 +160,7 @@ export function CommandPalette({
               <Search className="size-5" aria-hidden />
               {t('webPalette.empty', { query })}
             </Command.Empty>
-            <div ref={track} className="palette-track glide-track [--glide-radius:8px]">
+            <PaletteTrack>
               <Command.Group heading={t('webPalette.groupSessions')} className={groupClass}>
                 {sessions.isError ? (
                   <div role="alert" className="px-2 py-1.5 text-danger">
@@ -251,7 +264,7 @@ export function CommandPalette({
                   </Command.Item>
                 ))}
               </Command.Group>
-            </div>
+            </PaletteTrack>
           </Command.List>
           <div
             aria-hidden
