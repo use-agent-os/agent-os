@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from 'react'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webShell'
 import { useAttentionInbox } from '@/lib/useAttentionInbox'
-import { cn } from '@/lib/utils'
 import { SimpleTooltip } from '@/web/components/ui/tooltip'
 import { RailLink } from './RailLink'
 
@@ -33,10 +32,9 @@ export function InboxButton({ onNavigate }: { onNavigate?: () => void }) {
           <span
             data-testid="inbox-badge"
             aria-hidden
-            className={cn(
-              'pointer-events-none absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-danger px-1 text-center text-small leading-4 font-semibold text-danger-fg',
-              count > 0 ? 'visible' : 'invisible',
-            )}
+            // A template string, not cn(): tailwind-merge would drop text-small
+            // as a colour clashing with text-danger-fg.
+            className={`inbox-badge pointer-events-none absolute top-0 right-0 h-4 min-w-4 rounded-full bg-danger px-1 text-center text-small leading-4 font-semibold text-danger-fg tabular-nums ring-2 ring-surface-1 ${count > 0 ? 'visible' : 'invisible'}`}
           >
             {count > 99 ? '99+' : count}
           </span>

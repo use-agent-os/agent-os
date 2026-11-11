@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react'
+import { Check, Settings2 } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { t } from '@/i18n'
 import '@/i18n/en/webShell'
@@ -40,15 +40,18 @@ export function AgentSwitcher() {
             variant="ghost"
             size="icon"
             aria-label={label}
-            className="rounded-lg bg-surface-3 font-semibold"
+            className="group/avatar rounded-full hover:bg-transparent data-[state=open]:bg-transparent"
           >
-            <span aria-hidden className="text-small">
+            <span
+              aria-hidden
+              className="grid size-8 place-items-center rounded-full border border-border-strong bg-[linear-gradient(160deg,var(--surface-3),var(--surface-2))] text-small font-semibold tracking-wide text-text shadow-highlight transition-[border-color,box-shadow] duration-[var(--duration-fast)] group-hover/avatar:border-accent/60 group-data-[state=open]/avatar:border-accent group-data-[state=open]/avatar:shadow-[0_0_0_3px_var(--accent-tint)]"
+            >
               {initials(shown)}
             </span>
           </Button>
         </DropdownMenuTrigger>
       </SimpleTooltip>
-      <DropdownMenuContent side="right" align="start">
+      <DropdownMenuContent side="right" align="start" sideOffset={8} className="min-w-56">
         <DropdownMenuLabel>{t('webShell.agentSwitcherLabel')}</DropdownMenuLabel>
         {agents.isPending ? (
           <DropdownMenuItem disabled>{t('webShell.agentsLoading')}</DropdownMenuItem>
@@ -62,22 +65,29 @@ export function AgentSwitcher() {
               aria-checked={activeAgent === agent.id}
               role="menuitemradio"
             >
+              <span
+                aria-hidden
+                className="grid size-6 shrink-0 place-items-center rounded-full border border-border bg-surface-2 text-small font-semibold text-text-muted"
+              >
+                {initials(agent.name || agent.id)}
+              </span>
+              <span className="min-w-0 flex-1 truncate">{agent.name}</span>
               <Check
-                className={activeAgent === agent.id ? 'opacity-100' : 'opacity-0'}
+                className={activeAgent === agent.id ? 'text-accent! opacity-100' : 'opacity-0'}
                 aria-hidden
               />
-              {agent.name}
             </DropdownMenuItem>
           ))
         )}
         {activeAgent ? (
           <DropdownMenuItem onSelect={() => chooseAgent(null)}>
-            <Check className="opacity-0" aria-hidden />
+            <span aria-hidden className="size-6 shrink-0" />
             {t('webShell.agentFilterAll')}
           </DropdownMenuItem>
         ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => navigate('/settings/agents')}>
+          <Settings2 aria-hidden />
           {t('webShell.agentManage')}
         </DropdownMenuItem>
       </DropdownMenuContent>
