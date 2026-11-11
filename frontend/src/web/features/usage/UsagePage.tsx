@@ -348,7 +348,7 @@ function SessionsTable({ rows }: { rows: UsageRow[] }) {
                           title={t('webPagesOverview.usageOpenSession', { session: key })}
                           className="target flex items-center font-mono text-small text-accent underline-offset-2 hover:underline"
                         >
-                          <span className="truncate">{key}</span>
+                          <KeyLabel value={key} />
                         </Link>
                       ) : (
                         '—'
@@ -466,6 +466,22 @@ function ChartLegend({ mode }: { mode: ChartMode }) {
   )
 }
 
+/**
+ * A session key cut in the middle: keys share a long prefix
+ * (`agent:main:webchat:`) and differ at the end, so the head truncates and
+ * the tail always shows. Both halves are text, so the accessible name and
+ * copy-paste are the whole key.
+ */
+function KeyLabel({ value }: { value: string }) {
+  const cut = Math.max(0, value.length - 10)
+  return (
+    <>
+      <span className="min-w-0 truncate">{value.slice(0, cut)}</span>
+      <span className="shrink-0 whitespace-pre">{value.slice(cut)}</span>
+    </>
+  )
+}
+
 /** The sessions with the most usage in range, as bars, by tokens or by cost. */
 function TopSessionsChart({ rows }: { rows: UsageRow[] }) {
   const [mode, setMode] = useState<ChartMode>('tokens')
@@ -517,7 +533,7 @@ function TopSessionsChart({ rows }: { rows: UsageRow[] }) {
                 title={bar.key}
                 className="target inline-flex min-w-0 items-center font-mono text-small text-text underline-offset-2 transition-colors duration-[var(--duration-fast)] hover:text-accent hover:underline"
               >
-                <span className="truncate">{bar.label}</span>
+                <KeyLabel value={bar.key} />
               </Link>
               <Meter
                 index={i}

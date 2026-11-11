@@ -785,21 +785,57 @@ async function auditKeyboard(browser) {
           const o = document.querySelector('[cmdk-item][data-selected=true]')
           if (!o) return { found: false }
           const st = getComputedStyle(o)
-          // The highlighted row is marked by an outline or by a leading
-          // accent bar (shell.css `.palette-item::before`) over its soft fill.
+          // Resolve any CSS colour (oklab, color-mix) to sRGB bytes.
+          const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
+          const rgba = (c) => {
+            ctx.clearRect(0, 0, 1, 1)
+            ctx.fillStyle = '#000'
+            ctx.fillStyle = c
+            ctx.fillRect(0, 0, 1, 1)
+            return [...ctx.getImageData(0, 0, 1, 1).data]
+          }
+          const clear = (c) => !c || /transparent/.test(c) || rgba(c)[3] === 0
+          // The highlighted row needs a visible fill (its own background, or
+          // the list's gliding pill placed over it) plus the leading 3:1
+          // accent bar (shell.css `.palette-item::before`), or an outline.
+          let fill = clear(st.backgroundColor) ? null : st.backgroundColor
+          let fillFrom = fill ? 'row' : 'none'
+          const track = o.closest('.glide-track')
+          if (!fill && track?.dataset.glide) {
+            const tr = track.getBoundingClientRect()
+            const r = o.getBoundingClientRect()
+            const scale = tr.height / track.offsetHeight || 1
+            const gy = parseFloat(track.style.getPropertyValue('--glide-y')) * scale
+            const gh = parseFloat(track.style.getPropertyValue('--glide-h')) * scale
+            const pill = getComputedStyle(track, '::before')
+            if (
+              Math.abs(tr.top + gy - r.top) <= 2 &&
+              Math.abs(gh - r.height) <= 2 &&
+              parseFloat(pill.opacity) >= 0.99 &&
+              !clear(pill.backgroundColor)
+            ) {
+              fill = pill.backgroundColor
+              fillFrom = 'glide'
+            }
+          }
+          const surface = getComputedStyle(o.closest('[role=dialog]')).backgroundColor
+          const [a, b] = [fill ? rgba(fill) : null, rgba(surface)]
+          const fillDelta = a ? Math.max(...[0, 1, 2].map((i) => Math.abs(a[i] - b[i]))) : 0
+          const fillOn = fillDelta >= 8
           const bar = getComputedStyle(o, '::before')
           const barOn =
             bar.content !== 'none' &&
             parseFloat(bar.opacity) >= 0.99 &&
             parseFloat(bar.width) >= 2 &&
             parseFloat(bar.height) >= 12 &&
-            !/rgba\([^)]*,\s*0\)|transparent/.test(bar.backgroundColor)
+            !clear(bar.backgroundColor)
           const outlineOn = st.outlineStyle !== 'none' && parseFloat(st.outlineWidth) > 0
           return {
             found: true,
             outline: `${st.outlineStyle} ${st.outlineWidth} ${st.outlineColor}`,
+            fill: `${fillFrom} ${fill} vs ${surface} (max channel delta ${fillDelta})`,
             bar: `${bar.width}x${bar.height} ${bar.backgroundColor} opacity ${bar.opacity}`,
-            on: outlineOn || barOn,
+            on: outlineOn || (fillOn && barOn),
           }
         })
         const paletteEsc = await escapeOut(page)

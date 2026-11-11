@@ -23,7 +23,7 @@ export interface StripItem {
   iconTone?: OverviewTone
   /** Under the figure: a breakdown, a live status line. */
   detail?: ReactNode
-  /** Spans two columns on wide layouts (the cell with a breakdown). */
+  /** Spans two columns (the cell with a breakdown). */
   wide?: boolean
 }
 
@@ -37,9 +37,10 @@ const TONE: Record<StripTone, string> = {
 
 /** Grid columns per breakpoint, by the number of columns the items need. */
 function columns(units: number): string {
-  // Five cells, the first one wide: it gets 1.5 shares on one wide row.
-  if (units >= 6)
-    return 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-[minmax(0,1.5fr)_repeat(4,minmax(0,1fr))]'
+  // Five cells, the first one wide: two rows of three (the wide cell takes
+  // two). Five across never fits within the page's max width with labels
+  // like "Failed or timed out" on one line, so there is no wider step.
+  if (units >= 6) return 'grid-cols-2 md:grid-cols-3'
   if (units === 5) return 'grid-cols-2 sm:grid-cols-5'
   if (units === 3) return 'grid-cols-3'
   return 'grid-cols-2 sm:grid-cols-4'
@@ -65,11 +66,7 @@ export function StatStrip({
       className={cn('anim-stagger grid gap-3 sm:gap-4', columns(units), className)}
     >
       {items.map((item) => (
-        <Card
-          key={item.label}
-          padding="none"
-          className={cn(CELL, item.wide && 'col-span-2 lg:col-span-1')}
-        >
+        <Card key={item.label} padding="none" className={cn(CELL, item.wide && 'col-span-2')}>
           {/* The label is the dt's own text (tests and getNodeText read it);
               it wraps beside the tile rather than cutting off. */}
           <dt
@@ -99,11 +96,7 @@ export function StatStripSkeleton({ cells, wide = false }: { cells: number; wide
   return (
     <div className={cn('grid gap-3 sm:gap-4', columns(units))}>
       {Array.from({ length: cells }, (_, i) => (
-        <Card
-          key={i}
-          padding="none"
-          className={cn(CELL, wide && i === 0 && 'col-span-2 lg:col-span-1')}
-        >
+        <Card key={i} padding="none" className={cn(CELL, wide && i === 0 && 'col-span-2')}>
           <span className="flex items-center gap-2.5">
             <Skeleton className="size-8 rounded-control max-sm:hidden" />
             <Skeleton className="h-3.5 w-20" />

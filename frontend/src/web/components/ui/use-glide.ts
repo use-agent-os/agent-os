@@ -21,13 +21,29 @@ export function useGlide<T extends HTMLElement>(selector: string = GLIDE_ACTIVE)
     let frame = 0
     const place = () => {
       const item = track.querySelector<HTMLElement>(selector)
-      if (!item || item.offsetParent !== track) {
+      // Sum offsets up to the track, so items nested in groups (cmdk) or
+      // other positioned wrappers still place; give up only when the chain
+      // never reaches the track (hidden item, track not positioned).
+      let x = 0
+      let y = 0
+      let node: Element | null = item
+      while (node instanceof HTMLElement && node !== track) {
+        x += node.offsetLeft
+        y += node.offsetTop
+        node = node.offsetParent
+        // An intermediate parent's border sits between its edge and ours.
+        if (node instanceof HTMLElement && node !== track) {
+          x += node.clientLeft
+          y += node.clientTop
+        }
+      }
+      if (!item || node !== track) {
         delete track.dataset.glide
         return
       }
       const s = track.style
-      s.setProperty('--glide-x', `${item.offsetLeft}px`)
-      s.setProperty('--glide-y', `${item.offsetTop}px`)
+      s.setProperty('--glide-x', `${x}px`)
+      s.setProperty('--glide-y', `${y}px`)
       s.setProperty('--glide-w', `${item.offsetWidth}px`)
       s.setProperty('--glide-h', `${item.offsetHeight}px`)
       if (!track.dataset.glide) {

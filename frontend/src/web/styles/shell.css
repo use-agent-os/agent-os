@@ -259,17 +259,30 @@
         publishes its own height as --tray-stack (ApprovalTray.tsx);
      3. toasts sit above both, at the same right edge as the tray.
 
-   Nothing floats at the top, so no toast can cover a page title, a header
+   The tray never grows into the top --toast-slot of the viewport, and the
+   toast offset is capped to that slot's bottom edge: when the docked bar
+   and the tray leave no room above them, the toast sits in the slot (just
+   below the top bars), still clear of the tray and of the composer.
+   Nothing else floats at the top, so no toast covers a page title, a header
    action or the phone menu button. Toasts stay below any open sheet (the
    phone drawer) and its scrim. */
 :root {
   --float-inset: 1rem;
   --float-gap: 0.5rem;
   --float-bottom: max(var(--float-inset), env(safe-area-inset-bottom));
+  /* Top bars (~3.5rem, plus the setup banner) and one two-line toast. */
+  --toast-slot: 12rem;
 }
 @media (max-width: 639.98px) {
   :root {
     --float-inset: 0.5rem;
+  }
+}
+/* Narrower, the top bar, the wrapped setup banner and the chat header stack
+   taller. */
+@media (max-width: 1023.98px) {
+  :root {
+    --toast-slot: 15rem;
   }
 }
 
@@ -281,7 +294,7 @@
   max-height: min(
     560px,
     70dvh,
-    calc(100dvh - var(--float-bottom) - var(--tray-clearance, 0px) - 10rem)
+    calc(100dvh - var(--float-bottom) - var(--tray-clearance, 0px) - var(--toast-slot))
   );
 }
 @media (max-width: 639.98px) {
@@ -298,7 +311,7 @@
       var(--float-bottom) + var(--tray-clearance, 0px) +
         var(--tray-stack, calc(0px - var(--float-gap))) + var(--float-gap)
     ),
-    calc(100dvh - 12rem)
+    calc(100dvh - var(--toast-slot) + var(--float-gap))
   );
   --offset-right: var(--float-inset) !important;
   --offset-bottom: var(--toast-bottom) !important;
@@ -370,14 +383,18 @@
 .palette-track {
   --glide-bg: color-mix(in oklab, var(--accent) 9%, var(--surface-3));
 }
+/* Until the pill has measured (or if it cannot), the row paints the same
+   fill itself, so a keyboard user always sees which result Enter opens. */
+.palette-track:not([data-glide]) .palette-item[data-selected='true'] {
+  background: var(--glide-bg);
+}
 .palette-item::before {
   content: '';
   position: absolute;
-  top: 50%;
+  top: 6px;
+  bottom: 6px;
   left: 0;
   width: 3px;
-  height: 16px;
-  translate: 0 -50%;
   border-radius: 0 3px 3px 0;
   background: var(--ring);
   opacity: 0;
@@ -424,6 +441,10 @@
   }
   .rail-track::before {
     background: none;
+  }
+  .palette-item[data-selected='true'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
   }
   .rail-track > :is([aria-pressed='true'], [aria-current='page']) {
     forced-color-adjust: none;

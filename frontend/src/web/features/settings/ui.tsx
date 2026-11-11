@@ -63,8 +63,10 @@ export function Notice({
       <span className="set-notice-icon" aria-hidden>
         {icon ?? <Icon data-status-icon />}
       </span>
-      <div className="min-w-0 flex-1">{children}</div>
-      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+      {/* With actions, the text keeps a readable measure (14rem) and the
+          actions wrap onto their own row below it rather than squeezing it. */}
+      <div className={cn('min-w-0 flex-1', actions && 'basis-56')}>{children}</div>
+      {actions ? <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   )
 }

@@ -180,10 +180,7 @@ export function SaveBar({
           </div>
         </Docked>
       ) : saved ? (
-        <Docked
-          role="status"
-          className="set-saved sticky bottom-4 z-[var(--z-sticky)] mt-8 flex justify-center"
-        >
+        <Docked role="status" className="set-saved sticky bottom-4 z-[var(--z-sticky)] mt-8">
           <span className="inline-flex items-center gap-2 rounded-full border border-border-strong bg-surface-overlay px-3.5 py-1.5 text-small font-medium shadow-overlay">
             <span className="grid size-4 place-items-center rounded-full bg-ok/15 text-ok">
               <Check className="size-3" aria-hidden data-status-icon />
