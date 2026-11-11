@@ -1,10 +1,22 @@
-import { Loader2, X } from 'lucide-react'
+import {
+  AlertTriangle,
+  CalendarClock,
+  CalendarPlus,
+  ChevronRight,
+  Loader2,
+  Pencil,
+  Send,
+  ShieldAlert,
+  X,
+  Zap,
+} from 'lucide-react'
 import { useId, useMemo, useState, type ReactNode } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webPagesWork'
 import type { Gate } from '@/lib/disabled-reason'
 import { cn } from '@/lib/utils'
 import {
+  buildDelivery,
   buildSavePayload,
   explainCron,
   humanCountdown,
@@ -14,6 +26,7 @@ import {
   resolveTarget,
   seedForm,
   targetsForChannel,
+  validateScriptPath,
   type CronForm,
   type DeliveryMode,
   type DeliveryTarget,
@@ -26,17 +39,18 @@ import {
   type SessionTarget,
 } from '@/views/cron/logic'
 import { Button } from '@/web/components/ui/button'
+import { Input, Select, Textarea } from '@/web/components/ui/input'
+import { SectionHeader } from '@/web/components/ui/section-header'
+import { SegmentedControl } from '@/web/components/ui/segmented-control'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/web/components/ui/sheet'
 import { Switch } from '@/web/components/ui/switch'
+import '@/web/styles/work.css'
 
 // The create / edit panel for one automation (task 8.5). All validation and
 // payload assembly is views/cron/logic (seedForm, resolveTarget,
 // buildSavePayload); this file renders the form around it.
 
 export type SaveRequest = Extract<SaveBuild, { ok: true }>
-
-const inputClass =
-  'h-9 w-full rounded-md border border-border-control bg-surface-0 px-3 text-ui touch:h-11 max-md:text-base disabled:opacity-60'
 
 /** Sentinel option value: "the recipient I want is not in this list". */
 const MANUAL_RECIPIENT = '__manual__'
@@ -100,26 +114,68 @@ function wakeModes(): { value: string; label: string }[] {
   ]
 }
 
-/** A labelled control; `hint` sits under it. */
+/** A labelled control; `hint` sits under it, an inline `error` replaces the hint. */
 function Field({
   label,
   hint,
+  error,
+  errorId,
   children,
   id,
 }: {
   label: string
   hint?: ReactNode
+  error?: string | null
+  errorId?: string
   children: ReactNode
   id: string
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="font-medium">
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <label htmlFor={id} className="text-label">
         {label}
       </label>
       {children}
-      {hint ? <span className="text-small text-text-muted">{hint}</span> : null}
+      {error ? (
+        <FieldError id={errorId} text={error} />
+      ) : hint ? (
+        <span className="text-small text-pretty text-text-muted">{hint}</span>
+      ) : null}
     </div>
+  )
+}
+
+/** The validation message under the field it is about. */
+function FieldError({ id, text }: { id?: string; text: string }) {
+  return (
+    <p
+      id={id}
+      role="alert"
+      className="anim-fade-in flex items-start gap-1.5 text-small text-danger [&_svg]:mt-px [&_svg]:size-3.5 [&_svg]:shrink-0"
+    >
+      <AlertTriangle aria-hidden data-status-icon />
+      {text}
+    </p>
+  )
+}
+
+/** One titled group of the form. */
+function FormSection({
+  id,
+  title,
+  icon,
+  children,
+}: {
+  id: string
+  title: string
+  icon: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <section aria-labelledby={id} className="flex flex-col gap-4">
+      <SectionHeader id={id} as="h3" size="sm" icon={icon} title={title} />
+      {children}
+    </section>
   )
 }
 
@@ -140,21 +196,38 @@ export function CronExplain({ expr, timeZone = '' }: { expr: string; timeZone?: 
   }
   if (!parsed) {
     return (
-      <p role="status" className="text-small text-danger">
+      <p
+        role="status"
+        className="flex items-start gap-1.5 text-small text-danger [&_svg]:mt-px [&_svg]:size-3.5 [&_svg]:shrink-0"
+      >
+        <AlertTriangle aria-hidden data-status-icon />
         {t('webPagesWork.explainInvalid')}
       </p>
     )
   }
   return (
-    <div role="status" className="rounded-md bg-surface-1 px-3 py-2 text-small">
-      <p className="font-medium">{explainCron(trimmed) || t('webPagesWork.explainCustom')}</p>
+    <div
+      role="status"
+      className="anim-fade-in rounded-card border border-border bg-surface-2 px-3.5 py-3 shadow-highlight"
+    >
+      <p className="flex items-center gap-2 font-medium [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-accent">
+        <CalendarClock aria-hidden />
+        {explainCron(trimmed) || t('webPagesWork.explainCustom')}
+      </p>
       {upcoming.length ? (
         <>
-          <p className="mt-1 text-text-muted">{t('webPagesWork.nextRuns')}</p>
-          <ul role="list" className="tabular-nums">
-            {upcoming.map((d) => (
-              <li key={d.getTime()} className="flex gap-2">
-                <span>{humanCountdown(d)}</span>
+          <p className="mt-2.5 text-label text-text-muted">{t('webPagesWork.nextRuns')}</p>
+          <ul role="list" className="mt-1.5 flex flex-col gap-1 text-small tabular-nums">
+            {upcoming.map((d, i) => (
+              <li key={d.getTime()} className="flex items-center gap-2">
+                <span
+                  aria-hidden
+                  className={cn(
+                    'size-1.5 shrink-0 rounded-full',
+                    i === 0 ? 'bg-accent' : 'bg-border-strong',
+                  )}
+                />
+                <span className="font-medium">{humanCountdown(d)}</span>
                 <span className="text-text-muted">{humanTime(d)}</span>
               </li>
             ))}
@@ -188,9 +261,8 @@ function RecipientField({
   return (
     <Field id={id} label={t('webPagesWork.fieldRecipient')}>
       {asPicker ? (
-        <select
+        <Select
           id={id}
-          className={inputClass}
           value={value}
           onChange={(e) => {
             if (e.target.value === MANUAL_RECIPIENT) {
@@ -208,11 +280,10 @@ function RecipientField({
             </option>
           ))}
           <option value={MANUAL_RECIPIENT}>{t('webPagesWork.recipientManual')}</option>
-        </select>
+        </Select>
       ) : (
-        <input
+        <Input
           id={id}
-          className={inputClass}
           placeholder={placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -244,7 +315,7 @@ export function AutomationEditor({
   onSubmit: (request: SaveRequest) => void
 }) {
   const [form, setForm] = useState<CronForm>(() => seedForm(job, template, activeSessionKey))
-  const [invalid, setInvalid] = useState<string | null>(null)
+  const [invalid, setInvalid] = useState<{ text: string; field: InvalidField | null } | null>(null)
   const ids = {
     name: useId(),
     kind: useId(),
@@ -252,7 +323,6 @@ export function AutomationEditor({
     every: useId(),
     at: useId(),
     tz: useId(),
-    payload: useId(),
     agent: useId(),
     target: useId(),
     targetKey: useId(),
@@ -272,6 +342,8 @@ export function AutomationEditor({
     fdWebhook: useId(),
     fdToken: useId(),
     reason: useId(),
+    section: useId(),
+    error: useId(),
   }
   const isEdit = !!job
 
@@ -288,18 +360,24 @@ export function AutomationEditor({
     const effective: CronForm = { ...form, sessionTarget: targetRes.target }
     const build = buildSavePayload(effective, job, activeSessionKey)
     if (!build.ok) {
-      setInvalid(build.error)
+      setInvalid({ text: build.error, field: fieldOfError(effective) })
       return
     }
     setInvalid(null)
     onSubmit(build)
   }
 
-  const error = invalid ?? saveError
+  // A validation error sits under the field it is about; anything else (a
+  // delivery problem, a failed save) shows above the buttons.
+  const invalidField = invalid?.field ?? null
+  const error = invalidField ? saveError : (invalid?.text ?? saveError)
+  const errorFor = (field: InvalidField) => (invalidField === field ? invalid!.text : null)
+  const invalidProps = (field: InvalidField) =>
+    invalidField === field ? { 'aria-invalid': true as const, 'aria-describedby': ids.error } : {}
 
   return (
     <Sheet open onOpenChange={(open) => !open && !saving && onCancel()}>
-      <SheetContent side="right" className="w-[min(100vw,36rem)]">
+      <SheetContent side="right" className="w-[min(100vw,38rem)]">
         <form
           noValidate
           className="flex min-h-0 flex-1 flex-col"
@@ -308,9 +386,15 @@ export function AutomationEditor({
             submit()
           }}
         >
-          <div className="flex items-start gap-2 border-b border-border px-4 py-3">
+          <div className="flex items-start gap-3 border-b border-border px-5 py-4">
+            <span
+              aria-hidden
+              className="grid size-9 shrink-0 place-items-center rounded-control border border-accent/20 bg-accent-tint text-accent shadow-highlight [&_svg]:size-4"
+            >
+              {isEdit ? <Pencil /> : <CalendarPlus />}
+            </span>
             <div className="min-w-0 flex-1">
-              <SheetTitle className="text-base font-semibold">
+              <SheetTitle className="text-section">
                 {isEdit ? t('webPagesWork.editTitle') : t('webPagesWork.createTitle')}
               </SheetTitle>
               <SheetDescription className="text-small text-text-muted">
@@ -328,114 +412,132 @@ export function AutomationEditor({
             </Button>
           </div>
 
-          <div className="scroll-contained flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
-            <Field id={ids.name} label={t('webPagesWork.fieldName')}>
-              <input
+          <div className="scroll-contained flex min-h-0 flex-1 flex-col gap-7 overflow-y-auto px-5 py-5">
+            <Field
+              id={ids.name}
+              label={t('webPagesWork.fieldName')}
+              error={errorFor('name')}
+              errorId={ids.error}
+            >
+              <Input
                 id={ids.name}
                 autoFocus
                 autoComplete="off"
-                className={inputClass}
                 placeholder={t('webPagesWork.fieldNamePlaceholder')}
                 value={form.name}
                 onChange={(e) => set('name', e.target.value)}
+                {...invalidProps('name')}
               />
             </Field>
 
-            <Field id={ids.kind} label={t('webPagesWork.fieldScheduleType')}>
-              <select
-                id={ids.kind}
-                className={inputClass}
+            <FormSection
+              id={ids.kind}
+              icon={<CalendarClock />}
+              title={t('webPagesWork.fieldScheduleType')}
+            >
+              <SegmentedControl
+                aria-labelledby={ids.kind}
                 value={form.scheduleKind}
-                onChange={(e) => set('scheduleKind', e.target.value as ScheduleKind)}
-              >
-                {scheduleKinds().map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
+                onChange={(kind) => set('scheduleKind', kind)}
+                options={scheduleKinds()}
+                size="sm"
+                className="w-full sm:w-fit max-sm:[&>*]:!h-auto max-sm:[&>*]:min-h-8 max-sm:[&>*]:flex-1 max-sm:[&>*]:py-1 max-sm:[&>*]:text-center max-sm:[&>*]:leading-tight max-sm:[&>*]:!whitespace-normal"
+              />
 
-            {form.scheduleKind === 'cron' ? (
-              <div className="flex flex-col gap-2">
-                <Field id={ids.cron} label={t('webPagesWork.fieldCron')}>
-                  <input
-                    id={ids.cron}
-                    autoComplete="off"
-                    spellCheck={false}
-                    className={cn(inputClass, 'font-mono')}
-                    placeholder="0 9 * * 1-5"
-                    value={form.cron}
-                    onChange={(e) => set('cron', e.target.value)}
+              {form.scheduleKind === 'cron' ? (
+                <div className="flex flex-col gap-3">
+                  <Field id={ids.cron} label={t('webPagesWork.fieldCron')}>
+                    <Input
+                      id={ids.cron}
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="font-mono"
+                      placeholder="0 9 * * 1-5"
+                      value={form.cron}
+                      onChange={(e) => set('cron', e.target.value)}
+                    />
+                  </Field>
+                  <div
+                    role="group"
+                    aria-label={t('webPagesWork.presets')}
+                    className="flex flex-wrap gap-1.5"
+                  >
+                    {presets().map((p) => (
+                      <Button
+                        key={p.cron}
+                        size="sm"
+                        variant="outline"
+                        aria-pressed={form.cron.trim() === p.cron}
+                        className="rounded-full aria-pressed:border-accent/40 aria-pressed:bg-accent-tint aria-pressed:text-accent"
+                        onClick={() => set('cron', p.cron)}
+                      >
+                        {p.label}
+                      </Button>
+                    ))}
+                  </div>
+                  <CronExplain expr={form.cron} timeZone={form.tz} />
+                </div>
+              ) : null}
+
+              {form.scheduleKind === 'every' ? (
+                <Field
+                  id={ids.every}
+                  label={t('webPagesWork.fieldInterval')}
+                  error={errorFor('every')}
+                  errorId={ids.error}
+                >
+                  <Input
+                    id={ids.every}
+                    type="number"
+                    min="1"
+                    inputMode="numeric"
+                    className="tabular-nums sm:max-w-48"
+                    placeholder="60"
+                    value={form.every}
+                    onChange={(e) => set('every', e.target.value)}
+                    {...invalidProps('every')}
                   />
                 </Field>
-                <CronExplain expr={form.cron} timeZone={form.tz} />
-                <div
-                  role="group"
-                  aria-label={t('webPagesWork.presets')}
-                  className="flex flex-wrap gap-1.5"
-                >
-                  {presets().map((p) => (
-                    <Button
-                      key={p.cron}
-                      size="sm"
-                      variant="outline"
-                      onClick={() => set('cron', p.cron)}
-                    >
-                      {p.label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+              ) : null}
 
-            {form.scheduleKind === 'every' ? (
-              <Field id={ids.every} label={t('webPagesWork.fieldInterval')}>
-                <input
-                  id={ids.every}
-                  type="number"
-                  min="1"
-                  inputMode="numeric"
-                  className={inputClass}
-                  placeholder="60"
-                  value={form.every}
-                  onChange={(e) => set('every', e.target.value)}
-                />
-              </Field>
-            ) : null}
-
-            {form.scheduleKind === 'at' ? (
-              <Field id={ids.at} label={t('webPagesWork.fieldAt')}>
-                <input
+              {form.scheduleKind === 'at' ? (
+                <Field
                   id={ids.at}
-                  className={cn(inputClass, 'font-mono')}
-                  placeholder="2026-05-18T09:00:00+08:00"
-                  value={form.at}
-                  onChange={(e) => set('at', e.target.value)}
+                  label={t('webPagesWork.fieldAt')}
+                  error={errorFor('at')}
+                  errorId={ids.error}
+                >
+                  <Input
+                    id={ids.at}
+                    className="font-mono"
+                    placeholder="2026-05-18T09:00:00+08:00"
+                    value={form.at}
+                    onChange={(e) => set('at', e.target.value)}
+                    {...invalidProps('at')}
+                  />
+                </Field>
+              ) : null}
+
+              <Field
+                id={ids.tz}
+                label={t('webPagesWork.fieldTimezone')}
+                hint={t('webPagesWork.fieldTimezoneHint')}
+              >
+                <Input
+                  id={ids.tz}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="font-mono"
+                  placeholder={t('webPagesWork.fieldTimezonePlaceholder')}
+                  value={form.tz}
+                  onChange={(e) => set('tz', e.target.value)}
                 />
               </Field>
-            ) : null}
+            </FormSection>
 
-            <Field
-              id={ids.tz}
-              label={t('webPagesWork.fieldTimezone')}
-              hint={t('webPagesWork.fieldTimezoneHint')}
-            >
-              <input
-                id={ids.tz}
-                autoComplete="off"
-                spellCheck={false}
-                className={cn(inputClass, 'font-mono')}
-                placeholder={t('webPagesWork.fieldTimezonePlaceholder')}
-                value={form.tz}
-                onChange={(e) => set('tz', e.target.value)}
-              />
-            </Field>
-
-            <Field id={ids.payload} label={t('webPagesWork.fieldPayload')}>
-              <select
-                id={ids.payload}
-                className={inputClass}
+            <FormSection id={ids.section} icon={<Zap />} title={t('webPagesWork.fieldPayload')}>
+              <Select
+                aria-labelledby={ids.section}
                 value={form.payloadKind}
                 onChange={(e) => set('payloadKind', e.target.value as PayloadKind)}
               >
@@ -444,155 +546,168 @@ export function AutomationEditor({
                     {o.label}
                   </option>
                 ))}
-              </select>
-            </Field>
+              </Select>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field id={ids.agent} label={t('webPagesWork.fieldAgent')}>
-                <input
-                  id={ids.agent}
-                  className={inputClass}
-                  placeholder={t('webPagesWork.fieldAgentPlaceholder')}
-                  value={form.agentId}
-                  onChange={(e) => set('agentId', e.target.value)}
-                />
-              </Field>
-              <Field
-                id={ids.target}
-                label={t('webPagesWork.fieldTarget')}
-                hint={targetRes.locked ? t('webPagesWork.targetLocked') : undefined}
-              >
-                <select
-                  id={ids.target}
-                  className={inputClass}
-                  value={targetRes.target}
-                  disabled={targetRes.locked}
-                  onChange={(e) => set('sessionTarget', e.target.value as SessionTarget)}
-                >
-                  {sessionTargets().map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-
-            {targetRes.showTargetSessionRow ? (
-              <Field
-                id={ids.targetKey}
-                label={
-                  targetRes.target === 'current'
-                    ? t('webPagesWork.fieldCurrentSession')
-                    : t('webPagesWork.fieldNamedSession')
-                }
-              >
-                <input
-                  id={ids.targetKey}
-                  className={cn(inputClass, 'font-mono')}
-                  placeholder={t('webPagesWork.fieldSessionPlaceholder')}
-                  value={form.targetSessionKey}
-                  onChange={(e) => set('targetSessionKey', e.target.value)}
-                />
-              </Field>
-            ) : null}
-
-            {isScriptJob ? null : (
-              <Field id={ids.message} label={targetRes.messageLabel}>
-                <textarea
-                  id={ids.message}
-                  rows={4}
-                  className={cn(inputClass, 'h-auto py-2')}
-                  placeholder={t('webPagesWork.fieldMessagePlaceholder')}
-                  value={form.message}
-                  onChange={(e) => set('message', e.target.value)}
-                />
-              </Field>
-            )}
-
-            {canRunScript ? (
-              <>
-                <Field
-                  id={ids.script}
-                  label={
-                    isScriptJob ? t('webPagesWork.fieldScript') : t('webPagesWork.fieldPreScript')
-                  }
-                  hint={
-                    isScriptJob
-                      ? t('webPagesWork.scriptHintDelivered')
-                      : t('webPagesWork.scriptHintContext')
-                  }
-                >
-                  <input
-                    id={ids.script}
-                    autoComplete="off"
-                    spellCheck={false}
-                    className={cn(inputClass, 'font-mono')}
-                    placeholder={isScriptJob ? 'watch-memory.sh' : 'watch-rss.py'}
-                    value={form.script}
-                    onChange={(e) => set('script', e.target.value)}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field id={ids.agent} label={t('webPagesWork.fieldAgent')}>
+                  <Input
+                    id={ids.agent}
+                    placeholder={t('webPagesWork.fieldAgentPlaceholder')}
+                    value={form.agentId}
+                    onChange={(e) => set('agentId', e.target.value)}
                   />
                 </Field>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field
-                    id={ids.args}
-                    label={t('webPagesWork.fieldScriptArgs')}
-                    hint={t('webPagesWork.scriptArgsHint')}
+                <Field
+                  id={ids.target}
+                  label={t('webPagesWork.fieldTarget')}
+                  hint={targetRes.locked ? t('webPagesWork.targetLocked') : undefined}
+                >
+                  <Select
+                    id={ids.target}
+                    value={targetRes.target}
+                    disabled={targetRes.locked}
+                    onChange={(e) => set('sessionTarget', e.target.value as SessionTarget)}
                   >
-                    <input
-                      id={ids.args}
-                      autoComplete="off"
-                      spellCheck={false}
-                      className={cn(inputClass, 'font-mono')}
-                      value={form.scriptArgs}
-                      onChange={(e) => set('scriptArgs', e.target.value)}
-                    />
-                  </Field>
-                  <Field id={ids.workdir} label={t('webPagesWork.fieldWorkdir')}>
-                    <input
-                      id={ids.workdir}
-                      autoComplete="off"
-                      spellCheck={false}
-                      className={cn(inputClass, 'font-mono')}
-                      placeholder={t('webPagesWork.fieldWorkdirPlaceholder')}
-                      value={form.workdir}
-                      onChange={(e) => set('workdir', e.target.value)}
-                    />
-                  </Field>
-                </div>
-              </>
-            ) : null}
-
-            {isScriptJob || (canRunScript && form.script.trim()) ? (
-              <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-small">
-                {t('webPagesWork.scriptWarning')}
-              </p>
-            ) : null}
-
-            {form.payloadKind === 'agent_turn' ? (
-              <div className="flex flex-col gap-1 rounded-md border border-danger/40 bg-danger/10 px-3 py-2">
-                <label className="flex items-center gap-2 font-medium">
-                  <input
-                    type="checkbox"
-                    className="size-4"
-                    checked={form.elevated}
-                    onChange={(e) => set('elevated', e.target.checked)}
-                  />
-                  {t('webPagesWork.fieldElevated')}
-                </label>
-                <p className="text-small">{t('webPagesWork.elevatedWarning')}</p>
+                    {sessionTargets().map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
               </div>
-            ) : null}
 
-            <details className="rounded-md border border-border px-3 py-2">
-              <summary className="target cursor-pointer font-medium">
-                {t('webPagesWork.deliverySection')}
+              {targetRes.showTargetSessionRow ? (
+                <Field
+                  id={ids.targetKey}
+                  label={
+                    targetRes.target === 'current'
+                      ? t('webPagesWork.fieldCurrentSession')
+                      : t('webPagesWork.fieldNamedSession')
+                  }
+                  error={errorFor('targetKey')}
+                  errorId={ids.error}
+                >
+                  <Input
+                    id={ids.targetKey}
+                    className="font-mono"
+                    placeholder={t('webPagesWork.fieldSessionPlaceholder')}
+                    value={form.targetSessionKey}
+                    onChange={(e) => set('targetSessionKey', e.target.value)}
+                    {...invalidProps('targetKey')}
+                  />
+                </Field>
+              ) : null}
+
+              {isScriptJob ? null : (
+                <Field id={ids.message} label={targetRes.messageLabel}>
+                  <Textarea
+                    id={ids.message}
+                    rows={4}
+                    placeholder={t('webPagesWork.fieldMessagePlaceholder')}
+                    value={form.message}
+                    onChange={(e) => set('message', e.target.value)}
+                  />
+                </Field>
+              )}
+
+              {canRunScript ? (
+                <>
+                  <Field
+                    id={ids.script}
+                    label={
+                      isScriptJob ? t('webPagesWork.fieldScript') : t('webPagesWork.fieldPreScript')
+                    }
+                    hint={
+                      isScriptJob
+                        ? t('webPagesWork.scriptHintDelivered')
+                        : t('webPagesWork.scriptHintContext')
+                    }
+                    error={errorFor('script')}
+                    errorId={ids.error}
+                  >
+                    <Input
+                      id={ids.script}
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="font-mono"
+                      placeholder={isScriptJob ? 'watch-memory.sh' : 'watch-rss.py'}
+                      value={form.script}
+                      onChange={(e) => set('script', e.target.value)}
+                      {...invalidProps('script')}
+                    />
+                  </Field>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field
+                      id={ids.args}
+                      label={t('webPagesWork.fieldScriptArgs')}
+                      hint={t('webPagesWork.scriptArgsHint')}
+                    >
+                      <Input
+                        id={ids.args}
+                        autoComplete="off"
+                        spellCheck={false}
+                        className="font-mono"
+                        value={form.scriptArgs}
+                        onChange={(e) => set('scriptArgs', e.target.value)}
+                      />
+                    </Field>
+                    <Field id={ids.workdir} label={t('webPagesWork.fieldWorkdir')}>
+                      <Input
+                        id={ids.workdir}
+                        autoComplete="off"
+                        spellCheck={false}
+                        className="font-mono"
+                        placeholder={t('webPagesWork.fieldWorkdirPlaceholder')}
+                        value={form.workdir}
+                        onChange={(e) => set('workdir', e.target.value)}
+                      />
+                    </Field>
+                  </div>
+                </>
+              ) : null}
+
+              {isScriptJob || (canRunScript && form.script.trim()) ? (
+                <p className="anim-fade-in flex items-start gap-2 rounded-card border border-danger/30 bg-danger/10 px-3 py-2.5 text-small">
+                  <ShieldAlert
+                    className="mt-px size-4 shrink-0 text-danger"
+                    aria-hidden
+                    data-status-icon
+                  />
+                  {t('webPagesWork.scriptWarning')}
+                </p>
+              ) : null}
+
+              {form.payloadKind === 'agent_turn' ? (
+                <div className="anim-fade-in flex flex-col gap-1.5 rounded-card border border-danger/30 bg-danger/10 px-3 py-2.5">
+                  <label className="flex items-center gap-2 font-medium">
+                    <input
+                      type="checkbox"
+                      className="work-check"
+                      checked={form.elevated}
+                      onChange={(e) => set('elevated', e.target.checked)}
+                      {...invalidProps('elevated')}
+                    />
+                    {t('webPagesWork.fieldElevated')}
+                  </label>
+                  <p className="text-small">{t('webPagesWork.elevatedWarning')}</p>
+                  {errorFor('elevated') ? (
+                    <FieldError id={ids.error} text={errorFor('elevated')!} />
+                  ) : null}
+                </div>
+              ) : null}
+            </FormSection>
+
+            <details className="work-details group rounded-card border border-border bg-surface-1 shadow-card">
+              <summary className="press target flex cursor-pointer items-center gap-2 rounded-card px-4 py-3 font-medium hover:bg-surface-2">
+                <Send className="size-4 shrink-0 text-text-muted" aria-hidden />
+                <span className="flex-1">{t('webPagesWork.deliverySection')}</span>
+                <ChevronRight className="work-chevron size-4 text-text-muted" aria-hidden />
               </summary>
-              <div className="mt-3 flex flex-col gap-4">
+              <div className="flex flex-col gap-4 border-t border-border px-4 pt-4 pb-4">
                 <Field id={ids.wake} label={t('webPagesWork.fieldWake')}>
-                  <select
+                  <Select
                     id={ids.wake}
-                    className={inputClass}
                     value={form.wakeMode}
                     onChange={(e) => set('wakeMode', e.target.value)}
                   >
@@ -601,12 +716,11 @@ export function AutomationEditor({
                         {o.label}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </Field>
                 <Field id={ids.delivery} label={t('webPagesWork.fieldDelivery')}>
-                  <select
+                  <Select
                     id={ids.delivery}
-                    className={inputClass}
                     value={form.deliveryMode}
                     onChange={(e) => set('deliveryMode', e.target.value as DeliveryMode)}
                   >
@@ -615,15 +729,14 @@ export function AutomationEditor({
                         {o.label}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </Field>
 
                 {form.deliveryMode === 'announce' ? (
-                  <>
+                  <div className="grid gap-4 sm:grid-cols-2">
                     <Field id={ids.channel} label={t('webPagesWork.fieldChannel')}>
-                      <input
+                      <Input
                         id={ids.channel}
-                        className={inputClass}
                         placeholder={t('webPagesWork.fieldChannelPlaceholder')}
                         value={form.deliveryChannel}
                         onChange={(e) => set('deliveryChannel', e.target.value)}
@@ -637,33 +750,31 @@ export function AutomationEditor({
                       onChange={(next) => set('deliveryTo', next)}
                     />
                     <Field id={ids.account} label={t('webPagesWork.fieldAccount')}>
-                      <input
+                      <Input
                         id={ids.account}
-                        className={inputClass}
                         value={form.deliveryAccount}
                         onChange={(e) => set('deliveryAccount', e.target.value)}
                       />
                     </Field>
-                  </>
+                  </div>
                 ) : null}
 
                 {form.deliveryMode === 'webhook' ? (
                   <>
                     <Field id={ids.webhook} label={t('webPagesWork.fieldWebhookUrl')}>
-                      <input
+                      <Input
                         id={ids.webhook}
                         type="url"
-                        className={cn(inputClass, 'font-mono')}
+                        className="font-mono"
                         placeholder={t('webPagesWork.fieldWebhookUrlPlaceholder')}
                         value={form.deliveryWebhookUrl}
                         onChange={(e) => set('deliveryWebhookUrl', e.target.value)}
                       />
                     </Field>
                     <Field id={ids.token} label={t('webPagesWork.fieldWebhookToken')}>
-                      <input
+                      <Input
                         id={ids.token}
                         type="password"
-                        className={inputClass}
                         placeholder={t('webPagesWork.fieldWebhookTokenPlaceholder')}
                         value={form.deliveryWebhookToken}
                         onChange={(e) => set('deliveryWebhookToken', e.target.value)}
@@ -676,7 +787,7 @@ export function AutomationEditor({
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
-                      className="size-4"
+                      className="work-check"
                       checked={form.deliveryBestEffort}
                       onChange={(e) => set('deliveryBestEffort', e.target.checked)}
                     />
@@ -689,9 +800,8 @@ export function AutomationEditor({
                   label={t('webPagesWork.fieldFailure')}
                   hint={t('webPagesWork.fieldFailureHint')}
                 >
-                  <select
+                  <Select
                     id={ids.fd}
-                    className={inputClass}
                     value={form.fdMode}
                     onChange={(e) => set('fdMode', e.target.value as FailureDestMode)}
                   >
@@ -700,15 +810,14 @@ export function AutomationEditor({
                         {o.label}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </Field>
 
                 {form.fdMode === 'channel' ? (
-                  <>
+                  <div className="grid gap-4 sm:grid-cols-2">
                     <Field id={ids.fdChannel} label={t('webPagesWork.fieldFailureChannel')}>
-                      <input
+                      <Input
                         id={ids.fdChannel}
-                        className={inputClass}
                         placeholder={t('webPagesWork.fieldChannelPlaceholder')}
                         value={form.fdChannel}
                         onChange={(e) => set('fdChannel', e.target.value)}
@@ -722,33 +831,31 @@ export function AutomationEditor({
                       onChange={(next) => set('fdTo', next)}
                     />
                     <Field id={ids.fdAccount} label={t('webPagesWork.fieldAccount')}>
-                      <input
+                      <Input
                         id={ids.fdAccount}
-                        className={inputClass}
                         value={form.fdAccount}
                         onChange={(e) => set('fdAccount', e.target.value)}
                       />
                     </Field>
-                  </>
+                  </div>
                 ) : null}
 
                 {form.fdMode === 'webhook' ? (
                   <>
                     <Field id={ids.fdWebhook} label={t('webPagesWork.fieldFailureWebhook')}>
-                      <input
+                      <Input
                         id={ids.fdWebhook}
                         type="url"
-                        className={cn(inputClass, 'font-mono')}
+                        className="font-mono"
                         placeholder={t('webPagesWork.fieldFailureWebhookPlaceholder')}
                         value={form.fdWebhookUrl}
                         onChange={(e) => set('fdWebhookUrl', e.target.value)}
                       />
                     </Field>
                     <Field id={ids.fdToken} label={t('webPagesWork.fieldWebhookToken')}>
-                      <input
+                      <Input
                         id={ids.fdToken}
                         type="password"
-                        className={inputClass}
                         placeholder={t('webPagesWork.fieldWebhookTokenPlaceholder')}
                         value={form.fdWebhookToken}
                         onChange={(e) => set('fdWebhookToken', e.target.value)}
@@ -759,39 +866,73 @@ export function AutomationEditor({
               </div>
             </details>
 
-            <label className="flex items-center gap-2 font-medium">
-              <Switch checked={form.enabled} onCheckedChange={(on) => set('enabled', on)} />
+            <label className="flex items-center justify-between gap-3 rounded-card border border-border bg-surface-1 px-4 py-3 font-medium shadow-card">
               {t('webPagesWork.fieldEnabled')}
+              <Switch checked={form.enabled} onCheckedChange={(on) => set('enabled', on)} />
             </label>
+          </div>
 
+          <div className="flex flex-col gap-3 border-t border-border bg-surface-1 px-5 py-3">
             {error ? (
-              <p role="alert" className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2">
+              <p
+                role="alert"
+                className="anim-fade-in flex items-start gap-2 rounded-control border border-danger/30 bg-danger/10 px-3 py-2"
+              >
+                <AlertTriangle
+                  className="mt-0.5 size-4 shrink-0 text-danger"
+                  aria-hidden
+                  data-status-icon
+                />
                 {error}
               </p>
             ) : null}
-          </div>
-
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3">
-            {control.reason ? (
-              <span id={ids.reason} className="mr-auto text-small text-text-muted">
-                {control.reason}
-              </span>
-            ) : null}
-            <Button variant="outline" disabled={saving} onClick={onCancel}>
-              {t('webPagesWork.cancel')}
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={saving || control.disabled}
-              aria-describedby={control.reason ? ids.reason : undefined}
-            >
-              {saving ? <Loader2 className="animate-spin" /> : null}
-              {isEdit ? t('webPagesWork.saveChanges') : t('webPagesWork.createAutomation')}
-            </Button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {control.reason ? (
+                <span id={ids.reason} className="mr-auto text-small text-text-muted">
+                  {control.reason}
+                </span>
+              ) : null}
+              <Button variant="outline" disabled={saving} onClick={onCancel}>
+                {t('webPagesWork.cancel')}
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={saving || control.disabled}
+                aria-describedby={control.reason ? ids.reason : undefined}
+              >
+                {saving ? <Loader2 className="animate-spin" /> : null}
+                {isEdit ? t('webPagesWork.saveChanges') : t('webPagesWork.createAutomation')}
+              </Button>
+            </div>
           </div>
         </form>
       </SheetContent>
     </Sheet>
   )
+}
+
+type InvalidField = 'name' | 'every' | 'at' | 'targetKey' | 'script' | 'elevated'
+
+/**
+ * Which field a buildSavePayload error is about, or null for a form-level one
+ * (delivery). Follows buildSavePayload's own order of checks on the same form.
+ */
+function fieldOfError(form: CronForm): InvalidField | null {
+  if (!form.name.trim()) return 'name'
+  const kind = form.payloadKind
+  if (
+    (kind === 'script' || (kind === 'agent_turn' && form.script.trim())) &&
+    validateScriptPath(form.script)
+  )
+    return 'script'
+  if (form.scheduleKind === 'every') {
+    const seconds = Number(form.every)
+    if (!Number.isInteger(seconds) || seconds < 1) return 'every'
+  }
+  if (form.scheduleKind === 'at' && !form.at.trim()) return 'at'
+  if (form.elevated && kind !== 'agent_turn') return 'elevated'
+  if (!buildDelivery(form).ok) return null
+  if (form.sessionTarget === 'current' || form.sessionTarget === 'session') return 'targetKey'
+  return null
 }

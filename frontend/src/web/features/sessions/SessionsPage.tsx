@@ -1,10 +1,15 @@
 import { useQueryClient } from '@tanstack/react-query'
 import {
+  Activity,
   AlertTriangle,
   ArrowDown,
-  ArrowUp,
+  Bot,
+  ChevronDown,
+  ExternalLink,
   FolderInput,
+  FolderKanban,
   Loader2,
+  MessageSquare,
   MessagesSquare,
   MoreHorizontal,
   Pencil,
@@ -51,7 +56,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/web/components/ui/alert-dialog'
+import { Badge, StatusDot } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
+import { Card } from '@/web/components/ui/card'
+import { Input, Select } from '@/web/components/ui/input'
 import { PageHeader } from '@/web/components/ui/page-header'
 import {
   Dialog,
@@ -68,7 +76,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/web/components/ui/dropdown-menu'
-import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
+import { EmptyState, ErrorState, Skeleton } from '@/web/components/ui/states'
 import {
   AGENTS_QUERY_KEY,
   createSessionOptimistic,
@@ -88,6 +96,7 @@ import { openInNewTab } from '@/web/shell/SessionList'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import type { RpcState } from '@/lib/ws-rpc'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
+import { StatStrip, useArrival, WorkSkeleton, type StripItem } from './StatStrip'
 import { useSessionsTotal, type SessionsTotal } from './sessions-total'
 
 // `/sessions` (task 8.2): every session in one table, on views/sessions/logic.
@@ -98,17 +107,6 @@ import { useSessionsTotal, type SessionsTotal } from './sessions-total'
 const PAGE_SIZE = 50
 const NEW_AGENT = '__new__'
 const AGENT_ID = /^[a-z0-9_-]+$/
-
-const TONE_CLASS: Record<Tone, string> = {
-  ok: 'text-ok',
-  warn: 'text-warn',
-  danger: 'text-danger',
-  info: 'text-info',
-  dim: 'text-text-muted',
-}
-
-const fieldClass =
-  'h-9 w-full rounded-md border border-border-control bg-surface-0 px-3 text-ui touch:h-11 max-md:text-base'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -175,6 +173,8 @@ export function SessionsPage() {
   const selectable = visible.filter((r) => !r.provisional)
   const allVisibleSelected = selectable.length > 0 && selectable.every((r) => selected.has(r.key))
   const filtersActive = !!search.trim() || !!agentFilter || projectFilter !== 'all'
+  // Rows rise in once, when the list first arrives; never on a refetch.
+  const arriving = useArrival(!sessions.isPending)
 
   const toggle = (key: string, on: boolean) =>
     setSelected((prev) => {
@@ -273,74 +273,61 @@ export function SessionsPage() {
 
   let body: ReactNode
   if (sessions.isPending) {
-    body = (
-      <LoadingRegion label={t('webPagesWork.sessionsLoading')}>
-        {Array.from({ length: 8 }, (_, i) => (
-          <Skeleton key={i} className="my-2 h-9" />
-        ))}
-      </LoadingRegion>
-    )
+    body = <SessionsSkeleton />
   } else if (rows.length === 0 && sessions.isError) {
     // The error notice above says what failed; there is nothing to show under it.
     body = null
   } else if (rows.length === 0) {
     body = (
-      <EmptyState
-        icon={<MessagesSquare />}
-        title={t('webPagesWork.sessionsEmpty')}
-        description={t('webPagesWork.sessionsEmptyBody')}
-        action={
-          <Button variant="primary" disabled={act.disabled} onClick={() => setCreating(true)}>
-            <Plus />
-            {t('webPagesWork.sessionsNew')}
-          </Button>
-        }
-      />
+      <Card variant="plain" padding="none">
+        <EmptyState
+          icon={<MessagesSquare />}
+          title={t('webPagesWork.sessionsEmpty')}
+          description={t('webPagesWork.sessionsEmptyBody')}
+          action={
+            <Button variant="primary" disabled={act.disabled} onClick={() => setCreating(true)}>
+              <Plus />
+              {t('webPagesWork.sessionsNew')}
+            </Button>
+          }
+        />
+      </Card>
     )
   } else {
     body = (
       <>
         <StatTiles stats={stats} totals={totals} />
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="relative block min-w-0 flex-[2_1_14rem]">
-            <span className="sr-only">{t('webPagesWork.sessionsSearch')}</span>
-            <Search
-              className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-muted"
-              aria-hidden
-            />
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value)
-                setLimit(PAGE_SIZE)
-              }}
-              placeholder={t('webPagesWork.sessionsSearch')}
-              className={cn(fieldClass, 'pl-8')}
-            />
-          </label>
-          <label className="flex min-w-0 flex-[1_1_9rem] flex-col gap-1">
-            <span className="text-small text-text-muted">{t('webPagesWork.filterAgent')}</span>
-            <select
-              className={fieldClass}
-              value={agentFilter}
-              onChange={(e) => setAgentFilter(e.target.value)}
-            >
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            type="search"
+            aria-label={t('webPagesWork.sessionsSearch')}
+            icon={<Search />}
+            wrapperClassName="flex-[2_1_16rem]"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value)
+              setLimit(PAGE_SIZE)
+            }}
+            placeholder={t('webPagesWork.sessionsSearch')}
+          />
+          <label className="flex min-w-0 flex-[1_1_11rem] items-center gap-2">
+            <span className="shrink-0 text-label text-text-muted max-sm:w-12">
+              {t('webPagesWork.filterAgent')}
+            </span>
+            <Select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)}>
               <option value="">{t('webPagesWork.filterAllAgents')}</option>
               {agentOptions.map((id) => (
                 <option key={id} value={id}>
                   {agentsById.get(id)?.name ?? id}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
-          <label className="flex min-w-0 flex-[1_1_9rem] flex-col gap-1">
-            <span className="text-small text-text-muted">{t('webPagesWork.filterProject')}</span>
-            <select
-              className={fieldClass}
-              value={projectFilter}
-              onChange={(e) => setProjectFilter(e.target.value)}
-            >
+          <label className="flex min-w-0 flex-[1_1_11rem] items-center gap-2">
+            <span className="shrink-0 text-label text-text-muted max-sm:w-12">
+              {t('webPagesWork.filterProject')}
+            </span>
+            <Select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
               <option value="all">{t('webPagesWork.filterAllProjects')}</option>
               <option value="none">{t('webPagesWork.filterNoProject')}</option>
               {[...(projectNames ?? new Map<string, string>())].map(([id, name]) => (
@@ -348,61 +335,40 @@ export function SessionsPage() {
                   {name}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
+          {filtersActive ? (
+            <Button variant="ghost" size="sm" className="anim-fade-in" onClick={clearFilters}>
+              <X />
+              {t('webPagesWork.clearFilters')}
+            </Button>
+          ) : null}
         </div>
-
-        {chosen.length > 0 ? (
-          <div
-            role="region"
-            aria-label={t('webPagesWork.bulkRegion')}
-            className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2"
-          >
-            <span className="flex-1 font-medium">
-              {tPlural('webPagesWork.bulkSelected', chosen.length)}
-            </span>
-            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
-              {t('webPagesWork.bulkClear')}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={act.disabled}
-              title={act.reason ?? undefined}
-              onClick={() => setMoveKeys(chosen)}
-            >
-              <FolderInput />
-              {t('webPagesWork.bulkMove')}
-            </Button>
-            <Button
-              size="sm"
-              variant="danger"
-              disabled={act.disabled || deleting}
-              title={act.reason ?? undefined}
-              onClick={() => setConfirm({ keys: chosen })}
-            >
-              <Trash2 />
-              {t('webPagesWork.bulkDelete')}
-            </Button>
-          </div>
-        ) : null}
 
         {notice ? (
           <p
             role={notice.tone === 'ok' ? 'status' : 'alert'}
             className={cn(
-              'flex items-start gap-2 rounded-md border px-3 py-2',
+              'anim-fade-in flex items-start gap-2 rounded-card border px-3 py-2',
               notice.tone === 'danger'
-                ? 'border-danger/40 bg-danger/10'
-                : 'border-warn/40 bg-warn/10',
+                ? 'border-danger/30 bg-danger/10'
+                : 'border-warn/30 bg-warn/10',
             )}
           >
+            <AlertTriangle
+              className={cn(
+                'mt-0.5 size-4 shrink-0',
+                notice.tone === 'danger' ? 'text-danger' : 'text-warn',
+              )}
+              aria-hidden
+              data-status-icon
+            />
             <span className="flex-1">{notice.text}</span>
             <button
               type="button"
               aria-label={t('webPagesWork.dismiss')}
               onClick={() => setNotice(null)}
-              className="target inline-flex items-center justify-center rounded text-text-muted"
+              className="press target inline-flex items-center justify-center rounded-md text-text-muted hover:text-text"
             >
               <X className="size-4" aria-hidden />
             </button>
@@ -410,34 +376,38 @@ export function SessionsPage() {
         ) : null}
 
         {filtered.length === 0 ? (
-          <EmptyState
-            title={t('webPagesWork.sessionsNoMatch')}
-            description={t('webPagesWork.sessionsNoMatchBody')}
-            action={
-              filtersActive ? (
-                <Button variant="outline" onClick={clearFilters}>
-                  {t('webPagesWork.clearFilters')}
-                </Button>
-              ) : undefined
-            }
-          />
+          <Card variant="plain" padding="none">
+            <EmptyState
+              icon={<Search />}
+              title={t('webPagesWork.sessionsNoMatch')}
+              description={t('webPagesWork.sessionsNoMatchBody')}
+              action={
+                filtersActive ? (
+                  <Button variant="outline" onClick={clearFilters}>
+                    {t('webPagesWork.clearFilters')}
+                  </Button>
+                ) : undefined
+              }
+            />
+          </Card>
         ) : (
-          <div
+          <Card
+            variant="plain"
+            padding="none"
             role="region"
             aria-label={t('webPagesWork.sessionsTable')}
-            tabIndex={0}
-            className="overflow-x-auto rounded-lg border border-border"
+            className="work-table-wrap overflow-clip"
           >
-            <table className="w-full min-w-[760px] border-collapse text-left">
-              <thead className="bg-surface-2 text-small text-text-muted">
+            <table className="work-table">
+              <thead className="text-label text-text-muted">
                 <tr>
-                  <th scope="col" className="w-10 px-3 py-2">
+                  <th scope="col" data-col="check" className="w-11 py-2.5 pr-1 pl-4">
                     <input
                       type="checkbox"
                       aria-label={t('webPagesWork.selectAll')}
                       checked={allVisibleSelected}
                       onChange={(e) => toggleAll(e.target.checked)}
-                      className="size-4"
+                      className="work-check"
                     />
                   </th>
                   <SortHeader
@@ -447,13 +417,13 @@ export function SessionsPage() {
                     asc={sortAsc}
                     onSort={onSort}
                   />
-                  <th scope="col" className="px-3 py-2 font-medium">
+                  <th scope="col" data-col="agent" className="px-3 py-2.5 font-medium">
                     {t('webPagesWork.colAgent')}
                   </th>
-                  <th scope="col" className="px-3 py-2 font-medium">
+                  <th scope="col" data-col="project" className="px-3 py-2.5 font-medium">
                     {t('webPagesWork.colProject')}
                   </th>
-                  <th scope="col" className="px-3 py-2 font-medium">
+                  <th scope="col" data-col="status" className="px-3 py-2.5 font-medium">
                     {t('webPagesWork.colStatus')}
                   </th>
                   <SortHeader
@@ -462,6 +432,7 @@ export function SessionsPage() {
                     sortCol={sortCol}
                     asc={sortAsc}
                     onSort={onSort}
+                    numeric
                   />
                   <SortHeader
                     col="updated_at"
@@ -470,12 +441,12 @@ export function SessionsPage() {
                     asc={sortAsc}
                     onSort={onSort}
                   />
-                  <th scope="col" className="w-10 px-3 py-2">
+                  <th scope="col" data-col="actions" className="w-12 py-2.5 pr-3">
                     <span className="sr-only">{t('webPagesWork.colActions')}</span>
                   </th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className={cn(arriving && 'anim-stagger')}>
                 {visible.map((row) => (
                   <SessionTableRow
                     key={row.key}
@@ -492,16 +463,68 @@ export function SessionsPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+            {filtered.length > visible.length ? (
+              <div className="flex flex-wrap items-center justify-center gap-3 border-t border-border bg-surface-2/50 px-4 py-3">
+                <span className="text-small text-text-muted tabular-nums">
+                  {t('webPagesWork.showingOf', { shown: visible.length, total: filtered.length })}
+                </span>
+                <Button variant="outline" size="sm" onClick={() => setLimit((n) => n + PAGE_SIZE)}>
+                  <ChevronDown />
+                  {t('webPagesWork.showMore')}
+                </Button>
+              </div>
+            ) : null}
+          </Card>
         )}
-        {filtered.length > visible.length ? (
-          <div className="flex items-center justify-center gap-3">
-            <span className="text-small text-text-muted">
-              {t('webPagesWork.showingOf', { shown: visible.length, total: filtered.length })}
+
+        {chosen.length > 0 ? (
+          <div
+            role="region"
+            aria-label={t('webPagesWork.bulkRegion')}
+            className="anim-enter sticky bottom-4 z-[var(--z-sticky)] mx-auto flex w-fit max-w-full flex-wrap items-center gap-x-2 gap-y-1.5 rounded-overlay border border-border-strong bg-surface-overlay p-1.5 shadow-overlay"
+          >
+            <span className="flex min-w-0 items-center gap-1 max-sm:w-full">
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={t('webPagesWork.bulkClear')}
+                title={t('webPagesWork.bulkClear')}
+                onClick={() => setSelected(new Set())}
+              >
+                <X />
+              </Button>
+              <span
+                aria-hidden
+                className="grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-small font-semibold text-accent-fg tabular-nums"
+              >
+                {chosen.length}
+              </span>
+              <span className="pr-2 pl-1 font-medium whitespace-nowrap">
+                {tPlural('webPagesWork.bulkSelected', chosen.length)}
+              </span>
             </span>
-            <Button variant="outline" size="sm" onClick={() => setLimit((n) => n + PAGE_SIZE)}>
-              {t('webPagesWork.showMore')}
-            </Button>
+            <span className="flex items-center gap-1.5 max-sm:w-full max-sm:[&>*]:flex-1">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={act.disabled}
+                title={act.reason ?? undefined}
+                onClick={() => setMoveKeys(chosen)}
+              >
+                <FolderInput />
+                {t('webPagesWork.bulkMove')}
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={act.disabled || deleting}
+                title={act.reason ?? undefined}
+                onClick={() => setConfirm({ keys: chosen })}
+              >
+                <Trash2 />
+                {t('webPagesWork.bulkDelete')}
+              </Button>
+            </span>
           </div>
         ) : null}
       </>
@@ -509,7 +532,7 @@ export function SessionsPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-6">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 md:p-6">
       {header}
       {sessions.isError ? (
         <ErrorState
@@ -575,6 +598,34 @@ export function SessionsPage() {
   )
 }
 
+// ── Loading shape ────────────────────────────────────────────────────────────
+
+function SessionsSkeleton() {
+  return (
+    <WorkSkeleton label={t('webPagesWork.sessionsLoading')} cells={5} wide>
+      <div className="flex flex-wrap gap-2">
+        <Skeleton className="h-9 flex-[2_1_16rem]" />
+        <Skeleton className="h-9 flex-[1_1_11rem]" />
+        <Skeleton className="h-9 flex-[1_1_11rem]" />
+      </div>
+      <Card variant="plain" padding="none" className="overflow-hidden">
+        <div className="h-10 border-b border-border bg-surface-2" />
+        {Array.from({ length: 6 }, (_, i) => (
+          <div key={i} className="flex items-center gap-4 border-b border-border px-4 py-3.5">
+            <Skeleton className="size-4 shrink-0" />
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <Skeleton className="h-4 w-40 max-w-full" />
+              <Skeleton className="h-3 w-56 max-w-full" />
+            </div>
+            <Skeleton className="h-5 w-20 max-sm:hidden" />
+            <Skeleton className="h-4 w-12 max-sm:hidden" />
+          </div>
+        ))}
+      </Card>
+    </WorkSkeleton>
+  )
+}
+
 // ── Stat tiles ───────────────────────────────────────────────────────────────
 
 /** The count of stored sessions: the true total, or "500+" when the gateway did not say. */
@@ -590,26 +641,92 @@ function StatTiles({
   stats: ReturnType<typeof sessionStats>
   totals: SessionsTotal
 }) {
-  const tiles: { label: string; value: string; hint?: string }[] = [
+  const live = stats.activeRuns > 0
+  // Open, completed, failed or timed out, aborted: the same order as the hint.
+  const parts = [
+    { n: stats.lifecycleOpen, tone: 'text-ok' },
+    { n: stats.done, tone: 'text-info' },
+    { n: stats.failedOrTimedOut, tone: 'text-danger' },
+    { n: stats.aborted, tone: 'text-text-muted' },
+  ]
+  const hint = t('webPagesWork.statSessionsHint', {
+    open: stats.lifecycleOpen,
+    done: stats.done,
+    failed: stats.failedOrTimedOut,
+    aborted: stats.aborted,
+  })
+  // The hint becomes a legend keyed to the meter. The separators stay in the
+  // text (screen readers and copy read the sentence); a catalog that words it
+  // differently just shows as one plain line.
+  const legend = hint.split(' · ')
+  const items: StripItem[] = [
     {
       label: t('webPagesWork.statSessions'),
+      icon: <MessagesSquare />,
       value: sessionsCountText(totals),
-      hint: t('webPagesWork.statSessionsHint', {
-        open: stats.lifecycleOpen,
-        done: stats.done,
-        failed: stats.failedOrTimedOut,
-        aborted: stats.aborted,
-      }),
+      wide: true,
+      detail: (
+        <span className="flex flex-col gap-2">
+          {parts.some((part) => part.n > 0) ? (
+            <span className="work-meter" aria-hidden>
+              {parts
+                .filter((part) => part.n > 0)
+                .map((part) => (
+                  <span key={part.tone} className={part.tone} style={{ flexGrow: part.n }} />
+                ))}
+            </span>
+          ) : null}
+          <span className="flex flex-wrap gap-x-3 gap-y-0.5">
+            {legend.map((text, i) => (
+              <span key={i} className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                {legend.length === parts.length ? (
+                  <StatusDot className={cn('size-1.5', parts[i]!.tone)} />
+                ) : null}
+                {text}
+                {i < legend.length - 1 ? <span className="sr-only"> · </span> : null}
+              </span>
+            ))}
+          </span>
+        </span>
+      ),
     },
-    { label: t('webPagesWork.statRunning'), value: formatNumber(stats.activeRuns) },
-    { label: t('webPagesWork.statFailed'), value: formatNumber(stats.failedOrTimedOut) },
-    { label: t('webPagesWork.statMessages'), value: formatNumber(stats.totalMessages) },
-    { label: t('webPagesWork.statAgents'), value: formatNumber(stats.agents) },
+    {
+      label: t('webPagesWork.statRunning'),
+      icon: <Activity />,
+      value: formatNumber(stats.activeRuns),
+      tone: live ? 'accent' : 'default',
+      detail: (
+        <span role="status" className="flex min-w-0 items-center gap-1.5">
+          <StatusDot tone={live ? 'accent' : 'neutral'} live={live} className="size-1.5" />
+          <span className="truncate">
+            {live
+              ? tPlural('webPagesWork.executingNow', stats.activeRuns)
+              : t('webPagesWork.executingNone')}
+          </span>
+        </span>
+      ),
+    },
+    {
+      label: t('webPagesWork.statFailed'),
+      icon: <AlertTriangle />,
+      value: formatNumber(stats.failedOrTimedOut),
+      tone: stats.failedOrTimedOut > 0 ? 'danger' : 'default',
+    },
+    {
+      label: t('webPagesWork.statMessages'),
+      icon: <MessageSquare />,
+      value: formatNumber(stats.totalMessages),
+    },
+    { label: t('webPagesWork.statAgents'), icon: <Bot />, value: formatNumber(stats.agents) },
   ]
   return (
     <div className="flex flex-col gap-2">
       {totals.truncated ? (
-        <p role="note" className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-small">
+        <p
+          role="note"
+          className="flex items-start gap-2 rounded-card border border-warn/30 bg-warn/10 px-3 py-2 text-small"
+        >
+          <AlertTriangle className="mt-px size-4 shrink-0 text-warn" aria-hidden data-status-icon />
           {totals.total !== null
             ? t('webPagesWork.sessionsTruncated', {
                 shown: formatNumber(totals.listed),
@@ -618,32 +735,7 @@ function StatTiles({
             : t('webPagesWork.sessionsTruncatedUnknown', { shown: formatNumber(totals.listed) })}
         </p>
       ) : null}
-      <p role="status" className="flex items-center gap-2 text-small text-text-muted">
-        <span
-          aria-hidden
-          className={cn(
-            'size-2 rounded-full',
-            stats.activeRuns > 0 ? 'animate-pulse bg-ok' : 'bg-text-muted/50',
-          )}
-        />
-        {stats.activeRuns > 0
-          ? tPlural('webPagesWork.executingNow', stats.activeRuns)
-          : t('webPagesWork.executingNone')}
-      </p>
-      <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-        {tiles.map((tile) => (
-          <div
-            key={tile.label}
-            className="min-w-0 rounded-lg border border-border bg-surface-1 px-3 py-2"
-          >
-            <dt className="text-small text-text-muted">{tile.label}</dt>
-            <dd className="text-lg font-semibold tabular-nums">{tile.value}</dd>
-            {tile.hint ? (
-              <dd className="text-small break-words text-text-muted">{tile.hint}</dd>
-            ) : null}
-          </div>
-        ))}
-      </dl>
+      <StatStrip items={items} />
     </div>
   )
 }
@@ -656,20 +748,27 @@ const LIFECYCLE_LABEL: Record<string, () => string> = {
   timeout: () => t('webPagesWork.lifecycleTimeout'),
 }
 
-/** The lifecycle chip (open / completed / failed / aborted / timed out) of a row. */
-function LifecycleChip({ row }: { row: SessionRow }) {
+const BADGE_TONE: Record<Tone, 'ok' | 'warn' | 'danger' | 'info' | 'neutral'> = {
+  ok: 'ok',
+  warn: 'warn',
+  danger: 'danger',
+  info: 'info',
+  dim: 'neutral',
+}
+
+/** The lifecycle badge (open / completed / failed / aborted / timed out) of a row. */
+function LifecycleChip({ row, live }: { row: SessionRow; live: boolean }) {
   const visual = sessionVisualStatus(row)
   const label = LIFECYCLE_LABEL[visual]?.() ?? t('webPagesWork.lifecycleUnknown')
   return (
-    <span
+    <Badge
       data-lifecycle={visual}
-      className={cn(
-        'inline-flex items-center rounded-full border border-current/40 px-2 text-small whitespace-nowrap',
-        TONE_CLASS[sessionStatusChip(visual)],
-      )}
+      tone={live ? 'accent' : BADGE_TONE[sessionStatusChip(visual)]}
+      dot={!live}
+      live={live}
     >
       {label}
-    </span>
+    </Badge>
   )
 }
 
@@ -679,33 +778,41 @@ function SortHeader({
   sortCol,
   asc,
   onSort,
+  numeric = false,
 }: {
   col: SortColumn
   label: string
   sortCol: SortColumn
   asc: boolean
   onSort: (col: SortColumn) => void
+  numeric?: boolean
 }) {
   const active = sortCol === col
+  const dataCol = col === 'key' ? 'session' : col === 'message_count' ? 'messages' : 'updated'
   return (
     <th
       scope="col"
+      data-col={dataCol}
       aria-sort={active ? (asc ? 'ascending' : 'descending') : 'none'}
-      className="px-3 py-2 font-medium"
+      className={cn('px-3 py-2.5 font-medium', numeric && 'text-right')}
     >
       <button
         type="button"
         onClick={() => onSort(col)}
-        className="target inline-flex items-center gap-1 rounded hover:text-text"
+        className={cn(
+          'press group/sort target -mx-1 inline-flex items-center gap-1 rounded-md px-1 hover:text-text',
+          active && 'text-text',
+        )}
       >
         {label}
-        {active ? (
-          asc ? (
-            <ArrowUp className="size-3.5" aria-hidden />
-          ) : (
-            <ArrowDown className="size-3.5" aria-hidden />
-          )
-        ) : null}
+        <ArrowDown
+          aria-hidden
+          className={cn(
+            'size-3.5 transition-[rotate,opacity] duration-[var(--duration-base)] ease-[var(--ease-out)]',
+            asc && active && 'rotate-180',
+            active ? 'opacity-100' : 'opacity-0 group-hover/sort:opacity-50',
+          )}
+        />
       </button>
     </th>
   )
@@ -742,6 +849,8 @@ function SessionTableRow({
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Bumped on a successful rename: remounts the title so it flashes once.
+  const [renamedAt, setRenamedAt] = useState(0)
   const errorId = useId()
 
   const agentId = sessionAgent(row)
@@ -757,6 +866,10 @@ function SessionTableRow({
     setError(null)
     setRenaming(true)
   }
+  const cancelRename = () => {
+    setRenaming(false)
+    setError(null)
+  }
   const submitRename = async () => {
     const name = draft.trim()
     if (name === sessionName(row).trim()) {
@@ -771,6 +884,7 @@ function SessionTableRow({
         prev?.map((r) => (r.key === row.key ? { ...r, display_name: name, displayName: name } : r)),
       )
       setRenaming(false)
+      setRenamedAt(Date.now())
       void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY })
     } catch (e) {
       setError(t('webPagesWork.renameFailed', { message: errorMessage(e) }))
@@ -782,64 +896,88 @@ function SessionTableRow({
   return (
     <tr
       data-session-key={row.key}
-      className={cn('border-t border-border align-top', selected && 'bg-accent-soft')}
+      data-selected={selected || undefined}
+      className={cn(
+        'align-middle transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]',
+        selected ? 'bg-accent-tint' : 'hover:bg-surface-2',
+      )}
     >
-      <td className="px-3 py-2">
+      <td data-col="check" className="py-3 pr-1 pl-4">
         {row.provisional ? null : (
           <input
             type="checkbox"
             aria-label={t('webPagesWork.selectRow', { title })}
             checked={selected}
             onChange={(e) => onSelect(e.target.checked)}
-            className="size-4"
+            className="work-check"
           />
         )}
       </td>
-      <td className="max-w-[22rem] px-3 py-2">
+      <td data-col="session" className="max-w-[24rem] min-w-0 px-3 py-2.5">
         {renaming ? (
           <form
-            className="flex items-center gap-1"
+            className="anim-fade-in flex items-center gap-1.5"
             onSubmit={(e) => {
               e.preventDefault()
               void submitRename()
             }}
           >
-            <input
+            <Input
+              size="sm"
               autoFocus
               aria-label={t('webPagesWork.renameLabel')}
               placeholder={t('webPagesWork.renamePlaceholder')}
               value={draft}
               disabled={busy}
               onChange={(e) => setDraft(e.target.value)}
+              onFocus={(e) => e.currentTarget.select()}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
                   e.stopPropagation()
-                  setRenaming(false)
-                  setError(null)
+                  cancelRename()
                 }
               }}
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? errorId : undefined}
-              className="h-8 min-w-0 flex-1 rounded border border-border-control bg-surface-0 px-2"
+              className="flex-1"
             />
-            <Button size="sm" type="submit" disabled={busy || act.disabled}>
+            <Button size="sm" variant="primary" type="submit" disabled={busy || act.disabled}>
+              {busy ? <Loader2 className="animate-spin" /> : null}
               {t('webPagesWork.save')}
+            </Button>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={t('webPagesWork.cancel')}
+              disabled={busy}
+              onClick={cancelRename}
+            >
+              <X />
             </Button>
           </form>
         ) : (
           <div className="flex min-w-0 items-center gap-1">
             <Link
+              key={renamedAt}
               to={sessionKeyToPath(row.key)}
-              className="target min-w-0 truncate font-medium hover:underline"
+              viewTransition
+              className={cn(
+                'flex min-h-6 min-w-0 items-center rounded-sm font-medium hover:underline hover:underline-offset-2 touch:min-h-11',
+                renamedAt ? 'anim-flash' : null,
+              )}
             >
-              {title}
+              <span className="truncate">{title}</span>
             </Link>
             {row.provisional ? (
-              <span className="text-small text-text-muted">{t('webPagesWork.provisional')}</span>
+              <Badge tone="neutral" className="ml-1">
+                <Loader2 className="animate-spin" aria-hidden />
+                {t('webPagesWork.provisional')}
+              </Badge>
             ) : (
               <Button
                 size="icon-sm"
                 variant="ghost"
+                className="work-reveal shrink-0 text-text-muted"
                 aria-label={t('webPagesWork.renameRow', { title })}
                 disabled={act.disabled}
                 title={act.reason ?? undefined}
@@ -850,75 +988,99 @@ function SessionTableRow({
             )}
           </div>
         )}
-        <div className="truncate font-mono text-small text-text-muted">{row.key}</div>
+        <div className="truncate font-mono text-small text-text-muted" title={row.key}>
+          {row.key}
+        </div>
         {error ? (
-          <p id={errorId} role="alert" className="text-small text-danger">
+          <p
+            id={errorId}
+            role="alert"
+            className="anim-fade-in mt-1 flex items-center gap-1 text-small text-danger"
+          >
+            <AlertTriangle className="size-3.5 shrink-0" aria-hidden data-status-icon />
             {error}
           </p>
         ) : null}
       </td>
-      <td className="px-3 py-2">
-        <span>{agentsById.get(agentId)?.name ?? (agentId || t('webPagesWork.dash'))}</span>
-        {subline?.orphan ? (
-          <span
-            className="ml-1 inline-flex items-center gap-1 rounded-full border border-warn/50 px-1.5 text-small text-warn"
-            title={t('webPagesWork.orphanTitle', { agent: agentId })}
-          >
-            <AlertTriangle className="size-3" aria-hidden data-status-icon />
-            {t('webPagesWork.orphan')}
+      <td data-col="agent" className="px-3 py-2.5">
+        <span className="inline-flex min-w-0 flex-wrap items-center gap-1.5">
+          <span className="truncate">
+            {agentsById.get(agentId)?.name ?? (agentId || t('webPagesWork.dash'))}
           </span>
-        ) : null}
+          {subline?.orphan ? (
+            <Badge tone="warn" title={t('webPagesWork.orphanTitle', { agent: agentId })}>
+              <AlertTriangle aria-hidden data-status-icon />
+              {t('webPagesWork.orphan')}
+            </Badge>
+          ) : null}
+        </span>
       </td>
-      <td className="px-3 py-2">
+      <td data-col="project" data-empty={project ? undefined : ''} className="px-3 py-2.5">
         {project ? (
-          (projectNames?.get(project) ?? project)
+          <span className="inline-flex max-w-full items-center gap-1.5">
+            <FolderKanban className="size-3.5 shrink-0 text-text-muted" aria-hidden />
+            <span className="truncate">{projectNames?.get(project) ?? project}</span>
+          </span>
         ) : (
           <span className="text-text-muted">{t('webPagesWork.dash')}</span>
         )}
       </td>
-      <td className="px-3 py-2">
+      <td data-col="status" className="px-3 py-2.5">
         <div className="flex flex-wrap items-center gap-1.5">
-          <LifecycleChip row={row} />
+          <LifecycleChip row={row} live={executing} />
           {executing && badge ? (
-            <span className={cn('text-small font-medium', TONE_CLASS[badge.tone])}>
-              {badge.label}
-            </span>
+            <span className="text-small font-medium text-accent">{badge.label}</span>
           ) : open ? (
             <span className="text-small text-text-muted">{t('webPagesWork.statusIdle')}</span>
           ) : null}
         </div>
       </td>
-      <td className="px-3 py-2 tabular-nums">{formatNumber(Number(row.message_count) || 0)}</td>
-      <td className="px-3 py-2 whitespace-nowrap text-text-muted">
+      <td data-col="messages" className="px-3 py-2.5 text-right tabular-nums">
+        <MessageSquare
+          className="work-narrow-only mr-1 size-3.5 align-[-2px] text-text-muted"
+          aria-hidden
+        />
+        {formatNumber(Number(row.message_count) || 0)}
+      </td>
+      <td data-col="updated" className="px-3 py-2.5 whitespace-nowrap text-text-muted">
         {relTimeLabel(row.updated_at ?? row.updatedAt ?? '')}
       </td>
-      <td className="px-3 py-2">
+      <td data-col="actions" className="py-2.5 pr-3">
         {row.provisional ? null : (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 size="icon-sm"
                 variant="ghost"
+                className="text-text-muted data-[state=open]:bg-surface-3 data-[state=open]:text-text"
                 aria-label={t('webPagesWork.rowActions', { title })}
               >
                 <MoreHorizontal />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" className="min-w-48">
               <DropdownMenuItem asChild>
-                <Link to={sessionKeyToPath(row.key)}>{t('webPagesWork.openChat')}</Link>
+                <Link to={sessionKeyToPath(row.key)} viewTransition>
+                  <MessageSquare aria-hidden />
+                  {t('webPagesWork.openChat')}
+                </Link>
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => openInNewTab(tabHref)}>
+                <ExternalLink aria-hidden />
                 {t('webPagesWork.openNewTab')}
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem disabled={act.disabled} onSelect={startRename}>
+                <Pencil aria-hidden />
                 {t('webPagesWork.rename')}
               </DropdownMenuItem>
               <DropdownMenuItem disabled={act.disabled} onSelect={onMove}>
+                <FolderInput aria-hidden />
                 {t('webPagesWork.moveToProject')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem variant="danger" disabled={act.disabled} onSelect={onDelete}>
+                <Trash2 aria-hidden />
                 {t('webPagesWork.delete')}
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -978,26 +1140,24 @@ function MoveDialog({
           <DialogTitle>{tPlural('webPagesWork.moveTitle', keys.length)}</DialogTitle>
           <DialogDescription>{t('webPagesWork.moveBody')}</DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-1">
-          <label htmlFor={selectId} className="font-medium">
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={selectId} className="text-label">
             {t('webPagesWork.colProject')}
           </label>
-          <select
-            id={selectId}
-            className={fieldClass}
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-          >
+          <Select id={selectId} value={target} onChange={(e) => setTarget(e.target.value)}>
             <option value="">{t('webPagesWork.filterNoProject')}</option>
             {[...(projectNames ?? new Map<string, string>())].map(([id, name]) => (
               <option key={id} value={id}>
                 {name}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         {error ? (
-          <p role="alert" className="text-danger">
+          <p
+            role="alert"
+            className="anim-fade-in rounded-control border border-danger/30 bg-danger/10 px-3 py-2"
+          >
             {error}
           </p>
         ) : null}
@@ -1110,33 +1270,28 @@ function NewSessionDialog({
             <DialogTitle>{t('webPagesWork.newTitle')}</DialogTitle>
             <DialogDescription>{t('webPagesWork.newBody')}</DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-1">
-            <label htmlFor={agentSelectId} className="font-medium">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={agentSelectId} className="text-label">
               {t('webPagesWork.colAgent')}
             </label>
-            <select
-              id={agentSelectId}
-              className={fieldClass}
-              value={agent}
-              onChange={(e) => setAgent(e.target.value)}
-            >
+            <Select id={agentSelectId} value={agent} onChange={(e) => setAgent(e.target.value)}>
               {agents.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
                 </option>
               ))}
               <option value={NEW_AGENT}>{t('webPagesWork.newAgentOption')}</option>
-            </select>
+            </Select>
           </div>
           {creatingAgent ? (
-            <div className="flex flex-col gap-1">
-              <label htmlFor={newAgentFieldId} className="font-medium">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor={newAgentFieldId} className="text-label">
                 {t('webPagesWork.newAgentId')}
               </label>
-              <input
+              <Input
                 id={newAgentFieldId}
                 autoFocus
-                className={fieldClass}
+                className="font-mono"
                 value={newAgentId}
                 placeholder={t('webPagesWork.newAgentPlaceholder')}
                 onChange={(e) => setNewAgentId(e.target.value)}
@@ -1144,13 +1299,12 @@ function NewSessionDialog({
               <span className="text-small text-text-muted">{t('webPagesWork.newAgentHint')}</span>
             </div>
           ) : null}
-          <div className="flex flex-col gap-1">
-            <label htmlFor={projectSelectId} className="font-medium">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={projectSelectId} className="text-label">
               {t('webPagesWork.colProject')}
             </label>
-            <select
+            <Select
               id={projectSelectId}
-              className={fieldClass}
               value={project}
               onChange={(e) => setProject(e.target.value)}
             >
@@ -1160,10 +1314,13 @@ function NewSessionDialog({
                   {name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           {error ? (
-            <p role="alert" className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2">
+            <p
+              role="alert"
+              className="anim-fade-in rounded-control border border-danger/30 bg-danger/10 px-3 py-2"
+            >
               {error}
             </p>
           ) : null}

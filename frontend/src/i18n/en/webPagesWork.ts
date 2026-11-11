@@ -146,6 +146,7 @@ export const webPagesWork = defineNamespace('webPagesWork', {
     'This project changed elsewhere. The latest version is loaded; check the name and save again.',
   projectSaveFailed: 'Couldn’t save: {message}',
   knowledge: 'Knowledge',
+  projectNoKnowledge: 'No shared knowledge yet',
   knowledgeHint: 'Injected into the system prompt of every session in this project.',
   knowledgePlaceholder: 'Instructions and facts shared with every session in this project…',
   knowledgeCounter: '{count} / {max} characters',
