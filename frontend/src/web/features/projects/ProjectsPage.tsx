@@ -1,12 +1,25 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  AlertTriangle,
   ArrowLeft,
+  ArrowUpRight,
+  BookOpen,
+  Bot,
+  Check,
+  ChevronRight,
+  Clock,
   FolderKanban,
+  FolderPlus,
+  FolderX,
+  Info,
   Loader2,
   MessageSquare,
+  MessageSquareDashed,
   MessageSquarePlus,
+  MessagesSquare,
   Plus,
   Search,
+  SearchX,
   Trash2,
 } from 'lucide-react'
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
@@ -40,7 +53,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/web/components/ui/alert-dialog'
+import { Badge } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
+import { Card } from '@/web/components/ui/card'
+import { Input, Select, Textarea } from '@/web/components/ui/input'
 import { PageHeader } from '@/web/components/ui/page-header'
 import {
   Dialog,
@@ -60,6 +76,8 @@ import {
 import { sessionTitle, type SessionRow } from '@/web/shell/session-list'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
+import { useArrival } from '@/web/features/sessions/StatStrip'
+import '@/web/styles/work.css'
 
 // `/projects` and `/projects/:projectId` (task 8.3) on views/projects/logic:
 // list, create, rename, knowledge editing with compare-and-swap, delete, a new
@@ -73,9 +91,6 @@ const PROJECT_ROWS_QUERY_KEY = ['projects', 'rows'] as const
 // src/agentos/session/manager.py: the gateway rejects anything longer.
 const PROJECT_NAME_MAX = 200
 const PROJECT_KNOWLEDGE_MAX = 24_000
-
-const fieldClass =
-  'w-full rounded-md border border-border-control bg-surface-0 px-3 text-ui max-md:text-base'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -132,84 +147,83 @@ export function ProjectsPage() {
   const rows = useMemo(() => sortProjects(projects.data ?? []), [projects.data])
   const listed = useMemo(() => filterProjects(rows, query), [rows, query])
   const selected = projectId ? (rows.find((p) => projectIdOf(p) === projectId) ?? null) : null
+  // Cards rise in once, when the list first arrives.
+  const arriving = useArrival(!projects.isPending)
+
+  const listing = projectId ? 'rail' : 'grid'
+  const searchField = (
+    <Input
+      type="search"
+      aria-label={t('webPagesWork.projectsSearch')}
+      icon={<Search />}
+      wrapperClassName={listing === 'grid' ? 'w-full sm:max-w-sm' : 'w-full'}
+      value={query}
+      onChange={(e) => setQuery(e.target.value)}
+      placeholder={t('webPagesWork.projectsSearch')}
+    />
+  )
 
   const list = projects.isPending ? (
-    <LoadingRegion label={t('webPagesWork.projectsLoading')}>
-      {Array.from({ length: 5 }, (_, i) => (
-        <Skeleton key={i} className="my-2 h-14" />
-      ))}
-    </LoadingRegion>
+    <ProjectsSkeleton listing={listing} />
   ) : rows.length === 0 ? (
     projects.isError ? null : (
-      <EmptyState
-        icon={<FolderKanban />}
-        title={t('webPagesWork.projectsEmpty')}
-        description={t('webPagesWork.projectsEmptyBody')}
-        action={
-          <Button variant="primary" disabled={act.disabled} onClick={() => setCreating(true)}>
-            <Plus />
-            {t('webPagesWork.projectsNew')}
-          </Button>
-        }
-      />
+      <Card variant="plain" padding="none" className="border-dashed">
+        <EmptyState
+          icon={<FolderPlus />}
+          title={t('webPagesWork.projectsEmpty')}
+          description={t('webPagesWork.projectsEmptyBody')}
+          action={
+            <Button variant="primary" disabled={act.disabled} onClick={() => setCreating(true)}>
+              <Plus />
+              {t('webPagesWork.projectsNew')}
+            </Button>
+          }
+        />
+      </Card>
     )
   ) : (
-    <div className="flex flex-col gap-2">
-      <label className="relative block">
-        <span className="sr-only">{t('webPagesWork.projectsSearch')}</span>
-        <Search
-          className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-muted"
-          aria-hidden
-        />
-        <input
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t('webPagesWork.projectsSearch')}
-          className={cn(fieldClass, 'h-9 pl-8 touch:h-11')}
-        />
-      </label>
+    <div className="flex flex-col gap-3">
+      {searchField}
       {listed.length === 0 ? (
-        <p className="px-1 py-4 text-text-muted">{t('webPagesWork.projectsNoMatch')}</p>
+        <EmptyState
+          size="sm"
+          icon={<SearchX />}
+          title={t('webPagesWork.projectsNoMatch')}
+          action={
+            <Button variant="outline" size="sm" onClick={() => setQuery('')}>
+              {t('webPagesWork.clearFilters')}
+            </Button>
+          }
+        />
       ) : (
-        <ul role="list" aria-label={t('webPagesWork.projectsList')} className="flex flex-col gap-1">
-          {listed.map((p) => {
-            const id = projectIdOf(p)
-            const knowledge = String(p.knowledge ?? '')
-            return (
-              <li key={id}>
-                <Link
-                  to={`/projects/${encodeURIComponent(id)}`}
-                  aria-current={id === projectId ? 'page' : undefined}
-                  className={cn(
-                    'target flex flex-col gap-0.5 rounded-md px-3 py-2',
-                    id === projectId ? 'bg-surface-3' : 'hover:bg-surface-2',
-                  )}
-                >
-                  <span className="truncate font-medium">{projectName(p)}</span>
-                  <span className="text-small text-text-muted">
-                    {tPlural('webPagesWork.sessionCount', projectSessionCount(p))}
-                  </span>
-                  {knowledge ? (
-                    <span className="truncate text-small text-text-muted">
-                      {knowledgeExcerpt(knowledge)}
-                    </span>
-                  ) : null}
-                </Link>
-              </li>
-            )
-          })}
+        <ul
+          role="list"
+          aria-label={t('webPagesWork.projectsList')}
+          className={cn(
+            arriving && 'anim-stagger',
+            listing === 'grid'
+              ? 'grid gap-3 sm:grid-cols-2 xl:grid-cols-3'
+              : 'flex flex-col gap-0.5',
+          )}
+        >
+          {listed.map((p) =>
+            listing === 'grid' ? (
+              <ProjectCard key={projectIdOf(p)} project={p} />
+            ) : (
+              <ProjectRailItem
+                key={projectIdOf(p)}
+                project={p}
+                active={projectIdOf(p) === projectId}
+              />
+            ),
+          )}
         </ul>
       )}
     </div>
   )
 
-  let detail: ReactNode
-  if (!projectId) {
-    detail = rows.length ? (
-      <p className="p-6 text-text-muted">{t('webPagesWork.projectsPick')}</p>
-    ) : null
-  } else if (selected) {
+  let detail: ReactNode = null
+  if (selected) {
     detail = (
       <ProjectDetail
         key={projectId}
@@ -218,24 +232,40 @@ export function ProjectsPage() {
         refetch={async () => (await projects.refetch()).data ?? []}
       />
     )
-  } else if (projects.isPending) {
-    detail = null
-  } else {
+  } else if (projectId && projects.isPending) {
     detail = (
-      <EmptyState
-        title={t('webPagesWork.projectMissing')}
-        description={t('webPagesWork.projectMissingBody')}
-        action={
-          <Button asChild variant="outline">
-            <Link to="/projects">{t('webPagesWork.backToProjects')}</Link>
-          </Button>
-        }
-      />
+      <div aria-hidden className="flex flex-col gap-4">
+        <Card padding="lg" className="flex items-center gap-4">
+          <Skeleton className="size-12 shrink-0" />
+          <div className="flex flex-1 flex-col gap-2">
+            <Skeleton className="h-3 w-12" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        </Card>
+        <Skeleton className="h-64 rounded-card" />
+      </div>
+    )
+  } else if (projectId) {
+    detail = (
+      <Card variant="plain" padding="none">
+        <EmptyState
+          icon={<FolderX />}
+          title={t('webPagesWork.projectMissing')}
+          description={t('webPagesWork.projectMissingBody')}
+          action={
+            <Button asChild variant="outline">
+              <Link to="/projects" viewTransition>
+                {t('webPagesWork.backToProjects')}
+              </Link>
+            </Button>
+          }
+        />
+      </Card>
     )
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-6">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 md:p-6">
       <PageHeader
         title={t('webPagesWork.projectsTitle')}
         description={t('webPagesWork.projectsSubtitle')}
@@ -260,31 +290,166 @@ export function ProjectsPage() {
           retrying={projects.isFetching}
         />
       ) : null}
-      <div className="grid gap-4 md:grid-cols-[minmax(14rem,18rem)_1fr]">
-        {/* On a phone the list and the detail take turns: the URL decides. */}
-        <section
-          aria-label={t('webPagesWork.projectsList')}
-          className={cn(projectId && 'max-md:hidden')}
-        >
-          {list}
-        </section>
-        <section className={cn('min-w-0', !projectId && 'max-md:hidden')}>
-          {projectId ? (
+      {listing === 'grid' ? (
+        <section aria-label={t('webPagesWork.projectsList')}>{list}</section>
+      ) : (
+        <div className="grid items-start gap-6 md:grid-cols-[minmax(13rem,16rem)_1fr]">
+          {/* On a phone the list and the detail take turns: the URL decides. */}
+          <section
+            aria-label={t('webPagesWork.projectsList')}
+            className="sticky top-4 max-md:hidden"
+          >
+            {list}
+          </section>
+          <section className="min-w-0">
             <Link
               to="/projects"
-              className="target mb-2 inline-flex items-center gap-1 text-small text-text-muted md:hidden"
+              viewTransition
+              className="press target mb-3 inline-flex items-center gap-1 rounded-md text-small text-text-muted hover:text-text md:hidden"
             >
               <ArrowLeft className="size-4" aria-hidden />
               {t('webPagesWork.backToProjects')}
             </Link>
-          ) : null}
-          {detail}
-        </section>
-      </div>
+            {detail}
+          </section>
+        </div>
+      )}
       {creating ? (
         <CreateProjectDialog agents={agents.data ?? []} onClose={() => setCreating(false)} />
       ) : null}
     </div>
+  )
+}
+
+// ── List items ───────────────────────────────────────────────────────────────
+
+function projectPath(p: RawProject): string {
+  return `/projects/${encodeURIComponent(projectIdOf(p))}`
+}
+
+/** A project in the overview grid: name, owner, knowledge, sessions, last change. */
+function ProjectCard({ project }: { project: RawProject }) {
+  const knowledge = String(project.knowledge ?? '')
+  const owner = projectAgentId(project)
+  const updated = updatedAtOf(project)
+  return (
+    <li className="min-w-0">
+      <Card asChild variant="interactive" padding="none">
+        <Link
+          to={projectPath(project)}
+          viewTransition
+          className="group flex h-full flex-col gap-3 p-4"
+        >
+          <span className="flex items-start gap-3">
+            <ProjectGlyph />
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate text-section">{projectName(project)}</span>
+              {owner ? (
+                <span className="truncate text-small text-text-muted">
+                  {t('webPagesWork.projectOwner', { agent: owner })}
+                </span>
+              ) : null}
+            </span>
+            <ArrowUpRight
+              aria-hidden
+              className="size-4 shrink-0 -translate-x-1 text-text-muted opacity-0 transition-[opacity,translate] duration-[var(--duration-base)] ease-[var(--ease-out)] group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100"
+            />
+          </span>
+          <span
+            className={cn(
+              'line-clamp-2 min-h-[2lh] text-small',
+              knowledge ? 'text-text-muted' : 'text-text-muted italic',
+            )}
+          >
+            {knowledge ? knowledgeExcerpt(knowledge, 140) : t('webPagesWork.projectNoKnowledge')}
+          </span>
+          <span className="mt-auto flex items-center gap-3 border-t border-border pt-3 text-small text-text-muted">
+            <span className="inline-flex items-center gap-1.5 tabular-nums">
+              <MessageSquare className="size-3.5" aria-hidden />
+              {tPlural('webPagesWork.sessionCount', projectSessionCount(project))}
+            </span>
+            {updated ? (
+              <span className="ml-auto inline-flex items-center gap-1.5 truncate">
+                <Clock className="size-3.5 shrink-0" aria-hidden />
+                {relTimeLabel(updated)}
+              </span>
+            ) : null}
+          </span>
+        </Link>
+      </Card>
+    </li>
+  )
+}
+
+/** A project in the side list next to an open project. */
+function ProjectRailItem({ project, active }: { project: RawProject; active: boolean }) {
+  return (
+    <li>
+      <Link
+        to={projectPath(project)}
+        viewTransition
+        aria-current={active ? 'page' : undefined}
+        className={cn(
+          'press target flex items-center gap-2.5 rounded-control px-2.5 py-2',
+          active
+            ? 'bg-accent-tint text-text forced-colors:bg-[Highlight] forced-colors:text-[HighlightText] forced-colors:forced-color-adjust-none'
+            : 'text-text-muted hover:bg-surface-2 hover:text-text',
+        )}
+      >
+        <FolderKanban
+          aria-hidden
+          className={cn('size-4 shrink-0', active ? 'text-accent' : 'text-text-muted')}
+        />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate font-medium">{projectName(project)}</span>
+          <span className="text-small text-text-muted tabular-nums">
+            {tPlural('webPagesWork.sessionCount', projectSessionCount(project))}
+          </span>
+        </span>
+      </Link>
+    </li>
+  )
+}
+
+/** The folder mark in an accent-tinted tile. */
+function ProjectGlyph({ size = 'md' }: { size?: 'md' | 'lg' }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'grid shrink-0 place-items-center rounded-control border border-accent/20 bg-accent-tint text-accent shadow-highlight',
+        size === 'lg' ? 'size-12 max-sm:hidden [&_svg]:size-6' : 'size-9 [&_svg]:size-4.5',
+      )}
+    >
+      <FolderKanban />
+    </span>
+  )
+}
+
+function ProjectsSkeleton({ listing }: { listing: 'grid' | 'rail' }) {
+  return (
+    <LoadingRegion label={t('webPagesWork.projectsLoading')} className="flex flex-col gap-3">
+      <Skeleton className={cn('h-9', listing === 'grid' ? 'w-full sm:max-w-sm' : 'w-full')} />
+      {listing === 'grid' ? (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 3 }, (_, i) => (
+            <Card key={i} padding="md" className="flex flex-col gap-3">
+              <div className="flex items-center gap-3">
+                <Skeleton className="size-9 shrink-0" />
+                <div className="flex flex-1 flex-col gap-1.5">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-20" />
+                </div>
+              </div>
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-4 w-28" />
+            </Card>
+          ))}
+        </div>
+      ) : (
+        Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-12" />)
+      )}
+    </LoadingRegion>
   )
 }
 
@@ -453,87 +618,121 @@ function ProjectDetail({
     !dirty && !conflict ? blockedBecause(t('webPagesWork.noChanges')) : null,
   )
 
+  const sessionTotal = Math.max(projectSessionCount(project), projectSessions.length)
+
   return (
-    <article aria-label={name} className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1">
-        <label htmlFor={nameFieldId} className="text-small text-text-muted">
-          {t('webPagesWork.projectName')}
-        </label>
+    <article aria-label={name} className="anim-enter flex flex-col gap-4">
+      <Card padding="lg" className="flex flex-col gap-4">
+        <div className="flex items-start gap-4">
+          <ProjectGlyph size="lg" />
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <label htmlFor={nameFieldId} className="text-label text-text-muted">
+              {t('webPagesWork.projectName')}
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                id={nameFieldId}
+                size="lg"
+                className="flex-1 text-section"
+                value={nameDraft ?? name}
+                maxLength={PROJECT_NAME_MAX}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter saves the name, as Save name does; not mid-composition.
+                  if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+                  e.preventDefault()
+                  if (!nameGate.disabled && saving === null) void saveName()
+                }}
+              />
+              {nameDraft !== null && nameDraft !== name ? (
+                <Button
+                  className="anim-fade-in"
+                  variant="outline"
+                  disabled={nameGate.disabled || saving !== null}
+                  title={nameGate.reason ?? undefined}
+                  onClick={() => void saveName()}
+                >
+                  {saving === 'name' ? <Loader2 className="animate-spin" /> : <Check />}
+                  {t('webPagesWork.saveName')}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
-          <input
-            id={nameFieldId}
-            className={cn(fieldClass, 'h-10 min-w-0 flex-1 text-lg font-semibold')}
-            value={nameDraft ?? name}
-            maxLength={PROJECT_NAME_MAX}
-            onChange={(e) => setNameDraft(e.target.value)}
-            onKeyDown={(e) => {
-              // Enter saves the name, as Save name does; not mid-composition.
-              if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
-              e.preventDefault()
-              if (!nameGate.disabled && saving === null) void saveName()
-            }}
-          />
-          {nameDraft !== null && nameDraft !== name ? (
-            <Button
-              variant="outline"
-              disabled={nameGate.disabled || saving !== null}
-              title={nameGate.reason ?? undefined}
-              onClick={() => void saveName()}
-            >
-              {saving === 'name' ? <Loader2 className="animate-spin" /> : null}
-              {t('webPagesWork.saveName')}
-            </Button>
+          {owner ? (
+            <Badge tone="neutral">
+              <Bot aria-hidden />
+              {t('webPagesWork.projectOwner', { agent: owner })}
+            </Badge>
+          ) : null}
+          <Badge tone="neutral">
+            <MessageSquare aria-hidden />
+            {tPlural('webPagesWork.sessionCount', sessionTotal)}
+          </Badge>
+          {updatedAtOf(project) ? (
+            <Badge tone="neutral">
+              <Clock aria-hidden />
+              {t('webPagesWork.projectUpdated', { time: relTimeLabel(updatedAtOf(project)) })}
+            </Badge>
           ) : null}
         </div>
-        <span className="text-small text-text-muted">
-          {[
-            projectAgentId(project)
-              ? t('webPagesWork.projectOwner', { agent: projectAgentId(project) })
-              : '',
-            updatedAtOf(project)
-              ? t('webPagesWork.projectUpdated', { time: relTimeLabel(updatedAtOf(project)) })
-              : '',
-          ]
-            .filter(Boolean)
-            .join(' · ')}
-        </span>
-      </div>
+      </Card>
 
       {error ? (
-        <p role="alert" className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2">
+        <p
+          role="alert"
+          className="anim-fade-in flex items-start gap-2 rounded-card border border-danger/30 bg-danger/10 px-3 py-2"
+        >
+          <AlertTriangle
+            className="mt-0.5 size-4 shrink-0 text-danger"
+            aria-hidden
+            data-status-icon
+          />
           {error}
         </p>
       ) : null}
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor={knowledgeFieldId} className="font-medium">
-          {t('webPagesWork.knowledge')}
-        </label>
-        <p className="text-small text-text-muted">{t('webPagesWork.knowledgeHint')}</p>
-        <textarea
-          id={knowledgeFieldId}
-          rows={8}
-          value={knowledgeValue}
-          maxLength={PROJECT_KNOWLEDGE_MAX}
-          placeholder={t('webPagesWork.knowledgePlaceholder')}
-          aria-describedby={counterId}
-          onChange={(e) =>
-            setDraft((d) => ({ text: e.target.value, base: d?.base ?? updatedAtOf(project) }))
-          }
-          className={cn(fieldClass, 'py-2 font-mono text-small')}
-        />
+      <Card padding="none" className="flex flex-col">
+        <div className="flex flex-col gap-1 px-5 pt-4 pb-3">
+          <label
+            htmlFor={knowledgeFieldId}
+            className="flex items-center gap-2 text-section [&_svg]:size-4 [&_svg]:text-text-muted"
+          >
+            <BookOpen aria-hidden />
+            {t('webPagesWork.knowledge')}
+          </label>
+          <p className="text-small text-text-muted">{t('webPagesWork.knowledgeHint')}</p>
+        </div>
+        <div className="px-5">
+          <Textarea
+            id={knowledgeFieldId}
+            rows={9}
+            value={knowledgeValue}
+            maxLength={PROJECT_KNOWLEDGE_MAX}
+            placeholder={t('webPagesWork.knowledgePlaceholder')}
+            aria-describedby={counterId}
+            onChange={(e) =>
+              setDraft((d) => ({ text: e.target.value, base: d?.base ?? updatedAtOf(project) }))
+            }
+            className="font-mono text-small"
+          />
+        </div>
         {conflict ? (
           <div
             role="alert"
-            className="flex flex-col gap-2 rounded-md border border-warn/50 bg-warn/10 p-3"
+            className="anim-enter mx-5 mt-3 flex flex-col gap-2 rounded-card border border-warn/30 bg-warn/10 p-3"
           >
-            <p className="font-medium">{t('webPagesWork.conflictTitle')}</p>
+            <p className="flex items-center gap-2 font-medium">
+              <AlertTriangle className="size-4 shrink-0 text-warn" aria-hidden data-status-icon />
+              {t('webPagesWork.conflictTitle')}
+            </p>
             <p className="text-text-muted">{t('webPagesWork.conflictBody')}</p>
-            <p className="text-small font-medium">{t('webPagesWork.conflictTheirs')}</p>
+            <p className="text-label">{t('webPagesWork.conflictTheirs')}</p>
             <pre
               tabIndex={0}
               aria-label={t('webPagesWork.conflictTheirs')}
-              className="max-h-48 overflow-auto rounded border border-border bg-surface-0 p-2 font-mono text-small whitespace-pre-wrap"
+              className="max-h-48 overflow-auto rounded-control bg-surface-inset p-2 font-mono text-small whitespace-pre-wrap shadow-inset"
             >
               {conflict.theirs || t('webPagesWork.conflictEmpty')}
             </pre>
@@ -560,14 +759,20 @@ function ProjectDetail({
             </div>
           </div>
         ) : null}
-        <div className="flex flex-wrap items-center gap-2">
-          <span id={counterId} className="flex-1 text-small text-text-muted tabular-nums">
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border px-5 py-3">
+          <span id={counterId} className="text-small text-text-muted tabular-nums">
             {t('webPagesWork.knowledgeCounter', {
               count: knowledgeValue.length,
               max: PROJECT_KNOWLEDGE_MAX,
             })}
-            {dirty ? ` · ${t('webPagesWork.unsaved')}` : ''}
+            {dirty ? <span className="sr-only"> · {t('webPagesWork.unsaved')}</span> : null}
           </span>
+          {dirty ? (
+            <Badge tone="warn" dot className="anim-fade-in" aria-hidden>
+              {t('webPagesWork.unsaved')}
+            </Badge>
+          ) : null}
+          <span className="flex-1" />
           {dirty ? (
             <Button variant="ghost" size="sm" onClick={() => setDraft(null)}>
               {t('webPagesWork.discard')}
@@ -586,65 +791,93 @@ function ProjectDetail({
             </Button>
           )}
         </div>
-      </div>
+      </Card>
 
-      <section aria-label={t('webPagesWork.projectSessions')} className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="flex-1 font-medium">{t('webPagesWork.projectSessions')}</h2>
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={starting || (!!owner && act.disabled)}
-            title={owner ? (act.reason ?? undefined) : undefined}
-            onClick={() => void startChat()}
-          >
-            {starting ? <Loader2 className="animate-spin" /> : <MessageSquarePlus />}
-            {t('webPagesWork.newChatInProject')}
-          </Button>
-        </div>
-        {partial ? (
-          <p role="note" className="text-small text-text-muted">
-            {t('webPagesWork.projectSessionsPartial', {
-              shown: projectSessions.length,
-              total: projectSessionCount(project),
-            })}
-          </p>
-        ) : null}
-        {groups.length === 0 ? (
-          partial ? null : (
-            <p className="text-text-muted">{t('webPagesWork.projectNoSessions')}</p>
-          )
-        ) : (
-          groups.map((group) => (
-            <div key={group.agentId}>
-              <h3 className="text-small font-medium text-text-muted">
-                {t('webPagesWork.agentGroup', { agent: group.agentId })}
-              </h3>
-              <ul role="list" className="flex flex-col">
-                {(group.items as SessionRow[]).map((s) => (
-                  <li key={s.key}>
-                    <Link
-                      to={sessionKeyToPath(s.key)}
-                      className="target flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-surface-2"
-                    >
-                      <MessageSquare className="size-4 shrink-0 text-text-muted" aria-hidden />
-                      <span className="min-w-0 flex-1 truncate">{sessionTitle(s)}</span>
-                      <span className="text-small text-text-muted">
-                        {relTimeLabel(s.updated_at ?? '')}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+      <Card asChild padding="none">
+        <section aria-label={t('webPagesWork.projectSessions')} className="flex flex-col">
+          <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-3">
+            <h2 className="flex flex-1 items-center gap-2 text-section [&_svg]:size-4 [&_svg]:text-text-muted">
+              <MessagesSquare aria-hidden />
+              {t('webPagesWork.projectSessions')}
+            </h2>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={starting || (!!owner && act.disabled)}
+              title={owner ? (act.reason ?? undefined) : undefined}
+              onClick={() => void startChat()}
+            >
+              {starting ? <Loader2 className="animate-spin" /> : <MessageSquarePlus />}
+              {t('webPagesWork.newChatInProject')}
+            </Button>
+          </div>
+          {partial ? (
+            <p role="note" className="mx-5 mb-3 flex items-start gap-2 text-small text-text-muted">
+              <Info className="mt-px size-3.5 shrink-0" aria-hidden />
+              {t('webPagesWork.projectSessionsPartial', {
+                shown: projectSessions.length,
+                total: projectSessionCount(project),
+              })}
+            </p>
+          ) : null}
+          {groups.length === 0 ? (
+            partial ? null : (
+              <div className="mx-5 mb-5 flex items-center gap-3 rounded-card border border-dashed border-border-strong px-4 py-5 text-text-muted">
+                <span
+                  aria-hidden
+                  className="grid size-9 shrink-0 place-items-center rounded-control bg-surface-2 [&_svg]:size-4"
+                >
+                  <MessageSquareDashed />
+                </span>
+                <p className="text-pretty">{t('webPagesWork.projectNoSessions')}</p>
+              </div>
+            )
+          ) : (
+            <div className="flex flex-col gap-3 px-3 pb-3">
+              {groups.map((group) => (
+                <div key={group.agentId} className="flex flex-col gap-0.5">
+                  <h3 className="flex items-center gap-1.5 px-2 pb-1 text-label tracking-[0.04em] text-text-muted uppercase [&_svg]:size-3.5">
+                    <Bot aria-hidden />
+                    {t('webPagesWork.agentGroup', { agent: group.agentId })}
+                  </h3>
+                  <ul role="list" className="flex flex-col">
+                    {(group.items as SessionRow[]).map((s) => (
+                      <li key={s.key}>
+                        <Link
+                          to={sessionKeyToPath(s.key)}
+                          viewTransition
+                          className="press group target flex items-center gap-2.5 rounded-control px-2 py-2 hover:bg-surface-2"
+                        >
+                          <MessageSquare className="size-4 shrink-0 text-text-muted" aria-hidden />
+                          <span className="min-w-0 flex-1 truncate">{sessionTitle(s)}</span>
+                          <span className="text-small whitespace-nowrap text-text-muted">
+                            {relTimeLabel(s.updated_at ?? '')}
+                          </span>
+                          <ChevronRight
+                            aria-hidden
+                            className="size-4 shrink-0 text-text-muted opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover:opacity-100"
+                          />
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </div>
-          ))
-        )}
-      </section>
+          )}
+        </section>
+      </Card>
 
-      <div className="border-t border-border pt-4">
+      <Card
+        variant="plain"
+        className="flex flex-wrap items-center gap-x-4 gap-y-3 border-danger/25 bg-danger/[0.04]"
+      >
+        <p className="min-w-0 flex-[1_1_16rem] text-small text-text-muted">
+          {t('webPagesWork.deleteProjectBody')}
+        </p>
         <Button
           variant="outline"
-          className="text-danger"
+          className="border-danger/40 text-danger hover:bg-danger/10"
           disabled={act.disabled}
           title={act.reason ?? undefined}
           onClick={() => setConfirmDelete(true)}
@@ -652,7 +885,7 @@ function ProjectDetail({
           <Trash2 />
           {t('webPagesWork.deleteProject')}
         </Button>
-      </div>
+      </Card>
 
       <AlertDialog
         open={confirmDelete}
@@ -748,46 +981,40 @@ function CreateProjectDialog({
             <DialogTitle>{t('webPagesWork.createProjectTitle')}</DialogTitle>
             <DialogDescription>{t('webPagesWork.createProjectBody')}</DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-1">
-            <label htmlFor={nameId} className="font-medium">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={nameId} className="text-label">
               {t('webPagesWork.projectName')}
             </label>
-            <input
+            <Input
               id={nameId}
               autoFocus
-              className={cn(fieldClass, 'h-9 touch:h-11')}
               value={name}
               maxLength={PROJECT_NAME_MAX}
               placeholder={t('webPagesWork.projectNamePlaceholder')}
               onChange={(e) => setName(e.target.value)}
             />
           </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor={agentFieldId} className="font-medium">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={agentFieldId} className="text-label">
               {t('webPagesWork.projectAgent')}
             </label>
-            <select
-              id={agentFieldId}
-              className={cn(fieldClass, 'h-9 touch:h-11')}
-              value={agentId}
-              onChange={(e) => setAgentId(e.target.value)}
-            >
+            <Select id={agentFieldId} value={agentId} onChange={(e) => setAgentId(e.target.value)}>
               {agentChoices.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
                 </option>
               ))}
-            </select>
+            </Select>
             <span className="text-small text-text-muted">{t('webPagesWork.projectAgentHint')}</span>
           </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor={knowledgeId} className="font-medium">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={knowledgeId} className="text-label">
               {t('webPagesWork.knowledge')}
             </label>
-            <textarea
+            <Textarea
               id={knowledgeId}
               rows={5}
-              className={cn(fieldClass, 'py-2')}
+              className="font-mono text-small"
               value={knowledge}
               maxLength={PROJECT_KNOWLEDGE_MAX}
               placeholder={t('webPagesWork.knowledgePlaceholder')}
@@ -795,7 +1022,10 @@ function CreateProjectDialog({
             />
           </div>
           {error ? (
-            <p role="alert" className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2">
+            <p
+              role="alert"
+              className="anim-fade-in rounded-control border border-danger/30 bg-danger/10 px-3 py-2"
+            >
               {error}
             </p>
           ) : null}
