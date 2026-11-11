@@ -69,6 +69,7 @@ import {
 import { Badge, StatusDot } from '@/web/components/ui/badge'
 import { Button, buttonVariants } from '@/web/components/ui/button'
 import { StatCard } from '@/web/components/ui/card'
+import { IconTile, STAT_CARD_DENSE, StatWord } from '@/web/features/home/overview-ui'
 import {
   Dialog,
   DialogContent,
@@ -378,35 +379,57 @@ export function McpSection() {
 
       <div className="anim-stagger grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard
+          className={STAT_CARD_DENSE}
           headingAs="p"
-          icon={<Server />}
+          icon={
+            <IconTile>
+              <Server />
+            </IconTile>
+          }
           label={t('webSetCapabilities.mcpTileConfigured')}
           value={saved.length}
         />
         <StatCard
+          className={STAT_CARD_DENSE}
           headingAs="p"
-          icon={<Link2 />}
+          icon={
+            <IconTile>
+              <Link2 />
+            </IconTile>
+          }
           label={t('webSetCapabilities.mcpTileConnected')}
           value={statusAvailable ? connected : t('webSetCapabilities.dash')}
           tone={statusAvailable && connected > 0 ? 'ok' : 'default'}
         />
         <StatCard
+          className={STAT_CARD_DENSE}
           headingAs="p"
-          icon={<Wrench />}
+          icon={
+            <IconTile>
+              <Wrench />
+            </IconTile>
+          }
           label={t('webSetCapabilities.mcpTileTools')}
           value={statusAvailable ? tools : t('webSetCapabilities.dash')}
         />
         <StatCard
+          className={STAT_CARD_DENSE}
           headingAs="p"
-          icon={<Power />}
+          icon={
+            <IconTile>
+              <Power />
+            </IconTile>
+          }
           label={t('webSetCapabilities.mcpTileRuntime')}
           tone={statusAvailable && savedEnabled ? 'accent' : 'default'}
           value={
-            !statusAvailable
-              ? t('webSetCapabilities.mcpRuntimeUnknown')
-              : savedEnabled
-                ? t('webSetCapabilities.mcpRuntimeOn')
-                : t('webSetCapabilities.mcpRuntimeOff')
+            <StatWord>
+              {!statusAvailable
+                ? t('webSetCapabilities.mcpRuntimeUnknown')
+                : savedEnabled
+                  ? t('webSetCapabilities.mcpRuntimeOn')
+                  : t('webSetCapabilities.mcpRuntimeOff')}
+            </StatWord>
           }
         />
       </div>
@@ -479,7 +502,7 @@ export function McpSection() {
                 <RefreshCw aria-hidden className={cn(status.isFetching && 'animate-spin')} />
                 {t('webSetCapabilities.refresh')}
               </Button>
-              <Button size="sm" variant="secondary" onClick={() => setDraft(createServerDraft())}>
+              <Button size="sm" variant="outline" onClick={() => setDraft(createServerDraft())}>
                 <Plus aria-hidden />
                 {t('webSetCapabilities.mcpAdd')}
               </Button>

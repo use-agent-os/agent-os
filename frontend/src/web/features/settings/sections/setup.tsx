@@ -233,7 +233,7 @@ function Stepper({ snapshot }: { snapshot: SettingsSnapshot }) {
           {t('webSetConfig.back')}
         </Button>
         <Button
-          variant="secondary"
+          variant="outline"
           disabled={index === ORDER.length - 1}
           onClick={() => setStep(ORDER[index + 1]!)}
         >

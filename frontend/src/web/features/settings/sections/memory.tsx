@@ -55,6 +55,7 @@ import {
 import { Badge } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
 import { StatCard } from '@/web/components/ui/card'
+import { IconTile, STAT_CARD_DENSE, StatWord } from '@/web/features/home/overview-ui'
 import {
   Dialog,
   DialogContent,
@@ -306,10 +307,17 @@ function Tile({
 }) {
   return (
     <StatCard
+      className={STAT_CARD_DENSE}
       headingAs="p"
-      icon={icon}
+      icon={<IconTile>{icon}</IconTile>}
       label={label}
-      value={value ?? t('webSetCapabilities.dash')}
+      value={
+        typeof value === 'string' && value !== t('webSetCapabilities.dash') ? (
+          <StatWord>{value}</StatWord>
+        ) : (
+          (value ?? t('webSetCapabilities.dash'))
+        )
+      }
     />
   )
 }

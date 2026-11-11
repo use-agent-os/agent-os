@@ -63,6 +63,7 @@ import {
 import { Badge, StatusDot } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
 import { Card, StatCard } from '@/web/components/ui/card'
+import { STAT_CARD_DENSE } from '@/web/features/home/overview-ui'
 import {
   Dialog,
   DialogContent,
@@ -1007,15 +1008,17 @@ export function ChannelsSection() {
           <div
             role="group"
             aria-label={t('webSetAccess.chStats')}
-            className="anim-stagger grid grid-cols-2 gap-2.5 @lg:grid-cols-3 @2xl:grid-cols-5"
+            className="anim-stagger grid grid-cols-2 gap-3 @lg:grid-cols-3 @2xl:grid-cols-5"
           >
             <StatCard
+              className={STAT_CARD_DENSE}
               headingAs="p"
               label={t('webSetAccess.chStatTotal')}
               value={stats.total}
               hint={tPlural('webSetAccess.chStatTypes', stats.typeCount)}
             />
             <StatCard
+              className={STAT_CARD_DENSE}
               headingAs="p"
               label={t('webSetAccess.chStatConnected')}
               value={stats.connected}
@@ -1023,6 +1026,7 @@ export function ChannelsSection() {
               hint={t('webSetAccess.chStatConnectedHint')}
             />
             <StatCard
+              className={STAT_CARD_DENSE}
               headingAs="p"
               label={t('webSetAccess.chStatAttention')}
               value={stats.attention}
@@ -1030,12 +1034,14 @@ export function ChannelsSection() {
               hint={t('webSetAccess.chStatInactive', { count: stats.inactive })}
             />
             <StatCard
+              className={STAT_CARD_DENSE}
               headingAs="p"
               label={t('webSetAccess.chStatRestarts')}
               value={stats.restarts}
               hint={t('webSetAccess.chStatRestartsHint')}
             />
             <StatCard
+              className={STAT_CARD_DENSE}
               headingAs="p"
               label={t('webSetAccess.chStatPairing')}
               value={stats.pendingAccess}
@@ -1061,7 +1067,7 @@ export function ChannelsSection() {
               title={t('webSetAccess.chEmptyTitle')}
               description={t('webSetAccess.chEmptyBody')}
               action={
-                <Button variant="primary" disabled={write.disabled} onClick={() => openSetup()}>
+                <Button variant="outline" disabled={write.disabled} onClick={() => openSetup()}>
                   <Plus />
                   {t('webSetAccess.chAdd')}
                 </Button>

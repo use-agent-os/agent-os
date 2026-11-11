@@ -20,9 +20,12 @@
   }
 
   /* The nav: one accent-tinted pill glides between links across groups
-     (.glide-track + useGlide); the active link also grows a short lime bar. */
+     (.glide-track + useGlide). The lime bar on its leading edge is painted
+     into the pill itself (a 2px layer at the track's start edge, which the
+     pill's rounded clip trims to a bar), so pill and bar move as one piece
+     instead of a bar per link growing and shrinking under the glide. */
   .set-nav {
-    --glide-bg: var(--accent-tint);
+    --glide-bg: linear-gradient(to right, var(--accent) 0 2px, transparent 2px), var(--accent-tint);
     --glide-radius: 8px;
   }
   .set-nav-link {
@@ -59,24 +62,10 @@
     color: var(--accent);
     opacity: 1;
   }
-  .set-nav-link::before {
-    content: '';
-    position: absolute;
-    inset-block: 0.5rem;
-    inset-inline-start: 0;
-    width: 2px;
-    border-radius: 2px;
-    background: var(--accent);
-    scale: 1 0;
-    transition: scale var(--duration-base) var(--ease-out);
-  }
-  .set-nav-link[aria-current='page']::before {
-    scale: 1 1;
-  }
   /* Until useGlide has measured (or without JS) the active link paints its
      own tint: the links are not direct children of the track. */
   .set-nav:not([data-glide]) .set-nav-link[aria-current='page'] {
-    background: var(--accent-tint);
+    background: var(--glide-bg);
   }
 
   /* Search results: a dropdown-like list under the field. */
@@ -307,6 +296,29 @@
   .set-saved {
     view-transition-name: agentos-settings-saved;
     animation: set-savebar-in var(--duration-slow) var(--ease-spring) both;
+  }
+
+  /* The restart notice docks at the bottom of the pane, rising into the
+     save bar's place instead of pushing the page down. One bottom slot:
+     pending edits (the save bar) come first, and the restart notice stands
+     in for the brief "Saved" confirmation (it implies it). */
+  .set-restart-dock {
+    view-transition-name: agentos-settings-restart;
+    animation: set-savebar-in var(--duration-slow) var(--ease-enter) both;
+  }
+  .set-restart-dock > .set-notice {
+    border-radius: var(--radius-overlay);
+    background: color-mix(
+      in oklab,
+      color-mix(in oklab, var(--tone) 9%, var(--surface-overlay)) 94%,
+      transparent
+    );
+    box-shadow: var(--shadow-overlay);
+    backdrop-filter: blur(10px);
+  }
+  .set-pane:has(.set-savebar) .set-restart-dock,
+  .set-pane:has(.set-restart-dock) .set-saved {
+    display: none;
   }
 
   /* ---- Notices ----------------------------------------------------------- */
@@ -551,20 +563,13 @@
   }
 }
 
-/* Unlayered on purpose: these must beat utilities the primitives set
-   (EmptyState's max-w-md, StatCard's truncate). An EmptyState drawn as a
-   card fills the column. */
+/* Unlayered on purpose: it must beat a utility the primitive sets
+   (EmptyState's max-w-md). An EmptyState drawn as a card fills the column.
+   (Stat tiles need no override: STAT_CARD wraps their labels and word
+   values use StatWord, so nothing wraps mid-word.) */
 .set-card[data-slot='empty-state'] {
   max-width: none;
   width: 100%;
-}
-/*
-   Stat tiles in settings wrap a long label or value instead of cutting it. */
-.set-pane [data-slot='stat-card'] :is(header > :is(h2, h3, h4, p), p.text-stat) {
-  white-space: normal;
-  overflow: visible;
-  text-overflow: clip;
-  overflow-wrap: anywhere;
 }
 
 @keyframes set-savebar-in {
@@ -580,7 +585,6 @@
     background: Highlight;
     color: HighlightText;
   }
-  .set-nav-link::before,
   .set-row::before,
   .set-row-label::after {
     background: CanvasText;

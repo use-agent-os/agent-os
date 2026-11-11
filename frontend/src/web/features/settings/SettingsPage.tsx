@@ -297,7 +297,9 @@ function SettingsSummary() {
           </div>
         </div>
         <div className="relative">
-          <Link to="/settings/setup" className={buttonVariants({ variant: 'primary' })}>
+          {/* Outline: the shell's setup bar carries the lime "Open guided
+              setup" while setup is unfinished, and one view gets one primary. */}
+          <Link to="/settings/setup" className={buttonVariants({ variant: 'outline' })}>
             <Sparkles aria-hidden />
             {t('webSettings.summarySetup')}
           </Link>
@@ -385,46 +387,50 @@ function RestartNotice() {
   const reasons = reported ? (snapshot.data?.restartReasons ?? []) : []
   const signature = reasons.length ? reasons.join(',') : 'restart'
   if (!pending || dismissed === signature) return null
+  // Docked at the bottom of the pane, in the save bar's place, rather than
+  // at the top: it usually arrives right after a save, and inserting it
+  // above the section pushed everything the reader was looking at down.
   return (
-    <Notice
-      role="status"
-      tone="warn"
-      icon={<RotateCw data-status-icon />}
-      className="anim-enter mb-5"
-      actions={
-        <>
-          <Button size="sm" variant="ghost" onClick={() => dismiss(signature)}>
-            {t('webSettings.restartLater')}
-          </Button>
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true)
-              void rpc
-                .call('gateway.restart', { reason: 'settings' })
-                .then(async () => {
-                  dismiss(signature)
-                  await queryClient.invalidateQueries({ queryKey: SETTINGS_SNAPSHOT_QUERY_KEY })
-                })
-                .catch(() => undefined)
-                .finally(() => setBusy(false))
-            }}
-          >
-            {busy ? <Loader2 className="animate-spin" /> : <RotateCw />}
-            {busy ? t('webSettings.restarting') : t('webSettings.restartNow')}
-          </Button>
-        </>
-      }
-    >
-      <p className="font-medium">{t('webSettings.restartTitle')}</p>
-      <p className="text-small text-text-muted">
-        {reasons.length
-          ? t('webSettings.restartBody', { reasons: reasons.map(restartReasonLabel).join(', ') })
-          : t('webSettings.restartBodyGeneric')}
-      </p>
-    </Notice>
+    <div className="set-restart-dock sticky bottom-4 z-[var(--z-sticky)] mt-8">
+      <Notice
+        role="status"
+        tone="warn"
+        icon={<RotateCw data-status-icon />}
+        actions={
+          <>
+            <Button size="sm" variant="ghost" onClick={() => dismiss(signature)}>
+              {t('webSettings.restartLater')}
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true)
+                void rpc
+                  .call('gateway.restart', { reason: 'settings' })
+                  .then(async () => {
+                    dismiss(signature)
+                    await queryClient.invalidateQueries({ queryKey: SETTINGS_SNAPSHOT_QUERY_KEY })
+                  })
+                  .catch(() => undefined)
+                  .finally(() => setBusy(false))
+              }}
+            >
+              {busy ? <Loader2 className="animate-spin" /> : <RotateCw />}
+              {busy ? t('webSettings.restarting') : t('webSettings.restartNow')}
+            </Button>
+          </>
+        }
+      >
+        <p className="font-medium">{t('webSettings.restartTitle')}</p>
+        <p className="text-small text-text-muted">
+          {reasons.length
+            ? t('webSettings.restartBody', { reasons: reasons.map(restartReasonLabel).join(', ') })
+            : t('webSettings.restartBodyGeneric')}
+        </p>
+      </Notice>
+    </div>
   )
 }
 
@@ -490,7 +496,6 @@ export function SettingsPage() {
               {t('webSettings.allSettings')}
             </Link>
           ) : null}
-          <RestartNotice />
           {!section ? (
             <SettingsSummary />
           ) : Section && meta ? (
@@ -523,12 +528,13 @@ export function SettingsPage() {
               icon={<SearchX />}
               title={t('webSettings.sectionNotFound', { section: section })}
               action={
-                <Link to="/settings" className={buttonVariants({ variant: 'secondary' })}>
+                <Link to="/settings" className={buttonVariants({ variant: 'outline' })}>
                   {t('webSettings.allSettings')}
                 </Link>
               }
             />
           )}
+          <RestartNotice />
         </div>
       </div>
     </div>
