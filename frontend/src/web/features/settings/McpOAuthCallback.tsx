@@ -57,19 +57,19 @@ export function McpOAuthCallback() {
   return (
     <section
       aria-live="polite"
-      className="mx-auto flex max-w-md flex-col items-center gap-3 p-12 text-center"
+      className="anim-enter mx-auto my-12 flex max-w-md flex-col items-center gap-3 rounded-card border border-border bg-surface-1 p-10 text-center shadow-card"
     >
       {message ? (
         <XCircle className="size-8 text-danger" aria-hidden data-status-icon />
       ) : (
-        <Loader2 className="motion-status size-8 animate-spin text-text-muted" aria-hidden />
+        <Loader2 className="motion-status size-8 animate-spin text-accent" aria-hidden />
       )}
-      <h1 className="text-base font-semibold">
+      <h1 className="text-section">
         {message ? t('webSettings.mcpOAuthFailed') : t('webSettings.mcpOAuthWorking')}
       </h1>
       {message ? <p className="text-text-muted">{message}</p> : null}
       {message ? (
-        <Link to="/settings/mcp" replace className={buttonVariants({ variant: 'outline' })}>
+        <Link to="/settings/mcp" replace className={buttonVariants()}>
           {t('webSettings.mcpOAuthBack')}
         </Link>
       ) : null}

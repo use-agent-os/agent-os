@@ -1,5 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
-import { Activity, Copy, RefreshCw, ShieldAlert, ShieldCheck } from 'lucide-react'
+import {
+  CircleCheck,
+  CircleX,
+  Copy,
+  Info,
+  RefreshCw,
+  ShieldCheck,
+  TriangleAlert,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { useBootstrap, useRpc } from '@/app/providers'
 import { formatNumber, t } from '@/i18n'
@@ -22,8 +30,11 @@ import {
   type HealthReport,
   type Impact,
 } from '@/views/health/logic'
+import { Badge } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
-import { ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
+import { SectionHeader } from '@/web/components/ui/section-header'
+import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
+import '@/web/styles/settings.css'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 
 // System › Health: the `doctor.status` report, readiness first, then the
@@ -31,11 +42,35 @@ import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 
 const GROUP_ORDER: readonly GroupKind[] = ['action', 'degraded', 'optional', 'ready']
 
-const GROUP_TONE: Record<GroupKind, string> = {
-  action: 'border-l-danger',
-  degraded: 'border-l-warn',
-  optional: 'border-l-info',
-  ready: 'border-l-ok',
+const GROUP_TONE = {
+  action: 'danger',
+  degraded: 'warn',
+  optional: 'info',
+  ready: 'ok',
+} as const satisfies Record<GroupKind, string>
+
+const GROUP_ICON = {
+  action: CircleX,
+  degraded: TriangleAlert,
+  optional: Info,
+  ready: CircleCheck,
+} satisfies Record<GroupKind, unknown>
+
+/** The status mark of a finding group: an icon in a tile tinted by its tone. */
+function StatusMark({ kind, size = 'md' }: { kind: GroupKind; size?: 'md' | 'lg' }) {
+  const Icon = GROUP_ICON[kind]
+  return (
+    <span
+      data-tone={GROUP_TONE[kind]}
+      className={cn(
+        'set-notice-icon set-mark',
+        size === 'lg' && 'size-11 rounded-card [&_svg]:size-5',
+      )}
+      aria-hidden
+    >
+      <Icon data-status-icon />
+    </span>
+  )
 }
 
 function groupCopy(kind: GroupKind): { title: string; note: string } {
@@ -66,7 +101,10 @@ function stepsHeading(kind: GroupKind): string {
 
 function CommandLine({ command }: { command: string }) {
   return (
-    <div className="mt-1 flex max-w-full items-center gap-1 rounded-md border border-border bg-surface-0 pl-3">
+    <div className="mt-1.5 flex max-w-full items-center gap-1 rounded-control border border-border bg-surface-inset pl-3 shadow-inset">
+      <span aria-hidden className="font-mono text-small text-accent select-none">
+        $
+      </span>
       <code
         tabIndex={0}
         className="min-w-0 flex-1 overflow-x-auto py-1.5 font-mono text-small whitespace-pre"
@@ -107,66 +145,76 @@ function FindingCard({ finding, index }: { finding: Finding; index: number }) {
   const surface = finding.surface || 'system'
   const badge = findingBadge(finding.id)
   return (
-    <article
-      className={cn('rounded-lg border border-border border-l-4 p-3', GROUP_TONE[kind])}
-      aria-label={finding.title || finding.id}
-    >
-      <div className="flex flex-wrap gap-2 text-small text-text-muted">
-        <span>{severity}</span>
-        <span>{impactLabel(impactValue(finding))}</span>
-        <span className="font-mono">{surface}</span>
-        {finding.restartRequired ? (
-          <span className="text-warn">{t('webSetSystem.findingRestart')}</span>
+    <article className="set-card flex gap-3.5" aria-label={finding.title || finding.id}>
+      <StatusMark kind={kind} />
+      <div className="min-w-0 flex-1">
+        <h3 className="font-medium">
+          {finding.title || finding.id || t('webSetSystem.findingFallback', { index: index + 1 })}
+        </h3>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-small text-text-muted">
+          <Badge tone={GROUP_TONE[kind]}>{severity}</Badge>
+          <span>{impactLabel(impactValue(finding))}</span>
+          <span aria-hidden>·</span>
+          <span className="font-mono">{surface}</span>
+          {finding.restartRequired ? (
+            <Badge tone="warn" variant="outline">
+              {t('webSetSystem.findingRestart')}
+            </Badge>
+          ) : null}
+          {badge ? <Badge tone="neutral">{badge}</Badge> : null}
+        </div>
+        {finding.detail ? (
+          <p className="mt-2 text-text-muted text-pretty">{finding.detail}</p>
         ) : null}
-        {badge ? (
-          <span className="rounded-full border border-border px-2 font-medium text-text">
-            {badge}
-          </span>
+        {evidence.length ? (
+          <dl
+            aria-label={t('webSetSystem.evidence')}
+            className="mt-2.5 flex flex-wrap gap-1.5 text-small"
+          >
+            {evidence.map(([key, value]) => (
+              <div key={key} className="set-key gap-1.5 font-sans">
+                <dt className="inline text-text-muted">{evidenceLabel(key)}</dt>{' '}
+                <dd className="inline font-mono break-all">{evidenceValue(value)}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+        {steps.length ? (
+          <div className="mt-4 border-t border-border pt-3">
+            <p className="text-label text-text-muted">{stepsHeading(kind)}</p>
+            <ol className="mt-2 flex flex-col gap-3">
+              {steps.map((step, i) => (
+                <li key={i} className="flex gap-2.5">
+                  <span className="grid size-5 shrink-0 place-items-center rounded-full border border-border-strong bg-surface-2 text-small font-semibold tabular-nums">
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">{step.label || t('webSetSystem.stepFallback')}</p>
+                    {step.command ? <CommandLine command={step.command} /> : null}
+                    {step.detail ? (
+                      <p className="mt-1 text-small text-text-muted">{step.detail}</p>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
         ) : null}
       </div>
-      <h3 className="mt-1 font-medium">
-        {finding.title || finding.id || t('webSetSystem.findingFallback', { index: index + 1 })}
-      </h3>
-      {finding.detail ? <p className="text-text-muted">{finding.detail}</p> : null}
-      {evidence.length ? (
-        <dl
-          aria-label={t('webSetSystem.evidence')}
-          className="mt-2 flex flex-wrap gap-1.5 text-small"
-        >
-          {evidence.map(([key, value]) => (
-            <div key={key} className="rounded border border-border px-1.5 py-0.5">
-              <dt className="inline font-medium">{evidenceLabel(key)}</dt>{' '}
-              <dd className="inline font-mono break-all">{evidenceValue(value)}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
-      {steps.length ? (
-        <div className="mt-3">
-          <p className="text-small font-semibold text-text-muted">{stepsHeading(kind)}</p>
-          <ol className="mt-1 flex flex-col gap-2">
-            {steps.map((step, i) => (
-              <li key={i} className="flex gap-2">
-                <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-3 text-small">
-                  {i + 1}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium">{step.label || t('webSetSystem.stepFallback')}</p>
-                  {step.command ? <CommandLine command={step.command} /> : null}
-                  {step.detail ? <p className="text-small text-text-muted">{step.detail}</p> : null}
-                </div>
-              </li>
-            ))}
-          </ol>
-        </div>
-      ) : null}
     </article>
   )
 }
 
 function Findings({ findings }: { findings: Finding[] }) {
   if (!findings.length) {
-    return <p className="text-text-muted">{t('webSetSystem.findingsEmpty')}</p>
+    return (
+      <EmptyState
+        size="sm"
+        icon={<ShieldCheck />}
+        title={t('webSetSystem.findingsEmpty')}
+        className="set-card"
+      />
+    )
   }
   return (
     <div className="flex flex-col gap-6">
@@ -175,14 +223,16 @@ function Findings({ findings }: { findings: Finding[] }) {
         if (!group.length) return null
         const copy = groupCopy(kind)
         return (
-          <section key={kind} aria-label={copy.title} className="flex flex-col gap-2">
-            <header className="flex items-baseline justify-between gap-2">
-              <div>
-                <h2 className="font-semibold">{copy.title}</h2>
-                <p className="text-small text-text-muted">{copy.note}</p>
-              </div>
-              <span className="text-small text-text-muted">{formatNumber(group.length)}</span>
-            </header>
+          <section key={kind} aria-label={copy.title} className="flex flex-col gap-2.5">
+            <SectionHeader
+              title={copy.title}
+              description={copy.note}
+              actions={
+                <Badge tone={GROUP_TONE[kind]} className="tabular-nums">
+                  {formatNumber(group.length)}
+                </Badge>
+              }
+            />
             {group.map((finding, i) => (
               <FindingCard key={finding.id || i} finding={finding} index={i} />
             ))}
@@ -209,43 +259,46 @@ function Readiness({ report }: { report: HealthReport }) {
     context.push([t('webSetSystem.contextRequested'), report.requestedConfigPath])
   }
   if (report.agentId) context.push([t('webSetSystem.contextAgent'), report.agentId])
-  const Icon = status === 'ready' ? ShieldCheck : status === 'degraded' ? Activity : ShieldAlert
+  const kind: GroupKind = report.ready ? 'ready' : status === 'degraded' ? 'degraded' : 'action'
   return (
     <section
       aria-label={t('webSetSystem.readiness')}
-      className="flex flex-col gap-3 rounded-lg border border-border p-4"
+      className="set-card relative flex flex-col gap-4 overflow-hidden"
     >
-      <div className="flex items-start gap-3">
-        <Icon
-          className={cn(
-            'mt-0.5 size-6 shrink-0',
-            report.ready ? 'text-ok' : status === 'degraded' ? 'text-warn' : 'text-danger',
-          )}
-          aria-hidden
-          data-status-icon
-        />
-        <div>
-          <p className="text-small text-text-muted">{t('webSetSystem.readiness')}</p>
-          <p data-testid="health-readiness" className="text-lg font-semibold">
+      <div className="flex items-start gap-3.5">
+        <StatusMark kind={kind} size="lg" />
+        <div className="min-w-0">
+          <p className="text-label text-text-muted">{t('webSetSystem.readiness')}</p>
+          <p data-testid="health-readiness" className="text-stat leading-tight">
             {statusLabel(status, report.ready)}
           </p>
-          {report.summary ? <p className="text-text-muted">{report.summary}</p> : null}
+          {report.summary ? (
+            <p className="mt-1 text-text-muted text-pretty">{report.summary}</p>
+          ) : null}
         </div>
       </div>
       <ul role="list" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {counts.map((c) => (
-          <li key={c.label} className="rounded-md bg-surface-2 px-3 py-2">
-            <span className="block text-small text-text-muted">{c.label}</span>
-            <strong className={cn('text-lg', c.value > 0 && c.tone)}>
+          <li
+            key={c.label}
+            className="rounded-control border border-border bg-surface-2 px-3 py-2 shadow-highlight"
+          >
+            <span className="block text-label text-text-muted">{c.label}</span>
+            <strong
+              className={cn(
+                'text-lg font-semibold tabular-nums',
+                c.value > 0 ? c.tone : 'text-text-muted',
+              )}
+            >
               {formatNumber(c.value)}
             </strong>
           </li>
         ))}
       </ul>
       {context.length ? (
-        <dl className="flex flex-col gap-1 text-small">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 border-t border-border pt-3 text-small">
           {context.map(([label, value]) => (
-            <div key={label} className="flex flex-wrap gap-2">
+            <div key={label} className="contents">
               <dt className="text-text-muted">{label}</dt>
               <dd className="font-mono break-all">{value}</dd>
             </div>
@@ -276,6 +329,7 @@ export function HealthSection() {
     <div className="flex flex-wrap items-center gap-2">
       <Button
         variant="outline"
+        size="sm"
         disabled={refresh.disabled || query.isFetching}
         onClick={() => void query.refetch()}
       >
@@ -290,8 +344,11 @@ export function HealthSection() {
     return (
       <div className="flex flex-col gap-4">
         {header}
-        <LoadingRegion label={t('webSetSystem.checking')}>
-          <Skeleton className="h-40" />
+        <LoadingRegion label={t('webSetSystem.checking')} className="flex flex-col gap-4">
+          <Skeleton className="h-44 rounded-card" />
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="h-28 rounded-card" />
+          <Skeleton className="h-28 rounded-card" />
         </LoadingRegion>
       </div>
     )

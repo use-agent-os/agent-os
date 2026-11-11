@@ -1,14 +1,16 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowUpCircle, CheckCircle2, Loader2, RefreshCw } from 'lucide-react'
+import { ArrowUpCircle, CheckCircle2, Download, Loader2, RefreshCw, Sparkles } from 'lucide-react'
 import { lazy, Suspense, useState } from 'react'
 import { useBootstrap, useRpc } from '@/app/providers'
 import { t } from '@/i18n'
 import '@/i18n/en/webSetSystem'
 import { gate, requireConnection } from '@/lib/disabled-reason'
 import { Button } from '@/web/components/ui/button'
+import { SectionHeader } from '@/web/components/ui/section-header'
 import { ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import { UPDATE_CHECK_KEY, type UpdateCheck } from '@/web/shell/updates'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
+import { Notice } from '../ui'
 
 // System › Updates and About.
 
@@ -25,9 +27,9 @@ interface UpdateJob {
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-[10rem_1fr] gap-2 py-1.5 max-sm:grid-cols-1 max-sm:gap-0">
-      <dt className="text-text-muted">{label}</dt>
-      <dd className="min-w-0 break-all">{value}</dd>
+    <div className="grid grid-cols-[10rem_1fr] gap-2 py-2 max-sm:grid-cols-1 max-sm:gap-0 [&+&]:border-t [&+&]:border-border">
+      <dt className="text-small text-text-muted">{label}</dt>
+      <dd className="min-w-0 font-mono break-all tabular-nums">{value}</dd>
     </div>
   )
 }
@@ -70,72 +72,96 @@ export function UpdatesSection() {
   const outdated = data?.status === 'outdated' && !!data.latest
   const jobText = job.data ? jobLabel(job.data) : applied ? t('webSetSystem.updateRunning') : null
 
+  const running = job.data?.status === 'running' || (applied && !job.data)
+  const actionRow = (
+    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+      {actions.reason ? (
+        <span className="text-small text-text-muted">{actions.reason}</span>
+      ) : !outdated && data ? (
+        <span className="text-small text-text-muted">{t('webSetSystem.updateNothing')}</span>
+      ) : null}
+      <span className="flex-1" />
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={actions.disabled || check.isFetching}
+        onClick={() => void check.refetch()}
+      >
+        <RefreshCw className={check.isFetching ? 'animate-spin' : undefined} aria-hidden />
+        {check.isFetching ? t('webSetSystem.checking') : t('webSetSystem.checkNow')}
+      </Button>
+      <Button
+        variant="primary"
+        size="sm"
+        disabled={actions.disabled || !outdated || job.data?.status === 'running'}
+        onClick={() => setApplyOpen(true)}
+      >
+        <Download aria-hidden />
+        {t('webSetSystem.updateNow')}
+      </Button>
+    </div>
+  )
+
   return (
     <div className="flex flex-col gap-4">
       {check.isPending && connection === 'connected' ? (
-        <LoadingRegion>
-          <Skeleton className="h-24" />
+        <LoadingRegion className="set-card flex flex-col gap-3">
+          <Skeleton className="h-11 w-64" />
+          <Skeleton className="h-16" />
         </LoadingRegion>
       ) : check.isError ? (
         <ErrorState
           title={t('webSetSystem.updateCheckFailed')}
           message={check.error instanceof Error ? check.error.message : String(check.error)}
         />
-      ) : data ? (
-        <div className="flex flex-col gap-2 rounded-lg border border-border p-4">
-          <p className="flex items-center gap-2 font-medium">
-            {outdated ? (
-              <ArrowUpCircle className="size-5 text-info" aria-hidden data-status-icon />
-            ) : (
-              <CheckCircle2 className="size-5 text-ok" aria-hidden data-status-icon />
-            )}
-            {outdated
-              ? t('webSetSystem.updateAvailable', { version: data.latest ?? '' })
-              : checkStatusLabel(data.status)}
-          </p>
-          <dl>
-            <Row
-              label={t('webSetSystem.updateCurrent')}
-              value={data.current || t('webSetSystem.none')}
-            />
-            <Row
-              label={t('webSetSystem.updateLatest')}
-              value={data.latest || t('webSetSystem.none')}
-            />
-          </dl>
-        </div>
       ) : null}
-
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant="outline"
-          disabled={actions.disabled || check.isFetching}
-          onClick={() => void check.refetch()}
-        >
-          <RefreshCw className={check.isFetching ? 'animate-spin' : undefined} aria-hidden />
-          {check.isFetching ? t('webSetSystem.checking') : t('webSetSystem.checkNow')}
-        </Button>
-        <Button
-          variant="primary"
-          disabled={actions.disabled || !outdated || job.data?.status === 'running'}
-          onClick={() => setApplyOpen(true)}
-        >
-          {t('webSetSystem.updateNow')}
-        </Button>
-        {actions.reason ? (
-          <span className="text-small text-text-muted">{actions.reason}</span>
-        ) : !outdated && data ? (
-          <span className="text-small text-text-muted">{t('webSetSystem.updateNothing')}</span>
+      <section className="set-card relative flex flex-col gap-3 overflow-hidden">
+        {outdated ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 bg-[radial-gradient(70%_140%_at_0%_0%,var(--accent-tint),transparent_70%)]"
+          />
         ) : null}
-      </div>
+        {data ? (
+          <>
+            <p className="relative flex items-center gap-3 text-section">
+              <span
+                data-tone={outdated ? 'accent' : 'ok'}
+                className="set-notice-icon set-mark size-10 rounded-card [&_svg]:size-5"
+                aria-hidden
+              >
+                {outdated ? <ArrowUpCircle data-status-icon /> : <CheckCircle2 data-status-icon />}
+              </span>
+              {outdated
+                ? t('webSetSystem.updateAvailable', { version: data.latest ?? '' })
+                : checkStatusLabel(data.status)}
+            </p>
+            <dl className="relative">
+              <Row
+                label={t('webSetSystem.updateCurrent')}
+                value={data.current || t('webSetSystem.none')}
+              />
+              <Row
+                label={t('webSetSystem.updateLatest')}
+                value={data.latest || t('webSetSystem.none')}
+              />
+            </dl>
+          </>
+        ) : null}
+        {actionRow}
+      </section>
 
       {jobText ? (
-        <p role="status" className="flex items-center gap-2">
-          {job.data?.status === 'running' || (applied && !job.data) ? (
-            <Loader2 className="size-4 animate-spin" aria-hidden />
-          ) : null}
+        <Notice
+          role="status"
+          tone={
+            job.data?.status === 'failed' ? 'danger' : job.data?.status === 'done' ? 'ok' : 'info'
+          }
+          icon={running ? <Loader2 className="animate-spin" aria-hidden /> : undefined}
+          className="anim-enter"
+        >
           {jobText}
-        </p>
+        </Notice>
       ) : null}
 
       {applyOpen && data?.latest ? (
@@ -172,22 +198,31 @@ export function AboutSection() {
 
   return (
     <div className="flex flex-col gap-6">
-      <dl className="rounded-lg border border-border px-3 py-1.5">
-        <Row
-          label={t('webSetSystem.aboutVersion')}
-          value={
-            <span data-testid="about-version">{bootstrap.version || t('webSetSystem.none')}</span>
-          }
+      <section className="set-card flex items-center gap-4">
+        <span
+          aria-hidden
+          className="grid size-12 shrink-0 place-items-center rounded-card bg-accent [background-image:var(--accent-gradient)] text-accent-fg shadow-[var(--elevation-primary)]"
+        >
+          <Sparkles className="size-6" />
+        </span>
+        <dl className="min-w-0 flex-1">
+          <Row
+            label={t('webSetSystem.aboutVersion')}
+            value={
+              <span data-testid="about-version">{bootstrap.version || t('webSetSystem.none')}</span>
+            }
+          />
+        </dl>
+      </section>
+      <section aria-labelledby="about-licenses" className="flex flex-col gap-3">
+        <SectionHeader
+          id="about-licenses"
+          title={t('webSetSystem.licenses')}
+          description={t('webSetSystem.licensesHelp')}
         />
-      </dl>
-      <section aria-labelledby="about-licenses" className="flex flex-col gap-2">
-        <h2 id="about-licenses" className="text-base font-semibold">
-          {t('webSetSystem.licenses')}
-        </h2>
-        <p className="text-small text-text-muted">{t('webSetSystem.licensesHelp')}</p>
         {licenses.isPending ? (
           <LoadingRegion label={t('webSetSystem.loading')}>
-            <Skeleton className="h-64" />
+            <Skeleton className="h-64 rounded-card" />
           </LoadingRegion>
         ) : licenses.isError ? (
           <ErrorState
@@ -202,7 +237,7 @@ export function AboutSection() {
           <pre
             tabIndex={0}
             aria-label={t('webSetSystem.licenses')}
-            className="max-h-[32rem] overflow-auto rounded-md border border-border bg-surface-0 p-3 font-mono text-small whitespace-pre-wrap"
+            className="set-log max-h-[32rem] overflow-auto p-4 whitespace-pre-wrap"
           >
             {licenses.data}
           </pre>

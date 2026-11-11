@@ -1,5 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Eye, EyeOff, Loader2, Lock, Plus, RefreshCw, Settings2 } from 'lucide-react'
+import {
+  Check,
+  CircleAlert,
+  ExternalLink,
+  ListChecks,
+  Loader2,
+  Lock,
+  MessagesSquare,
+  Plus,
+  Radio,
+  RefreshCw,
+  Settings2,
+  SlidersHorizontal,
+  UserCheck,
+  X,
+} from 'lucide-react'
 import { useEffect, useId, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
@@ -45,7 +60,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/web/components/ui/alert-dialog'
+import { Badge, StatusDot } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
+import { Card, StatCard } from '@/web/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -54,12 +71,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/web/components/ui/dialog'
+import { Input, Select } from '@/web/components/ui/input'
 import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import { Switch } from '@/web/components/ui/switch'
 import { ChannelIcon } from '@/web/shell/channel-icon'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { useRestartNotice } from '../config-editor'
-import { useRegisterFields, useReveal } from '../fields'
+import { SecretInput, useRegisterFields, useReveal } from '../fields'
+import { Disclosure, Notice } from '../ui'
 
 // Settings › Channels (overhaul-control-ui 7.4, Appendix A "Channels"):
 // adapter status and stats, Telegram pairing, and the channel setup dialog.
@@ -79,7 +98,7 @@ function GateReason({ gate: g, className }: { gate: Gate; className?: string }) 
   return g.reason ? <p className={cn('text-small text-text-muted', className)}>{g.reason}</p> : null
 }
 
-const TONE_CLASS = { ok: 'text-ok', danger: 'text-danger', off: 'text-text-muted' } as const
+const STATUS_TONE = { ok: 'ok', danger: 'danger', off: 'neutral' } as const
 
 // ── Pairing ─────────────────────────────────────────────────────────────────
 
@@ -128,10 +147,19 @@ function PersonRow({
   })
   const busy = resolve.isPending
   return (
-    <li className="flex flex-col gap-1 py-2">
-      <div className="flex flex-wrap items-center gap-2">
+    <li className="flex flex-col gap-1.5 px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span
+          aria-hidden
+          className={cn(
+            'grid size-8 shrink-0 place-items-center rounded-full text-small font-semibold uppercase',
+            pending ? 'bg-warn/15 text-warn' : 'bg-surface-3 text-text-muted',
+          )}
+        >
+          {label.replace(/^@/, '').slice(0, 1) || '?'}
+        </span>
         <div className="min-w-0 flex-1">
-          <p className="font-medium">{label}</p>
+          <p className="truncate font-medium">{label}</p>
           <p className="truncate text-small text-text-muted">{senderMeta(item)}</p>
         </div>
         {pending ? (
@@ -142,22 +170,25 @@ function PersonRow({
               disabled={write.disabled || locked || busy}
               onClick={() => resolve.mutate(true)}
             >
-              {busy && resolve.variables ? <Loader2 className="animate-spin" /> : null}
+              {busy && resolve.variables ? <Loader2 className="animate-spin" /> : <Check />}
               {t('webSetAccess.chApprove')}
             </Button>
             <Button
               size="sm"
-              variant="danger"
+              variant="outline"
+              className="text-danger hover:bg-danger/10"
               disabled={write.disabled || busy}
               onClick={() => resolve.mutate(false)}
             >
+              <X />
               {t('webSetAccess.chDeny')}
             </Button>
           </>
         ) : (
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
+            className="text-text-muted hover:text-danger"
             disabled={write.disabled}
             onClick={() => onRevoke({ channel, senderId, label })}
           >
@@ -166,7 +197,8 @@ function PersonRow({
         )}
       </div>
       {error ? (
-        <p role="alert" className="text-small text-danger">
+        <p role="alert" className="ml-10 flex items-center gap-1.5 text-small text-danger">
+          <CircleAlert className="size-3.5 shrink-0" aria-hidden data-status-icon />
           {error}
         </p>
       ) : null}
@@ -200,12 +232,20 @@ function AccessPanel({
     : t('webSetAccess.chGroupsDisabled')
 
   const group = (title: string, items: AccessAccount[], isPending: boolean, empty: string) => (
-    <section aria-label={title}>
-      <h4 className="text-small font-semibold text-text-muted">
-        {title} <span className="font-mono">{items.length}</span>
+    <section aria-label={title} className="flex flex-col gap-1.5">
+      <h4 className="flex items-center gap-2 text-label text-text-muted">
+        {title}{' '}
+        <span
+          className={cn(
+            'rounded-full px-1.5 font-mono tabular-nums',
+            isPending && items.length ? 'bg-warn/15 text-warn' : 'bg-surface-3',
+          )}
+        >
+          {items.length}
+        </span>
       </h4>
       {items.length ? (
-        <ul role="list" className="divide-y divide-border">
+        <ul role="list" className="set-list shadow-none">
           {items.map((item, i) => (
             <PersonRow
               key={`${String(item.sender_id ?? i)}`}
@@ -219,7 +259,9 @@ function AccessPanel({
           ))}
         </ul>
       ) : (
-        <p className="py-1 text-small text-text-muted">{empty}</p>
+        <p className="rounded-control border border-dashed border-border px-3 py-2 text-small text-text-muted">
+          {empty}
+        </p>
       )}
     </section>
   )
@@ -227,13 +269,16 @@ function AccessPanel({
   return (
     <div
       className={cn(
-        'flex flex-col gap-3 rounded-md border p-3',
-        pending.length ? 'border-warn/50 bg-warn/5' : 'border-border',
+        'flex flex-col gap-3 rounded-control border p-3',
+        pending.length ? 'border-warn/30 bg-warn/5' : 'border-border bg-surface-2',
       )}
     >
-      <div>
-        <h3 className="font-medium">{t('webSetAccess.chPairingTitle')}</h3>
-        <p className="text-small text-text-muted">{groups}</p>
+      <div className="flex items-start gap-2">
+        <UserCheck className="mt-0.5 size-4 shrink-0 text-text-muted" aria-hidden />
+        <div className="min-w-0">
+          <h3 className="font-medium">{t('webSetAccess.chPairingTitle')}</h3>
+          <p className="text-small text-text-muted">{groups}</p>
+        </div>
       </div>
       {locked ? (
         <p role="status" className="flex items-center gap-1.5 text-small text-warn">
@@ -273,92 +318,63 @@ function ChannelCard({
   })
   return (
     <li>
-      <article
-        aria-label={t('webSetAccess.chCardLabel', { name: d.name })}
-        className="flex flex-col gap-3 rounded-lg border border-border bg-surface-1 p-4"
-      >
-        <header className="flex flex-wrap items-center gap-2">
-          <ChannelIcon channel={String(channel.type || '')} className="text-text-muted" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-medium">{d.name}</p>
-            <p className="font-mono text-small text-text-muted">
-              {channel.type || t('webSetAccess.chTypeUnknown')}
-            </p>
-          </div>
-          <span
-            className={cn(
-              'rounded-full border border-current px-2 py-0.5 font-mono text-small',
-              TONE_CLASS[d.tone],
-            )}
-          >
-            {d.status}
-          </span>
-          {guided === false ? (
-            <Button asChild size="sm" variant="ghost">
-              <Link to="/settings/advanced">
+      <Card asChild className="flex flex-col gap-3.5">
+        <article aria-label={t('webSetAccess.chCardLabel', { name: d.name })}>
+          <header className="flex flex-wrap items-center gap-3">
+            <span
+              aria-hidden
+              className="grid size-9 shrink-0 place-items-center rounded-control bg-surface-2 text-text-muted shadow-highlight"
+            >
+              <ChannelIcon channel={String(channel.type || '')} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium">{d.name}</p>
+              <p className="font-mono text-small text-text-muted">
+                {channel.type || t('webSetAccess.chTypeUnknown')}
+              </p>
+            </div>
+            <Badge tone={STATUS_TONE[d.tone]} dot live={d.tone === 'ok'} className="font-mono">
+              {d.status}
+            </Badge>
+            {guided === false ? (
+              <Button asChild size="sm" variant="outline">
+                <Link to="/settings/advanced">
+                  <Settings2 />
+                  {t('webSetAccess.chAdvanced')}
+                </Link>
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" disabled={guided === null} onClick={onConfigure}>
                 <Settings2 />
-                {t('webSetAccess.chAdvanced')}
-              </Link>
-            </Button>
-          ) : (
-            <Button size="sm" variant="ghost" disabled={guided === null} onClick={onConfigure}>
-              <Settings2 />
-              {t('webSetAccess.chConfigure')}
-            </Button>
-          )}
-        </header>
-        <dl className="grid grid-cols-2 gap-2 text-small">
-          <div>
-            <dt className="text-text-muted">{t('webSetAccess.chConnectedSince')}</dt>
-            <dd className="font-mono">
-              {channel.connected_since ? relTime(channel.connected_since) : '—'}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-text-muted">{t('webSetAccess.chRestarts')}</dt>
-            <dd className="font-mono">{d.attempts}</dd>
-          </div>
-        </dl>
-        <p className="text-small text-text-muted">{hint}</p>
-        <AccessPanel channel={channel} write={write} onRevoke={onRevoke} />
-        <details>
-          <summary className="cursor-pointer text-small text-text-muted">
-            {t('webSetAccess.chAdapterConfig')}
-          </summary>
-          <pre
-            tabIndex={0}
-            className="mt-2 max-h-64 overflow-auto rounded bg-surface-0 p-2 font-mono text-small"
-          >
-            {d.configJson}
-          </pre>
-        </details>
-      </article>
+                {t('webSetAccess.chConfigure')}
+              </Button>
+            )}
+          </header>
+          <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-control border border-border bg-border text-small">
+            <div className="bg-surface-2 px-3 py-2">
+              <dt className="text-label text-text-muted">{t('webSetAccess.chConnectedSince')}</dt>
+              <dd className="font-mono tabular-nums">
+                {channel.connected_since ? relTime(channel.connected_since) : '—'}
+              </dd>
+            </div>
+            <div className="bg-surface-2 px-3 py-2">
+              <dt className="text-label text-text-muted">{t('webSetAccess.chRestarts')}</dt>
+              <dd className="font-mono tabular-nums">{d.attempts}</dd>
+            </div>
+          </dl>
+          <p className="text-small text-text-muted">{hint}</p>
+          <AccessPanel channel={channel} write={write} onRevoke={onRevoke} />
+          <Disclosure summary={t('webSetAccess.chAdapterConfig')} className="text-small">
+            <pre
+              tabIndex={0}
+              className="max-h-64 overflow-auto rounded-control bg-surface-inset p-3 font-mono text-small shadow-inset"
+            >
+              {d.configJson}
+            </pre>
+          </Disclosure>
+        </article>
+      </Card>
     </li>
-  )
-}
-
-function Stat({
-  label,
-  value,
-  hint,
-  warn,
-}: {
-  label: string
-  value: number
-  hint: string
-  warn?: boolean
-}) {
-  return (
-    <div
-      className={cn(
-        'flex flex-col rounded-lg border p-3',
-        warn ? 'border-warn/50 bg-warn/5' : 'border-border',
-      )}
-    >
-      <dt className="text-small text-text-muted">{label}</dt>
-      <dd className="font-mono text-xl font-semibold">{value}</dd>
-      <dd className="text-small text-text-muted">{hint}</dd>
-    </div>
   )
 }
 
@@ -393,9 +409,6 @@ function fieldVisible(field: FieldSpec, draft: Draft): boolean {
   )
 }
 
-const inputClass =
-  'h-9 w-full rounded-md border border-border-control bg-surface-0 px-3 disabled:opacity-50 touch:h-11 touch:text-base'
-
 function SetupField({
   field,
   value,
@@ -427,10 +440,9 @@ function SetupField({
     )
   } else if (field.type === 'select') {
     control = (
-      <select
+      <Select
         id={id}
         aria-describedby={describedBy}
-        className={inputClass}
         value={value.value}
         disabled={disabled}
         onChange={(e) => onChange({ value: e.target.value })}
@@ -440,56 +452,55 @@ function SetupField({
             {choice}
           </option>
         ))}
-      </select>
+      </Select>
     )
   } else {
     const secret = isSecretField(field)
-    control = (
-      <div className="flex items-center gap-2">
-        <input
-          id={id}
-          aria-describedby={describedBy}
-          type={
-            secret && !shown
-              ? 'password'
-              : field.type === 'int' || field.type === 'float'
-                ? 'number'
-                : 'text'
-          }
-          step={field.type === 'float' ? 'any' : undefined}
-          autoComplete="off"
-          className={inputClass}
-          value={value.value}
-          disabled={disabled}
-          placeholder={
-            field.placeholder || (secret && keepSecret ? t('webSetAccess.chSecretKeep') : '')
-          }
-          onChange={(e) => onChange({ value: e.target.value })}
-        />
-        {secret ? (
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label={shown ? t('webSetAccess.hide') : t('webSetAccess.reveal')}
-            onClick={toggleShown}
-          >
-            {shown ? <EyeOff /> : <Eye />}
-          </Button>
-        ) : null}
-      </div>
+    const common = {
+      id,
+      'aria-describedby': describedBy,
+      value: value.value,
+      disabled,
+      className: 'disabled:opacity-50',
+      placeholder:
+        field.placeholder || (secret && keepSecret ? t('webSetAccess.chSecretKeep') : ''),
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange({ value: e.target.value }),
+    }
+    control = secret ? (
+      <SecretInput {...common} shown={shown} onToggle={toggleShown} />
+    ) : (
+      <Input
+        {...common}
+        type={field.type === 'int' || field.type === 'float' ? 'number' : 'text'}
+        step={field.type === 'float' ? 'any' : undefined}
+        autoComplete="off"
+      />
     )
   }
   return (
-    <div className="flex flex-col gap-1" data-field={field.name}>
-      <label htmlFor={id} className="font-medium">
-        {label}
-        {field.required ? <span aria-hidden> *</span> : null}
-      </label>
-      {help ? (
-        <p id={`${id}-help`} className="text-small text-text-muted">
-          {help}
-        </p>
-      ) : null}
+    <div
+      className={cn(
+        'flex gap-1.5',
+        field.type === 'bool' ? 'flex-row-reverse items-start justify-end gap-3' : 'flex-col',
+      )}
+      data-field={field.name}
+    >
+      <div className="min-w-0">
+        <label htmlFor={id} className="font-medium">
+          {label}
+          {field.required ? (
+            <span aria-hidden className="text-accent">
+              {' '}
+              *
+            </span>
+          ) : null}
+        </label>
+        {help ? (
+          <p id={`${id}-help`} className="text-small text-pretty text-text-muted">
+            {help}
+          </p>
+        ) : null}
+      </div>
       {control}
     </div>
   )
@@ -657,8 +668,13 @@ function ChannelSetupDialog({
   let body: React.ReactNode
   if (snapshotQuery.isPending) {
     body = (
-      <LoadingRegion>
-        <Skeleton className="h-32" />
+      <LoadingRegion className="flex flex-col gap-3">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Skeleton className="h-14 rounded-control" />
+          <Skeleton className="h-14 rounded-control" />
+        </div>
+        <Skeleton className="h-9 rounded-control" />
+        <Skeleton className="h-9 rounded-control" />
       </LoadingRegion>
     )
   } else if (snapshotQuery.isError) {
@@ -670,10 +686,12 @@ function ChannelSetupDialog({
       />
     )
   } else if (specs.length === 0) {
-    body = <EmptyState title={t('webSetAccess.chNoAdapters')} />
+    body = <EmptyState size="sm" icon={<Radio />} title={t('webSetAccess.chNoAdapters')} />
   } else if (isEditing && initialType && !spec) {
     body = (
       <EmptyState
+        size="sm"
+        icon={<SlidersHorizontal />}
         title={t('webSetAccess.chNeedsAdvanced', { type: initialType })}
         action={
           <Button asChild variant="outline">
@@ -686,7 +704,7 @@ function ChannelSetupDialog({
     body = (
       <>
         <fieldset className="flex flex-col gap-2">
-          <legend className="mb-2 font-medium">{t('webSetAccess.chAdapter')}</legend>
+          <legend className="mb-2 text-label text-text-muted">{t('webSetAccess.chAdapter')}</legend>
           <div
             role="radiogroup"
             aria-label={t('webSetAccess.chAdapter')}
@@ -708,13 +726,23 @@ function ChannelSetupDialog({
                   }
                 }}
                 className={cn(
-                  'target flex items-center gap-2 rounded-md border px-3 py-2 text-left disabled:opacity-50',
+                  'press target flex items-center gap-3 rounded-control border px-3 py-2.5 text-left disabled:opacity-50',
                   type === candidate.type
-                    ? 'border-accent bg-accent-soft'
-                    : 'border-border hover:bg-surface-3',
+                    ? 'border-accent/60 bg-accent-tint shadow-[0_0_0_1px_var(--accent-tint)] forced-colors:border-[Highlight]'
+                    : 'border-border bg-surface-2 hover:border-border-strong hover:bg-surface-3',
                 )}
               >
-                <ChannelIcon channel={candidate.type} className="text-text-muted" />
+                <span
+                  aria-hidden
+                  className={cn(
+                    'grid size-8 shrink-0 place-items-center rounded-control',
+                    type === candidate.type
+                      ? 'bg-accent-tint text-accent'
+                      : 'bg-surface-3 text-text-muted',
+                  )}
+                >
+                  <ChannelIcon channel={candidate.type} />
+                </span>
                 <span className="min-w-0">
                   <span className="block font-medium">{candidate.label || candidate.type}</span>
                   <span className="block text-small text-text-muted">
@@ -729,38 +757,40 @@ function ChannelSetupDialog({
           ) : null}
         </fieldset>
         {spec ? (
-          <div className="flex flex-col gap-3">
+          <div key={type} className="anim-fade-in flex flex-col gap-3.5">
             {spec.description || spec.help ? (
               <p className="text-text-muted">{spec.description || spec.help}</p>
             ) : null}
             {spec.whatYouNeed?.length ? (
-              <div className="rounded-md border border-border p-3">
+              <Notice tone="info" icon={<ListChecks data-status-icon />}>
                 <p className="font-medium">{t('webSetAccess.chBeforeYouStart')}</p>
-                <ul className="list-disc pl-5 text-small">
+                <ul className="mt-1 list-disc pl-5 text-small text-text-muted">
                   {spec.whatYouNeed.map((item) => (
                     <li key={item}>{item}</li>
                   ))}
                 </ul>
-              </div>
+              </Notice>
             ) : null}
             {spec.docsHint ? (
               <a
                 href={spec.docsHint}
                 target="_blank"
                 rel="noreferrer"
-                className="text-small text-accent underline-offset-2 hover:underline"
+                className="inline-flex items-center gap-1 self-start text-small text-accent underline-offset-2 hover:underline"
               >
                 {t('webSetAccess.chSetupGuide')}
+                <ExternalLink className="size-3.5" aria-hidden />
               </a>
             ) : null}
             {fieldList(primary)}
             {advanced.length ? (
-              <details className="flex flex-col gap-3">
-                <summary className="cursor-pointer text-small text-text-muted">
-                  {t('webSetAccess.chAdvancedOptions')}
-                </summary>
-                <div className="mt-3 flex flex-col gap-3">{fieldList(advanced)}</div>
-              </details>
+              <Disclosure
+                summary={t('webSetAccess.chAdvancedOptions')}
+                className="border-t border-border pt-2"
+                bodyClassName="flex flex-col gap-3.5"
+              >
+                {fieldList(advanced)}
+              </Disclosure>
             ) : null}
           </div>
         ) : null}
@@ -788,25 +818,31 @@ function ChannelSetupDialog({
           </DialogHeader>
           {body}
           {blockedReason ? (
-            <div role="alert" className="flex flex-wrap items-center gap-2 text-small text-danger">
-              <span className="flex-1">{blockedReason}</span>
-              {conflicted ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setBaseRevision(snapshotRevision)
-                    setMessage(null)
-                  }}
-                >
-                  {t('webSetAccess.chUseLatest')}
-                </Button>
-              ) : null}
-            </div>
+            <Notice
+              role="alert"
+              tone="danger"
+              className="text-small"
+              actions={
+                conflicted ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setBaseRevision(snapshotRevision)
+                      setMessage(null)
+                    }}
+                  >
+                    {t('webSetAccess.chUseLatest')}
+                  </Button>
+                ) : null
+              }
+            >
+              {blockedReason}
+            </Notice>
           ) : message ? (
-            <p role="alert" className="text-small text-danger">
+            <Notice role="alert" tone="danger" className="anim-fade-in text-small">
               {message}
-            </p>
+            </Notice>
           ) : (
             <p className="flex items-center gap-1.5 text-small text-text-muted">
               <Lock className="size-3.5" aria-hidden />
@@ -930,7 +966,7 @@ export function ChannelsSection() {
   const guidedTypes = new Set((snapshotQuery.data?.catalog?.channels ?? []).map((s) => s.type))
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-2" data-field-id="channels.add">
         <Button variant="primary" disabled={write.disabled} onClick={() => openSetup()}>
           <Plus />
@@ -944,13 +980,21 @@ export function ChannelsSection() {
           <RefreshCw className={channelsQuery.isFetching ? 'animate-spin' : undefined} />
           {t('webSetAccess.refresh')}
         </Button>
-        <span className="text-small text-text-muted">{t('webSetAccess.chCadence')}</span>
+        <span className="inline-flex items-center gap-1.5 text-small text-text-muted">
+          <StatusDot tone="ok" live className="size-1.5" />
+          {t('webSetAccess.chCadence')}
+        </span>
         <GateReason gate={write} className="w-full" />
       </div>
 
       {channelsQuery.isPending ? (
-        <LoadingRegion>
-          <Skeleton className="h-40" />
+        <LoadingRegion className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-2.5 @lg:grid-cols-3 @2xl:grid-cols-5">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <Skeleton key={i} className="h-24 rounded-card" />
+            ))}
+          </div>
+          <Skeleton className="h-44 rounded-card" />
         </LoadingRegion>
       ) : channelsQuery.isError && channels.length === 0 ? (
         <ErrorState
@@ -960,42 +1004,49 @@ export function ChannelsSection() {
         />
       ) : (
         <>
-          <dl
+          <div
+            role="group"
             aria-label={t('webSetAccess.chStats')}
-            className="grid grid-cols-2 gap-2 sm:grid-cols-5"
+            className="anim-stagger grid grid-cols-2 gap-2.5 @lg:grid-cols-3 @2xl:grid-cols-5"
           >
-            <Stat
+            <StatCard
+              headingAs="p"
               label={t('webSetAccess.chStatTotal')}
               value={stats.total}
               hint={tPlural('webSetAccess.chStatTypes', stats.typeCount)}
             />
-            <Stat
+            <StatCard
+              headingAs="p"
               label={t('webSetAccess.chStatConnected')}
               value={stats.connected}
+              tone={stats.connected > 0 ? 'ok' : 'default'}
               hint={t('webSetAccess.chStatConnectedHint')}
             />
-            <Stat
+            <StatCard
+              headingAs="p"
               label={t('webSetAccess.chStatAttention')}
               value={stats.attention}
-              warn={stats.attention > 0}
+              tone={stats.attention > 0 ? 'warn' : 'default'}
               hint={t('webSetAccess.chStatInactive', { count: stats.inactive })}
             />
-            <Stat
+            <StatCard
+              headingAs="p"
               label={t('webSetAccess.chStatRestarts')}
               value={stats.restarts}
               hint={t('webSetAccess.chStatRestartsHint')}
             />
-            <Stat
+            <StatCard
+              headingAs="p"
               label={t('webSetAccess.chStatPairing')}
               value={stats.pendingAccess}
-              warn={stats.pendingAccess > 0}
+              tone={stats.pendingAccess > 0 ? 'warn' : 'default'}
               hint={
                 stats.pendingAccess
                   ? t('webSetAccess.chStatPairingWaiting')
                   : t('webSetAccess.chStatPairingIdle')
               }
             />
-          </dl>
+          </div>
           {channelsQuery.isError ? (
             <ErrorState
               title={t('webSetAccess.chLoadFailed')}
@@ -1005,6 +1056,8 @@ export function ChannelsSection() {
           ) : null}
           {channels.length === 0 ? (
             <EmptyState
+              className="set-card border-dashed shadow-none"
+              icon={<MessagesSquare />}
               title={t('webSetAccess.chEmptyTitle')}
               description={t('webSetAccess.chEmptyBody')}
               action={
@@ -1015,7 +1068,11 @@ export function ChannelsSection() {
               }
             />
           ) : (
-            <ul role="list" className="flex flex-col gap-3" data-field-id="channels.pairing">
+            <ul
+              role="list"
+              className="anim-stagger flex flex-col gap-3"
+              data-field-id="channels.pairing"
+            >
               {channels.map((channel, i) => (
                 <ChannelCard
                   key={String(channel.name || channel.id || i)}

@@ -1,5 +1,17 @@
 import { useQuery } from '@tanstack/react-query'
-import { Eye, EyeOff, Loader2, Power, RefreshCw, Unplug } from 'lucide-react'
+import {
+  CircleAlert,
+  CircleCheck,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+  Plug,
+  Power,
+  RefreshCw,
+  Server,
+  Unplug,
+} from 'lucide-react'
 import { useId, useState, type FormEvent } from 'react'
 import { useBootstrap, useRpc } from '@/app/providers'
 import { formatNumber, t } from '@/i18n'
@@ -19,10 +31,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/web/components/ui/alert-dialog'
+import { StatusDot } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
+import { Input } from '@/web/components/ui/input'
 import { connectGateway, useConnectAttempt } from '@/web/shell/connection-gate'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { useRegisterFields, useReveal } from '../fields'
+import { Notice } from '../ui'
 
 // Connections › Gateway: where this browser connects, with what, and the
 // connection-level actions (new credentials, reconnect, restart).
@@ -34,9 +49,6 @@ interface GatewayStatus {
   provider?: string | null
   active_sessions?: number
 }
-
-const inputClass =
-  'h-9 w-full max-w-xl rounded-md border border-border-control bg-surface-0 px-3 touch:h-11 touch:text-base'
 
 function stateLabel(state: RpcState): string {
   if (state === 'connected') return t('webSetSystem.gatewayConnected')
@@ -55,12 +67,14 @@ function formatUptime(ms: number): string {
 
 function Detail({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-[10rem_1fr] gap-2 py-1.5 max-sm:grid-cols-1 max-sm:gap-0">
-      <dt className="text-text-muted">{label}</dt>
-      <dd className="min-w-0 break-all">{value}</dd>
+    <div className="grid grid-cols-[11rem_minmax(0,1fr)] items-baseline gap-3 px-5 py-2.5 max-sm:grid-cols-1 max-sm:gap-0.5">
+      <dt className="text-small text-text-muted">{label}</dt>
+      <dd className="min-w-0 break-all tabular-nums">{value}</dd>
     </div>
   )
 }
+
+const STATE_TONE = { connected: 'ok', connecting: 'warn', disconnected: 'danger' } as const
 
 function ConnectionDetails({ url }: { url: string }) {
   const rpc = useRpc()
@@ -76,19 +90,45 @@ function ConnectionDetails({ url }: { url: string }) {
   const s = status.data
   const dash = t('webSetSystem.none')
   return (
-    <section aria-labelledby="gateway-details" className="flex flex-col gap-2">
-      <h2 id="gateway-details" className="text-base font-semibold">
-        {t('webSetSystem.gatewayDetails')}
-      </h2>
-      <dl data-field-id="gatewayUrl" className="rounded-lg border border-border px-3 py-1.5">
-        <Detail label={t('webSetSystem.gatewayState')} value={stateLabel(connection)} />
+    <section aria-labelledby="gateway-details" className="set-card px-0 pb-1">
+      <header className="flex flex-wrap items-center gap-3 px-5 pb-2">
+        <span
+          aria-hidden
+          className="grid size-8 shrink-0 place-items-center rounded-control bg-surface-2 text-text-muted shadow-highlight"
+        >
+          <Server className="size-4" />
+        </span>
+        <h2 id="gateway-details" className="set-card-title min-w-0 flex-1">
+          {t('webSetSystem.gatewayDetails')}
+        </h2>
+      </header>
+      <dl data-field-id="gatewayUrl" className="divide-y divide-border border-t border-border">
+        <Detail
+          label={t('webSetSystem.gatewayState')}
+          value={
+            <span className="inline-flex items-center gap-2">
+              <StatusDot
+                tone={STATE_TONE[connection as keyof typeof STATE_TONE] ?? 'neutral'}
+                live={connection === 'connected'}
+                className="size-2"
+              />
+              {stateLabel(connection)}
+            </span>
+          }
+        />
         <Detail
           label={t('webSetSystem.gatewayUrl')}
-          value={<span className="font-mono text-small">{url}</span>}
+          value={<span className="set-key">{url}</span>}
         />
         <Detail label={t('webSetSystem.gatewayAuth')} value={bootstrap.auth_mode || dash} />
-        <Detail label={t('webSetSystem.consoleVersion')} value={bootstrap.version || dash} />
-        <Detail label={t('webSetSystem.gatewayVersion')} value={s?.version || dash} />
+        <Detail
+          label={t('webSetSystem.consoleVersion')}
+          value={<span className="font-mono text-small">{bootstrap.version || dash}</span>}
+        />
+        <Detail
+          label={t('webSetSystem.gatewayVersion')}
+          value={<span className="font-mono text-small">{s?.version || dash}</span>}
+        />
         <Detail
           label={t('webSetSystem.gatewayUptime')}
           value={s?.uptime_ms ? formatUptime(s.uptime_ms) : dash}
@@ -100,7 +140,9 @@ function ConnectionDetails({ url }: { url: string }) {
         />
       </dl>
       {status.isError ? (
-        <p className="text-small text-text-muted">{t('webSetSystem.gatewayStatusFailed')}</p>
+        <p className="border-t border-border px-5 pt-2.5 pb-1.5 text-small text-text-muted">
+          {t('webSetSystem.gatewayStatusFailed')}
+        </p>
       ) : null}
     </section>
   )
@@ -152,74 +194,101 @@ function Credentials({ url: currentUrl, defaultUrl }: { url: string; defaultUrl:
   }
 
   return (
-    <form onSubmit={onSubmit} aria-labelledby="gateway-credentials" className="flex flex-col gap-3">
-      <h2 id="gateway-credentials" className="text-base font-semibold">
-        {t('webSetSystem.credentials')}
-      </h2>
-      <div data-field-id="gatewayToken" className="flex flex-col gap-1">
-        <label htmlFor={tokenId} className="font-medium">
+    <form onSubmit={onSubmit} aria-labelledby="gateway-credentials" className="set-card">
+      <header className="mb-1 flex items-start gap-3">
+        <span
+          aria-hidden
+          className="grid size-8 shrink-0 place-items-center rounded-control bg-surface-2 text-text-muted shadow-highlight"
+        >
+          <KeyRound className="size-4" />
+        </span>
+        <h2 id="gateway-credentials" className="set-card-title mt-1">
+          {t('webSetSystem.credentials')}
+        </h2>
+      </header>
+      <div data-field-id="gatewayToken" className="set-row">
+        <label htmlFor={tokenId} className="set-row-label">
           {t('webSetSystem.token')}
         </label>
-        <p id={`${tokenId}-help`} className="text-small text-text-muted">
+        <p id={`${tokenId}-help`} className="set-row-help">
           {t('webSetSystem.tokenHelp')}
           {tokenRequired ? null : ` ${t('webConnection.settingsTokenOptional')}`}
         </p>
-        <div className="flex max-w-xl items-center gap-2">
-          <input
-            id={tokenId}
-            aria-describedby={`${tokenId}-help`}
-            type={shown ? 'text' : 'password'}
-            autoComplete="off"
-            value={token}
-            onChange={(e) => {
-              setToken(e.target.value)
-              setSent(null)
-            }}
-            className={inputClass}
-          />
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label={shown ? t('webSetSystem.hide') : t('webSetSystem.reveal')}
-            onClick={toggleShown}
-          >
-            {shown ? <EyeOff /> : <Eye />}
-          </Button>
+        <div className="set-row-control">
+          <span className="relative block min-w-0">
+            <Input
+              id={tokenId}
+              aria-describedby={`${tokenId}-help`}
+              type={shown ? 'text' : 'password'}
+              autoComplete="off"
+              value={token}
+              onChange={(e) => {
+                setToken(e.target.value)
+                setSent(null)
+              }}
+              className="pr-10"
+            />
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              className="absolute top-1/2 right-1 -translate-y-1/2 text-text-muted hover:text-text"
+              aria-label={shown ? t('webSetSystem.hide') : t('webSetSystem.reveal')}
+              aria-pressed={shown}
+              onClick={toggleShown}
+            >
+              {shown ? <EyeOff /> : <Eye />}
+            </Button>
+          </span>
         </div>
       </div>
-      <div className="flex flex-col gap-1">
-        <label htmlFor={urlId} className="font-medium">
+      <div className="set-row" data-layout="stacked">
+        <label htmlFor={urlId} className="set-row-label">
           {t('webSetSystem.gatewayUrl')}
         </label>
-        <p id={`${urlId}-help`} className="text-small text-text-muted">
+        <p id={`${urlId}-help`} className="set-row-help">
           {t('webSetSystem.urlHelp')}
         </p>
-        <input
-          id={urlId}
-          aria-describedby={`${urlId}-help`}
-          type="url"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          className={`${inputClass} font-mono text-small`}
-        />
+        <div className="set-row-control">
+          <Input
+            id={urlId}
+            aria-describedby={`${urlId}-help`}
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            className="font-mono text-small"
+          />
+        </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border pt-4">
         <Button type="submit" variant="primary" disabled={tokenRequired && !token.trim()}>
+          <Plug aria-hidden />
           {t('webSetSystem.connect')}
         </Button>
         {tokenRequired && !token.trim() && sent === null ? (
           <span className="text-small text-text-muted">{t('webSetSystem.connectNeedsToken')}</span>
         ) : null}
         {joined ? (
-          <span role="status" className="text-small text-text-muted">
+          <span
+            role="status"
+            className="anim-fade-in inline-flex items-center gap-1.5 text-small text-ok"
+          >
+            <CircleCheck className="size-4" aria-hidden data-status-icon />
             {t('webSetSystem.connectDone', { host: hostOf(sent) })}
           </span>
         ) : failed ? (
-          <span role="alert" className="text-small text-danger">
+          <span
+            role="alert"
+            className="anim-fade-in inline-flex items-center gap-1.5 text-small text-danger"
+          >
+            <CircleAlert className="size-4" aria-hidden data-status-icon />
             {t('webConnection.settingsUnreachable', { host: hostOf(sent) })}
           </span>
         ) : sent !== null ? (
-          <span role="status" className="text-small text-text-muted">
+          <span
+            role="status"
+            className="inline-flex items-center gap-1.5 text-small text-text-muted"
+          >
+            <Loader2 className="size-4 animate-spin" aria-hidden />
             {t('webSetSystem.connectSent')}
           </span>
         ) : null}
@@ -269,10 +338,18 @@ function Actions() {
   }
 
   return (
-    <section aria-labelledby="gateway-actions" className="flex flex-col gap-3">
-      <h2 id="gateway-actions" className="text-base font-semibold">
-        {t('webSetSystem.gatewayActions')}
-      </h2>
+    <section aria-labelledby="gateway-actions" className="set-card flex flex-col gap-3">
+      <header className="flex items-start gap-3">
+        <span
+          aria-hidden
+          className="grid size-8 shrink-0 place-items-center rounded-control bg-surface-2 text-text-muted shadow-highlight"
+        >
+          <Power className="size-4" />
+        </span>
+        <h2 id="gateway-actions" className="set-card-title mt-1">
+          {t('webSetSystem.gatewayActions')}
+        </h2>
+      </header>
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="outline" onClick={reconnect}>
           <RefreshCw aria-hidden />
@@ -295,12 +372,13 @@ function Actions() {
         ) : null}
       </div>
       {message ? (
-        <p
+        <Notice
           role={message.tone === 'error' ? 'alert' : 'status'}
-          className={message.tone === 'error' ? 'text-small text-danger' : 'text-small'}
+          tone={message.tone === 'error' ? 'danger' : 'info'}
+          className="anim-fade-in text-small"
         >
           {message.text}
-        </p>
+        </Notice>
       ) : null}
       <AlertDialog open={confirm} onOpenChange={setConfirm}>
         <AlertDialogContent>
@@ -341,7 +419,7 @@ export function GatewaySection() {
   ])
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="anim-stagger flex flex-col gap-4">
       <ConnectionDetails url={url} />
       <Credentials url={url} defaultUrl={defaultUrl} />
       <Actions />
