@@ -577,6 +577,12 @@ select:where(:not([multiple], [size])) {
 #main-content {
   view-transition-name: agentos-main;
 }
+/* Floating layers that overlap the main area need their own name, or the
+   main area's snapshot paints over them while it animates: the toaster here,
+   the approval tray through its `[view-transition-name:agentos-tray]` class. */
+[data-sonner-toaster] {
+  view-transition-name: agentos-toasts;
+}
 ::view-transition-old(root),
 ::view-transition-new(root) {
   animation: none;

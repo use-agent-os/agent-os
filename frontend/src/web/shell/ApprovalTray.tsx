@@ -219,7 +219,7 @@ export function ApprovalTray() {
   return (
     <aside
       aria-label={t('webShell.trayLabel')}
-      className="fixed right-4 bottom-4 z-[var(--z-popover)] w-[min(92vw,380px)] rounded-xl border border-warn/60 bg-surface-2 shadow-3"
+      className="fixed right-4 bottom-4 z-[var(--z-popover)] w-[min(92vw,380px)] [view-transition-name:agentos-tray] rounded-xl border border-warn/60 bg-surface-2 shadow-3"
     >
       <span role="status" aria-live="polite" className="sr-only">
         {announcement}
