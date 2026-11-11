@@ -11,6 +11,10 @@ export const webPalette = defineNamespace('webPalette', {
   groupActions: 'Actions',
   sessionsFailed: "Couldn't search sessions. Try again.",
   sessionsLoading: 'Loading sessions…',
+  hintNavigate: 'Navigate',
+  hintOpen: 'Open',
+  hintClose: 'Close',
+  keyEscape: 'esc',
 
   actionNewSession: 'New session',
   actionToggleSidebar: 'Toggle sidebar',
