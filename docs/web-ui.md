@@ -107,6 +107,18 @@ non-root mounts such as `/console/` work without rebuilding. Root, `/api`, and
   `{disabled, code, reason}`); the console renders the reason with its
   `DisabledReason` wrapper. A transient busy state is not a reason; a
   spinner already says that.
+- **Motion has a job and a budget.** Animation shows where something came
+  from, confirms an action, shows live status or guides the eye on arrival;
+  only live-status indicators loop. Interface transitions (hover, press,
+  state changes, overlays and panels) take at most 300 ms; entrance
+  choreography (a page or section arriving, spring-eased pops, a staggered
+  list) at most 450 ms in total, duration plus stagger. Exits are never
+  slower than their entrances. Durations and easings are tokens in
+  `frontend/src/web/styles/tokens.css`, never literals, and
+  `styles/motion.test.tsx` enforces all of this. Under reduced motion
+  everything is instant (no delays either) except a slow opacity pulse on
+  running indicators, and page transitions (the View Transitions API, main
+  area only) are switched off.
 - **Every RPC method the console calls is listed** in
   `frontend/src/lib/required-methods.ts` (the desktop's extra ones in
   `desktop/src/renderer/src/lib/required-methods.ts`). A vitest fails when a
