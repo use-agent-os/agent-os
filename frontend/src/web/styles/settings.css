@@ -428,47 +428,11 @@
     color: var(--text-muted);
   }
 
-  /* ---- Setup steps ------------------------------------------------------- */
-
-  .set-steps {
-    counter-reset: set-step;
-  }
-  .set-step {
-    counter-increment: set-step;
-    position: relative;
-    padding-inline-start: 2.75rem;
-  }
-  .set-step::before {
-    content: counter(set-step);
-    position: absolute;
-    inset-inline-start: 0;
-    top: 1.125rem;
-    display: grid;
-    place-items: center;
-    width: 1.75rem;
-    height: 1.75rem;
-    border-radius: 50%;
-    border: 1px solid var(--border-strong);
-    background: var(--surface-2);
-    font-size: var(--text-small);
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    color: var(--text-muted);
-  }
-  .set-step[data-done='true']::before {
-    border-color: transparent;
-    background: var(--accent);
-    background-image: var(--accent-gradient);
-    color: var(--accent-fg);
-  }
-  .set-step:not(:last-child)::after {
-    content: '';
-    position: absolute;
-    inset-inline-start: calc(0.875rem - 0.5px);
-    top: 3.125rem;
-    bottom: -0.75rem;
-    width: 1px;
-    background: var(--border-strong);
+  /* Stat tiles in settings: a long label wraps instead of truncating. */
+  .set-pane [data-slot='stat-card'] header > :is(h2, h3, h4, p) {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
   }
 
   /* F1: Pilot Router tier grid and the guided-setup stepper. ------------- */
@@ -627,11 +591,5 @@
   [aria-current='step'] .set-stepper-dot {
     background: Highlight;
     color: HighlightText;
-  }
-  .set-step::before {
-    forced-color-adjust: none;
-    background: Canvas;
-    color: CanvasText;
-    border-color: CanvasText;
   }
 }

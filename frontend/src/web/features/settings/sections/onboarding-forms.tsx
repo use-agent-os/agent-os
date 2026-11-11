@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Copy, Eye, EyeOff, Loader2, TriangleAlert } from 'lucide-react'
+import { Check, CircleAlert, Copy, Loader2, Terminal } from 'lucide-react'
 import { useId, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { toast } from 'sonner'
@@ -28,12 +28,14 @@ import {
   type TierSpec,
 } from '@/views/setup/logic'
 import { Button } from '@/web/components/ui/button'
+import { Input, Select } from '@/web/components/ui/input'
 import { ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import { Switch } from '@/web/components/ui/switch'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { afterConfigWrite } from '../config-editor'
-import { useReveal } from '../fields'
+import { SecretInput, useReveal } from '../fields'
 import { WriteBlockedNotice } from '../SaveBar'
+import { Disclosure, Notice, SettingsCard } from '../ui'
 import {
   collectParams,
   isSecretField,
@@ -107,8 +109,18 @@ export function SnapshotGate({
   const snapshot = useSetupSnapshot()
   if (snapshot.isPending) {
     return (
-      <LoadingRegion>
-        <Skeleton className="h-32" />
+      <LoadingRegion className="flex flex-col gap-4">
+        {[0, 1].map((i) => (
+          <div key={i} className="set-card flex flex-col gap-4">
+            <Skeleton className="h-5 w-40" />
+            <div className="flex flex-col gap-3">
+              <Skeleton className="h-9" />
+              <Skeleton className="h-9" />
+              <Skeleton className="h-9 w-2/3" />
+            </div>
+            <Skeleton className="h-8 w-20 self-end" />
+          </div>
+        ))}
       </LoadingRegion>
     )
   }
@@ -181,22 +193,29 @@ function ApplyBar({
   const connection = useDisplayedConnection()
   const blocked = gate(requireConnection(connection))
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-2">
-      <Button
-        variant="primary"
-        size="sm"
-        disabled={busy || blocked.disabled || Boolean(snapshot.writeBlocked) || disabled}
-        onClick={onApply}
-      >
-        {busy ? <Loader2 className="animate-spin" /> : null}
-        {busy ? t('webSetConfig.applying') : t('webSetConfig.apply')}
-      </Button>
-      {blocked.reason ? <span className="text-small text-text-muted">{blocked.reason}</span> : null}
+    <div className="mt-4 flex flex-wrap items-center justify-end gap-x-3 gap-y-2 border-t border-border pt-3.5">
+      {blocked.reason ? (
+        <span className="mr-auto text-small text-text-muted">{blocked.reason}</span>
+      ) : null}
       {error ? (
-        <span role="alert" className="text-small text-danger">
+        <span
+          role="alert"
+          className="anim-fade-in mr-auto flex min-w-0 items-center gap-1.5 text-small text-danger"
+        >
+          <CircleAlert className="size-3.5 shrink-0" aria-hidden data-status-icon />
           {error}
         </span>
       ) : null}
+      <Button
+        variant="primary"
+        size="sm"
+        className="min-w-20"
+        disabled={busy || blocked.disabled || Boolean(snapshot.writeBlocked) || disabled}
+        onClick={onApply}
+      >
+        {busy ? <Loader2 className="animate-spin" /> : <Check />}
+        {busy ? t('webSetConfig.applying') : t('webSetConfig.apply')}
+      </Button>
     </div>
   )
 }
@@ -222,23 +241,57 @@ function FormNotices({
         />
       ) : null}
       {stale ? (
-        <div
+        <Notice
           role="status"
-          className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-warn/50 bg-warn/10 px-3 py-2"
+          tone="warn"
+          className="anim-enter mb-3"
+          actions={
+            <Button size="sm" variant="outline" onClick={onReload}>
+              {t('webSettings.reload')}
+            </Button>
+          }
         >
-          <TriangleAlert className="size-4 text-warn" aria-hidden data-status-icon />
-          <span className="min-w-0 flex-1">{t('webSetConfig.changedElsewhere')}</span>
-          <Button size="sm" variant="outline" onClick={onReload}>
-            {t('webSettings.reload')}
-          </Button>
-        </div>
+          {t('webSetConfig.changedElsewhere')}
+        </Notice>
       ) : null}
     </>
   )
 }
 
-const inputClass =
-  'h-9 w-full max-w-xl rounded-md border border-border-control bg-surface-0 px-3 touch:h-11 touch:text-base'
+/**
+ * One catalog/router setting in the shared settings-row anatomy (fields.tsx
+ * FieldRow): label and help on the left, the control on the right on wide
+ * panes. Kept local because the label may carry a "(Required)" suffix.
+ */
+function SpecRow({
+  fieldId,
+  inputId,
+  label,
+  help,
+  helpId,
+  children,
+}: {
+  fieldId: string
+  inputId: string
+  label: React.ReactNode
+  help?: React.ReactNode
+  helpId?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div data-field-id={fieldId} className="set-row">
+      <label htmlFor={inputId} className="set-row-label">
+        {label}
+      </label>
+      {help ? (
+        <p id={helpId} className="set-row-help">
+          {help}
+        </p>
+      ) : null}
+      <div className="set-row-control">{children}</div>
+    </div>
+  )
+}
 
 function SpecField({
   field,
@@ -270,10 +323,9 @@ function SpecField({
     )
   } else if (field.type === 'select' && field.choices) {
     control = (
-      <select
+      <Select
         id={id}
         aria-describedby={describedBy}
-        className={inputClass}
         value={String(value ?? '')}
         onChange={(e) => onChange(e.target.value)}
       >
@@ -282,76 +334,90 @@ function SpecField({
             {c === '' ? t('webSettings.optionDefault') : c}
           </option>
         ))}
-      </select>
+      </Select>
     )
   } else {
-    control = (
-      <div className="flex max-w-xl items-center gap-2">
-        <input
-          id={id}
-          aria-describedby={describedBy}
-          type={
-            secret && !shown
-              ? 'password'
-              : field.type === 'int' || field.type === 'float'
-                ? 'number'
-                : 'text'
-          }
-          autoComplete="off"
-          placeholder={secret ? t('webSetConfig.keepSecret') : field.placeholder}
-          className={inputClass}
-          value={value === undefined || value === null ? '' : String(value)}
-          onChange={(e) => onChange(e.target.value)}
-        />
-        {secret ? (
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label={shown ? t('webSettings.hide') : t('webSettings.reveal')}
-            onClick={toggle}
-          >
-            {shown ? <EyeOff /> : <Eye />}
-          </Button>
-        ) : null}
-      </div>
+    const text = value === undefined || value === null ? '' : String(value)
+    control = secret ? (
+      <SecretInput
+        id={id}
+        aria-describedby={describedBy}
+        shown={shown}
+        onToggle={toggle}
+        placeholder={t('webSetConfig.keepSecret')}
+        value={text}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    ) : (
+      <Input
+        id={id}
+        aria-describedby={describedBy}
+        type={field.type === 'int' || field.type === 'float' ? 'number' : 'text'}
+        autoComplete="off"
+        placeholder={field.placeholder}
+        value={text}
+        onChange={(e) => onChange(e.target.value)}
+      />
     )
   }
   return (
-    <div data-field-id={fieldId} className="flex flex-col gap-1 py-2">
-      <label htmlFor={id} className="font-medium">
-        {label}
-        {field.required && !secret ? (
-          <span className="ml-1 text-small text-text-muted">({t('webSetConfig.required')})</span>
-        ) : null}
-      </label>
-      {help ? (
-        <p id={helpId} className="text-small text-text-muted">
-          {help}
-        </p>
-      ) : null}
+    <SpecRow
+      fieldId={fieldId}
+      inputId={id}
+      helpId={helpId}
+      help={help}
+      label={
+        <>
+          {label}
+          {field.required && !secret ? (
+            <span className="ml-1 text-small font-normal text-text-muted">
+              ({t('webSetConfig.required')})
+            </span>
+          ) : null}
+        </>
+      }
+    >
       {control}
-    </div>
+    </SpecRow>
   )
 }
 
 /** A copyable CLI command (env recovery for a capability). */
-function CommandLine({ command }: { command: string }) {
+export function CommandLine({
+  command,
+  onCopy,
+  className,
+}: {
+  command: string
+  /** Replaces the default copy (clipboard with fallback, then a toast). */
+  onCopy?(command: string): void
+  className?: string
+}) {
   return (
-    <div className="mt-2 flex max-w-xl items-center gap-1 rounded-md border border-border bg-surface-0 pl-3">
+    <div
+      className={cn(
+        'flex min-w-0 items-center gap-2 rounded-control border border-border bg-surface-inset pl-3 shadow-inset',
+        className,
+      )}
+    >
+      <Terminal className="size-3.5 shrink-0 text-text-muted" aria-hidden />
       <code
         tabIndex={0}
-        className="min-w-0 flex-1 overflow-x-auto py-1.5 font-mono text-small whitespace-pre"
+        className="min-w-0 flex-1 overflow-x-auto py-2 font-mono text-small whitespace-pre"
       >
         {command}
       </code>
       <Button
         size="icon-sm"
         variant="ghost"
+        className="mr-1"
         aria-label={t('webSetConfig.copyCommand')}
         onClick={() =>
-          void copyWithFallback(command)
-            .then(() => toast.success(t('webSetConfig.copied')))
-            .catch(() => undefined)
+          onCopy
+            ? onCopy(command)
+            : void copyWithFallback(command)
+                .then(() => toast.success(t('webSetConfig.copied')))
+                .catch(() => undefined)
         }
       >
         <Copy />
@@ -460,45 +526,47 @@ export function SpecForm({
   const command = recovery ? envRecoveryCommand(snapshot.status ?? {}, recovery) : ''
 
   return (
-    <section aria-label={title} className="rounded-lg border border-border p-4">
-      <h2 className="mb-1 font-semibold">{title}</h2>
-      {status ? <p className="mb-2 text-small text-text-muted">{status}</p> : null}
-      {command ? <CommandLine command={command} /> : null}
-      <FormNotices snapshot={snapshot} stale={draft.stale} onReload={draft.reload} />
-      {children}
+    <SettingsCard aria-label={title} title={title} description={status}>
+      {command ? <CommandLine command={command} className="mt-3" /> : null}
+      <div className="mt-3 empty:hidden">
+        <FormNotices snapshot={snapshot} stale={draft.stale} onReload={draft.reload} />
+        {children}
+      </div>
       {!adapter.single ? (
-        <div data-field-id={adapter.providerPath} className="flex flex-col gap-1 py-2">
-          <label htmlFor={selectId} className="font-medium">
-            {t('webSetConfig.provider')}
-          </label>
-          <select
-            id={selectId}
-            className={inputClass}
-            value={providerId}
-            onChange={(e) => switchProvider(e.target.value)}
-          >
+        <SpecRow
+          fieldId={adapter.providerPath}
+          inputId={selectId}
+          label={t('webSetConfig.provider')}
+        >
+          <Select id={selectId} value={providerId} onChange={(e) => switchProvider(e.target.value)}>
             {specs.map((s) => (
               <option key={s.providerId} value={s.providerId}>
                 {s.label || s.providerId}
               </option>
             ))}
-          </select>
-        </div>
+          </Select>
+        </SpecRow>
       ) : null}
-      {aside?.(spec)}
-      {spec?.whatYouNeed?.length ? (
-        <p className="mt-1 text-small text-text-muted">
-          {t('webSetConfig.whatYouNeed', { items: needsSentence(spec.whatYouNeed) })}
-        </p>
+      {aside || spec?.whatYouNeed?.length ? (
+        <div className="mb-1 flex flex-col gap-1 rounded-control bg-surface-2 px-3 py-2 text-small empty:hidden">
+          {aside?.(spec)}
+          {spec?.whatYouNeed?.length ? (
+            <p className="text-text-muted">
+              {t('webSetConfig.whatYouNeed', { items: needsSentence(spec.whatYouNeed) })}
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {core.map(renderField)}
       {advanced.length ? (
-        <details className="mt-2" open={advancedOpen || undefined}>
-          <summary className="target cursor-pointer font-medium">
-            {t('webSetConfig.advancedFields')}
-          </summary>
-          <div className="pl-1">{advanced.map(renderField)}</div>
-        </details>
+        <Disclosure
+          className="mt-2 border-t border-border pt-2"
+          open={advancedOpen || undefined}
+          summary={t('webSetConfig.advancedFields')}
+          bodyClassName="pt-0"
+        >
+          {advanced.map(renderField)}
+        </Disclosure>
       ) : null}
       <ApplyBar
         snapshot={snapshot}
@@ -507,7 +575,7 @@ export function SpecForm({
         disabled={!spec}
         onApply={submit}
       />
-    </section>
+    </SettingsCard>
   )
 }
 
@@ -688,13 +756,15 @@ export function RouterForm({ snapshot }: { snapshot: SettingsSnapshot }) {
     onChange: (value: string) => void,
     hint?: string,
   ) => (
-    <div data-field-id={fieldId} className="flex flex-col gap-1 py-2">
-      <label htmlFor={`${id}-${fieldId}`} className="font-medium">
-        {label}
-      </label>
-      <select
+    <SpecRow
+      fieldId={fieldId}
+      inputId={`${id}-${fieldId}`}
+      label={label}
+      help={hint}
+      helpId={`${id}-${fieldId}-hint`}
+    >
+      <Select
         id={`${id}-${fieldId}`}
-        className={inputClass}
         value={value}
         aria-describedby={hint ? `${id}-${fieldId}-hint` : undefined}
         onChange={(e) => onChange(e.target.value)}
@@ -704,13 +774,8 @@ export function RouterForm({ snapshot }: { snapshot: SettingsSnapshot }) {
             {o.label}
           </option>
         ))}
-      </select>
-      {hint ? (
-        <p id={`${id}-${fieldId}-hint`} className="text-small text-text-muted">
-          {hint}
-        </p>
-      ) : null}
-    </div>
+      </Select>
+    </SpecRow>
   )
   const numberField = (
     fieldId: string,
@@ -719,38 +784,42 @@ export function RouterForm({ snapshot }: { snapshot: SettingsSnapshot }) {
     hint: string,
     key: keyof RouterDraft,
   ) => (
-    <div data-field-id={fieldId} className="flex flex-col gap-1 py-2">
-      <label htmlFor={`${id}-${fieldId}`} className="font-medium">
-        {label}
-      </label>
-      <input
+    <SpecRow
+      fieldId={fieldId}
+      inputId={`${id}-${fieldId}`}
+      label={label}
+      help={hint}
+      helpId={`${id}-${fieldId}-hint`}
+    >
+      <Input
         id={`${id}-${fieldId}`}
         type="number"
         min={0}
         max={1}
         step={0.05}
-        className={inputClass}
+        className="tabular-nums"
         value={value}
         aria-describedby={`${id}-${fieldId}-hint`}
         onChange={(e) => set({ [key]: e.target.value } as Partial<RouterDraft>)}
       />
-      <p id={`${id}-${fieldId}-hint`} className="text-small text-text-muted">
-        {hint}
-      </p>
-    </div>
+    </SpecRow>
   )
   const tierOptions = TEXT_TIERS.map((tier) => ({ value: tier, label: tier }))
 
   return (
-    <section aria-label={t('webSetConfig.router')} className="rounded-lg border border-border p-4">
-      <h2 className="font-semibold">{t('webSetConfig.router')}</h2>
-      <p className="mb-2 text-small text-text-muted">{t('webSetConfig.routerHelp')}</p>
-      <FormNotices snapshot={snapshot} stale={draft.stale} onReload={draft.reload} />
-      {!provider ? (
-        <p role="status" className="text-text-muted">
-          {t('webSetConfig.routerNeedsProvider')}
-        </p>
-      ) : null}
+    <SettingsCard
+      aria-label={t('webSetConfig.router')}
+      title={t('webSetConfig.router')}
+      description={t('webSetConfig.routerHelp')}
+    >
+      <div className="mt-3 empty:hidden">
+        <FormNotices snapshot={snapshot} stale={draft.stale} onReload={draft.reload} />
+        {!provider ? (
+          <Notice role="status" tone="info" className="mb-1">
+            {t('webSetConfig.routerNeedsProvider')}
+          </Notice>
+        ) : null}
+      </div>
       {select(
         'agentos_router.strategy',
         t('webSetConfig.routerMode'),
@@ -799,20 +868,20 @@ export function RouterForm({ snapshot }: { snapshot: SettingsSnapshot }) {
         : null}
       {d.mode === 'jev' ? (
         <>
-          <div data-field-id="agentos_router.jev.api_key" className="flex flex-col gap-1 py-2">
-            <label htmlFor={`${id}-jev-key`} className="font-medium">
-              {t('webSetConfig.jevApiKey')}
-            </label>
-            <input
+          <SpecRow
+            fieldId="agentos_router.jev.api_key"
+            inputId={`${id}-jev-key`}
+            label={t('webSetConfig.jevApiKey')}
+          >
+            <Input
               id={`${id}-jev-key`}
               type="password"
               autoComplete="off"
-              className={inputClass}
               placeholder={t('webSetConfig.keepSecret')}
               value={d.jevApiKey}
               onChange={(e) => set({ jevApiKey: e.target.value })}
             />
-          </div>
+          </SpecRow>
           {numberField(
             'agentos_router.jev.high_risk_threshold',
             t('webSetConfig.jevHighRisk'),
@@ -832,62 +901,82 @@ export function RouterForm({ snapshot }: { snapshot: SettingsSnapshot }) {
       )}
 
       {provider ? (
-        <div role="table" aria-label={t('webSetConfig.tiers')} className="mt-3 flex flex-col gap-2">
-          {Object.entries(d.rows).map(([tier, row]) => {
-            const image = tier === 'image_model'
-            return (
-              <div
-                key={tier}
-                role="row"
-                data-field-id={`agentos_router.tiers.${tier}.model`}
-                className="grid gap-2 rounded-md border border-border p-2 sm:grid-cols-[5rem_1fr_9rem_auto] sm:items-center"
-              >
-                <div role="cell" className="flex flex-col">
-                  <code className="font-medium">{tier}</code>
-                  {/* Read-only: requests always go through the configured provider. */}
-                  <code
-                    className="text-small text-text-muted"
-                    aria-label={t('webSetConfig.tierProvider', { tier })}
+        <div className="mt-4 flex flex-col gap-2">
+          <h3 className="text-label text-text-muted">{t('webSetConfig.tiers')}</h3>
+          <div role="table" aria-label={t('webSetConfig.tiers')} className="set-grid">
+            <div role="row" className="set-tiers-head set-grid-head">
+              <span role="columnheader">{t('webSetConfig.tierColTier')}</span>
+              <span role="columnheader">{t('webSetConfig.tierColModel')}</span>
+              <span role="columnheader">{t('webSetConfig.tierColThinking')}</span>
+              <span role="columnheader" className="text-end">
+                {t('webSetConfig.tierImageShort')}
+              </span>
+            </div>
+            {Object.entries(d.rows).map(([tier, row]) => {
+              const image = tier === 'image_model'
+              return (
+                <div
+                  key={tier}
+                  role="row"
+                  data-field-id={`agentos_router.tiers.${tier}.model`}
+                  className="set-tiers-row"
+                >
+                  <div
+                    role="cell"
+                    data-col="tier"
+                    className="flex min-w-0 flex-col items-start gap-1"
                   >
-                    {provider}
-                  </code>
-                </div>
-                <div role="cell">
-                  <input
-                    aria-label={t('webSetConfig.tierModel', { tier })}
-                    className={inputClass}
-                    value={row.model}
-                    title={row.model}
-                    autoComplete="off"
-                    onChange={(e) => setRow(tier, { model: e.target.value })}
-                  />
-                </div>
-                <div role="cell">
-                  <select
-                    aria-label={t('webSetConfig.tierThinking', { tier })}
-                    className={cn(inputClass, 'w-full')}
-                    value={row.thinkingLevel}
-                    onChange={(e) => setRow(tier, { thinkingLevel: e.target.value })}
+                    <code className="set-key font-medium text-text">{tier}</code>
+                    {/* Read-only: requests always go through the configured provider. */}
+                    <code
+                      className="max-w-full truncate font-mono text-small text-text-muted"
+                      aria-label={t('webSetConfig.tierProvider', { tier })}
+                    >
+                      {provider}
+                    </code>
+                  </div>
+                  <div role="cell" data-col="model" className="min-w-0">
+                    <Input
+                      aria-label={t('webSetConfig.tierModel', { tier })}
+                      className="font-mono text-small"
+                      value={row.model}
+                      title={row.model}
+                      autoComplete="off"
+                      onChange={(e) => setRow(tier, { model: e.target.value })}
+                    />
+                  </div>
+                  <div role="cell" data-col="thinking" className="min-w-0">
+                    <Select
+                      aria-label={t('webSetConfig.tierThinking', { tier })}
+                      value={row.thinkingLevel}
+                      onChange={(e) => setRow(tier, { thinkingLevel: e.target.value })}
+                    >
+                      {THINKING_LEVELS.map((level) => (
+                        <option key={level} value={level}>
+                          {level || t('webSettings.optionDefault')}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <label
+                    role="cell"
+                    data-col="image"
+                    className="flex items-center gap-2 text-small"
                   >
-                    {THINKING_LEVELS.map((level) => (
-                      <option key={level} value={level}>
-                        {level || t('webSettings.optionDefault')}
-                      </option>
-                    ))}
-                  </select>
+                    <span aria-hidden className="set-tiers-image-label text-text-muted">
+                      {t('webSetConfig.tierImageShort')}
+                    </span>
+                    <Switch
+                      aria-label={t('webSetConfig.tierImage', { tier })}
+                      checked={image || row.supportsImage}
+                      disabled={image}
+                      onCheckedChange={(v) => setRow(tier, { supportsImage: v })}
+                    />
+                  </label>
                 </div>
-                <label role="cell" className="flex items-center gap-2 text-small">
-                  <Switch
-                    aria-label={t('webSetConfig.tierImage', { tier })}
-                    checked={image || row.supportsImage}
-                    disabled={image}
-                    onCheckedChange={(v) => setRow(tier, { supportsImage: v })}
-                  />
-                  <span aria-hidden>{t('webSetConfig.tierImageShort')}</span>
-                </label>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
       ) : null}
       <ApplyBar
@@ -897,6 +986,6 @@ export function RouterForm({ snapshot }: { snapshot: SettingsSnapshot }) {
         disabled={!provider}
         onApply={submit}
       />
-    </section>
+    </SettingsCard>
   )
 }
