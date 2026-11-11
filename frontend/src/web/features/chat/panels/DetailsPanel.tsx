@@ -39,13 +39,11 @@ function Row({
   )
 }
 
-/** A group of terms: a definition grid on a raised well. */
+/** A group of terms on a raised well; all groups share one label column. */
 function Group({ children }: { children: React.ReactNode }) {
   return (
     <Card asChild variant="plain" padding="sm" className="bg-surface-2 shadow-highlight">
-      <dl className="grid grid-cols-[6.75rem_minmax(0,1fr)] items-baseline gap-x-3 gap-y-2.5">
-        {children}
-      </dl>
+      <dl className="col-span-2 grid grid-cols-subgrid items-baseline gap-y-2.5">{children}</dl>
     </Card>
   )
 }
@@ -100,7 +98,7 @@ export function DetailsPanel({
           <X />
         </Button>
       </header>
-      <div className="scroll-contained anim-stagger flex flex-1 flex-col gap-3 p-4">
+      <div className="scroll-contained anim-stagger grid flex-1 grid-cols-[max-content_minmax(0,1fr)] content-start gap-x-4 gap-y-3 p-4">
         <Group>
           <Row label={t('webChat.detailsAgent')}>{row ? sessionAgent(row) : '—'}</Row>
           <Row label={t('webChat.detailsRoute')} className="font-mono text-small">
