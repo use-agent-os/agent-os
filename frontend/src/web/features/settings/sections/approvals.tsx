@@ -1,4 +1,13 @@
-import { RefreshCw } from 'lucide-react'
+import {
+  CheckCheck,
+  Gauge,
+  Inbox,
+  Loader2,
+  RefreshCw,
+  ShieldCheck,
+  SlidersHorizontal,
+  Zap,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webSetAccess'
@@ -18,13 +27,16 @@ import {
   resolveExecutionMode,
 } from '@/views/approvals/logic'
 import { configValueAt } from '@/views/config/logic'
+import { StatusDot } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
+import { SectionHeader } from '@/web/components/ui/section-header'
 import { EmptyState } from '@/web/components/ui/states'
 import { ApprovalCard } from '@/web/shell/ApprovalTray'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { useConfigEditor } from '../config-editor'
 import { ConfigField, useRegisterFields } from '../fields'
 import { SaveBar } from '../SaveBar'
+import { Disclosure, Notice } from '../ui'
 
 // Settings › Approvals (overhaul-control-ui 7.7, Appendix A "Approvals"): the
 // global default mode (gateway config, explicit save), the approval strategy
@@ -43,7 +55,11 @@ function GateReason({ gate: g, className }: { gate: Gate; className?: string }) 
   return g.reason ? <p className={cn('text-small text-text-muted', className)}>{g.reason}</p> : null
 }
 
-const TONE_BORDER = { ok: 'border-accent', warn: 'border-warn', danger: 'border-danger' } as const
+const TONE_BORDER = {
+  ok: 'border-accent/60 bg-accent-tint',
+  warn: 'border-warn/60 bg-warn/10',
+  danger: 'border-danger/60 bg-danger/10',
+} as const
 
 interface Choice {
   value: string
@@ -70,15 +86,17 @@ function ChoiceGroup({
   onChange: (value: string) => void
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="grid gap-2 sm:grid-cols-2">
+    <div role="radiogroup" aria-label={label} className="grid gap-2.5 sm:grid-cols-2">
       {choices.map((choice) => {
         const checked = choice.value === value
         return (
           <label
             key={choice.value}
             className={cn(
-              'flex cursor-pointer items-start gap-2 rounded-md border p-3 has-disabled:cursor-not-allowed has-disabled:opacity-60',
-              checked ? cn(TONE_BORDER[tone(choice.value)], 'bg-surface-2') : 'border-border',
+              'press flex cursor-pointer items-start gap-3 rounded-card border p-3.5 has-focus-visible:ring-2 has-focus-visible:ring-ring has-disabled:cursor-not-allowed has-disabled:opacity-60',
+              checked
+                ? cn(TONE_BORDER[tone(choice.value)], 'shadow-card')
+                : 'border-border bg-surface-1 hover:border-border-strong hover:bg-surface-2',
             )}
           >
             <input
@@ -88,11 +106,13 @@ function ChoiceGroup({
               checked={checked}
               disabled={disabled}
               onChange={() => onChange(choice.value)}
-              className="mt-1"
+              className="mt-1 size-4 shrink-0 accent-[var(--accent)]"
             />
-            <span>
+            <span className="min-w-0">
               <span className="block font-medium">{choice.label}</span>
-              <span className="block text-small text-text-muted">{choice.desc}</span>
+              <span className="mt-0.5 block text-small text-pretty text-text-muted">
+                {choice.desc}
+              </span>
             </span>
           </label>
         )
@@ -129,12 +149,17 @@ function StrategySetting({ write }: { write: Gate }) {
     <section
       aria-labelledby="approvals-strategy"
       data-field-id="approvals.strategy"
-      className="flex flex-col gap-2"
+      className="set-card flex flex-col gap-3"
     >
-      <h2 id="approvals-strategy" className="text-base font-semibold">
-        {t('webSetAccess.apStrategyTitle')}
-      </h2>
-      <p className="text-small text-text-muted">{t('webSetAccess.apStrategyHelp')}</p>
+      <SectionHeader
+        id="approvals-strategy"
+        title={t('webSetAccess.apStrategyTitle')}
+        description={t('webSetAccess.apStrategyHelp')}
+        icon={<ShieldCheck />}
+        actions={
+          saving ? <Loader2 className="size-4 animate-spin text-text-muted" aria-hidden /> : null
+        }
+      />
       <ChoiceGroup
         name="approval-strategy"
         label={t('webSetAccess.apStrategyTitle')}
@@ -146,9 +171,9 @@ function StrategySetting({ write }: { write: Gate }) {
       />
       <GateReason gate={write} />
       {error ? (
-        <p role="alert" className="text-small text-danger">
+        <Notice role="alert" tone="danger" className="text-small">
           {error}
-        </p>
+        </Notice>
       ) : null}
     </section>
   )
@@ -186,12 +211,14 @@ function ElevatedSetting({ globalMode }: { globalMode: string }) {
     <section
       aria-labelledby="approvals-elevated"
       data-field-id="approvals.elevated"
-      className="flex flex-col gap-2"
+      className="set-card flex flex-col gap-3"
     >
-      <h2 id="approvals-elevated" className="text-base font-semibold">
-        {t('webSetAccess.apElevatedTitle')}
-      </h2>
-      <p className="text-small text-text-muted">{t('webSetAccess.apElevatedHelp')}</p>
+      <SectionHeader
+        id="approvals-elevated"
+        title={t('webSetAccess.apElevatedTitle')}
+        description={t('webSetAccess.apElevatedHelp')}
+        icon={<Zap />}
+      />
       {/* Stored in this browser only; nothing is sent until a chat runs. */}
       <ChoiceGroup
         name="browser-elevated"
@@ -201,10 +228,16 @@ function ElevatedSetting({ globalMode }: { globalMode: string }) {
         tone={(v) => (v === 'full' ? 'danger' : v === 'bypass' ? 'warn' : 'ok')}
         onChange={(next) => setBrowserElevated(next as ElevatedMode)}
       />
-      <div role="status" className="rounded-md border border-border p-3">
-        <p className="text-small text-text-muted">{t('webSetAccess.apEffective')}</p>
-        <p className="font-medium">{execution.label}</p>
-        <p className="text-small text-text-muted">{execution.desc}</p>
+      <div
+        role="status"
+        className="flex items-start gap-3 rounded-card bg-surface-inset p-3.5 shadow-inset"
+      >
+        <Gauge className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
+        <div className="min-w-0">
+          <p className="text-label text-text-muted">{t('webSetAccess.apEffective')}</p>
+          <p className="font-medium">{execution.label}</p>
+          <p className="text-small text-text-muted">{execution.desc}</p>
+        </div>
       </div>
     </section>
   )
@@ -226,27 +259,33 @@ function PendingRequests({ write }: { write: Gate }) {
   }
 
   return (
-    <section aria-labelledby="approvals-pending" className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="approvals-pending" className="text-base font-semibold">
-          {pending.length
+    <section aria-labelledby="approvals-pending" className="flex flex-col gap-3">
+      <SectionHeader
+        id="approvals-pending"
+        title={
+          pending.length
             ? tPlural('webSetAccess.apPendingCount', pending.length)
-            : t('webSetAccess.apPendingTitle')}
-        </h2>
-        <Button size="sm" variant="outline" disabled={refreshing} onClick={() => void refresh()}>
-          <RefreshCw className={refreshing ? 'animate-spin' : undefined} aria-hidden />
-          {t('webSetAccess.apRefresh')}
-        </Button>
-      </div>
+            : t('webSetAccess.apPendingTitle')
+        }
+        icon={pending.length ? <StatusDot tone="warn" live className="size-2" /> : <Inbox />}
+        actions={
+          <Button size="sm" variant="outline" disabled={refreshing} onClick={() => void refresh()}>
+            <RefreshCw className={refreshing ? 'animate-spin' : undefined} aria-hidden />
+            {t('webSetAccess.apRefresh')}
+          </Button>
+        }
+      />
       <GateReason gate={write} />
       {pending.length === 0 ? (
         <EmptyState
-          className="py-6"
+          className="set-card py-8"
+          icon={<CheckCheck />}
+          size="sm"
           title={t('webSetAccess.apEmptyTitle')}
           description={t('webSetAccess.apEmptyBody')}
         />
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="anim-stagger flex flex-col gap-3">
           {pending.map((item) => {
             const full = approvalCardDetail(item)
             return (
@@ -255,17 +294,18 @@ function PendingRequests({ write }: { write: Gate }) {
                   <ApprovalCard item={item} />
                 </ul>
                 {full ? (
-                  <details className="px-1">
-                    <summary className="cursor-pointer text-small text-text-muted">
-                      {t('webSetAccess.apFullArgs')}
-                    </summary>
+                  <Disclosure
+                    className="px-2 text-small"
+                    summary={t('webSetAccess.apFullArgs')}
+                    bodyClassName="pt-1"
+                  >
                     <pre
                       tabIndex={0}
-                      className="mt-1 max-h-96 overflow-auto rounded bg-surface-0 p-2 font-mono text-small whitespace-pre-wrap"
+                      className="max-h-96 overflow-auto rounded-control border border-border bg-surface-inset p-3 font-mono text-small whitespace-pre-wrap shadow-inset"
                     >
                       {full}
                     </pre>
-                  </details>
+                  </Disclosure>
                 ) : null}
               </div>
             )
@@ -296,11 +336,14 @@ export function ApprovalsSection() {
   const configDisabled = !editor.ready || write.disabled
 
   return (
-    <div className="flex flex-col gap-8">
-      <section aria-labelledby="approvals-default" className="flex flex-col">
-        <h2 id="approvals-default" className="text-base font-semibold">
-          {t('webSetAccess.apDefaultTitle')}
-        </h2>
+    <div className="flex flex-col gap-6">
+      <section aria-labelledby="approvals-default" className="set-card flex flex-col pb-2">
+        <SectionHeader
+          id="approvals-default"
+          title={t('webSetAccess.apDefaultTitle')}
+          icon={<SlidersHorizontal />}
+          className="mb-1"
+        />
         <ConfigField
           editor={editor}
           path="permissions.default_mode"
@@ -317,7 +360,7 @@ export function ApprovalsSection() {
           type={{ kind: 'enum', options: ['off', 'bypass', 'full'] }}
           disabled={configDisabled}
         />
-        <GateReason gate={write} />
+        <GateReason gate={write} className="pb-2" />
       </section>
       <StrategySetting write={write} />
       <ElevatedSetting globalMode={savedDefault} />
