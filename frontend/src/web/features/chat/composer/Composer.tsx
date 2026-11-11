@@ -179,13 +179,22 @@ export function Composer(props: ComposerProps) {
     setText(props.editRequest.text)
   }
 
-  // Grow with the content up to a cap, then scroll inside.
+  // Grow with the content up to a cap, then scroll inside. Measuring needs
+  // `height: auto`, which collapses the input to one row for the forced
+  // layout; the composer box is held at its current height meanwhile, or the
+  // transcript above would get taller for that layout and clamp its
+  // scrollTop, leaving a reader at the end stranded above it (and paused).
   useLayoutEffect(() => {
     const el = textarea.current
     if (!el) return
+    const box = el.parentElement
+    const held = box?.style.minHeight ?? ''
+    if (box) box.style.minHeight = `${box.offsetHeight}px`
     el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`
-    el.style.overflowY = el.scrollHeight > MAX_HEIGHT_PX ? 'auto' : 'hidden'
+    const needed = el.scrollHeight
+    el.style.height = `${Math.min(needed, MAX_HEIGHT_PX)}px`
+    el.style.overflowY = needed > MAX_HEIGHT_PX ? 'auto' : 'hidden'
+    if (box) box.style.minHeight = held
   }, [text])
 
   const { onSent } = props
