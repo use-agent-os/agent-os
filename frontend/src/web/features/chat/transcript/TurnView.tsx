@@ -1,7 +1,6 @@
 import {
   ChevronRight,
   Copy,
-  Loader2,
   PencilLine,
   RotateCcw,
   ShieldAlert,
@@ -22,10 +21,21 @@ import { foldTurn, formatWorkDuration } from './fold'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolRow } from './ToolRow'
 
+function sameDay(a: Date, b: Date): boolean {
+  return a.toDateString() === b.toDateString()
+}
+
+/** Quiet: the time for today's messages, the date and time otherwise. */
 function timeLabel(ms: number | null): string {
   if (ms === null) return ''
   try {
-    return new Date(ms).toLocaleString()
+    const at = new Date(ms)
+    return at.toLocaleString(
+      undefined,
+      sameDay(at, new Date())
+        ? { timeStyle: 'short' }
+        : { dateStyle: 'medium', timeStyle: 'short' },
+    )
   } catch {
     return ''
   }
@@ -40,19 +50,47 @@ async function copy(text: string) {
   }
 }
 
-function MessageActions({ text, at }: { text: string; at: number | null }) {
+/**
+ * True when the component mounted while its turn was live: only content that
+ * genuinely arrives animates in. A turn that settles and remounts under its
+ * history id, or history loading above, mounts with `live` false.
+ */
+function useArrived(live: boolean): boolean {
+  const [arrived] = useState(live)
+  return arrived
+}
+
+function MessageActions({
+  text,
+  at,
+  align = 'start',
+}: {
+  text: string
+  at: number | null
+  align?: 'start' | 'end'
+}) {
   return (
-    <div className="flex items-center gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100">
+    <div
+      className={cn(
+        'chat-actions flex items-center gap-1 text-small text-text-muted',
+        align === 'end' && 'flex-row-reverse',
+      )}
+    >
       <Button
         size="icon-sm"
         variant="ghost"
         aria-label={t('webChat.copyMessage')}
         onClick={() => void copy(text)}
+        className="text-text-muted hover:text-text"
       >
         <Copy />
       </Button>
       {at !== null ? (
-        <time dateTime={new Date(at).toISOString()} className="text-small text-text-muted">
+        <time
+          dateTime={new Date(at).toISOString()}
+          title={new Date(at).toLocaleString()}
+          className="px-1 tabular-nums"
+        >
           {timeLabel(at)}
         </time>
       ) : null}
@@ -60,36 +98,115 @@ function MessageActions({ text, at }: { text: string; at: number | null }) {
   )
 }
 
-export function UserBubble({ turn }: { turn: Turn }) {
+export function UserBubble({ turn, live = false }: { turn: Turn; live?: boolean }) {
   const message = turn.userMessage!
+  const arrived = useArrived(live || message.delivery === 'sending')
   return (
-    <div data-role="user" className="group flex flex-col items-end gap-1">
-      <div className="max-w-[85%] rounded-2xl rounded-br-md bg-surface-3 px-4 py-2">
+    <div
+      data-role="user"
+      className={cn('group flex flex-col items-end gap-1', arrived && 'chat-enter-user')}
+    >
+      <div className="chat-user-bubble px-4 py-2.5">
         <Markdown text={message.text} />
       </div>
       {message.delivery === 'not_sent' ? null : (
-        <MessageActions text={message.text} at={message.timestamp} />
+        <MessageActions text={message.text} at={message.timestamp} align="end" />
       )}
     </div>
   )
 }
 
-function ItemView({ item, live, answered }: { item: Item; live: boolean; answered: boolean }) {
+function ItemView({
+  item,
+  live,
+  answered,
+  streaming = false,
+}: {
+  item: Item
+  live: boolean
+  answered: boolean
+  /** The text the reply is streaming into: it carries the caret. */
+  streaming?: boolean
+}) {
   switch (item.kind) {
     case 'text':
       return (
-        <div data-role="assistant" className="group flex flex-col gap-1">
+        <div
+          data-role="assistant"
+          className={cn('group flex flex-col gap-1', streaming && 'chat-streaming')}
+        >
           <Markdown text={item.text} />
           {live ? null : <MessageActions text={item.text} at={null} />}
         </div>
       )
     case 'toolCall':
-      return <ToolRow item={item} />
+      return <ToolRow item={item} live={live} />
     case 'thinkingRef':
       return <ThinkingBlock item={item} live={live} />
     default:
       return <CardItem item={item} answered={answered} />
   }
+}
+
+type Group = { key: string; activity: boolean; items: Item[] }
+
+/** Consecutive reasoning and tool calls read as one activity thread. */
+function groupItems(items: Item[]): Group[] {
+  const groups: Group[] = []
+  for (const item of items) {
+    const activity = item.kind === 'toolCall' || item.kind === 'thinkingRef'
+    const last = groups.at(-1)
+    if (activity && last?.activity) last.items.push(item)
+    else groups.push({ key: item.id, activity, items: [item] })
+  }
+  return groups
+}
+
+/** An item that arrived live rises into place; history renders still. */
+function Arrival({
+  live,
+  className,
+  children,
+}: {
+  live: boolean
+  className?: string
+  children: React.ReactNode
+}) {
+  const arrived = useArrived(live)
+  return <div className={cn('chat-item', className, arrived && 'chat-enter')}>{children}</div>
+}
+
+function Items({
+  items,
+  live,
+  answered,
+  streamingId = null,
+}: {
+  items: Item[]
+  live: boolean
+  answered: boolean
+  streamingId?: string | null
+}) {
+  return groupItems(items).map((group) =>
+    group.activity ? (
+      <div key={group.key} className="chat-activity">
+        {group.items.map((item) => (
+          <Arrival key={item.id} live={live} className="chat-step">
+            <ItemView item={item} live={live} answered={answered} />
+          </Arrival>
+        ))}
+      </div>
+    ) : (
+      <Arrival key={group.key} live={live}>
+        <ItemView
+          item={group.items[0]!}
+          live={live}
+          answered={answered}
+          streaming={group.items[0]!.id === streamingId}
+        />
+      </Arrival>
+    ),
+  )
 }
 
 function WorkedFor({
@@ -102,6 +219,8 @@ function WorkedFor({
   durationMs: number | null
 }) {
   const [open, setOpen] = useState(false)
+  // Mounted on first open, then kept so closing animates too.
+  const [mounted, setMounted] = useState(false)
   const duration = formatWorkDuration(durationMs)
   const label =
     toolCount > 0
@@ -112,20 +231,22 @@ function WorkedFor({
       <button
         type="button"
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="target flex items-center gap-1.5 rounded px-1 text-ui text-text-muted hover:text-text"
+        onClick={() => {
+          setMounted(true)
+          setOpen((v) => !v)
+        }}
+        className="target -ml-1.5 flex items-center gap-1.5 rounded-control px-1.5 py-1 text-ui text-text-muted transition-colors duration-[var(--duration-fast)] hover:bg-surface-2 hover:text-text"
       >
-        <ChevronRight
-          className={cn('size-3.5 transition-transform', open && 'rotate-90')}
-          aria-hidden
-        />
         {label}
+        <ChevronRight className="chat-chevron" aria-hidden />
       </button>
-      {open ? (
-        <div className="mt-2 flex flex-col gap-2 border-l-2 border-border pl-3">
-          {work.map((item) => (
-            <ItemView key={item.id} item={item} live={false} answered={false} />
-          ))}
+      {mounted ? (
+        <div className="collapsible chat-collapse" data-open={open}>
+          <div>
+            <div className="chat-fold-body">
+              <Items items={work} live={false} answered={false} />
+            </div>
+          </div>
         </div>
       ) : null}
     </div>
@@ -137,21 +258,22 @@ function FailedTurn({ turn }: { turn: Turn }) {
   const notSent = turn.userMessage?.delivery === 'not_sent'
   const reason = turn.failure
   return (
-    <div
-      role="alert"
-      className="flex flex-col gap-2 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2"
-    >
-      <p className="flex items-center gap-1.5">
-        <TriangleAlert className="size-4 text-danger" aria-hidden data-status-icon />
-        {notSent
-          ? t('webChat.notSent')
-          : reason
-            ? t('webChat.turnFailed', { reason })
-            : t('webChat.turnFailedUnknown')}
+    <div role="alert" className="chat-failed flex flex-col gap-3 px-3.5 py-3">
+      <p className="flex items-start gap-2.5">
+        <span className="chat-tile border-danger/30 bg-danger/10 text-danger">
+          <TriangleAlert aria-hidden data-status-icon />
+        </span>
+        <span className="min-w-0 pt-1">
+          {notSent
+            ? t('webChat.notSent')
+            : reason
+              ? t('webChat.turnFailed', { reason })
+              : t('webChat.turnFailedUnknown')}
+        </span>
       </p>
       {turn.userMessage ? (
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={() => retry(turn)}>
+        <div className="flex flex-wrap gap-2 pl-10">
+          <Button size="sm" variant="secondary" onClick={() => retry(turn)}>
             <RotateCcw />
             {notSent ? t('webChat.retrySend') : t('webChat.tryAgain')}
           </Button>
@@ -174,9 +296,13 @@ function LiveStatus({ turn, visible }: { turn: Turn; visible: Item[] }) {
     !visible.some((i) => i.kind === 'thinkingRef')
   if (!stopping && !quiet) return null
   return (
-    <p role="status" className="flex items-center gap-1.5 text-small text-text-muted">
-      <Loader2 className="motion-status size-3.5 animate-spin" aria-hidden data-status-icon />
-      {stopping ? t('webChat.stopping') : t('webChat.working')}
+    <p role="status" className="chat-enter flex items-center gap-2.5 text-ui">
+      <span className="flex size-6 items-center justify-center" aria-hidden>
+        <span className="status-dot motion-status size-2 text-accent" data-live data-status-icon />
+      </span>
+      <span className="chat-shimmer">
+        {stopping ? t('webChat.stopping') : t('webChat.working')}
+      </span>
     </p>
   )
 }
@@ -201,36 +327,44 @@ export const TurnView = memo(function TurnView({
 }) {
   const fold = foldTurn(turn)
   const live = turn.status === 'live'
+  const tail = fold.visible.at(-1)
+  const streamingId = live && tail?.kind === 'text' ? tail.id : null
   return (
     <article
       data-turn-status={turn.status}
       className={cn(
-        'flex flex-col gap-3',
+        'flex flex-col gap-4',
         !live && !last && '[content-visibility:auto] [contain-intrinsic-size:auto_200px]',
       )}
     >
-      {turn.userMessage ? <UserBubble turn={turn} /> : null}
+      {turn.userMessage ? <UserBubble turn={turn} live={live} /> : null}
       {turn.textTruncated ? (
         <p className="text-small text-text-muted">{t('webChat.textTruncated')}</p>
       ) : null}
       {fold.folded ? (
         <WorkedFor work={fold.work} toolCount={fold.toolCount} durationMs={fold.durationMs} />
       ) : null}
-      {fold.visible.map((item) => (
-        <ItemView key={item.id} item={item} live={live} answered={answered} />
-      ))}
+      <Items
+        items={fold.visible}
+        live={live}
+        answered={answered}
+        streamingId={waitingApproval ? null : streamingId}
+      />
       {live && (!waitingApproval || turn.abortRequested) ? (
         <LiveStatus turn={turn} visible={fold.visible} />
       ) : null}
       {live && waitingApproval ? (
-        <p role="status" className="flex items-center gap-1.5 text-small text-warn">
+        <p
+          role="status"
+          className="chat-enter inline-flex items-center gap-2 self-start rounded-full border border-warn/30 bg-warn/10 py-1 pr-3 pl-2 text-small font-medium text-warn"
+        >
           <ShieldAlert className="size-4" aria-hidden data-status-icon />
           {t('webChat.turnWaitingApproval')}
         </p>
       ) : null}
       {turn.status === 'aborted' ? (
-        <p className="flex items-center gap-1.5 text-small text-text-muted">
-          <Square className="size-3.5" aria-hidden data-status-icon />
+        <p className="flex items-center gap-2 text-small text-text-muted">
+          <Square className="size-3 fill-current" aria-hidden data-status-icon />
           {t('webChat.turnAborted')}
         </p>
       ) : null}

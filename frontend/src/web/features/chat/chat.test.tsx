@@ -1,6 +1,7 @@
 import '@/test/web'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useApprovals } from '@/services/approval-monitor'
 import { usePreferences } from '@/stores/preferences'
@@ -248,9 +249,12 @@ describe('header', () => {
 describe('composer', () => {
   it('marks focus with a ring as well as the border (the border alone is ~1.6:1 in light)', async () => {
     const { composer } = await openChat(chatRpc())
-    const frame = composer.closest('.rounded-2xl')
-    expect(frame?.className).toMatch(/focus-within:border-accent/)
-    expect(frame?.className).toMatch(/focus-within:ring-ring/)
+    expect(composer.closest('.chat-composer')).not.toBeNull()
+    // The focus chrome lives in chat.css: the accent border plus a 1px ring.
+    const css = readFileSync('src/web/styles/chat.css', 'utf8')
+    const rule = /\.chat-composer:focus-within\s*\{([^}]*)\}/.exec(css)?.[1] ?? ''
+    expect(rule).toMatch(/border-color:\s*var\(--ring\)/)
+    expect(rule).toMatch(/0 0 0 1px var\(--ring\)/)
   })
 
   it('Enter mode: Shift+Enter adds a line and nothing is sent', async () => {

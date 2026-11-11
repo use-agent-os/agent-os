@@ -1,6 +1,6 @@
 import {
   BrainCircuit,
-  CheckCircle2,
+  Check,
   ChevronRight,
   FileText,
   FolderOpen,
@@ -10,7 +10,7 @@ import {
   PenLine,
   Search,
   Terminal,
-  XCircle,
+  X,
   Zap,
 } from 'lucide-react'
 import { useId, useState } from 'react'
@@ -58,9 +58,16 @@ function pretty(value: unknown): string {
   }
 }
 
-/** One tool call: a compact row that expands to its arguments and result. */
-export function ToolRow({ item }: { item: ToolItem }) {
+/**
+ * One tool call: a step on the turn's activity thread that expands to its
+ * arguments and result. `live`: it mounted while the turn ran, so its state
+ * changes (running → done/failed) animate.
+ */
+export function ToolRow({ item, live = false }: { item: ToolItem; live?: boolean }) {
   const [open, setOpen] = useState(false)
+  // The details mount on first expand (a long result costs nothing until
+  // then) and stay, so collapsing animates too.
+  const [mounted, setMounted] = useState(false)
   const actions = useChatActions()
   const regionId = useId()
   const Icon = ICONS[toolIconName(item.name)] ?? Zap
@@ -72,31 +79,25 @@ export function ToolRow({ item }: { item: ToolItem }) {
       : ''
   const result = item.result ?? ''
   const long = result.length > INLINE_RESULT_LIMIT
+  const running = item.state === 'running'
+  const settle = live ? 'chat-pop' : undefined
 
   return (
-    <div
-      data-tool-state={item.state}
-      className={cn(
-        'rounded-md border text-[length:var(--text-prose)]',
-        item.state === 'failed' ? 'border-danger/50' : 'border-border',
-      )}
-    >
+    <div data-tool-state={item.state} className="text-[length:var(--text-prose)]">
       <button
         type="button"
         aria-expanded={open}
         aria-controls={regionId}
-        onClick={() => setOpen((v) => !v)}
-        className="target flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui"
+        onClick={() => {
+          setMounted(true)
+          setOpen((v) => !v)
+        }}
+        className="chat-step-row target text-ui"
       >
-        <ChevronRight
-          className={cn(
-            'size-3.5 shrink-0 text-text-muted transition-transform',
-            open && 'rotate-90',
-          )}
-          aria-hidden
-        />
-        <Icon className="size-4 shrink-0 text-text-muted" aria-hidden />
-        <span className="shrink-0 font-medium">{label}</span>
+        <span className="chat-node" aria-hidden>
+          <Icon />
+        </span>
+        <span className={cn('shrink-0 font-medium', running && 'chat-shimmer')}>{label}</span>
         {detail ? (
           <span className="min-w-0 flex-1 truncate font-mono text-small text-text-muted">
             {detail}
@@ -104,72 +105,81 @@ export function ToolRow({ item }: { item: ToolItem }) {
         ) : (
           <span className="flex-1" />
         )}
-        {item.state === 'running' ? (
-          <span className="flex shrink-0 items-center gap-1 text-small text-text-muted">
-            <Loader2 className="motion-status size-3.5 animate-spin" aria-hidden data-status-icon />
+        {running ? (
+          <span className="flex shrink-0 items-center gap-1.5 text-small text-text-muted">
+            <Loader2
+              className="motion-status size-3.5 animate-spin text-accent"
+              aria-hidden
+              data-status-icon
+            />
             {t('webChat.toolRunning')}
           </span>
         ) : item.state === 'failed' ? (
-          <span className="flex shrink-0 items-center gap-1 text-small text-danger">
-            <XCircle className="size-3.5" aria-hidden data-status-icon />
+          <span className="flex shrink-0 items-center gap-1 text-small font-medium text-danger">
+            <X className={cn('size-3.5', settle)} aria-hidden data-status-icon />
             {t('webChat.toolFailed')}
           </span>
         ) : (
-          <span className="flex shrink-0 items-center gap-1 text-small text-text-muted">
-            <CheckCircle2 className="size-3.5 text-ok" aria-hidden data-status-icon />
+          <span className="flex shrink-0 items-center text-small text-ok">
+            <Check className={cn('size-3.5', settle)} aria-hidden data-status-icon />
             <span className="sr-only">{t('webChat.toolSucceeded')}</span>
           </span>
         )}
         {duration ? (
           <span className="shrink-0 text-small text-text-muted tabular-nums">{duration}</span>
         ) : null}
+        <ChevronRight className="chat-chevron -mr-0.5" aria-hidden />
       </button>
-      {open ? (
-        <div
-          id={regionId}
-          role="region"
-          aria-label={t('webChat.toolDetails', { tool: label })}
-          className="flex flex-col gap-2 border-t border-border px-3 py-2"
-        >
-          {item.args !== undefined ? (
-            <div>
-              <p className="text-small font-medium text-text-muted">{t('webChat.toolArguments')}</p>
-              <pre
-                tabIndex={0}
-                className="scroll-contained max-h-48 rounded bg-code-bg p-2 font-mono text-small whitespace-pre-wrap"
-              >
-                {pretty(item.args)}
-              </pre>
-            </div>
-          ) : null}
-          {item.result !== undefined ? (
-            <div>
-              <p className="text-small font-medium text-text-muted">{t('webChat.toolResult')}</p>
-              <pre
-                data-testid="tool-result"
-                tabIndex={0}
-                className="scroll-contained max-h-64 rounded bg-code-bg p-2 font-mono text-small whitespace-pre-wrap"
-              >
-                {long ? `${result.slice(0, INLINE_RESULT_LIMIT)}…` : result}
-              </pre>
-              {long ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="mt-1"
-                  onClick={(e) =>
-                    actions.openPanel(
-                      { kind: 'tool-output', id: item.id, title: label },
-                      e.currentTarget,
-                    )
-                  }
-                >
-                  <PanelRightOpen />
-                  {t('webChat.toolOpenPanel')}
-                </Button>
+      {mounted ? (
+        <div className="collapsible chat-collapse" data-open={open}>
+          <div>
+            <div
+              id={regionId}
+              role="region"
+              aria-label={t('webChat.toolDetails', { tool: label })}
+              className="chat-details"
+            >
+              {item.args !== undefined ? (
+                <div>
+                  <p className="chat-details-label">{t('webChat.toolArguments')}</p>
+                  <pre tabIndex={0} className="chat-well scroll-contained max-h-48">
+                    {pretty(item.args)}
+                  </pre>
+                </div>
+              ) : null}
+              {item.result !== undefined ? (
+                <div>
+                  <p className="chat-details-label">{t('webChat.toolResult')}</p>
+                  <pre
+                    data-testid="tool-result"
+                    tabIndex={0}
+                    className={cn(
+                      'chat-well scroll-contained max-h-64',
+                      item.state === 'failed' && 'border-danger/30',
+                    )}
+                  >
+                    {long ? `${result.slice(0, INLINE_RESULT_LIMIT)}…` : result}
+                  </pre>
+                  {long ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="mt-2"
+                      onClick={(e) =>
+                        actions.openPanel(
+                          { kind: 'tool-output', id: item.id, title: label },
+                          e.currentTarget,
+                        )
+                      }
+                    >
+                      <PanelRightOpen />
+                      {t('webChat.toolOpenPanel')}
+                    </Button>
+                  ) : null}
+                </div>
               ) : null}
             </div>
-          ) : null}
+          </div>
         </div>
       ) : null}
     </div>

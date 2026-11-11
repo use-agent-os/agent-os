@@ -10,6 +10,7 @@ import { normalizeMarketsPayload } from '@/views/chat/transcript/markets'
 import { normalizeTriggerPayload } from '@/views/chat/transcript/trigger'
 import { Button } from '@/web/components/ui/button'
 import { ErrorState } from '@/web/components/ui/states'
+import { CARD, CARD_PLACEHOLDER, CardHeader } from './CoreCards'
 import { useArtifactJson } from './payload'
 
 const NORMALIZERS: Record<string, (raw: unknown) => unknown> = {
@@ -57,13 +58,7 @@ export function TradingCard({ category, artifact }: { category: string; artifact
   )
 
   if (query.isPending) {
-    return (
-      <div
-        className="h-24 rounded-lg border border-border bg-surface-1"
-        role="status"
-        aria-label={t('webChat.cardLoading')}
-      />
-    )
+    return <div className={CARD_PLACEHOLDER} role="status" aria-label={t('webChat.cardLoading')} />
   }
   if (query.isError) {
     return (
@@ -80,34 +75,28 @@ export function TradingCard({ category, artifact }: { category: string; artifact
   if (!payload) return null
   const kind = String((payload as { kind?: unknown }).kind ?? category)
   return (
-    <section
-      data-trading-card={category}
-      className="rounded-lg border border-border bg-surface-1 p-3"
-    >
-      <header className="mb-2 flex items-center gap-2 text-ui font-medium">
-        <CandlestickChart className="size-4 text-text-muted" aria-hidden />
-        <h3 className="min-w-0 flex-1 truncate">
-          {category.toUpperCase()} · {kind}
-        </h3>
+    <section data-trading-card={category} className={CARD}>
+      <CardHeader icon={<CandlestickChart />} title={`${category.toUpperCase()} · ${kind}`}>
         <Button
           size="sm"
           variant="ghost"
           onClick={() => void refetch()}
           disabled={query.isFetching}
+          className="-my-1 text-text-muted hover:text-text"
         >
-          <RefreshCw />
+          <RefreshCw className={query.isFetching ? 'motion-status animate-spin' : undefined} />
           {t('webChat.cardRefresh')}
         </Button>
-      </header>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-small">
+      </CardHeader>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-small">
         {summarizeTrading(payload).map((row) => (
           <div key={row.label} className="contents">
             <dt className="text-text-muted">{row.label}</dt>
-            <dd className="break-all">{row.value}</dd>
+            <dd className="break-all tabular-nums">{row.value}</dd>
           </div>
         ))}
       </dl>
-      <p className="mt-2 flex items-center gap-1 text-small text-text-muted">
+      <p className="mt-3 flex items-center gap-1.5 border-t border-border pt-2.5 text-small text-text-muted">
         <Lock className="size-3.5" aria-hidden />
         {t('webChat.cardReadOnly')}
       </p>

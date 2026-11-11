@@ -15,6 +15,7 @@ import { SESSIONS_QUERY_KEY, useSessionsList } from '@/web/shell/session-data'
 import { pathToSessionKey, sessionKeyToPath, defaultSessionKey } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { PHONE_QUERY, useMediaQuery } from '@/web/shell/use-media-query'
+import '@/web/styles/chat.css'
 import { ApprovalDock } from './ApprovalDock'
 import { ChatHeader } from './ChatHeader'
 import { Composer } from './composer/Composer'
@@ -223,7 +224,7 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
   return (
     <ChatActionsContext.Provider value={actions}>
       <div className="flex h-full min-h-0">
-        <div ref={paneRef} className="flex min-w-0 flex-1 flex-col">
+        <div ref={paneRef} className="chat-pane bg-atmosphere flex min-w-0 flex-1 flex-col">
           <ChatHeader
             sessionKey={sessionKey}
             row={row}
@@ -266,7 +267,7 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
               />
             </div>
             {showDetails && canDock ? (
-              <div className="w-80 shrink-0 border-l border-border">{details}</div>
+              <div className="chat-panel-in w-80 shrink-0 border-l border-border">{details}</div>
             ) : null}
           </div>
         </div>
