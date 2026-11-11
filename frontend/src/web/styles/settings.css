@@ -283,9 +283,9 @@
   .set-savebar-inner {
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-overlay);
-    background: color-mix(in oklab, var(--surface-overlay) 94%, transparent);
+    /* Opaque: the page scrolls underneath, and nothing may read through. */
+    background: var(--surface-overlay);
     box-shadow: var(--shadow-overlay);
-    backdrop-filter: blur(10px);
   }
   .set-savebar[data-tone='error'] .set-savebar-inner {
     border-color: color-mix(in oklab, var(--danger) 45%, transparent);
@@ -293,7 +293,11 @@
   .set-savebar[data-tone='conflict'] .set-savebar-inner {
     border-color: color-mix(in oklab, var(--warn) 45%, transparent);
   }
+  /* Its display lives here, not in a utility class, so the one-slot rule
+     below (same layer, more specific) can hide it. */
   .set-saved {
+    display: flex;
+    justify-content: center;
     view-transition-name: agentos-settings-saved;
     animation: set-savebar-in var(--duration-slow) var(--ease-spring) both;
   }
@@ -308,13 +312,8 @@
   }
   .set-restart-dock > .set-notice {
     border-radius: var(--radius-overlay);
-    background: color-mix(
-      in oklab,
-      color-mix(in oklab, var(--tone) 9%, var(--surface-overlay)) 94%,
-      transparent
-    );
+    background: color-mix(in oklab, var(--tone) 9%, var(--surface-overlay));
     box-shadow: var(--shadow-overlay);
-    backdrop-filter: blur(10px);
   }
   .set-pane:has(.set-savebar) .set-restart-dock,
   .set-pane:has(.set-restart-dock) .set-saved {
