@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import {
   ArrowUp,
   ChevronDown,
+  FileText,
   Loader2,
   Paperclip,
   Pencil,
@@ -408,7 +409,10 @@ export function Composer(props: ComposerProps) {
       attachments.addFiles(files)
     }
   }
+  // Files dragged over the composer: it shows where they will land.
+  const [dragging, setDragging] = useState(false)
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
+    setDragging(false)
     if (!e.dataTransfer.files.length) return
     e.preventDefault()
     attachments.addFiles(e.dataTransfer.files)
@@ -420,18 +424,26 @@ export function Composer(props: ComposerProps) {
 
   return (
     <div
-      onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes('Files')) return
+        e.preventDefault()
+        if (!dragging) setDragging(true)
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false)
+      }}
       onDrop={onDrop}
-      className="mx-auto w-full max-w-3xl px-4 pb-[max(env(safe-area-inset-bottom),12px)]"
+      className="chat-column pb-[max(env(safe-area-inset-bottom),16px)]"
     >
       {queue.length > 0 ? (
-        <section
-          aria-label={t('webChat.queued')}
-          className="mb-2 rounded-lg border border-border bg-surface-1 p-2"
-        >
-          <ol className="flex flex-col gap-1">
+        <section aria-label={t('webChat.queued')} className="chat-queue anim-enter">
+          <p className="px-1.5 pb-1 text-label text-text-muted">{t('webChat.queued')}</p>
+          <ol className="flex flex-col gap-0.5">
             {queue.map((item, i) => (
-              <li key={i} className="flex items-center gap-2 text-ui">
+              <li
+                key={i}
+                className="flex items-center gap-2 rounded-control py-0.5 pl-1.5 text-ui hover:bg-surface-3/60"
+              >
                 <span className="min-w-0 flex-1 truncate">{item.text}</span>
                 <Button
                   size="icon-sm"
@@ -463,7 +475,7 @@ export function Composer(props: ComposerProps) {
         <ul
           role="listbox"
           aria-label={t('webChat.slashMenu')}
-          className="mb-2 max-h-64 overflow-y-auto rounded-lg border border-border bg-surface-2 p-1 shadow-2"
+          className="anim-scale-in mb-2 max-h-64 origin-bottom overflow-y-auto rounded-overlay border border-border bg-surface-overlay p-1 shadow-overlay"
         >
           {matches.map((cmd, i) => (
             <li
@@ -475,45 +487,51 @@ export function Composer(props: ComposerProps) {
                 void runSlash(cmd)
               }}
               className={cn(
-                'flex cursor-default gap-3 rounded-md px-2 py-1.5',
+                'flex cursor-default gap-3 rounded-control px-2.5 py-1.5',
                 // surface-3 alone is ~1.1:1; the ring marks the active option at 3:1.
                 i === activeSlash &&
-                  'bg-surface-3 outline-2 -outline-offset-2 outline-ring outline-solid',
+                  'bg-accent-tint outline-1 -outline-offset-1 outline-ring outline-solid',
               )}
             >
-              <span className="font-mono">{cmd.cmd}</span>
+              <span className="font-mono text-accent">{cmd.cmd}</span>
               <span className="truncate text-text-muted">{cmd.desc}</span>
             </li>
           ))}
         </ul>
       ) : null}
 
-      {/* Focus: border and a 1px ring together. The border colour change alone
-          is only ~1.6:1 in the light theme (olive over grey). */}
-      <div className="rounded-2xl border border-border-control bg-surface-1 shadow-1 focus-within:border-accent focus-within:ring-1 focus-within:ring-ring">
+      {/* Focus: the accent boundary with a 1px ring and a soft glow (chat.css).
+          The border colour change alone is only ~1.6:1 in the light theme. */}
+      <div className="chat-composer" data-dragging={dragging || undefined}>
+        {dragging ? (
+          <div className="chat-dropzone" aria-hidden>
+            <Paperclip className="size-4" />
+            {t('webChat.attach')}
+          </div>
+        ) : null}
         {attachments.attachments.length > 0 || attachments.rejection ? (
-          <div
-            className="flex flex-wrap gap-2 border-b border-border p-2"
-            aria-label={t('webChat.attach')}
-          >
+          <div className="flex flex-wrap gap-2 px-3 pt-3" aria-label={t('webChat.attach')}>
             {attachments.attachments.map((att) => (
               <span
                 key={att.local_id}
                 data-attachment-state={att.kind}
-                className="inline-flex max-w-56 items-center gap-1.5 rounded-md bg-surface-3 py-1 pr-1 pl-2 text-small"
+                className="chat-chip anim-scale-in origin-left"
               >
-                {isUploading(att) ? (
-                  <Loader2 className="motion-status size-3.5 animate-spin" aria-hidden />
-                ) : null}
-                {att.dataUrl && att.mime.startsWith('image/') ? (
-                  <img src={att.dataUrl} alt="" className="size-6 rounded object-cover" />
-                ) : null}
+                <span className="chat-chip-thumb" aria-hidden>
+                  {isUploading(att) ? (
+                    <Loader2 className="motion-status size-3.5 animate-spin text-accent" />
+                  ) : att.dataUrl && att.mime.startsWith('image/') ? (
+                    <img src={att.dataUrl} alt="" className="size-full object-cover" />
+                  ) : (
+                    <FileText className="size-3.5" />
+                  )}
+                </span>
                 <span className="truncate">{att.name}</span>
                 <button
                   type="button"
                   aria-label={t('webChat.removeAttachment', { name: att.name })}
                   onClick={() => attachments.remove(att.local_id)}
-                  className="target inline-flex items-center justify-center rounded text-text-muted hover:text-text"
+                  className="target inline-flex items-center justify-center rounded-md text-text-muted transition-colors duration-[var(--duration-fast)] hover:bg-surface-3 hover:text-text"
                 >
                   <X className="size-3.5" aria-hidden />
                 </button>
@@ -546,9 +564,9 @@ export function Composer(props: ComposerProps) {
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           enterKeyHint={touch ? 'enter' : 'send'}
-          className="block w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[length:var(--text-prose)] leading-normal outline-none placeholder:text-text-muted max-md:text-base touch:text-base"
+          className="block w-full resize-none bg-transparent px-4 pt-3.5 pb-1.5 text-[length:var(--text-prose)] leading-relaxed outline-none placeholder:text-text-muted max-md:text-base touch:text-base"
         />
-        <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
+        <div className="flex min-w-0 items-center gap-0.5 px-2 pb-2">
           <input
             ref={fileInput}
             type="file"
@@ -564,6 +582,7 @@ export function Composer(props: ComposerProps) {
             variant="ghost"
             aria-label={t('webChat.attach')}
             onClick={() => fileInput.current?.click()}
+            className="text-text-muted hover:text-text"
           >
             <Paperclip />
           </Button>
@@ -583,7 +602,7 @@ export function Composer(props: ComposerProps) {
           {suggestion && !touch ? (
             <kbd
               title={t('webChat.nextSuggestionKeyTitle')}
-              className="hidden rounded border border-border px-1 text-small text-text-muted sm:inline"
+              className="mr-1 hidden rounded-md border border-border bg-surface-2 px-1.5 text-small text-text-muted shadow-highlight sm:inline"
             >
               {t('webChat.nextSuggestionKey')}
             </kbd>
@@ -595,7 +614,7 @@ export function Composer(props: ComposerProps) {
               variant="secondary"
               title={t('webChat.stopNowTitle')}
               onClick={onAbort}
-              className="shrink-0 rounded-full"
+              className="chat-stop anim-scale-in shrink-0"
             >
               <Loader2 className="motion-status animate-spin" />
               {t('webChat.stopNow')}
@@ -608,12 +627,12 @@ export function Composer(props: ComposerProps) {
               title={forcing ? t('webChat.stopping') : undefined}
               disabled={forcing}
               onClick={onAbort}
-              className="rounded-full"
+              className="chat-stop chat-send anim-scale-in"
             >
               {forcing ? (
                 <Loader2 className="motion-status animate-spin" />
               ) : (
-                <Square className="fill-current" />
+                <Square className="size-3! fill-current" />
               )}
             </Button>
           ) : null}
@@ -625,9 +644,12 @@ export function Composer(props: ComposerProps) {
               aria-describedby={sendReason ? 'send-reason' : undefined}
               disabled={!hasDraft || Boolean(sendReason)}
               onClick={() => void submit()}
-              className="rounded-full"
+              className={cn(
+                'anim-scale-in ml-1',
+                primary === 'queue' ? 'rounded-full' : 'chat-send chat-primary [&_svg]:size-[18px]',
+              )}
             >
-              {primary === 'queue' ? t('webChat.queue') : <ArrowUp />}
+              {primary === 'queue' ? t('webChat.queue') : <ArrowUp strokeWidth={2.4} />}
             </Button>
           )}
         </div>
@@ -654,7 +676,7 @@ function RoutePicker({ sessionKey }: { sessionKey: string }) {
           aria-label={`${t('webChat.route')}: ${label}`}
           data-pinned={pin.isPinned || undefined}
           // The one toolbar control that gives way on a narrow composer, so Send stays inside it.
-          className="min-w-0 shrink"
+          className="min-w-0 shrink rounded-full text-text-muted hover:text-text data-[state=open]:bg-surface-3 data-[state=open]:text-text"
         >
           <Route />
           <span className="max-w-32 min-w-0 truncate">{label}</span>
@@ -718,7 +740,12 @@ function CapabilityMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="icon-sm" variant="ghost" aria-label={t('webChat.capabilities')}>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label={t('webChat.capabilities')}
+          className="text-text-muted hover:text-text data-[state=open]:bg-surface-3 data-[state=open]:text-text"
+        >
           <Settings2 />
         </Button>
       </DropdownMenuTrigger>
@@ -768,7 +795,7 @@ function UsageReadout({ sessionKey }: { sessionKey: string }) {
   const cost = data.cost === null ? '—' : `$${data.cost.toFixed(4)}`
   return (
     <span
-      className="hidden text-small text-text-muted tabular-nums sm:inline"
+      className="hidden pl-1.5 text-small text-text-muted tabular-nums sm:inline"
       title={t('webChat.usage', { tokens, cost })}
     >
       {tokens} · {cost}

@@ -1,11 +1,14 @@
 import { MoreHorizontal, PanelRight, PanelRightOpen, RotateCcw, Scissors } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
+import { cn } from '@/lib/utils'
 import { useQueryClient } from '@tanstack/react-query'
 import { useRpc } from '@/app/providers'
 import { t } from '@/i18n'
 import '@/i18n/en/webChat'
 import '@/i18n/en/webShell'
 import { Button } from '@/web/components/ui/button'
+import { fieldVariants } from '@/web/components/ui/input'
+import { SimpleTooltip } from '@/web/components/ui/tooltip'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +27,11 @@ import {
   sessionTitle,
   type SessionRow,
 } from '@/web/shell/session-list'
+
+const CHIP =
+  'inline-flex h-6 min-w-0 items-center gap-1 rounded-full border border-border bg-surface-1/70 px-2 text-small text-text-muted'
+const ICON_BUTTON =
+  'text-text-muted hover:text-text aria-pressed:bg-surface-3 aria-pressed:text-text'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -73,7 +81,7 @@ export function ChatHeader(props: ChatHeaderProps) {
   }
 
   return (
-    <header className="sticky top-0 z-[var(--z-sticky)] flex min-h-12 items-center gap-2 border-b border-border bg-surface-0/95 px-3 py-1.5 backdrop-blur">
+    <header className="chat-header sticky top-0 z-[var(--z-sticky)] flex min-h-14 items-center gap-1 px-3 py-2 sm:px-4">
       {/* Phones open navigation from the shell's top bar; a second ☰ here duplicated it. */}
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {editing ? (
@@ -91,7 +99,7 @@ export function ChatHeader(props: ChatHeaderProps) {
                 }
               }}
               aria-invalid={error ? true : undefined}
-              className="h-8 min-w-0 rounded-md border border-border-control bg-surface-1 px-2 font-medium touch:text-base"
+              className={cn(fieldVariants({ size: 'sm' }), 'max-w-md font-medium')}
             />
             {error ? (
               <span role="alert" className="text-small text-danger">
@@ -110,25 +118,25 @@ export function ChatHeader(props: ChatHeaderProps) {
               }
             }}
             title={phone ? undefined : t('webChat.headerRename')}
-            className="target min-w-0 truncate rounded px-1 text-left font-semibold hover:bg-surface-2"
+            className="target min-w-0 truncate rounded-control px-2 py-1 text-left text-section transition-colors duration-[var(--duration-fast)] hover:bg-surface-2"
           >
             <h1 className="truncate">{title}</h1>
           </button>
         )}
         {!phone && row ? (
-          <div className="hidden min-w-0 items-center gap-1 md:flex">
+          <div className="hidden min-w-0 items-center gap-1.5 md:flex">
             <span
-              className="rounded-full bg-surface-2 px-2 text-small"
+              className={CHIP}
               aria-label={t('webChat.chipAgent', { value: sessionAgent(row) })}
             >
               {sessionAgent(row)}
             </span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 text-small">
+            <span className={CHIP}>
               <ChannelIcon channel={sessionChannel(row)} />
             </span>
             {project ? (
               <span
-                className="truncate rounded-full bg-surface-2 px-2 text-small"
+                className={cn(CHIP, 'truncate')}
                 aria-label={t('webChat.chipProject', {
                   value: projects.data?.get(project) ?? project,
                 })}
@@ -139,30 +147,42 @@ export function ChatHeader(props: ChatHeaderProps) {
           </div>
         ) : null}
       </div>
-      <Button
-        size="icon"
-        variant="ghost"
-        aria-label={t('webChat.headerDetails')}
-        aria-pressed={props.detailsOpen}
-        onClick={props.onToggleDetails}
-        className={phone ? 'hidden' : undefined}
-      >
-        <PanelRightOpen />
-      </Button>
-      <Button
-        size="icon"
-        variant="ghost"
-        aria-label={t('webChat.headerPanels')}
-        onClick={props.onTogglePanels}
-      >
-        <PanelRight />
-      </Button>
+      <SimpleTooltip side="bottom" label={t('webChat.headerDetails')}>
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label={t('webChat.headerDetails')}
+          aria-pressed={props.detailsOpen}
+          onClick={props.onToggleDetails}
+          className={cn(ICON_BUTTON, phone && 'hidden')}
+        >
+          <PanelRightOpen />
+        </Button>
+      </SimpleTooltip>
+      <SimpleTooltip side="bottom" label={t('webChat.headerPanels')}>
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label={t('webChat.headerPanels')}
+          onClick={props.onTogglePanels}
+          className={ICON_BUTTON}
+        >
+          <PanelRight />
+        </Button>
+      </SimpleTooltip>
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button size="icon" variant="ghost" aria-label={t('webChat.headerMenu')}>
-            <MoreHorizontal />
-          </Button>
-        </DropdownMenuTrigger>
+        <SimpleTooltip side="bottom" label={t('webChat.headerMenu')}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label={t('webChat.headerMenu')}
+              className={ICON_BUTTON}
+            >
+              <MoreHorizontal />
+            </Button>
+          </DropdownMenuTrigger>
+        </SimpleTooltip>
         <DropdownMenuContent align="end">
           <DropdownMenuItem
             onSelect={() => {
