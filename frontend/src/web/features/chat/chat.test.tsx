@@ -390,6 +390,105 @@ describe('composer', () => {
     vi.unstubAllGlobals()
   })
 
+  it('keeps a reader at the end of a settled transcript there while the draft grows', async () => {
+    // The browser defect: sizing the input sets `height: auto` and reads
+    // scrollHeight, a forced layout in which the input is one row tall. If the
+    // composer box shrinks with it, the transcript gets taller for that
+    // layout and clamps its scrollTop; the restored height then leaves the
+    // reader above the end, the scroll up reads as the reader and pauses
+    // following. A small layout model: the transcript fills what the
+    // composer leaves, scrollTop is clamped at every layout.
+    const observers: Array<{ cb: ResizeObserverCallback; targets: Element[] }> = []
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        targets: Element[] = []
+        constructor(public cb: ResizeObserverCallback) {
+          observers.push(this)
+        }
+        observe(target: Element) {
+          this.targets.push(target)
+        }
+        unobserve() {}
+        disconnect() {
+          this.targets = []
+        }
+      },
+    )
+    const { composer } = await openChat(chatRpc())
+    const scroller = log()
+    const box = composer.parentElement!
+    const ROW = 24
+    const VIEW = 700
+    const CONTENT = 2000
+    const inputHeight = () => {
+      const h = parseFloat(composer.style.height)
+      return Number.isNaN(h) ? ROW : h
+    }
+    const boxHeight = () => Math.max(parseFloat(box.style.minHeight) || 0, inputHeight() + 60)
+    const viewHeight = () => VIEW - boxHeight()
+    let top = 0
+    let scrolled = false
+    const layout = () => {
+      const clamped = Math.max(0, Math.min(top, CONTENT - viewHeight()))
+      if (clamped !== top) scrolled = true
+      top = clamped
+    }
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, get: () => CONTENT },
+      clientHeight: { configurable: true, get: () => viewHeight() },
+      scrollTop: {
+        configurable: true,
+        get: () => top,
+        set: (v: number) => {
+          top = v
+          layout()
+          scrolled = true
+        },
+      },
+    })
+    scroller.scrollTo = ((opts: ScrollToOptions) => {
+      scroller.scrollTop = opts.top ?? 0
+    }) as typeof scroller.scrollTo
+    Object.defineProperty(box, 'offsetHeight', { configurable: true, get: boxHeight })
+    Object.defineProperty(composer, 'scrollHeight', {
+      configurable: true,
+      get: () => {
+        layout()
+        return (composer as HTMLTextAreaElement).value.split('\n').length * ROW
+      },
+    })
+    // A rendering step: scroll events first, then resize observations.
+    let lastView = viewHeight()
+    const frame = () =>
+      act(() => {
+        layout()
+        if (scrolled) {
+          scrolled = false
+          scroller.dispatchEvent(new Event('scroll'))
+        }
+        if (viewHeight() !== lastView) {
+          lastView = viewHeight()
+          for (const o of observers)
+            if (o.targets.includes(scroller)) o.cb([], o as unknown as ResizeObserver)
+        }
+      })
+    const distance = () => CONTENT - top - viewHeight()
+    act(() => scroller.scrollTo({ top: CONTENT }))
+    frame()
+    expect(distance()).toBe(0)
+    let draft = ''
+    for (let i = 0; i < 8; i++) {
+      draft += `${i ? '\n' : ''}line ${i}`
+      fireEvent.change(composer, { target: { value: draft } })
+      frame()
+      expect(distance(), `after line ${i + 1}`).toBe(0)
+    }
+    expect(viewHeight()).toBe(VIEW - 8 * ROW - 60)
+    expect(document.querySelector('.chat-latest')).toHaveAttribute('data-show', 'false')
+    vi.unstubAllGlobals()
+  })
+
   it('publishes its height for the approval tray, and takes it back on leaving', async () => {
     const { unmount } = await openChat(chatRpc())
     const root = document.documentElement
