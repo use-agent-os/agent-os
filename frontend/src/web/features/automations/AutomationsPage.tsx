@@ -73,6 +73,7 @@ import { Card } from '@/web/components/ui/card'
 import { Input, Select } from '@/web/components/ui/input'
 import { PageHeader } from '@/web/components/ui/page-header'
 import { EmptyState, ErrorState, Skeleton } from '@/web/components/ui/states'
+import { PAGE_CLASS } from '@/web/features/home/overview-ui'
 import { StatStrip, useArrival, WorkSkeleton } from '@/web/features/sessions/StatStrip'
 import { useDocumentVisible } from '@/web/shell/session-data'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
@@ -338,7 +339,7 @@ export function AutomationsPage() {
           description={t('webPagesWork.automationsEmptyBody')}
           action={
             <div className="flex w-full flex-col items-center gap-5">
-              <Button variant="primary" onClick={() => openCreate(null)}>
+              <Button variant="outline" onClick={() => openCreate(null)}>
                 <Plus />
                 {t('webPagesWork.automationsNew')}
               </Button>
@@ -405,6 +406,7 @@ export function AutomationsPage() {
               icon: <AlertTriangle />,
               value: formatNumber(degraded),
               tone: degraded > 0 ? 'danger' : 'default',
+              iconTone: degraded > 0 ? 'danger' : 'neutral',
             },
           ]}
         />
@@ -494,7 +496,7 @@ export function AutomationsPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 md:p-6">
+    <div className={PAGE_CLASS}>
       <PageHeader
         title={t('webPagesWork.automationsTitle')}
         description={t('webPagesWork.automationsSubtitle')}
@@ -922,10 +924,10 @@ function JobCard({
         ) : null}
 
         <div aria-hidden className="min-h-4 flex-1" />
-        <footer className="flex flex-wrap items-center gap-1 border-t border-border px-3 py-2.5">
+        <footer className="flex flex-wrap items-center gap-1 border-t border-border px-2.5 py-2.5">
           <Button
             size="sm"
-            variant="secondary"
+            variant="outline"
             disabled={busy !== null || control.disabled}
             aria-describedby={control.reason ? reasonId : undefined}
             aria-label={t('webPagesWork.runNowFor', { name })}
@@ -976,7 +978,6 @@ function JobCard({
             <Pencil />
             <span className="@max-[26rem]:sr-only">{t('webPagesWork.edit')}</span>
           </Button>
-          <span aria-hidden className="mx-0.5 h-5 w-px bg-border-strong" />
           <Button
             size="icon-sm"
             variant="ghost"

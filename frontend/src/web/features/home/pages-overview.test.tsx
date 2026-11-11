@@ -92,6 +92,70 @@ describe('Home', () => {
     expect(hint.className).not.toMatch(/(^|\s)truncate(\s|$)/)
     expect(hint).toHaveAttribute('title', hint.textContent)
   })
+
+  it('lists what keeps the runtime from ready in the readiness lead', async () => {
+    const finding = (id: string, title: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      title,
+      severity: 'error',
+      readinessImpact: 'blocks_ready',
+      surface: 'provider',
+      ...extra,
+    })
+    const one = homeRpc().handle('doctor.status', {
+      status: 'action_required',
+      summary: '1 action required',
+      findings: [
+        finding('provider.missing', 'Active provider is not configured', {
+          detail: 'Set OPENROUTER_API_KEY for the gateway.',
+        }),
+        finding('gateway.rpc.ready', 'Gateway RPC ready', {
+          severity: 'ok',
+          readinessImpact: 'none',
+        }),
+      ],
+    })
+    const { unmount } = renderShell('/home', one)
+    const readiness = await screen.findByRole('region', { name: 'Readiness' })
+    const list = await within(readiness).findByRole('list', { name: 'What needs attention' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(1)
+    // A lone finding also says what to do about it.
+    expect(list).toHaveTextContent('Active provider is not configured')
+    expect(list).toHaveTextContent('Set OPENROUTER_API_KEY for the gateway.')
+    expect(list).not.toHaveTextContent('Gateway RPC ready')
+    expect(within(readiness).getByRole('link', { name: /Review and fix/ })).toHaveAttribute(
+      'href',
+      '/settings/health',
+    )
+    unmount()
+
+    renderShell(
+      '/home',
+      homeRpc().handle('doctor.status', {
+        status: 'degraded',
+        summary: 'Ready, 4 degraded checks',
+        findings: ['a', 'b', 'c', 'd'].map((id) =>
+          finding(id, `Check ${id}`, { severity: 'warn', readinessImpact: 'degrades' }),
+        ),
+      }),
+    )
+    const many = await within(await screen.findByRole('region', { name: 'Readiness' })).findByRole(
+      'list',
+      { name: 'What needs attention' },
+    )
+    expect(
+      within(many)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['Check aprovider', 'Check bprovider', 'Check cprovider', '1 more finding'])
+  })
+
+  it('lists no findings when the runtime is ready', async () => {
+    renderShell('/home', homeRpc())
+    const readiness = await screen.findByRole('region', { name: 'Readiness' })
+    expect(await within(readiness).findByText('Ready')).toBeInTheDocument()
+    expect(within(readiness).queryByRole('list')).toBeNull()
+  })
 })
 
 describe('Usage', () => {
@@ -328,6 +392,20 @@ describe('Usage ranges, chart, models and export', () => {
     expect(table.getByRole('link', { name: 'agent:main:webchat:old' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Spend' })).toHaveTextContent('$12.0000')
     expect(localStorage.getItem('agentos-usage-range')).toBe('all')
+  })
+
+  it('says where the spend comes from as a sentence per cost source', async () => {
+    const sourced = rows().map((row, i) => ({
+      ...row,
+      updatedAt: NOW - 86_400_000,
+      costSource: i === 0 ? 'provider_billed' : 'agentos_estimate',
+    }))
+    renderShell('/usage', shellRpc().handle('usage.status', { sessions: sourced }))
+    const spend = await screen.findByRole('region', { name: 'Spend' })
+    // Was "actual 1 · estimated 2", which read like a broken string.
+    expect(
+      await within(spend).findByText('Actual for 1 session · Estimated for 2 sessions'),
+    ).toBeInTheDocument()
   })
 
   it('charts the top sessions by tokens or by cost, and rolls usage up by model', async () => {

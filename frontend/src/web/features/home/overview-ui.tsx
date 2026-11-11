@@ -10,6 +10,32 @@ import '@/web/styles/overview.css'
 
 export type OverviewTone = 'neutral' | 'accent' | 'ok' | 'warn' | 'danger' | 'info'
 
+/**
+ * The one page container of the top-level pages (Home, Usage, Inbox,
+ * Sessions, Projects, Automations): same max width, gutters and rhythm, so
+ * page titles line up when moving between them.
+ */
+export const PAGE_CLASS = 'mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 md:p-8'
+
+// The stat family. Every figure card on these pages (Home, Usage, Inbox,
+// Sessions, Automations, settings tiles) reads the same: an icon in a soft
+// tile beside a muted label that wraps rather than clips, a stat-size
+// tabular figure, then a small muted hint.
+
+/** A figure card's label: wraps to two lines instead of cutting off. */
+export const STAT_LABEL = 'line-clamp-2 min-w-0 flex-1 text-label text-text-muted'
+/** A figure card's number. */
+export const STAT_FIGURE = 'truncate text-stat tabular-nums'
+/**
+ * Brings a `StatCard` (components/ui) into the family: the shared padding
+ * and gaps, and a label that wraps instead of truncating.
+ */
+export const STAT_CARD =
+  'gap-2 p-4 sm:p-5 [&>header]:gap-2.5 [&>header>:is(h2,h3,h4,p)]:line-clamp-2 [&>header>:is(h2,h3,h4,p)]:whitespace-normal'
+/** The same in a narrow column (a settings section): the tighter padding. */
+export const STAT_CARD_DENSE =
+  'gap-2 p-4 [&>header]:gap-2.5 [&>header>:is(h2,h3,h4,p)]:line-clamp-2 [&>header>:is(h2,h3,h4,p)]:whitespace-normal'
+
 /** A lucide icon in a soft tile tinted with its tone. Decorative. */
 export function IconTile({
   tone = 'neutral',
@@ -24,6 +50,19 @@ export function IconTile({
 }) {
   return (
     <span aria-hidden data-ov-tone={tone} data-size={size} className={cn('ov-tile', className)}>
+      {children}
+    </span>
+  )
+}
+
+/**
+ * A figure card value that is a word, not a number ("Vector + full text",
+ * "On"): body-size type, so it neither dwarfs the numbers beside it nor
+ * wraps; the card keeps the figure's line height, so rows stay level.
+ */
+export function StatWord({ children }: { children: string }) {
+  return (
+    <span title={children} className="text-ui font-medium">
       {children}
     </span>
   )

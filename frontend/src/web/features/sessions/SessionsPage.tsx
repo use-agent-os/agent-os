@@ -96,6 +96,7 @@ import { openInNewTab } from '@/web/shell/SessionList'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import type { RpcState } from '@/lib/ws-rpc'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
+import { PAGE_CLASS } from '@/web/features/home/overview-ui'
 import { StatStrip, useArrival, WorkSkeleton, type StripItem } from './StatStrip'
 import { useSessionsTotal, type SessionsTotal } from './sessions-total'
 
@@ -532,7 +533,7 @@ export function SessionsPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 md:p-6">
+    <div className={PAGE_CLASS}>
       {header}
       {sessions.isError ? (
         <ErrorState
@@ -695,10 +696,11 @@ function StatTiles({
       icon: <Activity />,
       value: formatNumber(stats.activeRuns),
       tone: live ? 'accent' : 'default',
+      iconTone: live ? 'accent' : 'neutral',
       detail: (
         <span role="status" className="flex min-w-0 items-center gap-1.5">
           <StatusDot tone={live ? 'accent' : 'neutral'} live={live} className="size-1.5" />
-          <span className="truncate">
+          <span className="line-clamp-2">
             {live
               ? tPlural('webPagesWork.executingNow', stats.activeRuns)
               : t('webPagesWork.executingNone')}
@@ -711,6 +713,7 @@ function StatTiles({
       icon: <AlertTriangle />,
       value: formatNumber(stats.failedOrTimedOut),
       tone: stats.failedOrTimedOut > 0 ? 'danger' : 'default',
+      iconTone: stats.failedOrTimedOut > 0 ? 'danger' : 'neutral',
     },
     {
       label: t('webPagesWork.statMessages'),

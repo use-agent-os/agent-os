@@ -4,19 +4,7 @@
  * tokens; the reduced-motion rule in base.css neutralises every animation and
  * transition here. */
 
-/* ---- Stat strip --------------------------------------------------------- */
-
-/* Hairlines between cells that survive wrapping: the grid gap shows the
-   strip's border colour through, each cell paints the card surface. */
-.work-strip {
-  display: grid;
-  gap: 1px;
-  background: var(--border);
-}
-.work-strip > * {
-  background: var(--surface-1);
-  min-width: 0;
-}
+/* ---- Stat cards --------------------------------------------------------- */
 
 /* A proportion bar (open / completed / failed / aborted). Segments grow in
    from the left once, on mount. */

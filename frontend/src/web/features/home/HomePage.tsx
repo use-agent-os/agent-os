@@ -23,6 +23,7 @@ import '@/i18n/en/webPagesOverview'
 import { gate, requireConnection } from '@/lib/disabled-reason'
 import { cn } from '@/lib/utils'
 import { isUpcomingRun, nextRunAbs, nextRunText, type RawJob } from '@/views/cron/logic'
+import { findingGroupKind, type Finding } from '@/views/health/logic'
 import {
   formatEventPayload,
   formatEventTs,
@@ -45,7 +46,15 @@ import { useCountUp } from '@/web/components/ui/use-count-up'
 import { useSessionsTotal } from '@/web/features/sessions/sessions-total'
 import { useDocumentVisible, useSessionsList } from '@/web/shell/session-data'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
-import { DetailsLink, IconTile, staggerStyle, type OverviewTone } from './overview-ui'
+import {
+  DetailsLink,
+  IconTile,
+  PAGE_CLASS,
+  STAT_FIGURE,
+  STAT_LABEL,
+  staggerStyle,
+  type OverviewTone,
+} from './overview-ui'
 
 // Home (shell spec "Home page"): a summary of the runtime. Every figure is its
 // own query, so one that fails shows its own error and Retry while the others
@@ -67,6 +76,7 @@ interface StatusPayload {
 interface DoctorPayload {
   status?: string
   summary?: string
+  findings?: Finding[]
 }
 
 interface RouteConfig {
@@ -200,7 +210,7 @@ function Figure({
     <>
       <header className="flex min-w-0 items-center gap-2.5">
         <IconTile tone={tone}>{icon}</IconTile>
-        <h2 className="min-w-0 flex-1 truncate text-label text-text-muted">{title}</h2>
+        <h2 className={STAT_LABEL}>{title}</h2>
         <DetailsLink to={to} label={linkLabel} stretched={variant === 'tile'}>
           {t('webPagesOverview.homeDetails')}
         </DetailsLink>
@@ -225,7 +235,7 @@ function Figure({
     return (
       <section
         aria-label={title}
-        className={cn('relative flex min-w-0 flex-col gap-3 p-5', className)}
+        className={cn('relative flex min-w-0 flex-col gap-2 p-4 sm:p-5', className)}
         style={style}
       >
         {content}
@@ -236,7 +246,7 @@ function Figure({
     <Card asChild padding="none">
       <section
         aria-label={title}
-        className={cn('group lift relative flex flex-col gap-3 p-5', className)}
+        className={cn('group lift relative flex flex-col gap-2 p-4 sm:p-5', className)}
         style={style}
       >
         {content}
@@ -251,7 +261,7 @@ function Value({ children, className }: { children: ReactNode; className?: strin
       title={typeof children === 'string' ? children : undefined}
       // Not cn(): tailwind-merge reads text-stat as a colour and would drop it
       // in favour of a tone class.
-      className={`truncate text-stat tabular-nums ${className ?? ''}`}
+      className={`${STAT_FIGURE} ${className ?? ''}`}
     >
       {children}
     </p>
@@ -298,6 +308,59 @@ function UptimeValue({
   }, [ticking])
   const shown = ticking ? ms + Math.max(0, now - at) : ms
   return <Value>{formatUptime(shown)}</Value>
+}
+
+/** Most findings the lead lists before it says how many more there are. */
+const FINDINGS_SHOWN = 3
+
+/**
+ * The findings that keep the runtime from ready, in the report's order. A
+ * lone finding also shows its detail, which usually names the fix.
+ */
+function FindingList({ findings }: { findings: Finding[] }) {
+  const shown = findings.slice(0, FINDINGS_SHOWN)
+  const more = findings.length - shown.length
+  const single = findings.length === 1
+  return (
+    <ul
+      role="list"
+      aria-label={t('webPagesOverview.homeReadinessFindings')}
+      className="mt-2 flex flex-col overflow-hidden rounded-control border border-border bg-surface-inset text-small shadow-inset"
+    >
+      {shown.map((finding, i) => (
+        <li
+          key={finding.id || i}
+          className="flex min-w-0 items-start gap-2.5 border-t border-border px-3 py-2 first:border-t-0"
+        >
+          <StatusDot
+            tone={findingGroupKind(finding) === 'action' ? 'danger' : 'warn'}
+            className="mt-1 size-2 shrink-0"
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate" title={finding.title || finding.id}>
+              {finding.title || finding.id}
+            </span>
+            {single && finding.detail ? (
+              <span
+                title={finding.detail}
+                className="mt-0.5 line-clamp-2 break-words text-text-muted"
+              >
+                {finding.detail}
+              </span>
+            ) : null}
+          </span>
+          {finding.surface ? (
+            <span className="shrink-0 text-text-muted">{finding.surface}</span>
+          ) : null}
+        </li>
+      ))}
+      {more > 0 ? (
+        <li className="border-t border-border px-3 py-2 text-text-muted">
+          {tPlural('webPagesOverview.homeReadinessMore', more)}
+        </li>
+      ) : null}
+    </ul>
+  )
 }
 
 const EVENT_TONE: readonly [RegExp, string][] = [
@@ -489,10 +552,21 @@ export function HomePage() {
     : null
   const readiness = readinessTone(doctor.data?.status)
   const needsFix = readiness === 'warn' || readiness === 'danger'
+  // What makes the runtime not ready, straight from the same report: listed
+  // in the lead so it says what to fix, not only that something is wrong.
+  const attention = needsFix
+    ? (doctor.data?.findings ?? []).filter((f) => {
+        const kind = findingGroupKind(f)
+        return kind === 'action' || kind === 'degraded'
+      })
+    : []
+  // With findings to list the readiness pane takes the left column and the
+  // other two figures stack beside it; without, all three share one row.
+  const listed = attention.length > 0
 
   return (
     <div className="bg-atmosphere min-h-full">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 md:p-8">
+      <div className={PAGE_CLASS}>
         <PageHeader
           title={t('webPagesOverview.homeTitle')}
           badge={offline && anyData ? <StaleBadge /> : null}
@@ -526,7 +600,8 @@ export function HomePage() {
           padding="none"
           data-ov-tone={readiness}
           className={cn(
-            'ov-lead ov-rise grid grid-cols-1 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]',
+            'ov-lead ov-rise grid grid-cols-1',
+            listed ? 'md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]' : 'md:grid-cols-3',
             readiness === 'danger' && 'border-danger/30',
             readiness === 'warn' && 'border-warn/30',
           )}
@@ -549,8 +624,9 @@ export function HomePage() {
               </Value>
             </div>
             <Hint>{doctor.data?.summary || t('webPagesOverview.homeReadinessHint')}</Hint>
+            {listed ? <FindingList findings={attention} /> : null}
             {needsFix ? (
-              <div className="mt-auto pt-3">
+              <div className="mt-auto pt-2">
                 <Button asChild size="sm" variant="outline" className="group/fix">
                   <Link to="/settings/health" viewTransition>
                     {t('webPagesOverview.homeReadinessFix')}
@@ -564,10 +640,15 @@ export function HomePage() {
             ) : null}
           </Figure>
 
-          <div className="flex min-w-0 flex-col border-t border-border md:border-t-0 md:border-l">
+          <div
+            className={cn(
+              'flex min-w-0 flex-col border-t border-border md:border-t-0',
+              listed ? 'md:border-l' : 'md:contents',
+            )}
+          >
             <Figure
               variant="pane"
-              className="flex-1"
+              className={cn('flex-1', !listed && 'md:border-l md:border-border')}
               title={t('webPagesOverview.homeProvider')}
               icon={<Cpu />}
               to="/settings/models"
@@ -586,7 +667,10 @@ export function HomePage() {
 
             <Figure
               variant="pane"
-              className="flex-1 border-t border-border"
+              className={cn(
+                'flex-1 border-t border-border',
+                !listed && 'md:border-t-0 md:border-l',
+              )}
               title={t('webPagesOverview.homeUptime')}
               icon={<Clock />}
               to="/settings/gateway"
@@ -607,7 +691,7 @@ export function HomePage() {
           </div>
         </Card>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
           <Figure
             className="ov-rise"
             style={staggerStyle(1)}

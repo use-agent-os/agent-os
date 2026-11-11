@@ -296,9 +296,14 @@ describe('restart-required changes', () => {
     expect(screen.queryByText(/takes effect after/)).not.toBeInTheDocument()
     await user.selectOptions(screen.getByRole('combobox', { name: 'mode' }), 'c')
     await user.click(screen.getByRole('button', { name: 'Save' }))
-    expect(
-      await screen.findByText(/A saved change takes effect after a restart: channels/),
-    ).toBeInTheDocument()
+    const notice = await screen.findByText(/A saved change takes effect after a restart: channels/)
+    // Docked after the section, in the save bar's place: inserting it above
+    // the section pushed the page down under the reader.
+    const dock = notice.closest('.set-restart-dock')!
+    expect(dock).not.toBeNull()
+    const pane = screen.getByRole('region', { name: /settings$/ })
+    const header = within(pane).getByRole('heading', { level: 1 })
+    expect(header.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Restart gateway' }))
     await waitFor(() => expect(rpc.callsTo('gateway.restart')).toHaveLength(1))
     await waitFor(() =>

@@ -57,6 +57,7 @@ import {
 import { Badge } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
 import { StatCard } from '@/web/components/ui/card'
+import { IconTile, STAT_CARD_DENSE } from '@/web/features/home/overview-ui'
 import {
   Dialog,
   DialogContent,
@@ -569,8 +570,13 @@ export function EnvironmentSection() {
 
       <div className="anim-stagger grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatCard
+          className={STAT_CARD_DENSE}
           headingAs="p"
-          icon={<CheckCircle2 />}
+          icon={
+            <IconTile>
+              <CheckCircle2 />
+            </IconTile>
+          }
           label={t('webSetAccess.envStatSet')}
           value={t('webSetAccess.envStatSetValue', {
             set: summary.setCount,
@@ -578,15 +584,25 @@ export function EnvironmentSection() {
           })}
         />
         <StatCard
+          className={STAT_CARD_DENSE}
           headingAs="p"
-          icon={<CircleDashed />}
+          icon={
+            <IconTile>
+              <CircleDashed />
+            </IconTile>
+          }
           label={t('webSetAccess.envStatMissing')}
           value={summary.missingCount}
           tone={summary.missingCount ? 'warn' : 'default'}
         />
         <StatCard
+          className={STAT_CARD_DENSE}
           headingAs="p"
-          icon={<Layers />}
+          icon={
+            <IconTile>
+              <Layers />
+            </IconTile>
+          }
           label={t('webSetAccess.envStatShadowed')}
           value={summary.shadowedCount}
           tone={summary.shadowedCount ? 'warn' : 'default'}

@@ -19,6 +19,7 @@ import { StatusDot } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/web/components/ui/dialog'
 import type { ConfigEditor } from './config-editor'
+import { Docked } from './tray-clearance'
 import { Notice } from './ui'
 
 const SAVED_MS = 1800
@@ -105,7 +106,7 @@ export function SaveBar({
   return (
     <>
       {dirty || kind === 'conflict' ? (
-        <div
+        <Docked
           role="region"
           aria-label={t('webSettings.reviewTitle')}
           data-tone={tone}
@@ -177,9 +178,9 @@ export function SaveBar({
               </div>
             ) : null}
           </div>
-        </div>
+        </Docked>
       ) : saved ? (
-        <div
+        <Docked
           role="status"
           className="set-saved sticky bottom-4 z-[var(--z-sticky)] mt-8 flex justify-center"
         >
@@ -189,7 +190,7 @@ export function SaveBar({
             </span>
             {t('webSetConfig.applied')}
           </span>
-        </div>
+        </Docked>
       ) : null}
 
       <Dialog open={review} onOpenChange={setReview}>
