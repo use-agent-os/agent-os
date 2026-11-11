@@ -223,21 +223,20 @@ def _should_send_temperature(
     base_url: str,
     model: str,
     cfg: ChatConfig,
-    caps: Any,
 ) -> bool:
     if cfg.temperature is None:
         return False
     if _is_kimi_fixed_sampling_model(provider_kind, model) and cfg.temperature != 1.0:
         return False
+    # OpenAI's reasoning families (gpt-5*, o1/o3/o4) answer a non-default
+    # temperature with a 400 ("Only the default (1) value is supported"),
+    # thinking or not: gpt-5.6-terra rejects ``temperature=0`` with no
+    # ``reasoning_effort`` sent. Dropping the knob costs determinism only.
     if (
-        provider_kind == "openai"
-        and "api.openai.com" in base_url.lower()
-        and cfg.thinking
-        and bool(caps and caps.supports_reasoning)
+        _direct_openai_uses_max_completion_tokens(provider_kind, base_url, model)
+        and cfg.temperature != 1.0
     ):
-        model_name = model.rsplit("/", 1)[-1].strip().lower()
-        if model_name.startswith(("gpt-5.4", "gpt-5.5", "gpt-5.6")):
-            return False
+        return False
     return True
 
 
@@ -1197,7 +1196,6 @@ class OpenAIProvider:
             self._base_url,
             self._model,
             cfg,
-            caps,
         ):
             payload["temperature"] = cfg.temperature
         if cfg.stop_sequences:

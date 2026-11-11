@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Settings → Providers: "Test key" no longer reports a valid OpenAI key as
+  rejected. The 1-token check pinned `temperature=0`, which GPT-5.x and
+  o-series models refuse with a 400; it now sends no sampling settings, and
+  direct OpenAI requests to those models drop any non-default temperature
+  (session titles, suggestions and flows sent one too).
+- Settings → Providers: opening a provider whose key lives in the gateway's
+  environment (for example `OPENAI_API_KEY` in `~/.agentos/.env`) now tests
+  that key right away, as it already did for a saved key.
+
 ## [2026.11.11] - 2026-11-11
 
 ### Added
