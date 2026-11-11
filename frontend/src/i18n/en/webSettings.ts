@@ -79,7 +79,6 @@ export const webSettings = defineNamespace('webSettings', {
   discard: 'Discard',
   save: 'Save',
   saving: 'Saving…',
-  savedConfirm: 'Saved',
   saveFailed: "Couldn't save: {message}",
   conflictTitle: 'The configuration changed since you opened it',
   conflictBody: 'Another client saved the configuration. Nothing was written.',

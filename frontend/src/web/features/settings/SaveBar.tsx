@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useBlocker } from 'react-router'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webCommon'
+import '@/i18n/en/webSetConfig'
 import '@/i18n/en/webSettings'
 import { isSensitiveKey, summariseDiffValue } from '@/views/config/logic'
 import {
@@ -186,7 +187,7 @@ export function SaveBar({
             <span className="grid size-4 place-items-center rounded-full bg-ok/15 text-ok">
               <Check className="size-3" aria-hidden data-status-icon />
             </span>
-            {t('webSettings.savedConfirm')}
+            {t('webSetConfig.applied')}
           </span>
         </div>
       ) : null}

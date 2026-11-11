@@ -119,11 +119,6 @@
     box-shadow: var(--shadow-card);
     padding: 1rem 1.25rem;
   }
-  /* An EmptyState drawn as a card fills the column instead of its 28rem. */
-  .set-card[data-slot='empty-state'] {
-    max-width: none;
-    width: 100%;
-  }
   .set-card-title {
     font-size: var(--text-section);
     line-height: var(--text-section--line-height);
@@ -428,13 +423,6 @@
     color: var(--text-muted);
   }
 
-  /* Stat tiles in settings: a long label wraps instead of truncating. */
-  .set-pane [data-slot='stat-card'] header > :is(h2, h3, h4, p) {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
-  }
-
   /* F1: Pilot Router tier grid and the guided-setup stepper. ------------- */
 
   /* Tier rows: tier chip + images switch on top, model and thinking below on
@@ -472,7 +460,7 @@
     .set-tiers-head,
     .set-tiers-row {
       display: grid;
-      grid-template-columns: 8.5rem minmax(0, 1fr) 8.5rem 4.5rem;
+      grid-template-columns: 6.5rem minmax(0, 1fr) 7.5rem 4rem;
       grid-template-areas: 'tier model thinking image';
       column-gap: 0.75rem;
       align-items: center;
@@ -561,6 +549,22 @@
       white-space: nowrap;
     }
   }
+}
+
+/* Unlayered on purpose: these must beat utilities the primitives set
+   (EmptyState's max-w-md, StatCard's truncate). An EmptyState drawn as a
+   card fills the column. */
+.set-card[data-slot='empty-state'] {
+  max-width: none;
+  width: 100%;
+}
+/*
+   Stat tiles in settings wrap a long label or value instead of cutting it. */
+.set-pane [data-slot='stat-card'] :is(header > :is(h2, h3, h4, p), p.text-stat) {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
 }
 
 @keyframes set-savebar-in {
