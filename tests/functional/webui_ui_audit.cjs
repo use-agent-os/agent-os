@@ -780,11 +780,27 @@ async function auditKeyboard(browser) {
         await palette.waitFor({ timeout: 4000 })
         const inPalette = await tabWalk(page, 12)
         await page.keyboard.press('ArrowDown')
+        await page.waitForTimeout(250) // let the marker's fade-in settle
         const optionMarker = await page.evaluate(() => {
           const o = document.querySelector('[cmdk-item][data-selected=true]')
           if (!o) return { found: false }
           const st = getComputedStyle(o)
-          return { found: true, outline: `${st.outlineStyle} ${st.outlineWidth} ${st.outlineColor}`, on: st.outlineStyle !== 'none' && parseFloat(st.outlineWidth) > 0 }
+          // The highlighted row is marked by an outline or by a leading
+          // accent bar (shell.css `.palette-item::before`) over its soft fill.
+          const bar = getComputedStyle(o, '::before')
+          const barOn =
+            bar.content !== 'none' &&
+            parseFloat(bar.opacity) >= 0.99 &&
+            parseFloat(bar.width) >= 2 &&
+            parseFloat(bar.height) >= 12 &&
+            !/rgba\([^)]*,\s*0\)|transparent/.test(bar.backgroundColor)
+          const outlineOn = st.outlineStyle !== 'none' && parseFloat(st.outlineWidth) > 0
+          return {
+            found: true,
+            outline: `${st.outlineStyle} ${st.outlineWidth} ${st.outlineColor}`,
+            bar: `${bar.width}x${bar.height} ${bar.backgroundColor} opacity ${bar.opacity}`,
+            on: outlineOn || barOn,
+          }
         })
         const paletteEsc = await escapeOut(page)
         const after = await probe(page)

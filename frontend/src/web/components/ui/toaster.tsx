@@ -13,14 +13,15 @@ const TOAST_VARS = {
 
 /**
  * Brief confirmations only (design-system spec "Toast discipline"): polite,
- * top-centre so they never cover the composer, themed with the console.
+ * bottom-right, themed with the console. The shell lifts them above the
+ * composer and the approval tray (shell.css "Floating layers").
  */
 export function Toaster() {
   const theme = useTheme((s) => s.mode)
   return (
     <Sonner
       theme={theme}
-      position="top-center"
+      position="bottom-right"
       closeButton
       style={TOAST_VARS}
       toastOptions={{

@@ -1,9 +1,9 @@
-import '@/test/web'
-import { render, renderHook, screen } from '@testing-library/react'
+import { stubMatchMedia } from '@/test/web'
+import { act, render, renderHook, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Search } from 'lucide-react'
 import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Badge, StatusDot } from './badge'
 import { Card, StatCard } from './card'
 import { Input, Select, Textarea } from './input'
@@ -127,6 +127,29 @@ describe('useCountUp', () => {
     expect(result.current).toBe(42)
     rerender({ n: 7 })
     expect(result.current).toBe(7)
+  })
+
+  it('never shows a value below the start when a frame is stamped before the start', () => {
+    stubMatchMedia(() => false)
+    const frames: FrameRequestCallback[] = []
+    const raf = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((cb) => frames.push(cb))
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {})
+    vi.spyOn(performance, 'now').mockReturnValue(1000)
+    try {
+      const { result } = renderHook(() => useCountUp(1915))
+      expect(result.current).toBe(0)
+      // rAF passes the frame's start time, which can be earlier than now().
+      act(() => frames.shift()!(990))
+      expect(result.current).toBe(0)
+      act(() => frames.shift()!(1000 + 450))
+      expect(result.current).toBe(1915)
+      expect(raf).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.restoreAllMocks()
+      stubMatchMedia((q) => q.includes('prefers-reduced-motion'))
+    }
   })
 })
 

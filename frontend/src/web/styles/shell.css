@@ -128,6 +128,18 @@
 .rail-track[data-active]::after {
   opacity: 1;
 }
+/* The pane toggles (Sessions, Pages) are not destinations: the open pane
+   keeps the pill and a full-strength icon, but the accent (colour and edge
+   bar) stays with the one current destination. */
+.rail-track[data-toggle]::after {
+  display: none;
+}
+.rail-track[data-toggle]::before {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.rail-track[data-toggle] .rail-item[aria-pressed='true'] {
+  color: var(--text);
+}
 
 /* ---- Route fallback ----------------------------------------------------- */
 
@@ -236,24 +248,71 @@
 
 /* ---- Floating layers ---------------------------------------------------- */
 
-/* Toasts live in a zero-height layer at the top of the main column
-   (Shell.tsx): its `contain: layout` makes it the containing block of
-   sonner's fixed list, so toasts sit below the top bars, centred on the main
-   column, and never cover the setup bar, the page title or the phone header.
-   The !important outranks the offsets sonner sets inline. */
-.toast-layer {
-  position: relative;
-  z-index: var(--z-toast);
-  height: 0;
-  contain: layout;
+/* Everything that floats over the bottom of the page stacks in one column
+   instead of overlapping, at any width:
+
+     1. the page's own docked bar (the chat composer, the settings save bar)
+        publishes the height it occupies above the viewport's bottom edge as
+        --tray-clearance on :root while it is shown (a sticky bar: its height
+        plus its CSS `bottom`), and removes it when it goes;
+     2. the approval tray sits above that (--float-bottom + clearance) and
+        publishes its own height as --tray-stack (ApprovalTray.tsx);
+     3. toasts sit above both, at the same right edge as the tray.
+
+   Nothing floats at the top, so no toast can cover a page title, a header
+   action or the phone menu button. Toasts stay below any open sheet (the
+   phone drawer) and its scrim. */
+:root {
+  --float-inset: 1rem;
+  --float-gap: 0.5rem;
+  --float-bottom: max(var(--float-inset), env(safe-area-inset-bottom));
 }
-.toast-layer [data-sonner-toaster][data-y-position='top'] {
-  --offset-top: 12px !important;
-  --mobile-offset-top: 8px !important;
+@media (max-width: 639.98px) {
+  :root {
+    --float-inset: 0.5rem;
+  }
+}
+
+.approval-tray {
+  right: var(--float-inset);
+  bottom: calc(var(--float-bottom) + var(--tray-clearance, 0px));
+  /* Never taller than the room above the docked bar, leaving the top of the
+     page (title, header actions) and a toast's slot clear. */
+  max-height: min(
+    560px,
+    70dvh,
+    calc(100dvh - var(--float-bottom) - var(--tray-clearance, 0px) - 10rem)
+  );
+}
+@media (max-width: 639.98px) {
+  .approval-tray:not([data-collapsed]) {
+    left: var(--float-inset);
+  }
+}
+
+/* Sonner sets its offsets and z-index inline / in its own sheet; the
+   !important outranks both. */
+[data-sonner-toaster] {
+  --toast-bottom: min(
+    calc(
+      var(--float-bottom) + var(--tray-clearance, 0px) +
+        var(--tray-stack, calc(0px - var(--float-gap))) + var(--float-gap)
+    ),
+    calc(100dvh - 12rem)
+  );
+  --offset-right: var(--float-inset) !important;
+  --offset-bottom: var(--toast-bottom) !important;
+  --mobile-offset-left: var(--float-inset) !important;
+  --mobile-offset-right: var(--float-inset) !important;
+  --mobile-offset-bottom: var(--toast-bottom) !important;
+  z-index: var(--z-toast) !important;
+}
+:root:has([data-slot='sheet-overlay'][data-state='open']) [data-sonner-toaster] {
+  z-index: calc(var(--z-drawer) - 1) !important;
 }
 /* Sonner's close button is 20px: give it more than the 24px minimum target
    (the toast is scaled slightly while it settles, so 24px measures under). */
-.toast-layer [data-sonner-toast][data-styled] [data-close-button] {
+[data-sonner-toaster] [data-sonner-toast][data-styled] [data-close-button] {
   width: 28px;
   height: 28px;
 }
@@ -305,6 +364,32 @@
 [data-slot='dialog-overlay']:has(+ [data-palette]) {
   backdrop-filter: blur(6px) saturate(1.1);
 }
+/* The highlighted result reads as a soft filled row: the gliding pill is an
+   accent wash over the raised step, and the row adds a short accent bar on
+   its leading edge (the 3:1 indicator; focus itself stays in the input). */
+.palette-track {
+  --glide-bg: color-mix(in oklab, var(--accent) 9%, var(--surface-3));
+}
+.palette-item::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 3px;
+  height: 16px;
+  translate: 0 -50%;
+  border-radius: 0 3px 3px 0;
+  background: var(--ring);
+  opacity: 0;
+  scale: 1 0.4;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    scale var(--duration-base) var(--ease-spring);
+}
+.palette-item[data-selected='true']::before {
+  opacity: 1;
+  scale: 1 1;
+}
 /* The highlight glides between results at keyboard speed. */
 .palette-track[data-glide='animate']::before {
   transition-duration: var(--duration-fast);
@@ -332,7 +417,8 @@
 @media (forced-colors: active) {
   .shell-brand-mark,
   .rail-track::after,
-  .session-row::before {
+  .session-row::before,
+  .palette-item::before {
     forced-color-adjust: none;
     background: CanvasText;
   }

@@ -133,10 +133,12 @@ function Workspace() {
             <span className="min-w-0 flex-1 truncate text-section">
               {handle ? t(handle.titleKey) : t('webShell.appName')}
             </span>
+            {/* Quiet on purpose: the page's own primary action leads. */}
             <Button
-              variant="primary"
-              size="icon-sm"
+              variant="ghost"
+              size="icon"
               aria-label={t('webShell.railNewSession')}
+              className="text-accent hover:bg-accent-tint"
               onClick={() =>
                 navigate(activeAgent ? `/new?agent=${encodeURIComponent(activeAgent)}` : '/new')
               }
@@ -151,11 +153,6 @@ function Workspace() {
         <Suspense fallback={null}>
           <SetupPrompt />
         </Suspense>
-        {/* Toasts: a zero-height layer that contains sonner's fixed list, so
-            they sit just below the bars, over the main column (shell.css). */}
-        <div className="toast-layer">
-          <ShellToaster />
-        </div>
         <main
           id="main-content"
           ref={mainRef}
@@ -173,6 +170,8 @@ function Workspace() {
       <Suspense fallback={null}>
         <ApprovalTray />
       </Suspense>
+      {/* Toasts stack above the docked bar and the tray (shell.css). */}
+      <ShellToaster />
       <PaletteHost />
       <GatewayUrlConfirm />
     </div>

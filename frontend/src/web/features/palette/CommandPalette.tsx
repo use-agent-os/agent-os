@@ -30,12 +30,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-// The highlighted row's fill is the list's gliding pill (`.palette-track`);
-// the row itself only adds the 3:1 ring, since focus stays in the input.
-const itemClass = [
-  'target relative flex cursor-default items-center gap-3 rounded-lg px-2 py-1.5 text-ui outline-none select-none data-[disabled=true]:opacity-60',
-  'data-[selected=true]:outline-solid data-[selected=true]:outline-2 data-[selected=true]:-outline-offset-2 data-[selected=true]:outline-ring',
-].join(' ')
+// The highlighted row's fill is the list's gliding pill (`.palette-track`, a
+// soft accent wash); `.palette-item` adds a short 3:1 accent bar on its
+// leading edge (shell.css), since focus stays in the input.
+const itemClass =
+  'palette-item target relative flex cursor-default items-center gap-3 rounded-lg px-2 py-1.5 text-ui outline-none select-none data-[disabled=true]:opacity-60'
 const groupClass =
   '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-label [&_[cmdk-group-heading]]:text-text-muted'
 const tileClass =
@@ -148,10 +147,7 @@ export function CommandPalette({
               <Search className="size-5" aria-hidden />
               {t('webPalette.empty', { query })}
             </Command.Empty>
-            <div
-              ref={track}
-              className="palette-track glide-track [--glide-bg:var(--surface-3)] [--glide-radius:8px]"
-            >
+            <div ref={track} className="palette-track glide-track [--glide-radius:8px]">
               <Command.Group heading={t('webPalette.groupSessions')} className={groupClass}>
                 {sessions.isError ? (
                   <div role="alert" className="px-2 py-1.5 text-danger">

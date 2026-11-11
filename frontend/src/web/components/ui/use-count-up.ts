@@ -24,7 +24,9 @@ export function useCountUp(target: number, duration = 450): number {
     const start = performance.now()
     let frame = 0
     const tick = (now: number) => {
-      const p = Math.min(1, (now - start) / duration)
+      // The first rAF timestamp is the frame's start, which can precede the
+      // `performance.now()` above: clamp, or the ease-out goes negative.
+      const p = Math.min(1, Math.max(0, (now - start) / duration))
       const eased = 1 - (1 - p) ** 3
       const next = from + (target - from) * eased
       shown.current = next
