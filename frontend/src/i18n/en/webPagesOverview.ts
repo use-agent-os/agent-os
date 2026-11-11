@@ -16,6 +16,7 @@ export const webPagesOverview = defineNamespace('webPagesOverview', {
   homeReadiness: 'Readiness',
   homeReadinessHint: 'From the doctor report',
   homeReadinessLink: 'Details: Health',
+  homeReadinessFix: 'Review and fix',
   homeProvider: 'Provider and route',
   homeProviderLink: 'Details: Models settings',
   homeProviderNone: 'Not configured',
@@ -49,6 +50,9 @@ export const webPagesOverview = defineNamespace('webPagesOverview', {
   homeEvents: 'Live events',
   homeEventsLink: 'Details: Debug',
   homeEventsEmpty: 'Waiting for gateway events…',
+  homeEventsEmptyHint: 'Every frame the gateway sends appears here as it happens.',
+  homeEventsLive: 'Live',
+  homeEventsPaused: 'Paused',
 
   // Usage
   usageTitle: 'Usage',

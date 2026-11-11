@@ -1,5 +1,17 @@
 import { useQuery } from '@tanstack/react-query'
-import { BarChart3, ChevronDown, Download, MessageSquarePlus, RefreshCw } from 'lucide-react'
+import {
+  ArrowUp,
+  BarChart3,
+  Calculator,
+  ChevronDown,
+  Coins,
+  Download,
+  Info,
+  MessageSquare,
+  MessageSquarePlus,
+  RefreshCw,
+  Wallet,
+} from 'lucide-react'
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useRpc } from '@/app/providers'
@@ -32,9 +44,11 @@ import {
   type UsageRange,
   type UsageRow,
 } from '@/views/usage/logic'
+import { Badge } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
-import { StatCard } from '@/web/components/ui/card'
+import { Card, StatCard } from '@/web/components/ui/card'
 import { PageHeader } from '@/web/components/ui/page-header'
+import { SegmentedControl } from '@/web/components/ui/segmented-control'
 import {
   EmptyState,
   ErrorState,
@@ -42,6 +56,8 @@ import {
   Skeleton,
   StaleBadge,
 } from '@/web/components/ui/states'
+import { useCountUp } from '@/web/components/ui/use-count-up'
+import { IconTile, Meter } from '@/web/features/home/overview-ui'
 import { useDocumentVisible } from '@/web/shell/session-data'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
@@ -131,45 +147,27 @@ function rowNumber(row: UsageRow, ...keys: string[]): string {
   return value == null || value === '' ? '—' : formatNumber(Number(value))
 }
 
-const SOURCE_TONE: Record<string, string> = {
-  provider_billed: 'border-ok/50 text-ok',
-  provider_billed_prorated: 'border-ok/50 text-ok',
-  agentos_estimate: 'border-info/50 text-info',
-  mixed: 'border-warn/50 text-warn',
-  unavailable: 'border-danger/50 text-danger',
-}
+const SOURCE_TONE = {
+  provider_billed: 'ok',
+  provider_billed_prorated: 'ok',
+  agentos_estimate: 'info',
+  mixed: 'warn',
+  unavailable: 'danger',
+} as const
 
 function SourceBadge({ badge }: { badge: CostSourceBadge }) {
+  const tone = badge.ephemeral
+    ? 'neutral'
+    : (SOURCE_TONE[badge.cls as keyof typeof SOURCE_TONE] ?? 'neutral')
   return (
-    <span
+    <Badge
+      tone={tone}
+      variant={badge.ephemeral ? 'outline' : 'soft'}
       title={badge.tooltip}
-      className={cn(
-        'inline-flex rounded-full border px-2 py-0.5 text-small whitespace-nowrap',
-        badge.ephemeral
-          ? 'border-dashed border-border text-text-muted'
-          : (SOURCE_TONE[badge.cls] ?? 'border-border text-text-muted'),
-      )}
+      className={badge.ephemeral ? 'border-dashed' : undefined}
     >
       {badge.label}
-    </span>
-  )
-}
-
-function Metric({
-  label,
-  value,
-  hint,
-  children,
-}: {
-  label: string
-  value: string
-  hint?: string
-  children?: ReactNode
-}) {
-  return (
-    <StatCard label={label} value={value} hint={hint}>
-      {children}
-    </StatCard>
+    </Badge>
   )
 }
 
@@ -177,7 +175,7 @@ function Metric({
 function ModelBreakdown({ row }: { row: UsageRow }) {
   const data = sessionExpandRows(row)
   return (
-    <div className="flex flex-col gap-2 bg-surface-0 px-3 py-2">
+    <div className="flex flex-col gap-2 border-t border-border bg-surface-inset px-4 py-3 shadow-inset">
       <p className="text-small text-text-muted">
         {tPlural('webPagesOverview.usageBreakdownModels', data.count, {
           tokens: formatNumber(data.totalTokens),
@@ -189,28 +187,23 @@ function ModelBreakdown({ row }: { row: UsageRow }) {
           {t('webPagesOverview.usageBreakdownProrated')}
         </p>
       ) : null}
-      <ul role="list" className="flex flex-col gap-1">
+      <ul role="list" className="flex flex-col gap-1.5">
         {data.rows.map((m, i) => (
-          <li key={`${m.model}:${i}`} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="min-w-40 font-mono" title={m.model}>
+          <li key={`${m.model}:${i}`} className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span className="min-w-40 font-mono text-small" title={m.model}>
               {m.provider ? <span className="text-text-muted">{m.provider}/</span> : null}
               {m.name}
             </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-20 overflow-hidden rounded-full bg-surface-3" aria-hidden>
-                <span
-                  className="block h-full bg-accent"
-                  style={{ width: `${m.sharePct.toFixed(1)}%` }}
-                />
-              </span>
+            <span className="flex items-center gap-2">
+              <Meter className="h-1.5 w-20" segments={[{ pct: m.sharePct }]} />
               <span className="text-small tabular-nums">
                 {t('webPagesOverview.usageShare', { share: m.sharePct.toFixed(1) })}
               </span>
             </span>
-            <span className="tabular-nums">
+            <span className="text-small tabular-nums">
               {t('webPagesOverview.usageTokens', { tokens: m.tokens })}
             </span>
-            <span className="tabular-nums">{formatCost(m.cost)}</span>
+            <span className="text-small tabular-nums">{formatCost(m.cost)}</span>
             <SourceBadge badge={m.badge} />
           </li>
         ))}
@@ -218,6 +211,8 @@ function ModelBreakdown({ row }: { row: UsageRow }) {
     </div>
   )
 }
+
+const CELL = 'px-3 py-2.5'
 
 function SessionsTable({ rows }: { rows: UsageRow[] }) {
   const [sortCol, setSortCol] = useState<SortColumn>('updated_at')
@@ -241,120 +236,168 @@ function SessionsTable({ rows }: { rows: UsageRow[] }) {
     })
 
   return (
-    <div className="scroll-contained overflow-x-auto rounded-lg border border-border">
-      <table className="w-full min-w-[56rem] text-left">
-        <caption className="sr-only">{t('webPagesOverview.usageTable')}</caption>
-        <thead className="bg-surface-2 text-small text-text-muted">
-          <tr>
-            {COLUMNS.map((col) => {
-              const active = col.key === sortCol
-              return (
-                <th
-                  key={col.key}
-                  scope="col"
-                  aria-sort={
-                    col.sortable && active ? (sortAsc ? 'ascending' : 'descending') : undefined
-                  }
-                  className={cn('px-3 py-2 font-medium', col.numeric && 'text-right')}
-                >
-                  {col.sortable ? (
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1 hover:text-text"
-                      onClick={() => sortBy(col.key as SortColumn)}
-                    >
-                      {columnLabel(col.key)}
-                      <span aria-hidden>{active ? (sortAsc ? '▲' : '▼') : ''}</span>
-                    </button>
-                  ) : (
-                    columnLabel(col.key)
-                  )}
-                </th>
-              )
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((row, index) => {
-            const key = rowKey(row)
-            const ts = sessionTimestamp(row)
-            const open = expanded.has(key)
-            const canExpand = hasModelExpand(row)
-            return (
-              <Fragment key={key || `row-${index}`}>
-                <tr className="border-t border-border">
-                  <td className="max-w-64 px-3 py-2">
-                    {key ? (
-                      <Link
-                        to={sessionKeyToPath(key)}
-                        title={t('webPagesOverview.usageOpenSession', { session: key })}
-                        className="block truncate font-mono text-small text-accent underline-offset-2 hover:underline"
-                      >
-                        {key}
-                      </Link>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap text-text-muted">
-                    {ts != null ? formatRelTime(ts) : '—'}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">
-                    {rowNumber(row, 'input_tokens', 'inputTokens')}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">
-                    {rowNumber(row, 'output_tokens', 'outputTokens')}
-                  </td>
-                  <td className="px-3 py-2 text-right text-text-muted tabular-nums">
-                    {rowNumber(row, 'cache_read_tokens', 'cacheReadTokens')}
-                  </td>
-                  <td className="px-3 py-2 text-right text-text-muted tabular-nums">
-                    {rowNumber(row, 'cache_write_tokens', 'cacheWriteTokens')}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">
-                    {formatCost(
-                      Number(rowVal(row as Record<string, unknown>, 'cost_usd', 'costUsd') ?? 0),
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    <SourceBadge badge={costSourceBadge(row as Record<string, unknown>)} />
-                  </td>
-                  <td className="px-3 py-2">
-                    {canExpand ? (
+    <Card variant="plain" padding="none" className="overflow-hidden shadow-card">
+      {/* Scrolls on its own, so the header can stick while the rows move. */}
+      <div className="scroll-contained max-h-[36rem] overflow-auto">
+        <table className="w-full min-w-[52rem] text-left">
+          <caption className="sr-only">{t('webPagesOverview.usageTable')}</caption>
+          <thead className="sticky top-0 z-10 bg-surface-2 text-small text-text-muted shadow-[inset_0_-1px_0_var(--border)]">
+            <tr>
+              {COLUMNS.map((col) => {
+                const active = col.key === sortCol
+                return (
+                  <th
+                    key={col.key}
+                    scope="col"
+                    aria-sort={
+                      col.sortable && active ? (sortAsc ? 'ascending' : 'descending') : undefined
+                    }
+                    className={cn('px-3 py-2 font-medium', col.numeric && 'text-right')}
+                  >
+                    {col.sortable ? (
                       <button
                         type="button"
-                        aria-expanded={open}
-                        onClick={() => toggle(key)}
-                        className="inline-flex items-center gap-1 rounded px-1 hover:bg-surface-3"
+                        className={cn(
+                          'group target -mx-1 inline-flex items-center gap-1 rounded-sm px-1 transition-colors duration-[var(--duration-fast)] hover:text-text',
+                          col.numeric && 'flex-row-reverse',
+                          active && 'text-text',
+                        )}
+                        onClick={() => sortBy(col.key as SortColumn)}
                       >
-                        {modelDisplayLabel(row)}
-                        <ChevronDown
-                          className={cn('size-3.5 transition-transform', open && 'rotate-180')}
+                        {columnLabel(col.key)}
+                        <ArrowUp
                           aria-hidden
+                          className={cn(
+                            'ov-sort size-3.5',
+                            active
+                              ? 'text-accent opacity-100'
+                              : 'opacity-0 group-hover:opacity-50 group-focus-visible:opacity-50',
+                            (!active || !sortAsc) && 'rotate-180',
+                          )}
                         />
                       </button>
                     ) : (
-                      <span className="font-mono text-small">{modelDisplayLabel(row)}</span>
+                      columnLabel(col.key)
                     )}
-                  </td>
-                </tr>
-                {canExpand && open ? (
-                  <tr>
-                    <td colSpan={COLUMNS.length} className="p-0">
-                      <ModelBreakdown row={row} />
+                  </th>
+                )
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((row, index) => {
+              const key = rowKey(row)
+              const ts = sessionTimestamp(row)
+              const open = expanded.has(key)
+              const canExpand = hasModelExpand(row)
+              return (
+                <Fragment key={key || `row-${index}`}>
+                  <tr
+                    className={cn(
+                      'border-t border-border transition-colors duration-[var(--duration-fast)] first:border-t-0 hover:bg-surface-2',
+                      open && 'bg-surface-2',
+                    )}
+                  >
+                    <td className={cn(CELL, 'max-w-44')}>
+                      {key ? (
+                        <Link
+                          to={sessionKeyToPath(key)}
+                          title={t('webPagesOverview.usageOpenSession', { session: key })}
+                          className="block truncate font-mono text-small text-accent underline-offset-2 hover:underline"
+                        >
+                          {key}
+                        </Link>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td className={cn(CELL, 'whitespace-nowrap text-text-muted')}>
+                      {ts != null ? formatRelTime(ts) : '—'}
+                    </td>
+                    <td className={cn(CELL, 'text-right tabular-nums')}>
+                      {rowNumber(row, 'input_tokens', 'inputTokens')}
+                    </td>
+                    <td className={cn(CELL, 'text-right tabular-nums')}>
+                      {rowNumber(row, 'output_tokens', 'outputTokens')}
+                    </td>
+                    <td className={cn(CELL, 'text-right text-text-muted tabular-nums')}>
+                      {rowNumber(row, 'cache_read_tokens', 'cacheReadTokens')}
+                    </td>
+                    <td className={cn(CELL, 'text-right text-text-muted tabular-nums')}>
+                      {rowNumber(row, 'cache_write_tokens', 'cacheWriteTokens')}
+                    </td>
+                    <td className={cn(CELL, 'text-right font-medium tabular-nums')}>
+                      {formatCost(
+                        Number(rowVal(row as Record<string, unknown>, 'cost_usd', 'costUsd') ?? 0),
+                      )}
+                    </td>
+                    <td className={CELL}>
+                      <SourceBadge badge={costSourceBadge(row as Record<string, unknown>)} />
+                    </td>
+                    <td className={CELL}>
+                      {canExpand ? (
+                        <button
+                          type="button"
+                          aria-expanded={open}
+                          onClick={() => toggle(key)}
+                          className="press target -mx-1.5 inline-flex items-center gap-1 rounded-control px-1.5 text-small hover:bg-surface-3"
+                        >
+                          {modelDisplayLabel(row)}
+                          <ChevronDown
+                            className={cn(
+                              'size-3.5 text-text-muted transition-transform duration-[var(--duration-base)] ease-[var(--ease-out)]',
+                              open && 'rotate-180',
+                            )}
+                            aria-hidden
+                          />
+                        </button>
+                      ) : (
+                        <span className="font-mono text-small">{modelDisplayLabel(row)}</span>
+                      )}
                     </td>
                   </tr>
-                ) : null}
-              </Fragment>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
+                  {canExpand && open ? (
+                    <tr>
+                      <td colSpan={COLUMNS.length} className="p-0">
+                        <div className="anim-enter">
+                          <ModelBreakdown row={row} />
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   )
 }
 
 const CHART_MODES: readonly ChartMode[] = ['tokens', 'cost']
+
+/** The colour key of the chart: what each fill colour stands for. */
+function ChartLegend({ mode }: { mode: ChartMode }) {
+  const item = (series: 'input' | 'output', label: string) => (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="ov-swatch" data-series={series} />
+      {label}
+    </span>
+  )
+  return (
+    <p className="flex items-center gap-4 text-small text-text-muted" aria-hidden>
+      {mode === 'tokens' ? (
+        <>
+          {item('input', t('webPagesOverview.usageChartInput'))}
+          {item('output', t('webPagesOverview.usageChartOutput'))}
+        </>
+      ) : (
+        item('input', t('webPagesOverview.usageChartCost'))
+      )}
+    </p>
+  )
+}
 
 /** The sessions with the most usage in range, as bars, by tokens or by cost. */
 function TopSessionsChart({ rows }: { rows: UsageRow[] }) {
@@ -362,81 +405,75 @@ function TopSessionsChart({ rows }: { rows: UsageRow[] }) {
   const chart = useMemo(() => chartRows(rows, mode), [rows, mode])
   if (chart.poolSize === 0) return null
   return (
-    <section
-      aria-labelledby="usage-chart-title"
-      className="flex flex-col gap-3 rounded-lg border border-border bg-surface-1 p-4"
-    >
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h2 id="usage-chart-title" className="font-semibold">
-          {t('webPagesOverview.usageChartTitle')}
-        </h2>
-        <span className="text-small text-text-muted">
-          {t('webPagesOverview.usageChartShown', { shown: chart.shown, total: chart.poolSize })}
-        </span>
-        <div
-          role="group"
-          aria-label={t('webPagesOverview.usageChartMeasure')}
-          className="ml-auto flex gap-1 rounded-md border border-border p-0.5"
-        >
-          {CHART_MODES.map((value) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={mode === value}
-              onClick={() => setMode(value)}
-              className={cn(
-                'rounded px-2.5 py-0.5 text-small',
-                mode === value ? 'bg-accent text-accent-fg' : 'text-text-muted hover:bg-surface-3',
-              )}
+    <Card asChild padding="none">
+      <section aria-labelledby="usage-chart-title" className="flex flex-col gap-4 p-5">
+        <header className="flex flex-wrap items-center gap-x-4 gap-y-3">
+          <div className="min-w-0">
+            <h2 id="usage-chart-title" className="text-section">
+              {t('webPagesOverview.usageChartTitle')}
+            </h2>
+            <p className="mt-0.5 text-small text-text-muted">
+              {t('webPagesOverview.usageChartShown', { shown: chart.shown, total: chart.poolSize })}
+            </p>
+          </div>
+          <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2">
+            <ChartLegend mode={mode} />
+            <SegmentedControl
+              kind="toggle"
+              size="sm"
+              aria-label={t('webPagesOverview.usageChartMeasure')}
+              value={mode}
+              onChange={setMode}
+              options={CHART_MODES.map((value) => ({
+                value,
+                label:
+                  value === 'tokens'
+                    ? t('webPagesOverview.usageChartTokens')
+                    : t('webPagesOverview.usageChartCost'),
+              }))}
+            />
+          </div>
+        </header>
+        <ol role="list" className="flex flex-col gap-1">
+          {chart.bars.map((bar, i) => (
+            <li
+              key={bar.key}
+              aria-label={t('webPagesOverview.usageChartBar', {
+                session: bar.key,
+                value: bar.valueLabel,
+              })}
+              className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 rounded-control sm:grid-cols-[minmax(7rem,13rem)_minmax(0,1fr)_4.5rem]"
             >
-              {value === 'tokens'
-                ? t('webPagesOverview.usageChartTokens')
-                : t('webPagesOverview.usageChartCost')}
-            </button>
+              {/* A full-height row target (24 px; 44 px on touch). */}
+              <Link
+                to={sessionKeyToPath(bar.key)}
+                title={bar.key}
+                className="target inline-flex min-w-0 items-center font-mono text-small text-text underline-offset-2 transition-colors duration-[var(--duration-fast)] hover:text-accent hover:underline"
+              >
+                <span className="truncate">{bar.label}</span>
+              </Link>
+              <Meter
+                index={i}
+                className="col-span-2 row-start-2 h-2.5 sm:col-span-1 sm:row-start-auto"
+                segments={[
+                  { pct: bar.inputPct, series: 'input' },
+                  { pct: bar.outputPct, series: 'output' },
+                ]}
+              />
+              <span className="text-right text-small font-medium tabular-nums">
+                {bar.valueLabel}
+              </span>
+            </li>
           ))}
-        </div>
-      </header>
-      {mode === 'tokens' ? (
-        <p className="flex items-center gap-3 text-small text-text-muted" aria-hidden>
-          <span className="inline-flex items-center gap-1">
-            <span className="size-2.5 rounded-sm bg-accent" />
-            {t('webPagesOverview.usageChartInput')}
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="size-2.5 rounded-sm bg-info" />
-            {t('webPagesOverview.usageChartOutput')}
-          </span>
-        </p>
-      ) : null}
-      <ol role="list" className="flex flex-col gap-1.5">
-        {chart.bars.map((bar) => (
-          <li
-            key={bar.key}
-            aria-label={t('webPagesOverview.usageChartBar', {
-              session: bar.key,
-              value: bar.valueLabel,
-            })}
-            className="grid grid-cols-[minmax(6rem,14rem)_1fr_auto] items-center gap-2"
-          >
-            <Link
-              to={sessionKeyToPath(bar.key)}
-              title={bar.key}
-              className="truncate font-mono text-small text-accent underline-offset-2 hover:underline"
-            >
-              {bar.label}
-            </Link>
-            <span className="flex h-3 overflow-hidden rounded-sm bg-surface-3" aria-hidden>
-              <span className="h-full bg-accent" style={{ width: `${bar.inputPct}%` }} />
-              {bar.outputPct > 0 ? (
-                <span className="h-full bg-info" style={{ width: `${bar.outputPct}%` }} />
-              ) : null}
-            </span>
-            <span className="text-small tabular-nums">{bar.valueLabel}</span>
-          </li>
-        ))}
-      </ol>
-    </section>
+        </ol>
+      </section>
+    </Card>
   )
+}
+
+/** A figure that counts up on arrival and on change. */
+function CountedCost({ value }: { value: number }) {
+  return <>{formatCost(useCountUp(value))}</>
 }
 
 /** Usage summed per model across the sessions in range. */
@@ -444,89 +481,134 @@ function ModelGrid({ rows }: { rows: UsageRow[] }) {
   const grid = useMemo(() => modelBreakdownGrid(rows), [rows])
   if (grid.models.length === 0) return null
   return (
-    <section aria-labelledby="usage-models-title" className="flex flex-col gap-2">
-      <h2 id="usage-models-title" className="font-semibold">
+    <section aria-labelledby="usage-models-title" className="flex flex-col gap-3">
+      <h2 id="usage-models-title" className="text-section">
         {t('webPagesOverview.usageModelsTitle')}
       </h2>
-      <ul role="list" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {grid.models.map((m) => (
-          <li
-            key={m.model}
-            aria-label={m.model}
-            className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-border bg-surface-1 p-4"
-          >
-            <p className="truncate font-mono text-small" title={m.model}>
-              {m.provider && m.name !== m.model ? (
-                <span className="text-text-muted">{m.provider}/</span>
-              ) : null}
-              {m.name}
-            </p>
-            <p className="text-xl font-semibold tabular-nums">{formatCost(m.costUsd)}</p>
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-24 overflow-hidden rounded-full bg-surface-3" aria-hidden>
-                <span
-                  className="block h-full bg-accent"
-                  style={{ width: `${m.sharePct.toFixed(1)}%` }}
-                />
-              </span>
-              <span className="text-small tabular-nums">
-                {t('webPagesOverview.usageShare', { share: m.sharePct.toFixed(1) })}
-              </span>
-            </span>
-            <p className="text-small text-text-muted tabular-nums">
-              {t('webPagesOverview.usageModelTokens', {
-                tokens: formatNumber(m.totalTokens),
-                input: formatNumber(m.inputTokens),
-                output: formatNumber(m.outputTokens),
-              })}
-            </p>
-            <p className="text-small text-text-muted">
-              {tPlural('webPagesOverview.usageModelSessions', m.sessions)}
-            </p>
-          </li>
+      <ul role="list" className="anim-stagger grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {grid.models.map((m, i) => (
+          <Card asChild key={m.model} padding="none">
+            <li aria-label={m.model} className="flex min-w-0 flex-col gap-3 p-5">
+              <p className="truncate font-mono text-small" title={m.model}>
+                {m.provider && m.name !== m.model ? (
+                  <span className="text-text-muted">{m.provider}/</span>
+                ) : null}
+                {m.name}
+              </p>
+              <div className="flex flex-col gap-2">
+                <p className="text-stat tabular-nums">
+                  <CountedCost value={m.costUsd} />
+                </p>
+                <span className="flex items-center gap-2.5">
+                  <Meter index={i} className="flex-1" segments={[{ pct: m.sharePct }]} />
+                  <span className="shrink-0 text-small font-medium tabular-nums">
+                    {t('webPagesOverview.usageShare', { share: m.sharePct.toFixed(1) })}
+                  </span>
+                </span>
+              </div>
+              <div className="flex flex-col gap-0.5 border-t border-border pt-3 text-small text-text-muted">
+                <p className="tabular-nums">
+                  {t('webPagesOverview.usageModelTokens', {
+                    tokens: formatNumber(m.totalTokens),
+                    input: formatNumber(m.inputTokens),
+                    output: formatNumber(m.outputTokens),
+                  })}
+                </p>
+                <p>{tPlural('webPagesOverview.usageModelSessions', m.sessions)}</p>
+              </div>
+            </li>
+          </Card>
         ))}
       </ul>
     </section>
   )
 }
 
+// The tokens card is wider: it carries the input/output/cache breakdown.
+const STAT_GRID =
+  'grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)_minmax(0,1fr)_minmax(0,1fr)]'
+
 function UsageBody({ all, range }: { all: UsageRow[]; range: UsageRange }) {
   const visible = useMemo(() => visibleSessions(all, range), [all, range])
   const metrics = useMemo(() => usageMetrics(visible), [visible])
   const composition = useMemo(() => sourceCompositionHint(visible), [visible])
   const hidden = rangeHiddenHint(all, range)
+  const ioTotal = metrics.input + metrics.output
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Metric
+    <div className="flex flex-col gap-6">
+      <div className={cn('anim-stagger', STAT_GRID)}>
+        <StatCard
           label={t('webPagesOverview.usageSpend')}
-          value={formatCost(metrics.cost)}
+          icon={
+            <IconTile tone="accent">
+              <Wallet />
+            </IconTile>
+          }
+          value={metrics.cost}
+          format={formatCost}
           hint={composition || t('webPagesOverview.usageNoCostSource')}
         />
-        <Metric
+        <StatCard
           label={t('webPagesOverview.usageTokensTitle')}
-          value={formatNumber(metrics.totalTokens)}
+          icon={
+            <IconTile>
+              <Coins />
+            </IconTile>
+          }
+          value={metrics.totalTokens}
+          format={formatNumber}
         >
-          <dl className="grid grid-cols-2 gap-x-3 text-small">
-            <dt className="text-text-muted">{t('webPagesOverview.usageInput')}</dt>
-            <dd className="text-right tabular-nums">{formatNumber(metrics.input)}</dd>
-            <dt className="text-text-muted">{t('webPagesOverview.usageOutput')}</dt>
-            <dd className="text-right tabular-nums">{formatNumber(metrics.output)}</dd>
-            <dt className="text-text-muted">{t('webPagesOverview.usageCacheRead')}</dt>
-            <dd className="text-right tabular-nums">{formatNumber(metrics.cacheRead)}</dd>
-            <dt className="text-text-muted">{t('webPagesOverview.usageCacheWrite')}</dt>
-            <dd className="text-right tabular-nums">{formatNumber(metrics.cacheWrite)}</dd>
+          <Meter
+            className="mt-1 h-1.5"
+            segments={[
+              { pct: ioTotal ? (metrics.input / ioTotal) * 100 : 0, series: 'input' },
+              { pct: ioTotal ? (metrics.output / ioTotal) * 100 : 0, series: 'output' },
+            ]}
+          />
+          <dl className="mt-1 grid grid-cols-2 gap-x-5 gap-y-0.5 text-small">
+            {(
+              [
+                ['input', t('webPagesOverview.usageInput'), metrics.input],
+                ['output', t('webPagesOverview.usageOutput'), metrics.output],
+                [null, t('webPagesOverview.usageCacheRead'), metrics.cacheRead],
+                [null, t('webPagesOverview.usageCacheWrite'), metrics.cacheWrite],
+              ] as const
+            ).map(([series, label, value]) => (
+              <div key={label} className="flex min-w-0 items-center justify-between gap-2">
+                <dt className="inline-flex min-w-0 items-center gap-1.5 truncate text-text-muted">
+                  {series ? (
+                    <span className="ov-swatch size-2" data-series={series} aria-hidden />
+                  ) : (
+                    <span className="size-2 shrink-0" aria-hidden />
+                  )}
+                  {label}
+                </dt>
+                <dd className="tabular-nums">{formatNumber(value)}</dd>
+              </div>
+            ))}
           </dl>
-        </Metric>
-        <Metric
+        </StatCard>
+        <StatCard
           label={t('webPagesOverview.usageSessions')}
-          value={formatNumber(metrics.sessions)}
+          icon={
+            <IconTile>
+              <MessageSquare />
+            </IconTile>
+          }
+          value={metrics.sessions}
+          format={formatNumber}
           hint={t('webPagesOverview.usageSessionsHint')}
         />
-        <Metric
+        <StatCard
           label={t('webPagesOverview.usageAverage')}
-          value={metrics.avgCost != null ? formatCost(metrics.avgCost) : '—'}
+          icon={
+            <IconTile>
+              <Calculator />
+            </IconTile>
+          }
+          value={metrics.avgCost != null ? metrics.avgCost : '—'}
+          format={formatCost}
           hint={t('webPagesOverview.usageAverageHint')}
         />
       </div>
@@ -534,27 +616,72 @@ function UsageBody({ all, range }: { all: UsageRow[]; range: UsageRange }) {
       <TopSessionsChart rows={visible} />
       <ModelGrid rows={visible} />
 
-      <section aria-labelledby="usage-sessions-title" className="flex flex-col gap-2">
+      <section
+        aria-labelledby="usage-sessions-title usage-sessions-count"
+        className="flex flex-col gap-3"
+      >
         <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h2 id="usage-sessions-title" className="font-semibold">
+          <h2 id="usage-sessions-title" className="text-section">
             {t('webPagesOverview.usageTable')}
           </h2>
-          <span className="text-small text-text-muted">
+          <span id="usage-sessions-count" className="text-small text-text-muted tabular-nums">
             {tPlural('webPagesOverview.usageSessionCount', visible.length)}
           </span>
           {hidden ? <span className="text-small text-text-muted">{hidden}</span> : null}
         </header>
         {visible.length === 0 ? (
-          <EmptyState
-            icon={<BarChart3 />}
-            title={t('webPagesOverview.usageRangeEmpty')}
-            description={t('webPagesOverview.usageRangeEmptyHint')}
-          />
+          <Card variant="plain" padding="none">
+            <EmptyState
+              icon={<BarChart3 />}
+              title={t('webPagesOverview.usageRangeEmpty')}
+              description={t('webPagesOverview.usageRangeEmptyHint')}
+            />
+          </Card>
         ) : (
           <SessionsTable rows={visible} />
         )}
       </section>
     </div>
+  )
+}
+
+/** The loading layout: the same cards in the same places, so nothing shifts. */
+function UsageSkeleton() {
+  const statLines = (
+    <>
+      <span className="flex items-center gap-2">
+        <Skeleton className="size-8 rounded-control" />
+        <Skeleton className="h-3.5 w-20" />
+      </span>
+      <Skeleton className="mt-1 h-8 w-28" />
+      <Skeleton className="h-4 w-36" />
+    </>
+  )
+  return (
+    <LoadingRegion label={t('webPagesOverview.usageLoading')} className="flex flex-col gap-6">
+      <div className={STAT_GRID}>
+        {[0, 1, 2, 3].map((i) => (
+          <Card key={i} className="flex h-36 flex-col gap-1.5">
+            {statLines}
+          </Card>
+        ))}
+      </div>
+      <Card padding="none" className="flex flex-col gap-4 p-5">
+        <span className="flex flex-col gap-1.5">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-3.5 w-40" />
+        </span>
+        {[92, 64, 40, 22].map((w) => (
+          <span
+            key={w}
+            className="grid grid-cols-[minmax(7rem,13rem)_minmax(0,1fr)] items-center gap-3"
+          >
+            <Skeleton className="h-3.5 w-28" />
+            <Skeleton className="h-2.5 rounded-full" style={{ width: `${w}%` }} />
+          </span>
+        ))}
+      </Card>
+    </LoadingRegion>
   )
 }
 
@@ -604,38 +731,31 @@ export function UsagePage() {
 
   let content: ReactNode
   if (query.isPending) {
-    content = (
-      <LoadingRegion label={t('webPagesOverview.usageLoading')} className="flex flex-col gap-4">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-28" />
-          ))}
-        </div>
-        <Skeleton className="h-64" />
-      </LoadingRegion>
-    )
+    content = <UsageSkeleton />
   } else if (all && all.length === 0) {
     content = (
-      <EmptyState
-        icon={<BarChart3 />}
-        title={t('webPagesOverview.usageEmpty')}
-        description={t('webPagesOverview.usageEmptyHint')}
-        action={
-          <Button variant="primary" asChild>
-            <Link to="/new">
-              <MessageSquarePlus aria-hidden />
-              {t('webPagesOverview.usageStartSession')}
-            </Link>
-          </Button>
-        }
-      />
+      <Card variant="plain" padding="none">
+        <EmptyState
+          icon={<BarChart3 />}
+          title={t('webPagesOverview.usageEmpty')}
+          description={t('webPagesOverview.usageEmptyHint')}
+          action={
+            <Button variant="primary" asChild>
+              <Link to="/new">
+                <MessageSquarePlus aria-hidden />
+                {t('webPagesOverview.usageStartSession')}
+              </Link>
+            </Button>
+          }
+        />
+      </Card>
     )
   } else if (all) {
     content = <UsageBody all={all} range={range} />
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-8">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 md:p-8">
       <PageHeader
         title={t('webPagesOverview.usageTitle')}
         badge={connection !== 'connected' && all ? <StaleBadge /> : null}
@@ -669,27 +789,20 @@ export function UsagePage() {
         }
       />
 
-      <div
-        role="group"
-        aria-label={t('webPagesOverview.usageRange')}
-        className="flex w-fit flex-wrap gap-1 rounded-lg border border-border bg-surface-1 p-1"
-      >
-        {RANGES.map((value) => (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={range === value}
-            onClick={() => pickRange(value)}
-            className={cn(
-              'rounded-md px-3 py-1 text-small',
-              range === value ? 'bg-accent text-accent-fg' : 'text-text-muted hover:bg-surface-3',
-            )}
-          >
-            {rangeLabel(value)}
-          </button>
-        ))}
+      <div className="flex flex-col gap-2">
+        <SegmentedControl
+          kind="toggle"
+          tone="accent"
+          aria-label={t('webPagesOverview.usageRange')}
+          value={range}
+          onChange={pickRange}
+          options={RANGES.map((value) => ({ value, label: rangeLabel(value) }))}
+        />
+        <p className="flex items-start gap-1.5 text-small text-text-muted">
+          <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          {t('webPagesOverview.usageRangeNote')}
+        </p>
       </div>
-      <p className="-mt-2 text-small text-text-muted">{t('webPagesOverview.usageRangeNote')}</p>
 
       {query.isError ? (
         <ErrorState
