@@ -30,11 +30,11 @@ export function PageHeader({
     >
       <div className="min-w-0 sm:flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-xl font-semibold">{title}</h1>
+          <h1 className="text-title">{title}</h1>
           {badge}
         </div>
         {description ? (
-          <p data-page-header-description className="text-text-muted">
+          <p data-page-header-description className="mt-1 text-pretty text-text-muted">
             {description}
           </p>
         ) : null}

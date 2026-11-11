@@ -18,12 +18,12 @@ export function AlertDialogContent({
   const focus = useRestoreFocus(onOpenAutoFocus, onCloseAutoFocus)
   return (
     <AlertDialogPrimitive.Portal>
-      <AlertDialogPrimitive.Overlay className="anim-overlay-in fixed inset-0 z-[var(--z-overlay)] bg-scrim" />
+      <AlertDialogPrimitive.Overlay className="anim-overlay-in fixed inset-0 z-[var(--z-overlay)] bg-scrim backdrop-blur-[2px]" />
       <AlertDialogPrimitive.Content
         data-slot="alert-dialog-content"
         className={cn(
           'anim-dialog-in fixed top-1/2 left-1/2 z-[var(--z-overlay)] grid w-[calc(100vw-2rem)] max-w-md',
-          '-translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl border border-border bg-surface-2 p-6 shadow-3',
+          '-translate-x-1/2 -translate-y-1/2 gap-4 rounded-overlay border border-border bg-surface-overlay p-6 shadow-overlay',
           className,
         )}
         {...props}
@@ -53,9 +53,7 @@ export function AlertDialogTitle({
   className,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Title>) {
-  return (
-    <AlertDialogPrimitive.Title className={cn('text-base font-semibold', className)} {...props} />
-  )
+  return <AlertDialogPrimitive.Title className={cn('text-section', className)} {...props} />
 }
 
 export function AlertDialogDescription({

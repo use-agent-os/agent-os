@@ -6,8 +6,10 @@ export function Switch({ className, ...props }: React.ComponentProps<typeof Swit
   return (
     <SwitchPrimitive.Root
       className={cn(
-        'peer inline-flex h-6 w-10 shrink-0 items-center rounded-full border border-border-control p-0.5',
-        'bg-surface-3 transition-colors data-[state=checked]:border-accent data-[state=checked]:bg-accent',
+        'peer inline-flex h-6 w-10 shrink-0 items-center rounded-full border border-border-control p-0.5 shadow-inset',
+        'bg-surface-inset transition-[background-color,border-color,box-shadow] duration-[var(--duration-base)] ease-[var(--ease-out)]',
+        'data-[state=checked]:border-accent data-[state=checked]:bg-accent data-[state=checked]:[background-image:var(--accent-gradient)]',
+        'focus-visible:shadow-[var(--focus-glow)]',
         'disabled:cursor-not-allowed disabled:opacity-50',
         // Forced colors would flatten track and thumb to Canvas: paint them
         // with system colours so the thumb shows and "on" reads as Highlight.
@@ -21,7 +23,8 @@ export function Switch({ className, ...props }: React.ComponentProps<typeof Swit
     >
       <SwitchPrimitive.Thumb
         className={cn(
-          'pointer-events-none block size-4 rounded-full bg-text-muted shadow-1 transition-transform',
+          'pointer-events-none block size-4 rounded-full bg-text-muted shadow-1',
+          'transition-[translate,background-color] duration-[var(--duration-spring)] ease-[var(--ease-spring)]',
           'data-[state=checked]:translate-x-4 data-[state=checked]:bg-accent-fg',
           'forced-colors:bg-[ButtonText] forced-colors:data-[state=checked]:bg-[HighlightText]',
           'forced-colors:data-[disabled]:bg-[GrayText] forced-colors:data-[disabled]:data-[state=checked]:bg-[Canvas]',

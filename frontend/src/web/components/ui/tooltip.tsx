@@ -22,7 +22,9 @@ export function TooltipContent({
       <TooltipPrimitive.Content
         sideOffset={sideOffset}
         className={cn(
-          'anim-overlay-in z-[var(--z-tooltip)] max-w-xs rounded-md bg-text px-2 py-1 text-small text-surface-0',
+          'anim-pop z-[var(--z-tooltip)] max-w-xs rounded-md px-2 py-1 text-small font-medium shadow-2',
+          // Light: an ink chip. Dark: a lifted overlay chip with a hairline.
+          'bg-text text-surface-0 dark:border dark:border-border-strong dark:bg-surface-overlay dark:text-text',
           className,
         )}
         {...props}

@@ -3,25 +3,34 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 
+// One primary per view: the lime (olive in light) gradient with a top sheen
+// and a soft glow on hover. Everything else stays quiet. `press` gives every
+// variant the pressed shrink.
 export const buttonVariants = cva(
   [
-    'target inline-flex shrink-0 items-center justify-center gap-2 rounded-md font-medium whitespace-nowrap',
-    'text-ui transition-colors duration-[var(--duration-fast)] select-none',
+    'press target inline-flex shrink-0 items-center justify-center gap-2 rounded-control font-medium whitespace-nowrap',
+    'text-ui select-none',
     'disabled:pointer-events-none disabled:opacity-50 aria-disabled:opacity-50',
     '[&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
   ].join(' '),
   {
     variants: {
       variant: {
-        primary: 'bg-accent text-accent-fg hover:bg-accent/90',
-        secondary: 'bg-surface-3 text-text hover:bg-surface-3/80',
-        outline: 'border border-border-control bg-transparent text-text hover:bg-surface-3',
+        primary: [
+          'bg-accent [background-image:var(--accent-gradient)] text-accent-fg shadow-[var(--elevation-primary)]',
+          'hover:shadow-[var(--elevation-primary-hover)] hover:brightness-[1.04]',
+        ].join(' '),
+        secondary:
+          'border border-border bg-surface-3 text-text shadow-highlight hover:border-border-strong hover:bg-[color-mix(in_oklab,var(--surface-3),var(--text)_6%)]',
+        outline:
+          'border border-border-control bg-transparent text-text hover:border-[color-mix(in_oklab,var(--border-control),var(--text)_28%)] hover:bg-surface-3',
         ghost: 'bg-transparent text-text hover:bg-surface-3',
-        danger: 'bg-danger text-danger-fg hover:bg-danger/90',
+        danger:
+          'bg-danger text-danger-fg shadow-[var(--elevation-primary)] hover:bg-[color-mix(in_oklab,var(--danger),black_8%)]',
         link: 'text-accent underline-offset-4 hover:underline',
       },
       size: {
-        sm: 'h-7 px-2.5',
+        sm: 'h-7 px-2.5 [&_svg]:size-3.5',
         md: 'h-9 px-3.5',
         lg: 'h-11 px-5',
         icon: 'size-9 touch:size-11',

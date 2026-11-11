@@ -3,6 +3,7 @@ import * as React from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webCommon'
 import { cn } from '@/lib/utils'
+import { Badge } from './badge'
 import { Button } from './button'
 
 // The standard view states (design-system spec "Standard view states"):
@@ -39,7 +40,7 @@ export function Skeleton({
       data-visible={visible || undefined}
       aria-hidden
       className={cn(
-        'rounded-md bg-surface-3 transition-opacity',
+        'skeleton-shimmer rounded-md bg-surface-3 transition-opacity duration-[var(--duration-base)]',
         visible ? 'opacity-100' : 'opacity-0',
         className,
       )}
@@ -70,35 +71,48 @@ export function LoadingRegion({
   )
 }
 
+/**
+ * A designed empty state: the icon in a soft tile, a clear title, one line of
+ * help and the primary action. `size="sm"` for a panel or card body.
+ */
 export function EmptyState({
   icon,
   title,
   description,
   action,
+  size = 'md',
   className,
 }: {
   icon?: React.ReactNode
   title: string
   description?: React.ReactNode
   action?: React.ReactNode
+  size?: 'sm' | 'md'
   className?: string
 }) {
   return (
     <div
       data-slot="empty-state"
       className={cn(
-        'mx-auto flex max-w-md flex-col items-center gap-3 px-6 py-12 text-center',
+        'anim-enter mx-auto flex max-w-md flex-col items-center text-center',
+        size === 'sm' ? 'gap-2 px-4 py-8' : 'gap-3 px-6 py-14',
         className,
       )}
     >
       {icon ? (
-        <div className="text-text-muted [&_svg]:size-8" aria-hidden>
+        <div
+          className={cn(
+            'mb-1 grid place-items-center rounded-card border border-border bg-surface-2 text-text-muted shadow-card',
+            size === 'sm' ? 'size-10 [&_svg]:size-5' : 'size-12 [&_svg]:size-6',
+          )}
+          aria-hidden
+        >
           {icon}
         </div>
       ) : null}
-      <h2 className="text-base font-semibold">{title}</h2>
-      {description ? <p className="text-text-muted">{description}</p> : null}
-      {action ? <div className="mt-1">{action}</div> : null}
+      <h2 className="text-section">{title}</h2>
+      {description ? <p className="text-pretty text-text-muted">{description}</p> : null}
+      {action ? <div className="mt-2 flex flex-wrap justify-center gap-2">{action}</div> : null}
     </div>
   )
 }
@@ -126,7 +140,7 @@ export function ErrorState({
     <div data-slot="error-state" className={className}>
       <div
         role="alert"
-        className="flex items-start gap-3 rounded-lg border border-danger/40 bg-danger/10 px-4 py-3"
+        className="anim-fade-in flex items-start gap-3 rounded-card border border-danger/30 bg-danger/[0.07] px-4 py-3 shadow-highlight"
       >
         <AlertTriangle
           className="mt-0.5 size-4 shrink-0 text-danger"
@@ -152,16 +166,14 @@ export function ErrorState({
 export function StaleBadge({ since, className }: { since?: string; className?: string }) {
   const label = since ? t('webCommon.staleSince', { time: since }) : t('webCommon.stale')
   return (
-    <span
+    <Badge
+      tone="warn"
       data-slot="stale-badge"
       title={t('webCommon.staleTitle')}
-      className={cn(
-        'inline-flex items-center gap-1 rounded-full border border-warn/50 px-2 py-0.5 text-small text-warn',
-        className,
-      )}
+      className={cn('[&_svg]:size-3.5', className)}
     >
-      <History className="size-3.5" aria-hidden data-status-icon />
+      <History aria-hidden data-status-icon />
       {label}
-    </span>
+    </Badge>
   )
 }
