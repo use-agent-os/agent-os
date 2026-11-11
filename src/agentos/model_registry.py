@@ -123,6 +123,8 @@ def _gateway_windows(
     )
 
 
+_ANTHROPIC_PRICE_SOURCE = "Anthropic models overview, list prices checked 2026-11-12"
+
 MODEL_FACTS: tuple[ModelFacts, ...] = (
     ModelFacts(
         "gpt-5.4-nano",
@@ -645,6 +647,69 @@ DELIBERATE_SPELLING_DIVERGENCES: tuple[SpellingDivergence, ...] = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class VendorModel:
+    """One model as its vendor's own API names, sizes and bills it.
+
+    Kept apart from :data:`MODEL_FACTS` because the ids overlap: ``claude-opus-5``
+    is both a gateway id (billed at the gateway's discount) and an Anthropic
+    Messages API id (billed at list price). Prices here apply only when the
+    session talks to that vendor directly.
+    """
+
+    model_id: str
+    display_name: str
+    max_output_tokens: int
+    context_window: int
+    price: PriceFacts
+
+
+#: The Anthropic Messages API catalog, newest first; the first entry is the
+#: model the Settings "Test key" check tries. Ids are hyphenated
+#: (``claude-opus-5-5``); the gateways' dotted spellings above are not accepted
+#: there. Without this table a direct Claude session fell back to a 200K window,
+#: a 16K output cap and gateway or default prices.
+ANTHROPIC_MESSAGES_MODELS: tuple[VendorModel, ...] = tuple(
+    VendorModel(
+        model_id,
+        name,
+        max_output_tokens=out,
+        context_window=ctx,
+        price=PriceFacts(inp, outp, source=_ANTHROPIC_PRICE_SOURCE),
+    )
+    for model_id, name, out, ctx, inp, outp in (
+        ("claude-opus-5-5", "Claude Opus 5.5", 128_000, 1_000_000, 4.0, 20.0),
+        ("claude-sonnet-5-5", "Claude Sonnet 5.5", 128_000, 1_000_000, 2.0, 10.0),
+        # $0.10 / $0.50 up to 100K prompt tokens; $0.50 / $2.50 beyond.
+        ("claude-haiku-5-5", "Claude Haiku 5.5", 128_000, 1_000_000, 0.10, 0.50),
+        ("claude-fable-5-1", "Claude Fable 5.1", 128_000, 1_000_000, 10.0, 50.0),
+        ("claude-fable-5", "Claude Fable 5", 128_000, 1_000_000, 10.0, 50.0),
+        ("claude-opus-5", "Claude Opus 5", 128_000, 1_000_000, 5.0, 25.0),
+        ("claude-sonnet-5", "Claude Sonnet 5", 128_000, 1_000_000, 2.0, 10.0),
+        ("claude-opus-4-8", "Claude Opus 4.8", 128_000, 1_000_000, 5.0, 25.0),
+        ("claude-opus-4-7", "Claude Opus 4.7", 128_000, 1_000_000, 5.0, 25.0),
+        ("claude-opus-4-6", "Claude Opus 4.6", 128_000, 1_000_000, 5.0, 25.0),
+        ("claude-sonnet-4-6", "Claude Sonnet 4.6", 128_000, 1_000_000, 3.0, 15.0),
+        ("claude-haiku-4-5", "Claude Haiku 4.5", 64_000, 200_000, 1.0, 5.0),
+        ("claude-haiku-4-5-20251001", "Claude Haiku 4.5", 64_000, 200_000, 1.0, 5.0),
+    )
+)
+
+#: Provider id -> the models that provider's own API serves.
+VENDOR_MODELS: dict[str, tuple[VendorModel, ...]] = {
+    "anthropic": ANTHROPIC_MESSAGES_MODELS,
+}
+
+
+def vendor_price(provider_id: str, model_id: str) -> PriceFacts | None:
+    """List price for ``model_id`` when ``provider_id`` is its vendor's own API."""
+    wanted = str(model_id or "").strip().lower()
+    for model in VENDOR_MODELS.get(str(provider_id or "").strip().lower(), ()):
+        if model.model_id == wanted:
+            return model.price
+    return None
+
+
 _BY_ID: dict[str, ModelFacts] = {facts.model_id: facts for facts in MODEL_FACTS}
 
 
@@ -673,6 +738,12 @@ def provider_windows() -> dict[str, dict[str, tuple[int, int]]]:
     table someone has to remember to update.
     """
     out: dict[str, dict[str, tuple[int, int]]] = {}
+    for provider, models in VENDOR_MODELS.items():
+        for model in models:
+            out.setdefault(provider, {})[model.model_id] = (
+                model.max_output_tokens,
+                model.context_window,
+            )
     for facts in MODEL_FACTS:
         for override in facts.provider_overrides:
             for provider in override.providers:

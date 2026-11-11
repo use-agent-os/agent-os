@@ -15,6 +15,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Settings → Providers: opening a provider whose key lives in the gateway's
   environment (for example `OPENAI_API_KEY` in `~/.agentos/.env`) now tests
   that key right away, as it already did for a saved key.
+- Direct Anthropic sessions (`llm.provider = "anthropic"`) are sized and
+  billed per model. The Messages API's hyphenated ids
+  (`claude-opus-5-5`) were missing from the model registry, so every Claude
+  model fell back to a 200K context window, a 16K output cap and gateway or
+  default prices (Haiku 4.5 at $3 / $15, Opus 4.8 at $15 / $75). The
+  Anthropic model list now lives in the registry with Anthropic's published
+  windows and list prices, and adds Claude Haiku 5.5, Claude Fable 5 and
+  Claude Opus 4.7. The context meter in Usage reads the same per-provider
+  window as the turn runner.
 
 ## [2026.11.11] - 2026-11-11
 

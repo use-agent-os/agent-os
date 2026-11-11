@@ -744,6 +744,18 @@ def lookup_price(model_id: str, provider_id: str = "") -> PriceEntry:
     model_id = str(model_id or "").strip()
     normalized_provider = str(provider_id or "").strip().lower()
 
+    # A vendor's own API bills its list price. Checked first: the same bare id
+    # (``claude-opus-5``) is also a gateway id whose static row carries the
+    # gateway's discount, and the hyphenated Messages API ids would otherwise
+    # prefix-match a shorter, older row.
+    vendor = model_registry.vendor_price(normalized_provider, model_id)
+    if vendor is not None:
+        return PriceEntry(
+            input_per_m=vendor.input_per_m,
+            output_per_m=vendor.output_per_m,
+            cached_input_per_m=vendor.cached_input_per_m,
+        )
+
     gateway = _GATEWAY_PRICE_CACHES.get(normalized_provider)
     if gateway is not None:
         # The gateway's public catalog is canonical for this provider. Shared
