@@ -41,6 +41,17 @@
   }
 }
 
+/* ---- Checkboxes ---------------------------------------------------------- */
+
+/* Native checkboxes in the accent; the platform keeps the mark legible. */
+.work-check {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--accent);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
 /* ---- Sessions table ------------------------------------------------------ */
 
 .work-table-wrap {

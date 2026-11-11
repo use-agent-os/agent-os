@@ -962,11 +962,11 @@ function SessionTableRow({
               to={sessionKeyToPath(row.key)}
               viewTransition
               className={cn(
-                'min-w-0 truncate rounded-sm font-medium hover:underline hover:underline-offset-2',
+                'flex min-h-6 min-w-0 items-center rounded-sm font-medium hover:underline hover:underline-offset-2 touch:min-h-11',
                 renamedAt ? 'anim-flash' : null,
               )}
             >
-              {title}
+              <span className="truncate">{title}</span>
             </Link>
             {row.provisional ? (
               <Badge tone="neutral" className="ml-1">
