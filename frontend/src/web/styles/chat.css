@@ -656,16 +656,18 @@
 }
 
 /* Unlayered: the chat's menus (model picker, capabilities, slash commands,
- * session actions). The highlighted row is a soft fill, not an outline; the
- * keyboard's row also gets a slim accent edge, which carries the 3:1 the fill
- * alone (~1.1:1) cannot. */
-.chat-menu-item:is([data-highlighted], [aria-selected='true']) {
+ * session actions), matching the command palette. The highlighted row is a
+ * soft lime-washed fill with a 3px bar in the ring colour on its left edge
+ * (the bar carries the 3:1 the fill alone cannot), never an outline.
+ * Radix moves DOM focus to the highlighted item (pointer and keys alike),
+ * so `:focus` is the highlight; `data-highlighted` only follows it a render
+ * later. The slash menu keeps focus in the composer: its active option is
+ * `aria-selected`. */
+.chat-menu-item:is(:focus, [aria-selected='true']) {
   outline: none;
-  background: var(--surface-3);
+  background: var(--accent-tint);
   color: var(--text);
-}
-.chat-menu-item:is(:focus-visible, [aria-selected='true']) {
-  box-shadow: inset 2px 0 0 var(--ring);
+  box-shadow: inset 3px 0 0 var(--ring);
 }
 
 @media (pointer: coarse) {
@@ -688,7 +690,7 @@
   .chat-user-bubble {
     border: 1px solid CanvasText;
   }
-  .chat-menu-item:is([data-highlighted], [aria-selected='true']) {
+  .chat-menu-item:is(:focus, [aria-selected='true']) {
     outline: 2px solid Highlight;
     outline-offset: -2px;
   }
