@@ -1,3 +1,4 @@
+import { Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useRpc } from '@/app/providers'
 import { t, tPlural } from '@/i18n'
@@ -69,7 +70,10 @@ export function UpdateApplyDialog({
         </AlertDialogHeader>
         <div aria-live="polite" className="flex flex-col gap-2">
           {preflight.loading ? (
-            <p className="text-text-muted">{t('webConnection.updateChecking')}</p>
+            <p className="flex items-center gap-2 text-text-muted">
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+              {t('webConnection.updateChecking')}
+            </p>
           ) : preflight.error ? (
             <p role="alert" className="text-danger">
               {t('webConnection.updateCheckFailed', { message: preflight.error })}
@@ -77,13 +81,13 @@ export function UpdateApplyDialog({
           ) : report ? (
             <>
               {report.runningSessions.length > 0 ? (
-                <div>
-                  <p>
+                <div className="rounded-card border border-warn/30 bg-warn/10 px-3 py-2">
+                  <p className="font-medium">
                     {tPlural('webConnection.updateRunningSessions', report.runningSessions.length)}
                   </p>
                   <ul
                     data-testid="preflight-sessions"
-                    className="ml-4 list-disc font-mono text-small"
+                    className="mt-1 ml-4 list-disc font-mono text-small"
                   >
                     {report.runningSessions.map((key) => (
                       <li key={key}>{key}</li>
@@ -92,9 +96,11 @@ export function UpdateApplyDialog({
                 </div>
               ) : null}
               {report.dueJobs.length > 0 ? (
-                <div>
-                  <p>{tPlural('webConnection.updateDueJobs', report.dueJobs.length)}</p>
-                  <ul className="ml-4 list-disc text-small">
+                <div className="rounded-card border border-border bg-surface-2 px-3 py-2">
+                  <p className="font-medium">
+                    {tPlural('webConnection.updateDueJobs', report.dueJobs.length)}
+                  </p>
+                  <ul className="mt-1 ml-4 list-disc text-small">
                     {report.dueJobs.map((job) => (
                       <li key={job.id}>{job.name}</li>
                     ))}
@@ -122,6 +128,7 @@ export function UpdateApplyDialog({
             disabled={applying || preflight.gate.disabled || !report}
             onClick={() => void apply()}
           >
+            {applying ? <Loader2 className="animate-spin" aria-hidden /> : null}
             {t('webConnection.updateApply')}
           </Button>
         </AlertDialogFooter>

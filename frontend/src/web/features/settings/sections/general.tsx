@@ -46,7 +46,7 @@ function ChoiceRow<V extends string>({
   return (
     // A rendered <legend> sits on the fieldset's top edge, above its padding, so the
     // row's spacing lives on a wrapper or the title touches the divider above it.
-    <div className="set-row py-3.5" data-layout="stacked">
+    <div className="set-row py-3" data-layout="stacked">
       <fieldset data-field-id={id} className="flex flex-col gap-1">
         <legend id={legendId} className="font-medium">
           {label}

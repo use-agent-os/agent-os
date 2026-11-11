@@ -19,7 +19,10 @@ import {
   type Level,
   type LogLine,
 } from '@/views/logs/logic'
+import { Badge, StatusDot } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
+import { Input } from '@/web/components/ui/input'
+import { Skeleton } from '@/web/components/ui/states'
 import { Switch } from '@/web/components/ui/switch'
 import { useRegisterFields } from '../fields'
 
@@ -35,22 +38,12 @@ interface LogsStatus {
   diagnostics_enabled?: { effective?: boolean; detail?: string }
 }
 
-const LEVEL_CLASS: Partial<Record<Level, string>> = {
-  ERROR: 'text-danger',
-  WARN: 'text-warn',
-  TRACE: 'text-text-muted',
-  DEBUG: 'text-text-muted',
-}
-
 function Pill({ label, warn }: { label: string; warn?: boolean }) {
   return (
-    <li
-      className={cn(
-        'rounded-full border px-2 py-0.5 text-small',
-        warn ? 'border-warn/50 text-warn' : 'border-border text-text-muted',
-      )}
-    >
-      {label}
+    <li>
+      <Badge tone={warn ? 'warn' : 'neutral'} dot>
+        {label}
+      </Badge>
     </li>
   )
 }
@@ -91,15 +84,15 @@ function StatusPills({ status }: { status: LogsStatus | null | undefined }) {
 function LineRow({ line, search }: { line: LogLine; search: string }) {
   const ts = sliceTs(line.ts)
   return (
-    <div className="flex gap-2 px-3 py-0.5 hover:bg-surface-2">
-      <span className="w-48 shrink-0 text-text-muted max-sm:hidden">{ts}</span>
-      <span className={cn('w-12 shrink-0 font-semibold', LEVEL_CLASS[line.level])}>
+    <div className="set-log-line max-sm:grid-cols-[auto_minmax(0,1fr)]">
+      <span className="text-text-muted tabular-nums max-sm:hidden">{ts}</span>
+      <span className="set-log-level" data-level={line.level}>
         {line.level}
       </span>
-      <span className="min-w-0 flex-1 break-words whitespace-pre-wrap">
+      <span className="min-w-0 break-words whitespace-pre-wrap">
         {splitHighlight(line.message, search).map((seg, i) =>
           seg.match ? (
-            <mark key={i} className="rounded-sm bg-accent/30 text-text">
+            <mark key={i} className="rounded-sm bg-accent-tint text-text ring-1 ring-accent/40">
               {seg.text}
             </mark>
           ) : (
@@ -237,7 +230,12 @@ export function LogsSection() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <StatusPills status={status.data} />
-        <Button variant="outline" onClick={() => exportLines(filtered)} disabled={!filtered.length}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => exportLines(filtered)}
+          disabled={!filtered.length}
+        >
           <Download aria-hidden />
           {t('webSetSystem.logExport')}
         </Button>
@@ -246,82 +244,107 @@ export function LogsSection() {
       <ul
         role="list"
         aria-label={t('webSetSystem.logStats')}
-        className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+        className="grid grid-cols-2 gap-2.5 sm:grid-cols-4"
       >
         {stats.map((s) => (
-          <li key={s.label} className="rounded-md bg-surface-2 px-3 py-2">
-            <span className="block text-small text-text-muted">{s.label}</span>
-            <strong className={cn('text-lg', s.tone)}>{s.value}</strong>
+          <li key={s.label} className="set-card px-3.5 py-2.5">
+            <span className="block text-label text-text-muted">{s.label}</span>
+            <strong className={cn('text-lg font-semibold tabular-nums', s.tone)}>{s.value}</strong>
           </li>
         ))}
       </ul>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div role="group" aria-label={t('webSetSystem.logLevels')} className="flex flex-wrap gap-1">
-          {LEVELS.map((level) => (
-            <Button
-              key={level}
-              size="sm"
-              variant={levels.has(level) ? 'secondary' : 'ghost'}
-              aria-pressed={levels.has(level)}
-              aria-label={t('webSetSystem.logToggleLevel', { level })}
-              onClick={() => toggleLevel(level)}
-              className={cn('font-mono', !levels.has(level) && 'text-text-muted line-through')}
-            >
-              {level}
-            </Button>
-          ))}
-        </div>
-        <label data-field-id="logSearch" className="relative min-w-48 flex-1" htmlFor={searchId}>
-          <span className="sr-only">{t('webSetSystem.logSearch')}</span>
-          <Search
-            className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-muted"
-            aria-hidden
-          />
-          <input
-            id={searchId}
-            type="search"
-            autoComplete="off"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('webSetSystem.logSearchPlaceholder')}
-            className="h-9 w-full rounded-md border border-border-control bg-surface-0 pr-2 pl-8 touch:h-11 touch:text-base"
-          />
-        </label>
-        <div data-field-id="logFollow" className="flex items-center gap-2">
-          <Switch id={followId} checked={follow} onCheckedChange={setFollow} />
-          <label htmlFor={followId}>{t('webSetSystem.logFollow')}</label>
-        </div>
-      </div>
-
-      {error ? (
-        <p role="status" className="text-small text-warn">
-          {t('webSetSystem.logPollFailed', { message: error })}
-        </p>
-      ) : null}
-
-      <div
-        ref={display}
-        role="log"
-        aria-label={t('webSetSystem.logStream')}
-        aria-busy={!loaded}
-        tabIndex={0}
-        className="h-[28rem] overflow-y-auto rounded-lg border border-border bg-surface-0 py-2 font-mono text-small"
-      >
-        {!loaded ? (
-          <p className="px-3 text-text-muted">{t('webSetSystem.logLoading')}</p>
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 py-12 text-text-muted">
-            <ScrollText className="size-6" aria-hidden />
-            {lines.length ? t('webSetSystem.logNoMatch') : t('webSetSystem.logEmpty')}
+      <section className="set-log overflow-hidden">
+        <div className="sticky top-0 z-[1] flex flex-wrap items-center gap-2 border-b border-border bg-surface-1 px-2.5 py-2 font-sans text-ui">
+          <div
+            role="group"
+            aria-label={t('webSetSystem.logLevels')}
+            className="flex flex-wrap gap-0.5 rounded-control bg-surface-inset p-0.5"
+          >
+            {LEVELS.map((level) => (
+              <Button
+                key={level}
+                size="sm"
+                variant="ghost"
+                aria-pressed={levels.has(level)}
+                aria-label={t('webSetSystem.logToggleLevel', { level })}
+                onClick={() => toggleLevel(level)}
+                className={cn(
+                  'h-6 px-2 font-mono text-small',
+                  levels.has(level)
+                    ? 'bg-surface-3 shadow-highlight'
+                    : 'text-text-muted line-through decoration-text-muted/60',
+                )}
+              >
+                <span className="set-log-level min-w-0" data-level={level}>
+                  {level}
+                </span>
+              </Button>
+            ))}
           </div>
-        ) : (
-          filtered.map((line, i) => (
-            <LineRow key={`${line.ts ?? ''}-${i}`} line={line} search={search} />
-          ))
-        )}
-      </div>
-      <p className="text-small text-text-muted">{t('webSetSystem.logCadence')}</p>
+          <label data-field-id="logSearch" className="min-w-40 flex-1" htmlFor={searchId}>
+            <span className="sr-only">{t('webSetSystem.logSearch')}</span>
+            <Input
+              id={searchId}
+              type="search"
+              size="sm"
+              autoComplete="off"
+              icon={<Search />}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('webSetSystem.logSearchPlaceholder')}
+            />
+          </label>
+          <div data-field-id="logFollow" className="flex items-center gap-2 px-1">
+            <Switch id={followId} checked={follow} onCheckedChange={setFollow} />
+            <label htmlFor={followId} className="text-small">
+              {t('webSetSystem.logFollow')}
+            </label>
+          </div>
+        </div>
+
+        {error ? (
+          <p
+            role="status"
+            className="border-b border-border bg-warn/10 px-3 py-1.5 font-sans text-small text-warn"
+          >
+            {t('webSetSystem.logPollFailed', { message: error })}
+          </p>
+        ) : null}
+
+        <div
+          ref={display}
+          role="log"
+          aria-label={t('webSetSystem.logStream')}
+          aria-busy={!loaded}
+          tabIndex={0}
+          className="h-[30rem] overflow-y-auto overscroll-contain py-2 focus-visible:-outline-offset-2"
+        >
+          {!loaded ? (
+            <div className="flex flex-col gap-2 px-3 py-1">
+              <p className="sr-only">{t('webSetSystem.logLoading')}</p>
+              {[72, 54, 88, 61, 45, 80].map((w, i) => (
+                <Skeleton key={i} className="h-3.5" style={{ width: `${w}%` }} />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-16 font-sans text-text-muted">
+              <span className="grid size-10 place-items-center rounded-card bg-surface-2 shadow-highlight">
+                <ScrollText className="size-5" aria-hidden />
+              </span>
+              {lines.length ? t('webSetSystem.logNoMatch') : t('webSetSystem.logEmpty')}
+            </div>
+          ) : (
+            filtered.map((line, i) => (
+              <LineRow key={`${line.ts ?? ''}-${i}`} line={line} search={search} />
+            ))
+          )}
+        </div>
+        <footer className="flex items-center gap-2 border-t border-border bg-surface-1 px-3 py-1.5 font-sans text-small text-text-muted">
+          <StatusDot tone={error ? 'warn' : 'ok'} live={!error && follow} className="size-1.5" />
+          {t('webSetSystem.logCadence')}
+        </footer>
+      </section>
     </div>
   )
 }

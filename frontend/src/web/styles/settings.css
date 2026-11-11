@@ -311,6 +311,9 @@
 
   /* ---- Notices ----------------------------------------------------------- */
 
+  .set-mark {
+    --tone: var(--info);
+  }
   .set-notice {
     --tone: var(--info);
     display: flex;
@@ -322,16 +325,16 @@
     background: color-mix(in oklab, var(--tone) 9%, var(--surface-1));
     padding: 0.625rem 0.875rem;
   }
-  .set-notice[data-tone='warn'] {
+  :is(.set-notice, .set-mark)[data-tone='warn'] {
     --tone: var(--warn);
   }
-  .set-notice[data-tone='danger'] {
+  :is(.set-notice, .set-mark)[data-tone='danger'] {
     --tone: var(--danger);
   }
-  .set-notice[data-tone='ok'] {
+  :is(.set-notice, .set-mark)[data-tone='ok'] {
     --tone: var(--ok);
   }
-  .set-notice[data-tone='accent'] {
+  :is(.set-notice, .set-mark)[data-tone='accent'] {
     --tone: var(--accent);
   }
   .set-notice-icon {
@@ -407,18 +410,16 @@
     font-weight: 600;
     text-transform: uppercase;
   }
-  .set-log-level[data-level='error'],
-  .set-log-level[data-level='critical'] {
+  .set-log-level:is([data-level='error' i], [data-level='critical' i]) {
     color: var(--danger);
   }
-  .set-log-level[data-level='warning'],
-  .set-log-level[data-level='warn'] {
+  .set-log-level:is([data-level='warning' i], [data-level='warn' i]) {
     color: var(--warn);
   }
-  .set-log-level[data-level='info'] {
+  .set-log-level[data-level='info' i] {
     color: var(--info);
   }
-  .set-log-level[data-level='debug'] {
+  .set-log-level:is([data-level='debug' i], [data-level='trace' i]) {
     color: var(--text-muted);
   }
 
@@ -464,6 +465,133 @@
     width: 1px;
     background: var(--border-strong);
   }
+
+  /* F1: Pilot Router tier grid and the guided-setup stepper. ------------- */
+
+  /* Tier rows: tier chip + images switch on top, model and thinking below on
+     narrow panes; one aligned line with a header row once the pane is wide. */
+  .set-tiers-head {
+    display: none;
+  }
+  .set-tiers-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'tier image' 'model model' 'thinking thinking';
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    padding: 0.75rem 1rem;
+    transition: background-color var(--duration-fast) var(--ease-out);
+  }
+  .set-tiers-row:hover,
+  .set-tiers-row:focus-within {
+    background: color-mix(in oklab, var(--surface-2) 60%, transparent);
+  }
+  .set-tiers-row > [data-col='tier'] {
+    grid-area: tier;
+  }
+  .set-tiers-row > [data-col='model'] {
+    grid-area: model;
+  }
+  .set-tiers-row > [data-col='thinking'] {
+    grid-area: thinking;
+  }
+  .set-tiers-row > [data-col='image'] {
+    grid-area: image;
+    justify-self: end;
+  }
+  @container set-pane (min-width: 40rem) {
+    .set-tiers-head,
+    .set-tiers-row {
+      display: grid;
+      grid-template-columns: 8.5rem minmax(0, 1fr) 8.5rem 4.5rem;
+      grid-template-areas: 'tier model thinking image';
+      column-gap: 0.75rem;
+      align-items: center;
+    }
+    .set-tiers-head {
+      padding: 0.5rem 1rem;
+    }
+    .set-tiers-row {
+      padding-block: 0.625rem;
+    }
+    .set-tiers-image-label {
+      display: none;
+    }
+  }
+
+  /* Guided setup: numbered steps joined by a line that fills as you go. */
+  .set-stepper {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .set-stepper > li {
+    display: flex;
+    flex: 1 1 0;
+    align-items: center;
+    min-width: 0;
+  }
+  .set-stepper > li:last-child {
+    flex: 0 0 auto;
+  }
+  .set-stepper > li:not(:last-child)::after {
+    content: '';
+    flex: 1 1 auto;
+    min-width: 0.75rem;
+    height: 2px;
+    margin-inline: 0.375rem;
+    border-radius: 2px;
+    background: var(--border-strong);
+    transition: background-color var(--duration-slow) var(--ease-out);
+  }
+  .set-stepper > li[data-done='true']::after {
+    background: var(--accent);
+  }
+  .set-stepper-dot {
+    display: grid;
+    place-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    flex-shrink: 0;
+    border-radius: 50%;
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2);
+    font-size: var(--text-small);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+    transition:
+      background-color var(--duration-base) var(--ease-out),
+      border-color var(--duration-base) var(--ease-out),
+      color var(--duration-base) var(--ease-out),
+      box-shadow var(--duration-base) var(--ease-out);
+  }
+  .set-stepper-dot svg {
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+  li[data-done='true'] .set-stepper-dot {
+    border-color: transparent;
+    background: var(--accent);
+    background-image: var(--accent-gradient);
+    color: var(--accent-fg);
+  }
+  [aria-current='step'] .set-stepper-dot {
+    border-color: var(--accent);
+    background: var(--accent-tint);
+    color: var(--text);
+    box-shadow: 0 0 0 4px var(--accent-tint);
+  }
+  @container set-pane (max-width: 32rem) {
+    .set-stepper button:not([aria-current='step']) .set-stepper-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+  }
 }
 
 @keyframes set-savebar-in {
@@ -483,6 +611,17 @@
   .set-row::before,
   .set-row-label::after {
     background: CanvasText;
+  }
+  /* F1: the current/done step dot keeps a visible boundary. */
+  .set-stepper-dot {
+    forced-color-adjust: none;
+    background: Canvas;
+    color: CanvasText;
+    border-color: CanvasText;
+  }
+  [aria-current='step'] .set-stepper-dot {
+    background: Highlight;
+    color: HighlightText;
   }
   .set-step::before {
     forced-color-adjust: none;
