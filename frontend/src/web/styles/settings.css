@@ -191,8 +191,9 @@
       margin-top: 0;
       align-self: center;
     }
-    .set-row:not([data-layout='stacked']) > .set-row-control:has([role='switch']) {
-      justify-self: end;
+    /* A lone switch needs no column of its own: the help text keeps the width. */
+    .set-row:not([data-layout='stacked']):has(> .set-row-control > [role='switch']:only-child) {
+      grid-template-columns: minmax(0, 1fr) auto;
     }
     .set-row:not([data-layout='stacked']) > .set-row-help {
       max-width: 34rem;

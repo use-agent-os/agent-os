@@ -20,7 +20,8 @@ import { useTheme, type ThemePreference } from '@/stores/theme'
 import { SegmentedControl } from '@/web/components/ui/segmented-control'
 import { Switch } from '@/web/components/ui/switch'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
-import { useRegisterFields } from '../fields'
+import { FieldRow, useRegisterFields } from '../fields'
+import { Notice } from '../ui'
 
 // General › Appearance and Notifications. Both are browser-only: a change
 // applies at once and never shows the save bar.
@@ -45,15 +46,15 @@ function ChoiceRow<V extends string>({
   return (
     // A rendered <legend> sits on the fieldset's top edge, above its padding, so the
     // row's spacing lives on a wrapper or the title touches the divider above it.
-    <div className="py-3">
+    <div className="set-row py-3.5" data-layout="stacked">
       <fieldset data-field-id={id} className="flex flex-col gap-1">
         <legend id={legendId} className="font-medium">
           {label}
         </legend>
-        {help ? <p className="text-small text-text-muted">{help}</p> : null}
+        {help ? <p className="set-row-help">{help}</p> : null}
         <SegmentedControl
           aria-labelledby={legendId}
-          className="mt-1"
+          className="mt-1.5 self-start"
           value={value}
           onChange={onChange}
           options={options}
@@ -78,22 +79,14 @@ function SwitchRow({
 }) {
   const inputId = useId()
   return (
-    <div data-field-id={id} className="flex items-start justify-between gap-4 py-3">
-      <div className="min-w-0">
-        <label htmlFor={inputId} className="font-medium">
-          {label}
-        </label>
-        <p id={`${inputId}-help`} className="text-small text-text-muted">
-          {help}
-        </p>
-      </div>
+    <FieldRow id={id} label={label} help={help} inputId={inputId}>
       <Switch
         id={inputId}
         aria-describedby={`${inputId}-help`}
         checked={checked}
         onCheckedChange={onChange}
       />
-    </div>
+    </FieldRow>
   )
 }
 
@@ -111,55 +104,59 @@ export function AppearanceSection() {
   ])
 
   return (
-    <div className="flex flex-col divide-y divide-border">
-      <p className="pb-3 text-small text-text-muted">{t('webSetSystem.appearanceLocal')}</p>
-      <ChoiceRow<ThemePreference>
-        id="theme"
-        label={t('webSetSystem.theme')}
-        value={theme}
-        onChange={setTheme}
-        options={[
-          { value: 'system', label: t('webSetSystem.themeSystem') },
-          { value: 'light', label: t('webSetSystem.themeLight') },
-          { value: 'dark', label: t('webSetSystem.themeDark') },
-        ]}
-      />
-      <ChoiceRow<TextSize>
-        id="textSize"
-        label={t('webSetSystem.textSize')}
-        value={prefs.textSize}
-        onChange={(v) => prefs.setPreference('textSize', v)}
-        options={[
-          { value: 'small', label: t('webSetSystem.textSmall') },
-          { value: 'default', label: t('webSetSystem.textDefault') },
-          { value: 'large', label: t('webSetSystem.textLarge') },
-        ]}
-      />
-      <ChoiceRow<SendShortcut>
-        id="sendShortcut"
-        label={t('webSetSystem.sendShortcut')}
-        help={t('webSetSystem.sendShortcutHelp')}
-        value={prefs.sendShortcut}
-        onChange={(v) => prefs.setPreference('sendShortcut', v)}
-        options={[
-          { value: 'enter', label: t('webSetSystem.sendEnter') },
-          { value: 'mod-enter', label: t('webSetSystem.sendModEnter') },
-        ]}
-      />
-      <SwitchRow
-        id="showThinking"
-        label={t('webSetSystem.showThinking')}
-        help={t('webSetSystem.showThinkingHelp')}
-        checked={prefs.showThinking}
-        onChange={(v) => prefs.setPreference('showThinking', v)}
-      />
-      <SwitchRow
-        id="visualEffects"
-        label={t('webSetSystem.visualEffects')}
-        help={t('webSetSystem.visualEffectsHelp')}
-        checked={prefs.visualEffects}
-        onChange={(v) => prefs.setPreference('visualEffects', v)}
-      />
+    <div className="flex flex-col gap-3">
+      <Notice tone="info" className="text-small">
+        {t('webSetSystem.appearanceLocal')}
+      </Notice>
+      <div className="set-card py-1">
+        <ChoiceRow<ThemePreference>
+          id="theme"
+          label={t('webSetSystem.theme')}
+          value={theme}
+          onChange={setTheme}
+          options={[
+            { value: 'system', label: t('webSetSystem.themeSystem') },
+            { value: 'light', label: t('webSetSystem.themeLight') },
+            { value: 'dark', label: t('webSetSystem.themeDark') },
+          ]}
+        />
+        <ChoiceRow<TextSize>
+          id="textSize"
+          label={t('webSetSystem.textSize')}
+          value={prefs.textSize}
+          onChange={(v) => prefs.setPreference('textSize', v)}
+          options={[
+            { value: 'small', label: t('webSetSystem.textSmall') },
+            { value: 'default', label: t('webSetSystem.textDefault') },
+            { value: 'large', label: t('webSetSystem.textLarge') },
+          ]}
+        />
+        <ChoiceRow<SendShortcut>
+          id="sendShortcut"
+          label={t('webSetSystem.sendShortcut')}
+          help={t('webSetSystem.sendShortcutHelp')}
+          value={prefs.sendShortcut}
+          onChange={(v) => prefs.setPreference('sendShortcut', v)}
+          options={[
+            { value: 'enter', label: t('webSetSystem.sendEnter') },
+            { value: 'mod-enter', label: t('webSetSystem.sendModEnter') },
+          ]}
+        />
+        <SwitchRow
+          id="showThinking"
+          label={t('webSetSystem.showThinking')}
+          help={t('webSetSystem.showThinkingHelp')}
+          checked={prefs.showThinking}
+          onChange={(v) => prefs.setPreference('showThinking', v)}
+        />
+        <SwitchRow
+          id="visualEffects"
+          label={t('webSetSystem.visualEffects')}
+          help={t('webSetSystem.visualEffectsHelp')}
+          checked={prefs.visualEffects}
+          onChange={(v) => prefs.setPreference('visualEffects', v)}
+        />
+      </div>
     </div>
   )
 }
@@ -244,10 +241,15 @@ export function NotificationsSection({ env: envOverride }: { env?: WebPushEnv } 
   }
 
   return (
-    <div data-field-id="webPush" className="flex flex-col gap-2 py-3">
+    <div data-field-id="webPush" className="set-card flex flex-col gap-3 py-4">
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 gap-3">
-          <BellRing className="mt-0.5 size-5 shrink-0 text-text-muted" aria-hidden />
+          <span
+            aria-hidden
+            className="grid size-9 shrink-0 place-items-center rounded-control bg-surface-2 text-text-muted shadow-highlight"
+          >
+            <BellRing className="size-4" />
+          </span>
           <div className="min-w-0">
             <label htmlFor={inputId} className="font-medium">
               {t('webSetSystem.pushTitle')}
@@ -257,7 +259,7 @@ export function NotificationsSection({ env: envOverride }: { env?: WebPushEnv } 
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 pt-1">
           {busy ? <Loader2 className="size-4 animate-spin text-text-muted" aria-hidden /> : null}
           <Switch
             id={inputId}
@@ -270,12 +272,12 @@ export function NotificationsSection({ env: envOverride }: { env?: WebPushEnv } 
         </div>
       </div>
       {!busy && toggle.reason ? (
-        <p className="text-small text-text-muted">{toggle.reason}</p>
+        <p className="ml-12 text-small text-text-muted">{toggle.reason}</p>
       ) : null}
       {error ? (
-        <p role="alert" className="text-small text-danger">
+        <Notice role="alert" tone="danger" className="text-small">
           {error}
-        </p>
+        </Notice>
       ) : null}
     </div>
   )
