@@ -311,7 +311,7 @@ export function SessionsPage() {
             placeholder={t('webPagesWork.sessionsSearch')}
           />
           <label className="flex min-w-0 flex-[1_1_11rem] items-center gap-2">
-            <span className="shrink-0 text-label text-text-muted">
+            <span className="shrink-0 text-label text-text-muted max-sm:w-12">
               {t('webPagesWork.filterAgent')}
             </span>
             <Select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)}>
@@ -324,7 +324,7 @@ export function SessionsPage() {
             </Select>
           </label>
           <label className="flex min-w-0 flex-[1_1_11rem] items-center gap-2">
-            <span className="shrink-0 text-label text-text-muted">
+            <span className="shrink-0 text-label text-text-muted max-sm:w-12">
               {t('webPagesWork.filterProject')}
             </span>
             <Select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
