@@ -1,7 +1,10 @@
 import {
   AlertTriangle,
+  CheckCheck,
+  Clock,
+  CloudOff,
   Copy,
-  Inbox as InboxIcon,
+  Info,
   MessageCircleQuestion,
   RefreshCw,
   ShieldAlert,
@@ -27,10 +30,20 @@ import { useRuntimeSignals } from '@/lib/runtime-signals'
 import { useAttentionInbox } from '@/lib/useAttentionInbox'
 import { cn } from '@/lib/utils'
 import { approvalMonitor, useApprovals } from '@/services/approval-monitor'
+import { Badge } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
+import { Card } from '@/web/components/ui/card'
+import { Input } from '@/web/components/ui/input'
 import { PageHeader } from '@/web/components/ui/page-header'
 import { EmptyState, StaleBadge } from '@/web/components/ui/states'
+import { useCountUp } from '@/web/components/ui/use-count-up'
 import { sendOnce } from '@/web/features/chat/send'
+import {
+  IconTile,
+  staggerStyle,
+  usePresence,
+  type OverviewTone,
+} from '@/web/features/home/overview-ui'
 import { ApprovalCard } from '@/web/shell/ApprovalTray'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
@@ -67,7 +80,10 @@ function Since({ at }: { at: number | null }) {
     new Date(at),
   )
   return (
-    <span className="text-small text-text-muted">{t('webPagesOverview.inboxSince', { time })}</span>
+    <span className="inline-flex items-center gap-1 text-small whitespace-nowrap text-text-muted tabular-nums">
+      <Clock className="size-3.5" aria-hidden />
+      {t('webPagesOverview.inboxSince', { time })}
+    </span>
   )
 }
 
@@ -81,37 +97,33 @@ function ItemCard({
   item: AttentionItem
   icon: ReactNode
   kind: string
-  tone: string
+  tone: OverviewTone
   children: ReactNode
 }) {
   return (
-    <article
-      aria-label={t('webPagesOverview.inboxItemLabel', { kind, title: item.title })}
-      data-kind={item.kind}
-      className={cn(
-        'flex min-w-0 flex-col gap-3 rounded-lg border border-l-4 border-border bg-surface-1 p-4',
-        tone,
-      )}
-    >
-      <header className="flex flex-wrap items-start gap-2">
-        <span className="mt-0.5 text-text-muted [&_svg]:size-4" aria-hidden>
-          {icon}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-small text-text-muted">{kind}</p>
-          <h2 className="font-semibold break-words">{item.title}</h2>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {item.sessions.length > 1 ? (
-            <span className="rounded-full border border-border px-2 py-0.5 text-small">
-              {tPlural('webPagesOverview.inboxSeenIn', item.sessions.length)}
-            </span>
-          ) : null}
+    <Card asChild padding="none">
+      <article
+        aria-label={t('webPagesOverview.inboxItemLabel', { kind, title: item.title })}
+        data-kind={item.kind}
+        data-ov-tone={tone}
+        className="ov-item flex min-w-0 flex-col gap-4 p-4 sm:p-5"
+      >
+        <header className="flex items-start gap-3">
+          <IconTile tone={tone}>{icon}</IconTile>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <Badge tone={tone === 'neutral' ? 'neutral' : tone}>{kind}</Badge>
+              {item.sessions.length > 1 ? (
+                <Badge>{tPlural('webPagesOverview.inboxSeenIn', item.sessions.length)}</Badge>
+              ) : null}
+            </div>
+            <h2 className="mt-1.5 text-section break-words">{item.title}</h2>
+          </div>
           <Since at={item.createdAt} />
-        </div>
-      </header>
-      {children}
-    </article>
+        </header>
+        <div className="flex min-w-0 flex-col gap-3 sm:pl-11">{children}</div>
+      </article>
+    </Card>
   )
 }
 
@@ -142,7 +154,7 @@ function ApprovalItem({ item, highlight }: { item: AttentionItem; highlight: str
       item={item}
       icon={<ShieldAlert />}
       kind={t('webPagesOverview.inboxKindApproval', { namespace })}
-      tone="border-l-warn"
+      tone="warn"
     >
       <ul role="list" className="flex flex-col gap-2">
         {item.members.map((member) =>
@@ -211,11 +223,11 @@ function QuestionItem({ item, answer }: { item: AttentionItem; answer: Gate }) {
       item={item}
       icon={<MessageCircleQuestion />}
       kind={t('webPagesOverview.inboxKindQuestion')}
-      tone="border-l-info"
+      tone="info"
     >
       {questions.map((q, qi) => (
         <fieldset key={`${qi}:${q.question}`} className="flex flex-col gap-1.5">
-          <legend className="mb-1 font-medium">{q.question}</legend>
+          <legend className="mb-1.5 font-medium">{q.question}</legend>
           <div className="flex flex-wrap gap-1.5">
             {q.options.map((opt) => {
               const on = picks[qi]?.includes(opt.label) ?? false
@@ -223,7 +235,10 @@ function QuestionItem({ item, answer }: { item: AttentionItem; answer: Gate }) {
                 <Button
                   key={opt.label}
                   size="sm"
-                  variant={on ? 'primary' : 'outline'}
+                  variant="outline"
+                  className={cn(
+                    on && 'border-accent/50 bg-accent-tint text-accent hover:bg-accent-tint',
+                  )}
                   aria-pressed={on}
                   title={opt.description}
                   disabled={answer.disabled || sending}
@@ -238,7 +253,7 @@ function QuestionItem({ item, answer }: { item: AttentionItem; answer: Gate }) {
       ))}
       <label className="flex flex-col gap-1">
         <span className="text-small text-text-muted">{t('webPagesOverview.inboxFreeText')}</span>
-        <input
+        <Input
           type="text"
           value={freeText}
           disabled={answer.disabled || sending}
@@ -250,7 +265,7 @@ function QuestionItem({ item, answer }: { item: AttentionItem; answer: Gate }) {
               void send()
             }
           }}
-          className="h-9 rounded-md border border-border-control bg-surface-0 px-3"
+          className="sm:max-w-md"
         />
       </label>
       {error ? (
@@ -327,23 +342,28 @@ function IssueItem({ item, issue }: { item: AttentionItem; issue: RuntimeIssue }
       kind={
         error ? t('webPagesOverview.inboxKindIssueError') : t('webPagesOverview.inboxKindIssueWarn')
       }
-      tone={error ? 'border-l-danger' : 'border-l-warn'}
+      tone={error ? 'danger' : 'warn'}
     >
       {issue.detail ? <p className="text-text-muted break-words">{issue.detail}</p> : null}
       {issue.findingId ? (
-        <code className="self-start font-mono text-small text-text-muted">{issue.findingId}</code>
+        <code className="self-start rounded-sm bg-surface-2 px-1.5 py-0.5 font-mono text-small text-text-muted">
+          {issue.findingId}
+        </code>
       ) : null}
       {stepsOpen && issue.fixSteps.length > 0 ? (
-        <ol aria-label={t('webPagesOverview.inboxFixSteps')} className="flex flex-col gap-2">
+        <ol
+          aria-label={t('webPagesOverview.inboxFixSteps')}
+          className="anim-enter flex flex-col gap-3 rounded-control border border-border bg-surface-2 p-3"
+        >
           {issue.fixSteps.map((step, i) => (
             <li key={`${i}:${step.label ?? ''}`} className="flex gap-2">
-              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-3 text-small">
+              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-3 text-small font-medium tabular-nums">
                 {formatNumber(i + 1)}
               </span>
               <div className="min-w-0 flex-1">
                 {step.label ? <p className="font-medium">{step.label}</p> : null}
                 {step.command ? (
-                  <div className="flex max-w-full items-center gap-1 rounded bg-surface-0 pl-2">
+                  <div className="mt-1 flex max-w-full items-center gap-1 rounded-control bg-surface-inset pl-3 shadow-inset">
                     <code
                       tabIndex={0}
                       className="block min-w-0 flex-1 overflow-x-auto py-1 font-mono text-small whitespace-pre"
@@ -389,12 +409,30 @@ function IssueItem({ item, issue }: { item: AttentionItem; issue: RuntimeIssue }
   )
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({
+  label,
+  value,
+  icon,
+  tone,
+}: {
+  label: string
+  value: number
+  icon: ReactNode
+  tone: OverviewTone
+}) {
+  const shown = useCountUp(value)
   return (
-    <div className="flex flex-col rounded-lg border border-border bg-surface-1 px-3 py-2">
-      <dt className="text-small text-text-muted">{label}</dt>
-      <dd className="text-lg font-semibold tabular-nums">{formatNumber(value)}</dd>
-    </div>
+    <Card padding="sm" className="flex min-w-0 items-center gap-3">
+      <IconTile tone={value > 0 ? tone : 'neutral'} className="max-sm:hidden">
+        {icon}
+      </IconTile>
+      <div className="min-w-0">
+        <dt className="truncate text-label text-text-muted">{label}</dt>
+        <dd className="text-[22px] leading-tight font-semibold tracking-[-0.015em] tabular-nums">
+          {formatNumber(shown)}
+        </dd>
+      </div>
+    </Card>
   )
 }
 
@@ -426,9 +464,10 @@ export function InboxPage() {
   const count = (kind: AttentionItem['kind']) =>
     items.filter((i) => i.kind === kind).reduce((n, i) => n + i.members.length, 0)
   const hiddenIssues = issues.filter((i) => dismissed.includes(i.id)).length
+  const { entries, done } = usePresence(items, (item) => item.id)
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4 md:p-8">
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 md:p-8">
       <PageHeader
         title={t('webPagesOverview.inboxTitle')}
         badge={!live && everConnected ? <StaleBadge /> : null}
@@ -443,44 +482,86 @@ export function InboxPage() {
 
       <dl
         aria-label={t('webPagesOverview.inboxSummary')}
-        className="grid grid-cols-3 gap-2 sm:max-w-md"
+        className="grid grid-cols-3 gap-2 sm:gap-3"
       >
-        <Stat label={t('webPagesOverview.inboxApprovals')} value={count('approval')} />
-        <Stat label={t('webPagesOverview.inboxQuestions')} value={count('question')} />
-        <Stat label={t('webPagesOverview.inboxIssues')} value={count('issue')} />
+        <Stat
+          label={t('webPagesOverview.inboxApprovals')}
+          value={count('approval')}
+          icon={<ShieldAlert />}
+          tone="warn"
+        />
+        <Stat
+          label={t('webPagesOverview.inboxQuestions')}
+          value={count('question')}
+          icon={<MessageCircleQuestion />}
+          tone="info"
+        />
+        <Stat
+          label={t('webPagesOverview.inboxIssues')}
+          value={count('issue')}
+          icon={<AlertTriangle />}
+          tone="danger"
+        />
       </dl>
 
-      {items.length === 0 ? (
-        <EmptyState
-          icon={<InboxIcon />}
-          title={live ? t('webPagesOverview.inboxEmpty') : t('webPagesOverview.inboxEmptyUnknown')}
-          description={
-            live
-              ? t('webPagesOverview.inboxEmptyHint')
-              : t('webPagesOverview.inboxEmptyUnknownHint')
-          }
-          action={
-            <Button variant="outline" disabled={rechecking} onClick={() => void recheck()}>
-              {t('webPagesOverview.inboxRecheck')}
-            </Button>
-          }
-        />
+      {entries.length === 0 ? (
+        <Card variant="plain" padding="none">
+          <EmptyState
+            className={live ? 'ov-caught-up' : undefined}
+            icon={live ? <CheckCheck /> : <CloudOff />}
+            title={
+              live ? t('webPagesOverview.inboxEmpty') : t('webPagesOverview.inboxEmptyUnknown')
+            }
+            description={
+              live
+                ? t('webPagesOverview.inboxEmptyHint')
+                : t('webPagesOverview.inboxEmptyUnknownHint')
+            }
+            action={
+              <Button variant="outline" disabled={rechecking} onClick={() => void recheck()}>
+                <RefreshCw className={rechecking ? 'animate-spin' : undefined} aria-hidden />
+                {t('webPagesOverview.inboxRecheck')}
+              </Button>
+            }
+          />
+        </Card>
       ) : (
-        <section aria-label={t('webPagesOverview.inboxList')} className="flex flex-col gap-3">
-          {items.map((item) =>
-            item.kind === 'approval' ? (
-              <ApprovalItem key={item.id} item={item} highlight={highlight} />
-            ) : item.kind === 'question' ? (
-              <QuestionItem key={item.id} item={item} answer={answer} />
-            ) : item.issue ? (
-              <IssueItem key={item.id} item={item} issue={item.issue} />
-            ) : null,
-          )}
+        <section aria-label={t('webPagesOverview.inboxList')} className="flex flex-col">
+          {entries.map(({ item, leaving }, index) => (
+            // One wrapper per item: it rises in, and when the item is
+            // resolved it fades while the list closes up over it.
+            <div
+              key={item.id}
+              className="ov-presence"
+              data-leaving={leaving || undefined}
+              aria-hidden={leaving || undefined}
+              inert={leaving}
+              onAnimationEnd={(e) => {
+                if (leaving && e.target === e.currentTarget) done(item.id)
+              }}
+              style={staggerStyle(index)}
+            >
+              <div>
+                <div className="pb-3">
+                  {item.kind === 'approval' ? (
+                    <ApprovalItem item={item} highlight={highlight} />
+                  ) : item.kind === 'question' ? (
+                    <QuestionItem item={item} answer={answer} />
+                  ) : item.issue ? (
+                    <IssueItem item={item} issue={item.issue} />
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ))}
         </section>
       )}
 
       <footer className="flex flex-col gap-1 text-small text-text-muted">
-        <p>{t('webPagesOverview.inboxQuestionsGap')}</p>
+        <p className="flex items-start gap-1.5">
+          <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          {t('webPagesOverview.inboxQuestionsGap')}
+        </p>
         {hiddenIssues > 0 ? (
           <p>
             {tPlural('webPagesOverview.inboxDismissed', hiddenIssues)}{' '}
