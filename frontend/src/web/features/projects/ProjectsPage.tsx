@@ -70,6 +70,7 @@ import {
 import { sessionTitle, type SessionRow } from '@/web/shell/session-list'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
+import { PAGE_CLASS } from '@/web/features/home/overview-ui'
 import { useArrival } from '@/web/features/sessions/StatStrip'
 import '@/web/styles/work.css'
 
@@ -167,7 +168,7 @@ export function ProjectsPage() {
           title={t('webPagesWork.projectsEmpty')}
           description={t('webPagesWork.projectsEmptyBody')}
           action={
-            <Button variant="primary" disabled={act.disabled} onClick={() => setCreating(true)}>
+            <Button variant="outline" disabled={act.disabled} onClick={() => setCreating(true)}>
               <Plus />
               {t('webPagesWork.projectsNew')}
             </Button>
@@ -259,7 +260,7 @@ export function ProjectsPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 md:p-6">
+    <div className={PAGE_CLASS}>
       <PageHeader
         title={t('webPagesWork.projectsTitle')}
         description={t('webPagesWork.projectsSubtitle')}

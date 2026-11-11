@@ -40,10 +40,12 @@ import { useCountUp } from '@/web/components/ui/use-count-up'
 import { sendOnce } from '@/web/features/chat/send'
 import {
   IconTile,
+  PAGE_CLASS,
   staggerStyle,
   usePresence,
   type OverviewTone,
 } from '@/web/features/home/overview-ui'
+import { StatStrip } from '@/web/features/sessions/StatStrip'
 import { ApprovalCard } from '@/web/shell/ApprovalTray'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
@@ -409,36 +411,9 @@ function IssueItem({ item, issue }: { item: AttentionItem; issue: RuntimeIssue }
   )
 }
 
-function Stat({
-  label,
-  value,
-  icon,
-  tone,
-}: {
-  label: string
-  value: number
-  icon: ReactNode
-  tone: OverviewTone
-}) {
-  const shown = useCountUp(value)
-  // A dl may only hold dt/dd (optionally grouped in one div), so the card is
-  // that div and the tile sits inside the dt, placed beside both lines.
-  return (
-    <Card padding="sm" className="relative min-w-0 sm:pl-14">
-      <dt className="truncate text-label text-text-muted">
-        <IconTile
-          tone={value > 0 ? tone : 'neutral'}
-          className="absolute top-1/2 left-3 -translate-y-1/2 max-sm:hidden"
-        >
-          {icon}
-        </IconTile>
-        {label}
-      </dt>
-      <dd className="text-[22px] leading-tight font-semibold tracking-[-0.015em] tabular-nums">
-        {formatNumber(shown)}
-      </dd>
-    </Card>
-  )
+/** A count that rises on arrival and on change. */
+function Counted({ value }: { value: number }) {
+  return <>{formatNumber(useCountUp(value))}</>
 }
 
 export function InboxPage() {
@@ -472,7 +447,7 @@ export function InboxPage() {
   const { entries, done } = usePresence(items, (item) => item.id)
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 md:p-8">
+    <div className={PAGE_CLASS}>
       <PageHeader
         title={t('webPagesOverview.inboxTitle')}
         badge={!live && everConnected ? <StaleBadge /> : null}
@@ -485,29 +460,21 @@ export function InboxPage() {
         }
       />
 
-      <dl
-        aria-label={t('webPagesOverview.inboxSummary')}
-        className="grid grid-cols-3 gap-2 sm:gap-3"
-      >
-        <Stat
-          label={t('webPagesOverview.inboxApprovals')}
-          value={count('approval')}
-          icon={<ShieldAlert />}
-          tone="warn"
-        />
-        <Stat
-          label={t('webPagesOverview.inboxQuestions')}
-          value={count('question')}
-          icon={<MessageCircleQuestion />}
-          tone="info"
-        />
-        <Stat
-          label={t('webPagesOverview.inboxIssues')}
-          value={count('issue')}
-          icon={<AlertTriangle />}
-          tone="danger"
-        />
-      </dl>
+      <StatStrip
+        label={t('webPagesOverview.inboxSummary')}
+        items={(
+          [
+            ['approval', t('webPagesOverview.inboxApprovals'), <ShieldAlert />, 'warn'],
+            ['question', t('webPagesOverview.inboxQuestions'), <MessageCircleQuestion />, 'info'],
+            ['issue', t('webPagesOverview.inboxIssues'), <AlertTriangle />, 'danger'],
+          ] as const
+        ).map(([kind, label, icon, tone]) => ({
+          label,
+          icon,
+          iconTone: count(kind) > 0 ? tone : 'neutral',
+          value: <Counted value={count(kind)} />,
+        }))}
+      />
 
       {entries.length === 0 ? (
         <Card variant="plain" padding="none">
