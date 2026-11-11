@@ -7,6 +7,7 @@ import { t } from '@/i18n'
 import '@/i18n/en/webSettings'
 import { useConnection } from '@/stores/connection'
 import { buttonVariants } from '@/web/components/ui/button'
+import { ShellBar } from './ShellBar'
 
 const DISMISS_KEY = 'agentos.ui.setupPromptDismissed'
 
@@ -37,36 +38,37 @@ export function SetupPrompt() {
   })
   const incomplete = status.data?.needsOnboarding === true || status.data?.llmConfigured === false
   if (hidden || !incomplete || pathname.startsWith('/settings/setup')) return null
+  const dismiss = () => {
+    try {
+      sessionStorage.setItem(DISMISS_KEY, '1')
+    } catch {
+      /* dismissed for this page only */
+    }
+    setHidden(true)
+  }
   return (
-    <div
-      role="status"
-      className="flex items-center gap-3 border-b border-accent/40 bg-accent-soft px-4 py-2 max-sm:gap-2 max-sm:py-1.5"
-    >
-      <Sparkles className="size-4 shrink-0 text-accent" aria-hidden />
+    <ShellBar tone="accent" icon={<Sparkles />}>
       {/* Phones get one line: a short title and the action; the body stays for screen readers. */}
       <span className="min-w-0 flex-1">
         <span className="font-medium max-sm:hidden">{t('webSettings.setupPromptTitle')}</span>
         <span className="font-medium sm:hidden">{t('webSettings.setupPromptTitleShort')}</span>{' '}
         <span className="text-text-muted max-sm:sr-only">{t('webSettings.setupPromptBody')}</span>
       </span>
-      <Link to="/settings/setup" className={buttonVariants({ size: 'sm', variant: 'primary' })}>
+      <Link
+        to="/settings/setup"
+        viewTransition
+        className={buttonVariants({ size: 'sm', variant: 'primary' })}
+      >
         {t('webSettings.setupPromptAction')}
       </Link>
       <button
         type="button"
         aria-label={t('webSettings.setupPromptDismiss')}
-        onClick={() => {
-          try {
-            sessionStorage.setItem(DISMISS_KEY, '1')
-          } catch {
-            /* dismissed for this page only */
-          }
-          setHidden(true)
-        }}
-        className="target inline-flex items-center justify-center rounded text-text-muted hover:text-text"
+        onClick={dismiss}
+        className="press target inline-flex size-7 items-center justify-center rounded-md text-text-muted hover:bg-surface-3 hover:text-text touch:size-11"
       >
         <X className="size-4" aria-hidden />
       </button>
-    </div>
+    </ShellBar>
   )
 }

@@ -7,6 +7,7 @@ import '@/i18n/en/webConnection'
 import { useRuntimeSignals } from '@/lib/runtime-signals'
 import { useConnection } from '@/stores/connection'
 import { Button } from '@/web/components/ui/button'
+import { ShellBar } from './ShellBar'
 import { useDismissedVersion, useUpdateCheck } from './updates'
 
 const UpdateApplyDialog = lazy(async () => ({
@@ -32,21 +33,6 @@ export function shouldAutoReload(bundleVersion: string, now: number = Date.now()
   } catch {
     return false
   }
-}
-
-function Banner({ children, tone }: { children: React.ReactNode; tone: 'info' | 'warn' }) {
-  return (
-    <div
-      role="status"
-      className={
-        tone === 'warn'
-          ? 'flex items-center gap-3 border-b border-warn/40 bg-warn/10 px-4 py-2'
-          : 'flex items-center gap-3 border-b border-info/40 bg-info/10 px-4 py-2'
-      }
-    >
-      {children}
-    </div>
-  )
 }
 
 /** "Restarting gateway…", protocol-mismatch Reload, and the update notice. */
@@ -89,14 +75,15 @@ export function ConnectionNotices({
   return (
     <>
       {restarting || (restartPending && state !== 'connected') ? (
-        <Banner tone="info">
-          <Loader2 className="motion-status size-4 animate-spin" aria-hidden />
-          <span className="font-medium">{t('webConnection.restarting')}</span>
-          <span className="text-text-muted">{t('webConnection.restartingBody')}</span>
-        </Banner>
+        <ShellBar tone="info" icon={<Loader2 className="motion-status animate-spin" />}>
+          <span className="min-w-0 flex-1">
+            <span className="font-medium">{t('webConnection.restarting')}</span>{' '}
+            <span className="text-text-muted">{t('webConnection.restartingBody')}</span>
+          </span>
+        </ShellBar>
       ) : null}
       {mismatch ? (
-        <Banner tone="warn">
+        <ShellBar tone="warn" icon={<RefreshCw />}>
           <span className="min-w-0 flex-1">
             <span className="font-medium">{t('webConnection.protocolTitle')}</span>{' '}
             <span className="text-text-muted">{t('webConnection.protocolBody')}</span>
@@ -105,18 +92,21 @@ export function ConnectionNotices({
             <RefreshCw aria-hidden />
             {t('webConnection.protocolReload')}
           </Button>
-        </Banner>
+        </ShellBar>
       ) : null}
       {showUpdate ? (
-        <Banner tone="info">
-          <ArrowUpCircle className="size-4 text-info" aria-hidden />
+        <ShellBar tone="info" icon={<ArrowUpCircle />}>
           <span className="min-w-0 flex-1">
             {t('webConnection.updateNotice', { version: latest })}{' '}
-            <Link to="/settings/updates" className="text-accent underline-offset-2 hover:underline">
+            <Link
+              to="/settings/updates"
+              viewTransition
+              className="font-medium text-accent underline-offset-2 hover:underline"
+            >
               {t('webConnection.updateNoticeLink')}
             </Link>
           </span>
-          <Button size="sm" variant="outline" onClick={() => setApplyOpen(true)}>
+          <Button size="sm" variant="secondary" onClick={() => setApplyOpen(true)}>
             {t('webConnection.updateNow')}
           </Button>
           <Button
@@ -124,10 +114,11 @@ export function ConnectionNotices({
             variant="ghost"
             aria-label={t('webConnection.updateDismiss')}
             onClick={() => dismiss(latest)}
+            className="text-text-muted hover:text-text"
           >
             <X />
           </Button>
-        </Banner>
+        </ShellBar>
       ) : null}
       {applyOpen ? (
         <Suspense fallback={null}>
