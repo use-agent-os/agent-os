@@ -12,6 +12,7 @@ import httpx
 import structlog
 
 from agentos.execution_status import derive_is_error
+from agentos.model_registry import ANTHROPIC_MESSAGES_MODELS
 
 from .error_body import read_bounded_body, summarize_error_body
 from .replay import prepare_replay, provenance_for_provider
@@ -61,87 +62,18 @@ def _uses_authorization_bearer(base_url: str) -> bool:
     return "api.minimaxi.com" in normalized or "api.minimax.io" in normalized
 
 
+# Served by ``list_models``; declared once in the registry with the windows and
+# list prices a direct session is sized and billed from.
 _KNOWN_MODELS: list[dict[str, Any]] = [
     {
-        "model_id": "claude-opus-5-5",
-        "display_name": "Claude Opus 5.5",
-        "context_window": 1000000,
-        "max_output_tokens": 128000,
-        "input_cost_per_1k": 0.004,
-        "output_cost_per_1k": 0.02,
-    },
-    {
-        "model_id": "claude-sonnet-5-5",
-        "display_name": "Claude Sonnet 5.5",
-        "context_window": 1000000,
-        "max_output_tokens": 128000,
-        "input_cost_per_1k": 0.002,
-        "output_cost_per_1k": 0.01,
-    },
-    {
-        "model_id": "claude-fable-5-1",
-        "display_name": "Claude Fable 5.1",
-        "context_window": 1000000,
-        "max_output_tokens": 128000,
-        "input_cost_per_1k": 0.01,
-        "output_cost_per_1k": 0.05,
-    },
-    {
-        "model_id": "claude-opus-5",
-        "display_name": "Claude Opus 5",
-        "context_window": 1000000,
-        "max_output_tokens": 128000,
-        "input_cost_per_1k": 0.005,
-        "output_cost_per_1k": 0.025,
-    },
-    {
-        "model_id": "claude-sonnet-5",
-        "display_name": "Claude Sonnet 5",
-        "context_window": 1000000,
-        "max_output_tokens": 128000,
-        "input_cost_per_1k": 0.002,
-        "output_cost_per_1k": 0.01,
-    },
-    {
-        "model_id": "claude-opus-4-8",
-        "display_name": "Claude Opus 4.8",
-        "context_window": 1000000,
-        "max_output_tokens": 128000,
-        "input_cost_per_1k": 0.005,
-        "output_cost_per_1k": 0.025,
-    },
-    {
-        "model_id": "claude-opus-4-6",
-        "display_name": "Claude Opus 4.6",
-        "context_window": 1000000,
-        "max_output_tokens": 128000,
-        "input_cost_per_1k": 0.005,
-        "output_cost_per_1k": 0.025,
-    },
-    {
-        "model_id": "claude-sonnet-4-6",
-        "display_name": "Claude Sonnet 4.6",
-        "context_window": 1000000,
-        "max_output_tokens": 128000,
-        "input_cost_per_1k": 0.003,
-        "output_cost_per_1k": 0.015,
-    },
-    {
-        "model_id": "claude-haiku-4-5",
-        "display_name": "Claude Haiku 4.5",
-        "context_window": 200000,
-        "max_output_tokens": 64000,
-        "input_cost_per_1k": 0.001,
-        "output_cost_per_1k": 0.005,
-    },
-    {
-        "model_id": "claude-haiku-4-5-20251001",
-        "display_name": "Claude Haiku 4.5",
-        "context_window": 200000,
-        "max_output_tokens": 64000,
-        "input_cost_per_1k": 0.001,
-        "output_cost_per_1k": 0.005,
-    },
+        "model_id": m.model_id,
+        "display_name": m.display_name,
+        "context_window": m.context_window,
+        "max_output_tokens": m.max_output_tokens,
+        "input_cost_per_1k": m.price.input_per_m / 1000,
+        "output_cost_per_1k": m.price.output_per_m / 1000,
+    }
+    for m in ANTHROPIC_MESSAGES_MODELS
 ]
 
 
