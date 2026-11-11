@@ -6,7 +6,8 @@ import { buttonVariants } from '@/web/components/ui/button'
 /**
  * An icon link for the rail. A plain-string className (not NavLink's function
  * form) so it survives Radix `Slot` merging when wrapped in a tooltip trigger.
- * Navigating cross-fades the main area (base.css page transitions).
+ * Navigating cross-fades the main area (base.css page transitions); the active
+ * background is the rail group's gliding pill.
  */
 export const RailLink = forwardRef<HTMLAnchorElement, ComponentProps<typeof Link>>(
   function RailLink({ to, className, ...props }, ref) {
@@ -20,8 +21,7 @@ export const RailLink = forwardRef<HTMLAnchorElement, ComponentProps<typeof Link
         aria-current={active ? 'page' : undefined}
         className={cn(
           buttonVariants({ variant: 'ghost', size: 'icon' }),
-          'relative',
-          active && 'bg-surface-3',
+          'rail-item relative',
           className as string | undefined,
         )}
         {...props}

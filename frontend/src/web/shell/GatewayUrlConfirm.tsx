@@ -1,3 +1,4 @@
+import { Globe } from 'lucide-react'
 import { useState } from 'react'
 import { useBootstrap, useRpc } from '@/app/providers'
 import { t } from '@/i18n'
@@ -84,13 +85,19 @@ export function GatewayUrlConfirm() {
     >
       <AlertDialogContent>
         <AlertDialogHeader>
+          <span
+            aria-hidden
+            className="mb-1 grid size-10 place-items-center rounded-card border border-warn/25 bg-warn/10 text-warn [&_svg]:size-[18px]"
+          >
+            <Globe />
+          </span>
           <AlertDialogTitle>{t('webConnection.gatewayUrlTitle')}</AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="flex flex-col gap-2">
               <p>{t('webConnection.gatewayUrlBody', { host })}</p>
               <code
                 data-testid="gateway-url-target"
-                className="rounded bg-surface-0 px-2 py-1 font-mono text-small break-all"
+                className="rounded-md border border-border bg-surface-inset px-2.5 py-2 font-mono text-small break-all text-text shadow-inset"
               >
                 {url}
               </code>

@@ -24,7 +24,7 @@ export function MobileDrawer() {
       <SheetContent
         side="left"
         aria-describedby={undefined}
-        className="w-[min(92vw,380px)] flex-row"
+        className="w-[min(92vw,380px)] flex-row overflow-hidden rounded-r-2xl border-r-border-strong"
         onOpenAutoFocus={(e) => {
           // Land on the current destination (or the drawer itself), not on a
           // rail button whose focus tooltip would swallow the first Escape.

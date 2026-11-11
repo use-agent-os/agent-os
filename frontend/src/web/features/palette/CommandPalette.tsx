@@ -1,5 +1,5 @@
 import { Command } from 'cmdk'
-import { CornerDownLeft, FileText, MessageSquare, Settings, Zap } from 'lucide-react'
+import { CornerDownLeft, FileText, MessageSquare, Search, Settings, Zap } from 'lucide-react'
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
@@ -12,6 +12,8 @@ import '@/i18n/en/webShell'
 import { useConnection } from '@/stores/connection'
 import { useTheme } from '@/stores/theme'
 import { Dialog, DialogContent, DialogTitle } from '@/web/components/ui/dialog'
+import { Kbd } from '@/web/components/ui/kbd'
+import { useGlide } from '@/web/components/ui/use-glide'
 import { ALL_SETTINGS_SECTIONS } from '@/web/features/settings/registry'
 import { PAGES } from '@/web/shell/pages'
 import { exportSessionMarkdown } from '@/web/shell/session-actions'
@@ -28,13 +30,25 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+// The highlighted row's fill is the list's gliding pill (`.palette-track`);
+// the row itself only adds the 3:1 ring, since focus stays in the input.
 const itemClass = [
-  'target flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-ui outline-none select-none data-[selected=true]:bg-surface-3 data-[disabled=true]:opacity-60',
-  // Focus stays in the input; the highlighted option needs a 3:1 marker, not just surface-3.
+  'target relative flex cursor-default items-center gap-3 rounded-lg px-2 py-1.5 text-ui outline-none select-none data-[disabled=true]:opacity-60',
   'data-[selected=true]:outline-solid data-[selected=true]:outline-2 data-[selected=true]:-outline-offset-2 data-[selected=true]:outline-ring',
 ].join(' ')
 const groupClass =
-  '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-small [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-text-muted'
+  '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-label [&_[cmdk-group-heading]]:text-text-muted'
+const tileClass =
+  'relative grid size-7 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-text-muted [&_svg]:size-3.5'
+
+/** The Enter hint that slides in on the highlighted row (shell.css). */
+function EnterHint() {
+  return (
+    <span aria-hidden className="palette-enter ml-auto flex shrink-0 text-text-muted">
+      <CornerDownLeft className="size-3.5" />
+    </span>
+  )
+}
 
 /** The ⌘K palette (command-palette spec "Command palette"). */
 export function CommandPalette({
@@ -53,6 +67,7 @@ export function CommandPalette({
   const overview = useShortcutOverlay()
   const phone = usePhone()
   const [query, setQuery] = useState('')
+  const track = useGlide<HTMLDivElement>('[cmdk-item][aria-selected="true"]')
 
   const currentKey = pathname.startsWith('/chat/') ? pathToSessionKey(pathname) : null
   const currentRow = currentKey ? sessions.rows.find((r) => r.key === currentKey) : undefined
@@ -69,7 +84,9 @@ export function CommandPalette({
     sessionRunning: currentRow ? sessionIsRunning(currentRow) : false,
     newSession: () => {
       const agent = useShell.getState().activeAgent
-      navigate(agent ? `/new?agent=${encodeURIComponent(agent)}` : '/new')
+      navigate(agent ? `/new?agent=${encodeURIComponent(agent)}` : '/new', {
+        viewTransition: true,
+      })
     },
     toggleSidebar: () => {
       const shell = useShell.getState()
@@ -80,7 +97,7 @@ export function CommandPalette({
     setTheme: setPreference,
     openShortcuts: overview.open,
     retryConnection: () => rpc.reconnect({ force: true }),
-    openInbox: () => navigate('/inbox'),
+    openInbox: () => navigate('/inbox', { viewTransition: true }),
     compact: (key) => {
       toast.info(t('webPalette.compactStarted'))
       rpc
@@ -96,8 +113,9 @@ export function CommandPalette({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         hideClose
+        data-palette
         aria-describedby={undefined}
-        className="top-[15vh] max-w-xl translate-y-0 gap-0 overflow-hidden p-0"
+        className="top-[14vh] max-w-[620px] translate-y-0 gap-0 overflow-hidden rounded-2xl p-0"
         onCloseAutoFocus={(e) => {
           // Back to wherever focus was when the palette opened (the composer,
           // a row) — a shortcut-opened dialog has no trigger to return to.
@@ -110,103 +128,152 @@ export function CommandPalette({
       >
         <DialogTitle className="sr-only">{t('webPalette.title')}</DialogTitle>
         <Command label={t('webPalette.title')} loop>
-          <Command.Input
-            value={query}
-            onValueChange={setQuery}
-            placeholder={t('webPalette.placeholder')}
-            className="h-12 w-full border-b border-border bg-transparent px-4 text-base outline-none placeholder:text-text-muted focus:border-ring"
-          />
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute top-1/2 left-4 size-[18px] -translate-y-1/2 text-text-muted"
+              aria-hidden
+            />
+            <Command.Input
+              value={query}
+              onValueChange={setQuery}
+              placeholder={t('webPalette.placeholder')}
+              className="h-14 w-full border-b border-border bg-transparent pr-16 pl-11 text-[15px] outline-none placeholder:text-text-muted focus:border-ring"
+            />
+            <Kbd className="absolute top-1/2 right-4 -translate-y-1/2 max-sm:hidden">
+              {t('webPalette.keyEscape')}
+            </Kbd>
+          </div>
           <Command.List className="scroll-contained max-h-[min(60dvh,420px)] p-2">
-            <Command.Empty className="px-2 py-6 text-center text-text-muted">
+            <Command.Empty className="flex flex-col items-center gap-2 px-2 py-10 text-center text-text-muted">
+              <Search className="size-5" aria-hidden />
               {t('webPalette.empty', { query })}
             </Command.Empty>
+            <div
+              ref={track}
+              className="palette-track glide-track [--glide-bg:var(--surface-3)] [--glide-radius:8px]"
+            >
+              <Command.Group heading={t('webPalette.groupSessions')} className={groupClass}>
+                {sessions.isError ? (
+                  <div role="alert" className="px-2 py-1.5 text-danger">
+                    {t('webPalette.sessionsFailed')}
+                  </div>
+                ) : sessions.isPending ? (
+                  <div className="px-2 py-1.5 text-text-muted">
+                    {t('webPalette.sessionsLoading')}
+                  </div>
+                ) : (
+                  sessions.rows.slice(0, MAX_SESSIONS).map((row) => (
+                    <Command.Item
+                      key={row.key}
+                      value={`session ${row.key}`}
+                      keywords={[sessionTitle(row), row.key]}
+                      onSelect={() =>
+                        run(() => navigate(sessionKeyToPath(row.key), { viewTransition: true }))
+                      }
+                      className={itemClass}
+                    >
+                      <span aria-hidden className={tileClass}>
+                        <MessageSquare />
+                        {sessionIsRunning(row) ? (
+                          <span className="absolute -top-1 -right-1 flex rounded-full bg-surface-overlay p-0.5 text-accent">
+                            <span data-live className="status-dot motion-status size-1.5" />
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="truncate">{sessionTitle(row)}</span>
+                      <EnterHint />
+                    </Command.Item>
+                  ))
+                )}
+              </Command.Group>
 
-            <Command.Group heading={t('webPalette.groupSessions')} className={groupClass}>
-              {sessions.isError ? (
-                <div role="alert" className="px-2 py-1.5 text-danger">
-                  {t('webPalette.sessionsFailed')}
-                </div>
-              ) : sessions.isPending ? (
-                <div className="px-2 py-1.5 text-text-muted">{t('webPalette.sessionsLoading')}</div>
-              ) : (
-                sessions.rows.slice(0, MAX_SESSIONS).map((row) => (
+              <Command.Group heading={t('webPalette.groupPages')} className={groupClass}>
+                {PAGES.map((page) => (
                   <Command.Item
-                    key={row.key}
-                    value={`session ${row.key}`}
-                    keywords={[sessionTitle(row), row.key]}
-                    onSelect={() => run(() => navigate(sessionKeyToPath(row.key)))}
+                    key={page.id}
+                    value={`page ${page.id}`}
+                    keywords={[t(page.titleKey), t(page.descriptionKey)]}
+                    onSelect={() => run(() => navigate(page.path, { viewTransition: true }))}
                     className={itemClass}
                   >
-                    <MessageSquare className="size-4 shrink-0 text-text-muted" aria-hidden />
-                    <span className="truncate">{sessionTitle(row)}</span>
-                  </Command.Item>
-                ))
-              )}
-            </Command.Group>
-
-            <Command.Group heading={t('webPalette.groupPages')} className={groupClass}>
-              {PAGES.map((page) => (
-                <Command.Item
-                  key={page.id}
-                  value={`page ${page.id}`}
-                  keywords={[t(page.titleKey), t(page.descriptionKey)]}
-                  onSelect={() => run(() => navigate(page.path))}
-                  className={itemClass}
-                >
-                  <page.icon className="size-4 shrink-0 text-text-muted" aria-hidden />
-                  <span>{t(page.titleKey)}</span>
-                  <span className="truncate text-small text-text-muted">
-                    {t(page.descriptionKey)}
-                  </span>
-                </Command.Item>
-              ))}
-            </Command.Group>
-
-            <Command.Group heading={t('webPalette.groupSettings')} className={groupClass}>
-              {ALL_SETTINGS_SECTIONS.map((section) => (
-                <Command.Item
-                  key={section.id}
-                  value={`settings ${section.id}`}
-                  keywords={[t(section.titleKey), t(section.descriptionKey), ...section.keywords]}
-                  onSelect={() => run(() => navigate(`/settings/${section.id}`))}
-                  className={itemClass}
-                >
-                  <Settings className="size-4 shrink-0 text-text-muted" aria-hidden />
-                  <span>{t(section.titleKey)}</span>
-                  <span className="truncate text-small text-text-muted">
-                    {t(section.descriptionKey)}
-                  </span>
-                </Command.Item>
-              ))}
-            </Command.Group>
-
-            <Command.Group heading={t('webPalette.groupActions')} className={groupClass}>
-              {actions.map((action) => (
-                <Command.Item
-                  key={action.id}
-                  value={`action ${action.id}`}
-                  keywords={[t(action.labelKey), ...action.keywords]}
-                  disabled={action.gate.disabled}
-                  onSelect={() => run(action.run)}
-                  className={itemClass}
-                >
-                  {action.id === 'export' ? (
-                    <FileText className="size-4 shrink-0 text-text-muted" aria-hidden />
-                  ) : (
-                    <Zap className="size-4 shrink-0 text-text-muted" aria-hidden />
-                  )}
-                  <span>{t(action.labelKey)}</span>
-                  {action.gate.reason ? (
-                    <span className="ml-auto truncate text-small text-text-muted">
-                      {action.gate.reason}
+                    <span aria-hidden className={tileClass}>
+                      <page.icon />
                     </span>
-                  ) : null}
-                </Command.Item>
-              ))}
-            </Command.Group>
+                    <span className="shrink-0">{t(page.titleKey)}</span>
+                    <span className="truncate text-small text-text-muted">
+                      {t(page.descriptionKey)}
+                    </span>
+                    <EnterHint />
+                  </Command.Item>
+                ))}
+              </Command.Group>
+
+              <Command.Group heading={t('webPalette.groupSettings')} className={groupClass}>
+                {ALL_SETTINGS_SECTIONS.map((section) => (
+                  <Command.Item
+                    key={section.id}
+                    value={`settings ${section.id}`}
+                    keywords={[t(section.titleKey), t(section.descriptionKey), ...section.keywords]}
+                    onSelect={() =>
+                      run(() => navigate(`/settings/${section.id}`, { viewTransition: true }))
+                    }
+                    className={itemClass}
+                  >
+                    <span aria-hidden className={tileClass}>
+                      <Settings />
+                    </span>
+                    <span className="shrink-0">{t(section.titleKey)}</span>
+                    <span className="truncate text-small text-text-muted">
+                      {t(section.descriptionKey)}
+                    </span>
+                    <EnterHint />
+                  </Command.Item>
+                ))}
+              </Command.Group>
+
+              <Command.Group heading={t('webPalette.groupActions')} className={groupClass}>
+                {actions.map((action) => (
+                  <Command.Item
+                    key={action.id}
+                    value={`action ${action.id}`}
+                    keywords={[t(action.labelKey), ...action.keywords]}
+                    disabled={action.gate.disabled}
+                    onSelect={() => run(action.run)}
+                    className={itemClass}
+                  >
+                    <span aria-hidden className={tileClass}>
+                      {action.id === 'export' ? <FileText /> : <Zap />}
+                    </span>
+                    <span className="shrink-0">{t(action.labelKey)}</span>
+                    {action.gate.reason ? (
+                      <span className="ml-auto truncate text-small text-text-muted">
+                        {action.gate.reason}
+                      </span>
+                    ) : (
+                      <EnterHint />
+                    )}
+                  </Command.Item>
+                ))}
+              </Command.Group>
+            </div>
           </Command.List>
-          <div className="flex items-center gap-1 border-t border-border px-3 py-2 text-small text-text-muted">
-            <CornerDownLeft className="size-3.5" aria-hidden />
+          <div
+            aria-hidden
+            className="flex items-center gap-4 border-t border-border bg-surface-2/60 px-4 py-2 text-small text-text-muted max-sm:hidden"
+          >
+            <span className="flex items-center gap-1.5">
+              <Kbd>↑</Kbd>
+              <Kbd>↓</Kbd>
+              {t('webPalette.hintNavigate')}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Kbd>↵</Kbd>
+              {t('webPalette.hintOpen')}
+            </span>
+            <span className="ml-auto flex items-center gap-1.5">
+              <Kbd>{t('webPalette.keyEscape')}</Kbd>
+              {t('webPalette.hintClose')}
+            </span>
           </div>
         </Command>
       </DialogContent>

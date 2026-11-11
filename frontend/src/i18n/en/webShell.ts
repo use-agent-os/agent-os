@@ -126,6 +126,7 @@ export const webShell = defineNamespace('webShell', {
   trayTitle_other: '{count} approvals waiting',
   trayCollapse: 'Collapse approvals',
   trayExpand: 'Show pending approvals',
+  traySubtitle: 'Each one waits for your decision before it runs.',
   traySession: 'From {session}',
   trayAgent: 'Agent {agent}',
   trayCopyCommand: 'Copy command',

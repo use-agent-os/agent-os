@@ -67,7 +67,7 @@ export function ListPane({
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onKeyDown={onKeyDown}
-          className="absolute inset-y-0 -right-1 w-2 cursor-col-resize hover:bg-accent/40 focus-visible:bg-accent/40"
+          className="pane-resizer absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none"
         />
       ) : null}
     </div>

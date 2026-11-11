@@ -1,0 +1,356 @@
+/* Shell-specific styling (rail, list pane, top bars, floating layers).
+ * Imported by web/shell/Shell.tsx. Everything generic (surfaces, focus,
+ * entrances, the gliding pill) lives in base.css; this file only adds what the
+ * frame around every page needs. Durations and easings are tokens; the global
+ * reduced-motion rule in base.css neutralises every animation here. */
+
+/* ---- Brand mark --------------------------------------------------------- */
+
+/* The AgentOS node mark, painted in the accent through a mask so it follows
+   the theme (lime on dark, olive on light) without an image request. */
+.shell-brand-mark {
+  display: block;
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 13.5V5M12 13.5 4 19M12 13.5 20 19' stroke='black' stroke-width='1.7' stroke-linecap='round'/%3E%3Ccircle cx='12' cy='13.5' r='3.7'/%3E%3Ccircle cx='12' cy='4.4' r='2.2'/%3E%3Ccircle cx='3.8' cy='19.4' r='2.2'/%3E%3Ccircle cx='20.2' cy='19.4' r='2.2'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+/* ---- Rail ------------------------------------------------------------- */
+
+/* Rail chrome lives here rather than in class strings: the rail is in the
+   entry chunk. Unlayered, so it outranks the ghost button's utilities. */
+.rail-brand {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: var(--elevation-card);
+}
+.rail-sep {
+  flex-shrink: 0;
+  width: 24px;
+  height: 1px;
+  margin-block: 12px;
+  background: var(--border);
+}
+.rail-new {
+  border-radius: 10px;
+}
+.rail-new svg {
+  width: 18px;
+  height: 18px;
+  transition: rotate var(--duration-base) var(--ease-out);
+}
+.rail-new:hover svg {
+  rotate: 90deg;
+}
+/* Icon items: muted at rest, a quiet hover step, the accent when active. The
+   active background is the track's gliding pill, so an active item paints
+   none of its own, even on hover. */
+.rail-item {
+  color: var(--text-muted);
+}
+.rail-item:hover {
+  color: var(--text);
+  background-color: transparent;
+}
+.rail-item:not([aria-pressed='true'], [aria-current='page']):hover {
+  background-color: var(--surface-2);
+}
+.rail-item:is([aria-pressed='true'], [aria-current='page']) {
+  color: var(--accent);
+}
+.rail-item svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* A rail group (Rail.tsx track()): one pill behind the active item and a
+   short accent bar on the rail's left edge, both gliding between items.
+   Items are a fixed size on a fixed step, so the position is the active
+   index (--rail-i) times the step; nothing is measured. */
+.rail-track {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  --rail-size: 36px;
+  --rail-step: calc(var(--rail-size) + 4px);
+  position: relative;
+  isolation: isolate;
+}
+@media (pointer: coarse) {
+  .rail-track {
+    --rail-size: 44px;
+  }
+}
+.rail-track[data-bottom] {
+  margin-top: auto;
+}
+.rail-track::before,
+.rail-track::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    transform var(--duration-spring) var(--ease-spring),
+    opacity var(--duration-fast) var(--ease-out);
+}
+.rail-track::before {
+  left: calc(50% - var(--rail-size) / 2);
+  z-index: -1;
+  width: var(--rail-size);
+  height: var(--rail-size);
+  border-radius: 8px;
+  background: var(--surface-3);
+  transform: translateY(calc(var(--rail-i, 0) * var(--rail-step)));
+}
+.rail-track::after {
+  left: 0;
+  width: 3px;
+  height: 16px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+  transform: translateY(calc(var(--rail-i, 0) * var(--rail-step) + var(--rail-size) / 2 - 8px));
+}
+.rail-track[data-active]::before,
+.rail-track[data-active]::after {
+  opacity: 1;
+}
+
+/* ---- Route fallback ----------------------------------------------------- */
+
+/* The route-loading skeleton (app/fallbacks.tsx), drawn by one element: a
+   title, a subtitle, three cards and a panel. It appears after the skeleton
+   delay so fast loads never flash it, and shimmers while shown. */
+.route-skeleton {
+  --sk: var(--surface-3);
+  max-width: 72rem;
+  height: 520px;
+  margin-inline: auto;
+  background:
+    linear-gradient(var(--sk), var(--sk)) 0 0 / 160px 24px,
+    linear-gradient(var(--sk), var(--sk)) 0 36px / min(300px, 100%) 14px,
+    linear-gradient(var(--sk), var(--sk)) 0 80px / calc((100% - 24px) / 3) 112px,
+    linear-gradient(var(--sk), var(--sk)) 50% 80px / calc((100% - 24px) / 3) 112px,
+    linear-gradient(var(--sk), var(--sk)) 100% 80px / calc((100% - 24px) / 3) 112px,
+    linear-gradient(var(--sk), var(--sk)) 0 216px / 100% 256px;
+  background-repeat: no-repeat;
+  border-radius: 8px;
+  animation:
+    agentos-fade-in var(--duration-base) var(--ease-out) var(--duration-slow) both,
+    route-skeleton-pulse var(--pulse-period) var(--ease-in-out) var(--duration-slow) infinite;
+}
+@keyframes route-skeleton-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* ---- List pane ---------------------------------------------------------- */
+
+/* The resize handle: an invisible 8px grip whose hairline lights up on hover,
+   while dragging and on keyboard focus. */
+.pane-resizer::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 2px;
+  translate: -50% 0;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.pane-resizer:hover::after,
+.pane-resizer:active::after {
+  opacity: 0.6;
+}
+.pane-resizer:focus-visible::after {
+  opacity: 1;
+}
+
+/* A session row. The selected row gets a quiet surface step and a short
+   accent bar on its leading edge. */
+.session-row::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 2px;
+  height: 18px;
+  translate: 0 -50%;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0;
+  scale: 1 0.4;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    scale var(--duration-base) var(--ease-spring);
+}
+.session-row[data-current]::before {
+  opacity: 1;
+  scale: 1 1;
+}
+
+/* ---- Top bars ----------------------------------------------------------- */
+
+/* A slim notice bar under the phone header / above the page. It opens by
+   growing its row (no measured heights) and fades its content in; dismissal
+   is instant. Tone comes from --bar-tone. */
+.shell-bar {
+  display: grid;
+  grid-template-rows: 1fr;
+  background-color: var(--surface-1);
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--bar-tone, var(--accent)) 11%, transparent) 0%,
+    color-mix(in oklab, var(--bar-tone, var(--accent)) 3%, transparent) 55%,
+    transparent 100%
+  );
+  border-bottom: 1px solid color-mix(in oklab, var(--bar-tone, var(--accent)) 22%, var(--border));
+  animation: shell-bar-open var(--duration-slow) var(--ease-enter) both;
+}
+.shell-bar > * {
+  min-height: 0;
+  overflow: hidden;
+  animation: agentos-fade-in var(--duration-slow) var(--ease-out) both;
+}
+@keyframes shell-bar-open {
+  from {
+    grid-template-rows: 0fr;
+  }
+}
+
+/* ---- Floating layers ---------------------------------------------------- */
+
+/* Toasts live in a zero-height layer at the top of the main column
+   (Shell.tsx): its `contain: layout` makes it the containing block of
+   sonner's fixed list, so toasts sit below the top bars, centred on the main
+   column, and never cover the setup bar, the page title or the phone header.
+   The !important outranks the offsets sonner sets inline. */
+.toast-layer {
+  position: relative;
+  z-index: var(--z-toast);
+  height: 0;
+  contain: layout;
+}
+.toast-layer [data-sonner-toaster][data-y-position='top'] {
+  --offset-top: 12px !important;
+  --mobile-offset-top: 8px !important;
+}
+/* Sonner's close button is 20px: give it more than the 24px minimum target
+   (the toast is scaled slightly while it settles, so 24px measures under). */
+.toast-layer [data-sonner-toast][data-styled] [data-close-button] {
+  width: 28px;
+  height: 28px;
+}
+/* Sonner's own focus marker is a faint grey shadow: use the console ring. */
+[data-sonner-toaster] :is([data-sonner-toast], [data-close-button], [data-button]):focus-visible {
+  outline: 2px solid var(--ring) !important;
+  outline-offset: 2px;
+}
+
+/* The approval tray arrives from below with a spring and a warn glow that
+   settles once: an approval is a high-attention moment. */
+.approval-tray {
+  animation: approval-tray-in var(--duration-spring) var(--ease-spring) both;
+  box-shadow:
+    var(--elevation-overlay),
+    0 0 0 1px color-mix(in oklab, var(--warn) 32%, transparent);
+}
+.approval-tray::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--warn) 22%, transparent);
+  opacity: 0;
+  animation: approval-tray-flare var(--duration-enter) var(--ease-out) var(--duration-base) both;
+}
+@keyframes approval-tray-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+}
+@keyframes approval-tray-flare {
+  0% {
+    opacity: 0;
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---- Command palette ---------------------------------------------------- */
+
+/* A deeper blur behind the palette than behind ordinary dialogs. */
+[data-slot='dialog-overlay']:has(+ [data-palette]) {
+  backdrop-filter: blur(6px) saturate(1.1);
+}
+/* The highlight glides between results at keyboard speed. */
+.palette-track[data-glide='animate']::before {
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-out);
+}
+/* The Enter hint slides in on the highlighted row only. */
+.palette-enter {
+  opacity: 0;
+  translate: -4px 0;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    translate var(--duration-fast) var(--ease-out);
+}
+[cmdk-item][data-selected='true'] .palette-enter {
+  opacity: 1;
+  translate: 0 0;
+}
+/* Groups are separated by a hairline once more than one is shown. */
+[cmdk-group]:not([hidden]) ~ [cmdk-group]:not([hidden]) {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+@media (forced-colors: active) {
+  .shell-brand-mark,
+  .rail-track::after,
+  .session-row::before {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  .rail-track::before {
+    background: none;
+  }
+  .rail-track > :is([aria-pressed='true'], [aria-current='page']) {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+  .shell-bar {
+    background-image: none;
+  }
+}
+
+/* The inbox badge pops in when the first item arrives. */
+.inbox-badge.visible {
+  transform-origin: 70% 30%;
+  animation: agentos-scale-in var(--duration-spring) var(--ease-spring) both;
+}

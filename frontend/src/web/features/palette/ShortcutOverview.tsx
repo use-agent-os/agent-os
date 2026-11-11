@@ -29,10 +29,16 @@ function Keys({ combo }: { combo: string }) {
 function Section({ title, bindings }: { title: string; bindings: readonly Binding[] }) {
   return (
     <section aria-label={title}>
-      <SectionHeader as="h3" size="sm" title={title} className="mb-1" />
-      <ul role="list" className="flex flex-col">
+      <SectionHeader as="h3" size="sm" title={title} className="mb-2" />
+      <ul
+        role="list"
+        className="flex flex-col rounded-card border border-border bg-surface-2/50 px-3 shadow-highlight"
+      >
         {bindings.map((b) => (
-          <li key={b.combo} className="flex items-center justify-between gap-4 py-1">
+          <li
+            key={b.combo}
+            className="flex items-center justify-between gap-4 border-b border-border py-2 last:border-b-0"
+          >
             <span>{t(b.descriptionKey)}</span>
             <Keys combo={b.combo} />
           </li>
@@ -46,7 +52,7 @@ function Section({ title, bindings }: { title: string; bindings: readonly Bindin
 export function ShortcutOverview({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : onClose())}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-3xl">
         <DialogTitle>{t('webPalette.shortcutsTitle')}</DialogTitle>
         <DialogDescription className="sr-only">{t('webPalette.bindOverview')}</DialogDescription>
         <div className="grid gap-6 md:grid-cols-2">

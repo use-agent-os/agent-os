@@ -165,7 +165,7 @@ a New session button.
 
 A pending approval from a session other than the one on screen appears in the
 approval tray at the bottom right of every page. It can collapse to a count but
-stays until every request is resolved.
+stays until every request is resolved; on phones it starts collapsed.
 
 ### Routes
 
