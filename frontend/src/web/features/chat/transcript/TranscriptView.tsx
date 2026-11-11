@@ -1,9 +1,9 @@
-import { ArrowDown, Loader2 } from 'lucide-react'
+import { ArrowDown, Loader2, MessageSquareText } from 'lucide-react'
 import { useCallback, useEffect, useRef } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webChat'
 import { Button } from '@/web/components/ui/button'
-import { EmptyState, ErrorState } from '@/web/components/ui/states'
+import { ErrorState } from '@/web/components/ui/states'
 import type { TranscriptState } from '../model/types'
 import { useFollowScroll } from './follow'
 import { TurnView } from './TurnView'
@@ -87,8 +87,11 @@ export function TranscriptView(props: TranscriptViewProps) {
 
   const lastUserIndex = state.turns.reduce((acc, turn, i) => (turn.userMessage ? i : acc), -1)
 
+  const empty = !error && !loading && state.turns.length === 0
+
   return (
-    <div className="relative min-h-0 flex-1">
+    // The bottom edge fades into the canvas, so the composer reads as floating.
+    <div className="chat-fade relative min-h-0 flex-1">
       <div
         ref={attachScroller}
         onScroll={maybeLoadOlder}
@@ -97,12 +100,15 @@ export function TranscriptView(props: TranscriptViewProps) {
         role="log"
         aria-label={t('webChat.transcriptLabel')}
         aria-busy={loading || undefined}
-        className="scroll-contained h-full"
+        className="chat-scroller scroll-contained h-full focus-visible:-outline-offset-2"
       >
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
+        <div className="chat-column chat-turns flex min-h-full flex-col">
           {state.hasMore ? (
-            <p className="text-center text-small text-text-muted" role="status">
-              <Loader2 className="motion-status mr-1 inline size-3.5 animate-spin" aria-hidden />
+            <p
+              className="flex items-center justify-center gap-1.5 text-small text-text-muted"
+              role="status"
+            >
+              <Loader2 className="motion-status size-3.5 animate-spin" aria-hidden />
               {t('webChat.loadOlder')}
             </p>
           ) : null}
@@ -112,8 +118,8 @@ export function TranscriptView(props: TranscriptViewProps) {
               message={error}
               onRetry={props.onRetryLoad}
             />
-          ) : !loading && state.turns.length === 0 ? (
-            <EmptyState title={t('webChat.emptyTitle')} description={t('webChat.emptyBody')} />
+          ) : empty ? (
+            <EmptyConversation />
           ) : (
             state.turns.map((turn, i) => (
               <TurnView
@@ -128,12 +134,12 @@ export function TranscriptView(props: TranscriptViewProps) {
           {state.pendingInputs.length ? (
             <section
               aria-label={t('webChat.gatewayQueued')}
-              className="flex flex-col items-end gap-1"
+              className="flex flex-col items-end gap-1.5"
             >
               {state.pendingInputs.map((input, i) => (
                 <p
                   key={input.task_id ?? i}
-                  className="max-w-[85%] rounded-2xl border border-dashed border-border px-4 py-2 text-text-muted"
+                  className="chat-enter chat-user-bubble chat-pending px-4 py-2 text-text-muted"
                 >
                   {input.steer
                     ? t('webChat.gatewayQueuedSteer', { text: input.text ?? '' })
@@ -144,17 +150,37 @@ export function TranscriptView(props: TranscriptViewProps) {
           ) : null}
         </div>
       </div>
-      {follow.showLatest ? (
+      {/* Always mounted, so it can leave as smoothly as it arrives; hidden
+          (and out of the tab order) while following. */}
+      <div
+        className="chat-latest pointer-events-none absolute inset-x-0 bottom-3 z-[1] flex justify-center"
+        data-show={follow.showLatest}
+        inert={!follow.showLatest}
+        aria-hidden={!follow.showLatest || undefined}
+      >
         <Button
           variant="secondary"
           size="sm"
           onClick={follow.resume}
-          className="absolute bottom-3 left-1/2 -translate-x-1/2 shadow-2"
+          className="pointer-events-auto rounded-full pr-3.5 pl-3 shadow-overlay"
         >
           <ArrowDown />
           {t('webChat.latest')}
         </Button>
-      ) : null}
+      </div>
+    </div>
+  )
+}
+
+/** The empty conversation: a composed arrival, centred in the column. */
+function EmptyConversation() {
+  return (
+    <div className="anim-stagger my-auto flex flex-col items-center gap-3 py-10 text-center">
+      <span className="chat-hero-mark isolate mb-3" aria-hidden>
+        <MessageSquareText className="size-6" />
+      </span>
+      <h2 className="text-title text-balance">{t('webChat.emptyTitle')}</h2>
+      <p className="max-w-sm text-ui text-pretty text-text-muted">{t('webChat.emptyBody')}</p>
     </div>
   )
 }

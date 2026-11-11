@@ -754,6 +754,8 @@ query or path), its state (running, done or **Failed**, always with an icon and
 the word as well as the colour) and its duration once it finishes. Activate the
 row (click, Enter or Space) to see its arguments and result. A long result shows
 a preview and **Open in side panel**.
+Consecutive tool calls and reasoning read as one activity thread, and content
+that arrives while a turn runs eases into place; history does not animate.
 
 Markdown in messages is sanitized: scripts, event handlers, `javascript:` links,
 HTML classes written by the model and anything outside an allowlist are

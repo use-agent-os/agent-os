@@ -20,6 +20,8 @@ export function ThinkingBlock({ item, live }: { item: ThinkingItem; live?: boole
   const rpc = useRpc()
   const { sessionKey } = useChatActions()
   const [open, setOpen] = useState(false)
+  // Mounted on first expand, then kept so collapsing animates too.
+  const [mounted, setMounted] = useState(false)
   const [loaded, setLoaded] = useState<string | null>(null)
   const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle')
   const [error, setError] = useState('')
@@ -29,6 +31,7 @@ export function ThinkingBlock({ item, live }: { item: ThinkingItem; live?: boole
   const toggle = () => {
     const next = !open
     setOpen(next)
+    setMounted(true)
     if (next && text === null && item.messageId && state === 'idle') {
       setState('loading')
       rpc
@@ -48,34 +51,39 @@ export function ThinkingBlock({ item, live }: { item: ThinkingItem; live?: boole
   }
 
   return (
-    <div className="rounded-md text-text-muted">
+    <div>
       <button
         type="button"
         aria-expanded={open}
         onClick={toggle}
-        className="target flex items-center gap-1.5 rounded px-1 text-ui hover:text-text"
+        className="chat-step-row target text-ui text-text-muted"
       >
-        <ChevronRight
-          className={cn('size-3.5 transition-transform', open && 'rotate-90')}
-          aria-hidden
-        />
-        <Brain className="size-4" aria-hidden />
-        {live ? t('webChat.thinkingLive') : t('webChat.thinking')}
+        <span className="chat-node" aria-hidden>
+          <Brain />
+        </span>
+        <span className={cn('font-medium', live && 'chat-shimmer')}>
+          {live ? t('webChat.thinkingLive') : t('webChat.thinking')}
+        </span>
+        <span className="flex-1" />
+        <ChevronRight className="chat-chevron" aria-hidden />
       </button>
-      {open ? (
-        <div
-          className="mt-1 border-l-2 border-border pl-3 text-[length:var(--text-prose)] whitespace-pre-wrap"
-          aria-live="polite"
-        >
-          {state === 'loading' ? (
-            <span role="status">{t('webChat.thinkingLoading')}</span>
-          ) : state === 'error' ? (
-            <span role="alert" className="text-danger">
-              {t('webChat.thinkingFailed', { message: error })}
-            </span>
-          ) : (
-            text
-          )}
+      {mounted ? (
+        <div className="collapsible chat-collapse" data-open={open}>
+          <div>
+            <div className="chat-thought" aria-live="polite">
+              {state === 'loading' ? (
+                <span role="status" className="chat-shimmer">
+                  {t('webChat.thinkingLoading')}
+                </span>
+              ) : state === 'error' ? (
+                <span role="alert" className="text-danger">
+                  {t('webChat.thinkingFailed', { message: error })}
+                </span>
+              ) : (
+                text
+              )}
+            </div>
+          </div>
         </div>
       ) : null}
     </div>
