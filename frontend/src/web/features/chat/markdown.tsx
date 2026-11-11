@@ -367,6 +367,9 @@ export function renderMarkdown(text: string, origin: string = window.location.or
   return template.innerHTML
 }
 
+/** How long a code block's Copy button reads Copied. */
+const COPIED_MS = 1600
+
 async function copyText(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text)
   throw new Error('Clipboard unavailable')
@@ -380,7 +383,16 @@ export function Markdown({ text, className }: { text: string; className?: string
     if (!button) return
     const code = button.closest('.code-block')?.querySelector('pre')?.textContent ?? ''
     void copyText(code)
-      .then(() => toast.success(t('webChat.copied')))
+      .then(() => {
+        // Confirmed where the eye is (Copied, with a check) and announced by the toast.
+        toast.success(t('webChat.copied'))
+        button.dataset.copied = ''
+        button.textContent = t('webChat.copied')
+        window.setTimeout(() => {
+          delete button.dataset.copied
+          button.textContent = t('webChat.copy')
+        }, COPIED_MS)
+      })
       .catch(() => toast.error(t('webChat.copyFailed')))
   }, [])
   return (
