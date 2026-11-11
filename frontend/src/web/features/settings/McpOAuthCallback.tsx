@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router'
 import { useRpc } from '@/app/providers'
 import { t } from '@/i18n'
 import '@/i18n/en/webSettings'
+import { cn } from '@/lib/utils'
 import { buttonVariants } from '@/web/components/ui/button'
 
 function errorMessage(error: unknown): string {
@@ -55,24 +56,42 @@ export function McpOAuthCallback() {
 
   const message = invalid ?? failure
   return (
-    <section
-      aria-live="polite"
-      className="mx-auto flex max-w-md flex-col items-center gap-3 p-12 text-center"
-    >
-      {message ? (
-        <XCircle className="size-8 text-danger" aria-hidden data-status-icon />
-      ) : (
-        <Loader2 className="motion-status size-8 animate-spin text-text-muted" aria-hidden />
-      )}
-      <h1 className="text-base font-semibold">
-        {message ? t('webSettings.mcpOAuthFailed') : t('webSettings.mcpOAuthWorking')}
-      </h1>
-      {message ? <p className="text-text-muted">{message}</p> : null}
-      {message ? (
-        <Link to="/settings/mcp" replace className={buttonVariants({ variant: 'outline' })}>
-          {t('webSettings.mcpOAuthBack')}
-        </Link>
-      ) : null}
-    </section>
+    <div className="bg-atmosphere flex min-h-full items-center justify-center p-6 md:p-12">
+      <section
+        aria-live="polite"
+        className="anim-enter flex w-full max-w-md flex-col items-center gap-3 rounded-card border border-border bg-surface-1 px-8 py-10 text-center shadow-card"
+      >
+        <span
+          aria-hidden
+          className={cn(
+            'grid size-14 place-items-center rounded-overlay shadow-highlight',
+            message ? 'bg-danger/10 text-danger' : 'bg-accent-tint text-accent',
+          )}
+        >
+          {message ? (
+            <XCircle className="size-7" data-status-icon />
+          ) : (
+            <Loader2 className="motion-status size-7 animate-spin" />
+          )}
+        </span>
+        <h1 className="mt-1 text-section">
+          {message ? t('webSettings.mcpOAuthFailed') : t('webSettings.mcpOAuthWorking')}
+        </h1>
+        {message ? (
+          <p className="rounded-control bg-surface-inset px-3 py-2 font-mono text-small break-words text-text-muted shadow-inset">
+            {message}
+          </p>
+        ) : null}
+        {message ? (
+          <Link
+            to="/settings/mcp"
+            replace
+            className={cn(buttonVariants({ variant: 'secondary' }), 'mt-2')}
+          >
+            {t('webSettings.mcpOAuthBack')}
+          </Link>
+        ) : null}
+      </section>
+    </div>
   )
 }

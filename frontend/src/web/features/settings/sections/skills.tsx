@@ -1,14 +1,16 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Check,
+  ChevronRight,
   Download,
-  Eye,
-  EyeOff,
+  ExternalLink,
   Globe,
+  Loader2,
   MessageSquare,
   Package,
   RefreshCw,
   Search,
+  SearchX,
   Trash2,
   TriangleAlert,
 } from 'lucide-react'
@@ -72,6 +74,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/web/components/ui/alert-dialog'
+import { Badge } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
 import {
   Dialog,
@@ -81,10 +84,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/web/components/ui/dialog'
+import { Input } from '@/web/components/ui/input'
+import { SectionHeader } from '@/web/components/ui/section-header'
 import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/web/components/ui/tabs'
+import { useGlide } from '@/web/components/ui/use-glide'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
-import { useRegisterFields, useReveal } from '../fields'
+import { SecretInput, useRegisterFields, useReveal } from '../fields'
+import { Notice, SettingsCard } from '../ui'
 
 // Settings › Skills (control-ui-settings "Skills"): installed skills grouped by
 // publisher, the partner catalogs (Bankr, Aeon, Capminal) and the community
@@ -103,9 +110,6 @@ const PARTNER_MARKS: Record<Partner, string> = {
 }
 /** Partner catalogs own a tab, so their rows stay out of Community. */
 const PARTNER_SOURCES: ReadonlySet<string> = new Set(PARTNERS)
-
-const inputClass =
-  'h-9 w-full rounded-md border border-border-control bg-surface-0 px-3 touch:h-11 touch:text-base'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -145,7 +149,7 @@ function PartnerMark({ partner, className }: { partner: Partner; className?: str
       alt={t('webSetCapabilities.skillsPartnerLogo', { name: partnerCopy(partner).name })}
       width={32}
       height={32}
-      className={cn('size-8 shrink-0 rounded-md object-contain', className)}
+      className={cn('size-9 shrink-0 rounded-control object-contain shadow-highlight', className)}
     />
   )
 }
@@ -154,43 +158,24 @@ function PartnerMark({ partner, className }: { partner: Partner; className?: str
 function GateNotice({ id, blocked }: { id: string; blocked: Gate }) {
   if (!blocked.reason) return null
   return (
-    <p
-      id={id}
-      role="status"
-      className="mb-3 flex items-center gap-2 rounded-md border border-warn/50 bg-warn/10 px-3 py-2 text-small"
-    >
-      <TriangleAlert className="size-4 shrink-0 text-warn" aria-hidden data-status-icon />
+    <Notice id={id} role="status" tone="warn" className="text-small">
       {blocked.reason}
-    </p>
+    </Notice>
   )
 }
 
-const BUCKET_TONE: Record<SkillBucket, string> = {
-  ready: 'border-ok/40 text-ok',
-  'needs-setup': 'border-warn/50 text-warn',
-  disabled: 'border-border text-text-muted',
-}
-
-function Chip({ className, title, children }: React.ComponentProps<'span'>) {
-  return (
-    <span
-      title={title}
-      className={cn(
-        'inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-small whitespace-nowrap',
-        className,
-      )}
-    >
-      {children}
-    </span>
-  )
+const BUCKET_TONE: Record<SkillBucket, 'ok' | 'warn' | 'neutral'> = {
+  ready: 'ok',
+  'needs-setup': 'warn',
+  disabled: 'neutral',
 }
 
 function StatusChip({ skill }: { skill: RawSkill }) {
   const bucket = skillBucket(skill)
   return (
-    <Chip className={BUCKET_TONE[bucket]} title={skillDotTitle(skill)}>
+    <Badge tone={BUCKET_TONE[bucket]} dot title={skillDotTitle(skill)}>
       {skillBucketLabel(bucket)}
-    </Chip>
+    </Badge>
   )
 }
 
@@ -198,9 +183,51 @@ function StatusChip({ skill }: { skill: RawSkill }) {
 function AvailabilityChip({ skill }: { skill: RawSkill }) {
   if (skillAvailabilityTone(skill) !== 'not-offered') return null
   return (
-    <Chip className="border-warn/50 text-warn" title={skillAvailabilityTitle(skill)}>
+    <Badge tone="warn" variant="outline" title={skillAvailabilityTitle(skill)}>
       {skillAvailabilityLabel(skill)}
-    </Chip>
+    </Badge>
+  )
+}
+
+/** A row of filter chips (aria-pressed buttons) with one gliding pill on the chosen one. */
+function FilterChips({ label, children }: { label: string; children: React.ReactNode }) {
+  const track = useGlide<HTMLDivElement>()
+  return (
+    <div
+      ref={track}
+      role="group"
+      aria-label={label}
+      className="glide-track flex flex-wrap gap-1 [--glide-bg:var(--surface-3)] [--glide-radius:8px]"
+    >
+      {children}
+    </div>
+  )
+}
+
+function chipClass(active: boolean) {
+  return cn(
+    'gap-1.5 text-text-muted hover:text-text aria-pressed:text-text',
+    active && 'font-medium',
+  )
+}
+
+function Count({ n }: { n: number }) {
+  return <span className="text-small text-text-muted tabular-nums">{n}</span>
+}
+
+function RowsSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <LoadingRegion className="set-list">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-3 px-4 py-3">
+          <Skeleton className="size-9 rounded-control" />
+          <div className="flex flex-1 flex-col gap-1.5">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-3 w-64 max-w-full" />
+          </div>
+        </div>
+      ))}
+    </LoadingRegion>
   )
 }
 
@@ -397,7 +424,7 @@ export function SkillsSection() {
           </TabsList>
           <span className="flex-1" />
           <Button size="sm" variant="ghost" onClick={() => void actions.refresh()}>
-            <RefreshCw aria-hidden />
+            <RefreshCw aria-hidden className={cn(installed.isFetching && 'animate-spin')} />
             {t('webSetCapabilities.refresh')}
           </Button>
         </div>
@@ -497,9 +524,10 @@ function InstalledPanel({
 
   if (loading) {
     return (
-      <LoadingRegion>
-        <Skeleton className="h-40" />
-      </LoadingRegion>
+      <div className="flex flex-col gap-3">
+        <Skeleton className="h-9 rounded-control" />
+        <RowsSkeleton />
+      </div>
     )
   }
   if (error) {
@@ -527,61 +555,58 @@ function InstalledPanel({
 
   return (
     <div className="flex flex-col gap-3">
-      <label className="relative block">
-        <span className="sr-only">{t('webSetCapabilities.skillsFilterLabel')}</span>
-        <Search
-          className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-muted"
-          aria-hidden
-        />
-        <input
-          type="search"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={t('webSetCapabilities.skillsFilterPlaceholder')}
-          className={cn(inputClass, 'pl-8')}
-        />
-      </label>
-      <div
-        role="group"
-        aria-label={t('webSetCapabilities.skillsStatusFilter')}
-        className="flex flex-wrap gap-1"
-      >
-        {filters
-          .filter((f) => f.key !== 'disabled' || f.count > 0 || status === 'disabled')
-          .map((f) => (
-            <Button
-              key={f.key}
-              size="sm"
-              variant={status === f.key ? 'secondary' : 'ghost'}
-              aria-pressed={status === f.key}
-              onClick={() => setStatus(f.key)}
-            >
-              {f.label}
-              <span className="text-text-muted">{f.count}</span>
-            </Button>
-          ))}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <label className="block min-w-48 flex-1">
+          <span className="sr-only">{t('webSetCapabilities.skillsFilterLabel')}</span>
+          <Input
+            type="search"
+            icon={<Search />}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={t('webSetCapabilities.skillsFilterPlaceholder')}
+          />
+        </label>
+        <FilterChips label={t('webSetCapabilities.skillsStatusFilter')}>
+          {filters
+            .filter((f) => f.key !== 'disabled' || f.count > 0 || status === 'disabled')
+            .map((f) => (
+              <Button
+                key={f.key}
+                size="sm"
+                variant="ghost"
+                className={chipClass(status === f.key)}
+                aria-pressed={status === f.key}
+                onClick={() => setStatus(f.key)}
+              >
+                {f.label}
+                <Count n={f.count} />
+              </Button>
+            ))}
+        </FilterChips>
       </div>
       {withheld > 0 ? (
-        <p role="note" className="text-small text-text-muted">
+        <Notice role="note" tone="warn" className="py-2 text-small">
           {tPlural('webSetCapabilities.skillsWithheld', withheld)}
-        </p>
+        </Notice>
       ) : null}
 
       {groups.length === 0 ? (
         <EmptyState
           icon={<Package />}
           title={installedEmptyMessage(text.trim(), status)}
-          className="py-8"
+          className="set-card border-dashed py-10 shadow-none"
         />
       ) : (
         groups.map((g) => (
-          <section key={g.key} aria-label={g.label} className="flex flex-col gap-1">
-            <h2 className="flex items-baseline gap-2 font-semibold">
-              {g.label}
-              <span className="text-small font-normal text-text-muted">{g.skills.length}</span>
-            </h2>
-            <p className="text-small text-text-muted">{g.help}</p>
-            <ul role="list" className="divide-y divide-border rounded-lg border border-border">
+          <section key={g.key} aria-label={g.label} className="mt-2 flex flex-col gap-2">
+            <div>
+              <h2 className="set-card-title flex items-center gap-2">
+                {g.label}
+                <Badge className="tabular-nums">{g.skills.length}</Badge>
+              </h2>
+              <p className="mt-0.5 text-small text-text-muted">{g.help}</p>
+            </div>
+            <ul role="list" className="set-list">
               {g.skills.map((skill) => (
                 <li key={skill.name}>
                   <SkillRow skill={skill} onOpen={() => onOpen(String(skill.name))} />
@@ -599,7 +624,10 @@ function SkillIcon({ skill }: { skill: RawSkill }) {
   const publisher = skillPublisherId(skill)
   if (isPartner(publisher)) return <PartnerMark partner={publisher} />
   return (
-    <span className="grid size-8 shrink-0 place-items-center rounded-md bg-surface-3" aria-hidden>
+    <span
+      className="grid size-9 shrink-0 place-items-center rounded-control bg-surface-2 text-base shadow-highlight"
+      aria-hidden
+    >
       {skill.emoji ? skill.emoji : <Package className="size-4 text-text-muted" />}
     </span>
   )
@@ -612,7 +640,7 @@ function SkillRow({ skill, onOpen }: { skill: RawSkill; onOpen: () => void }) {
       onClick={onOpen}
       // Named by its visible content (name, status, description): an aria-label
       // that drops the visible text fails WCAG 2.5.3, label in name.
-      className="target flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-surface-2"
+      className="group target flex w-full items-center gap-3 px-4 py-3 text-left transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)] hover:bg-surface-2 focus-visible:bg-surface-2"
     >
       <SkillIcon skill={skill} />
       <span className="min-w-0 flex-1">
@@ -622,9 +650,15 @@ function SkillRow({ skill, onOpen }: { skill: RawSkill; onOpen: () => void }) {
           <AvailabilityChip skill={skill} />
         </span>{' '}
         {skill.description ? (
-          <span className="block truncate text-small text-text-muted">{skill.description}</span>
+          <span className="mt-0.5 block truncate text-small text-text-muted">
+            {skill.description}
+          </span>
         ) : null}
       </span>
+      <ChevronRight
+        className="size-4 shrink-0 text-text-muted transition-transform duration-[var(--duration-fast)] ease-[var(--ease-out)] group-hover:translate-x-0.5"
+        aria-hidden
+      />
     </button>
   )
 }
@@ -703,7 +737,7 @@ function SkillDetails({
           <DialogTitle>{name}</DialogTitle>
         </div>
         <div className="flex flex-wrap gap-1.5">
-          <Chip title={layerHelp(skill.layer)}>{layerLabel(skill.layer)}</Chip>
+          <Badge title={layerHelp(skill.layer)}>{layerLabel(skill.layer)}</Badge>
           <StatusChip skill={skill} />
           <AvailabilityChip skill={skill} />
         </div>
@@ -711,30 +745,35 @@ function SkillDetails({
       </DialogHeader>
 
       {skillAvailabilityTone(skill) === 'not-offered' ? (
-        <section aria-label={t('webSetCapabilities.skillsAvailability')}>
-          <h3 className="font-medium">{t('webSetCapabilities.skillsAvailability')}</h3>
-          <p className="text-text-muted">{skillAvailabilityTitle(skill)}</p>
-        </section>
+        <Notice tone="warn" className="py-2">
+          <section aria-label={t('webSetCapabilities.skillsAvailability')}>
+            <h3 className="font-medium">{t('webSetCapabilities.skillsAvailability')}</h3>
+            <p className="text-small text-text-muted">{skillAvailabilityTitle(skill)}</p>
+          </section>
+        </Notice>
       ) : null}
 
       {requirements.length ? (
-        <section aria-label={t('webSetCapabilities.skillsRequirements')}>
-          <h3 className="font-medium">{t('webSetCapabilities.skillsRequirements')}</h3>
-          <ul role="list" className="flex flex-col gap-1 text-small">
+        <section
+          aria-label={t('webSetCapabilities.skillsRequirements')}
+          className="flex flex-col gap-2"
+        >
+          <SectionHeader as="h3" size="sm" title={t('webSetCapabilities.skillsRequirements')} />
+          <ul role="list" className="set-grid text-small">
             {requirements.map((item, i) => {
               const missing = [...(item.missing_bins ?? []), ...(item.missing_env ?? [])]
               return (
-                <li key={item.name || i} className="flex flex-wrap items-center gap-2">
+                <li key={item.name || i} className="flex flex-wrap items-center gap-2 px-3 py-2">
                   <span className="font-mono">{item.name}</span>
-                  <Chip className={item.status === 'ready' ? 'text-ok' : 'text-text-muted'}>
+                  <Badge tone={item.status === 'ready' ? 'ok' : 'neutral'} dot>
                     {item.status === 'ready'
                       ? t('webSetCapabilities.skillsReqReady')
                       : item.status === 'needs_setup' || item.status === 'missing_skill'
                         ? t('webSetCapabilities.skillsReqMissing')
                         : t('webSetCapabilities.skillsReqUndeclared')}
-                  </Chip>
+                  </Badge>
                   {missing.length ? (
-                    <span className="font-mono text-text-muted">{missing.join(', ')}</span>
+                    <span className="ml-auto font-mono text-text-muted">{missing.join(', ')}</span>
                   ) : null}
                 </li>
               )
@@ -745,18 +784,18 @@ function SkillDetails({
 
       {missingBins.length || missingEnv.length ? (
         <section aria-label={t('webSetCapabilities.skillsMissing')} className="flex flex-col gap-2">
-          <h3 className="font-medium">{t('webSetCapabilities.skillsMissing')}</h3>
-          <ul role="list" className="flex flex-col gap-2">
+          <SectionHeader as="h3" size="sm" title={t('webSetCapabilities.skillsMissing')} />
+          <ul role="list" className="set-grid">
             {missingBins.map((bin) => (
-              <li key={`bin:${bin}`} className="text-small">
-                <code>{bin}</code>{' '}
+              <li key={`bin:${bin}`} className="px-3 py-2 text-small">
+                <code className="set-key">{bin}</code>{' '}
                 <span className="text-text-muted">
                   {t('webSetCapabilities.skillsMissingBinary')}
                 </span>
               </li>
             ))}
             {missingEnv.map((env) => (
-              <li key={`env:${env}`}>
+              <li key={`env:${env}`} className="px-3 py-2">
                 <MissingEnvRow
                   name={env}
                   detail={(skill.missing_env_detail ?? []).find((d) => d.name === env)}
@@ -772,7 +811,7 @@ function SkillDetails({
 
       {installs.length ? (
         <section aria-label={t('webSetCapabilities.skillsDeps')} className="flex flex-col gap-2">
-          <h3 className="font-medium">{t('webSetCapabilities.skillsDeps')}</h3>
+          <SectionHeader as="h3" size="sm" title={t('webSetCapabilities.skillsDeps')} />
           {installs.map((option) => {
             const id = String(option.id)
             const busy = actions.busy.has(`deps:${name}:${id}`)
@@ -794,7 +833,11 @@ function SkillDetails({
                     if (left === 0) onClose()
                   }}
                 >
-                  <Download aria-hidden />
+                  {busy ? (
+                    <Loader2 aria-hidden className="animate-spin" />
+                  ) : (
+                    <Download aria-hidden />
+                  )}
                   {busy
                     ? t('webSetCapabilities.skillsInstalling')
                     : t('webSetCapabilities.skillsInstallVia', { kind: String(option.kind) })}
@@ -810,16 +853,19 @@ function SkillDetails({
           href={homepage}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-accent underline"
+          className="inline-flex items-center gap-1 self-start text-accent underline-offset-4 hover:underline"
         >
           {t('webSetCapabilities.skillsHomepage')}
+          <ExternalLink className="size-3.5" aria-hidden />
         </a>
       ) : null}
 
       {removeBlocked ? (
         <p className="text-small text-text-muted">{t('webSetCapabilities.skillsRemoveBlocked')}</p>
       ) : skill.file_path ? (
-        <p className="font-mono text-small break-all text-text-muted">{skill.file_path}</p>
+        <p className="rounded-control bg-surface-inset px-3 py-2 font-mono text-small break-all text-text-muted shadow-inset">
+          {skill.file_path}
+        </p>
       ) : null}
 
       <DialogFooter>
@@ -843,7 +889,10 @@ function SkillDetails({
             aria-describedby={describedBy}
             onClick={() => void actions.update(name)}
           >
-            <RefreshCw aria-hidden />
+            <RefreshCw
+              aria-hidden
+              className={cn(actions.busy.has(`update:${name}`) && 'animate-spin')}
+            />
             {actions.busy.has(`update:${name}`)
               ? t('webSetCapabilities.skillsUpdating')
               : t('webSetCapabilities.skillsUpdate')}
@@ -882,7 +931,7 @@ function MissingEnvRow({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2 text-small">
-        <code>{name}</code>
+        <code className="set-key">{name}</code>
         <span className="text-text-muted">{t('webSetCapabilities.skillsMissingEnv')}</span>
         <span className="flex-1" />
         {!editing ? (
@@ -906,7 +955,7 @@ function MissingEnvRow({
               href={url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-accent underline"
+              className="text-accent underline-offset-4 hover:underline"
             >
               {t('webSetCapabilities.skillsWhereToGet')}
             </a>
@@ -915,7 +964,7 @@ function MissingEnvRow({
       ) : null}
       {editing ? (
         <form
-          className="flex items-center gap-2"
+          className="anim-fade-in mt-1 flex items-center gap-2"
           onSubmit={async (e) => {
             e.preventDefault()
             if (!value) return
@@ -928,23 +977,16 @@ function MissingEnvRow({
           <label htmlFor={inputId} className="sr-only">
             {t('webSetCapabilities.skillsEnvValue', { name })}
           </label>
-          <input
+          <SecretInput
             id={inputId}
-            type={shown ? 'text' : 'password'}
-            autoComplete="off"
+            shown={shown}
+            onToggle={toggleShown}
+            wrapperClassName="flex-1"
+            className="font-mono"
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            className={inputClass}
             autoFocus
           />
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label={shown ? t('webSetCapabilities.hide') : t('webSetCapabilities.reveal')}
-            onClick={toggleShown}
-          >
-            {shown ? <EyeOff /> : <Eye />}
-          </Button>
           <Button
             type="submit"
             size="sm"
@@ -1004,54 +1046,44 @@ function CatalogPanel({
   return (
     <div className="flex flex-col gap-3">
       {community ? (
-        <>
-          <div className="flex items-start gap-3">
-            <Globe className="mt-0.5 size-6 shrink-0 text-text-muted" aria-hidden />
-            <div>
-              <h2 className="font-semibold">{t('webSetCapabilities.skillsCommunityTitle')}</h2>
-              <p className="text-text-muted">{t('webSetCapabilities.skillsCommunityBody')}</p>
-            </div>
-          </div>
+        <SettingsCard
+          icon={<Globe />}
+          title={t('webSetCapabilities.skillsCommunityTitle')}
+          description={t('webSetCapabilities.skillsCommunityBody')}
+        >
           <GithubInstall actions={actions} blocked={blocked} reasonId={reasonId} />
-        </>
+        </SettingsCard>
       ) : (
         <PartnerIntro partner={source} count={snapshot.data?.length} />
       )}
 
-      <label className="relative block">
+      <label className="mt-1 block">
         <span className="sr-only">{t('webSetCapabilities.skillsSearchLabel', { label })}</span>
-        <Search
-          className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-muted"
-          aria-hidden
-        />
-        <input
+        <Input
           type="search"
+          icon={<Search />}
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder={t('webSetCapabilities.skillsSearchPlaceholder', { label })}
-          className={cn(inputClass, 'pl-8')}
         />
       </label>
 
       {chips.length ? (
-        <div
-          role="group"
-          aria-label={t('webSetCapabilities.skillsCategories')}
-          className="flex flex-wrap gap-1"
-        >
+        <FilterChips label={t('webSetCapabilities.skillsCategories')}>
           {chips.map((c) => (
             <Button
               key={c.cat}
               size="sm"
-              variant={c.active ? 'secondary' : 'ghost'}
+              variant="ghost"
+              className={chipClass(c.active)}
               aria-pressed={c.active}
               onClick={() => setCategory(c.cat)}
             >
               {c.label}
-              <span className="text-text-muted">{c.count}</span>
+              <Count n={c.count} />
             </Button>
           ))}
-        </div>
+        </FilterChips>
       ) : null}
 
       {failed ? (
@@ -1061,17 +1093,15 @@ function CatalogPanel({
           onRetry={() => void (query ? live.refetch() : snapshot.refetch())}
         />
       ) : loading ? (
-        <LoadingRegion>
-          <Skeleton className="h-40" />
-        </LoadingRegion>
+        <RowsSkeleton rows={5} />
       ) : items.length === 0 ? (
-        <EmptyState title={registryEmptyMessage(source, text)} className="py-8" />
+        <EmptyState
+          icon={<SearchX />}
+          title={registryEmptyMessage(source, text)}
+          className="set-card border-dashed py-10 shadow-none"
+        />
       ) : (
-        <ul
-          role="list"
-          aria-label={label}
-          className="divide-y divide-border rounded-lg border border-border"
-        >
+        <ul role="list" aria-label={label} className="set-list">
           {items.map((item) => (
             <li key={registryKey(item)}>
               <CatalogRow item={item} actions={actions} blocked={blocked} reasonId={reasonId} />
@@ -1086,21 +1116,26 @@ function CatalogPanel({
 function PartnerIntro({ partner, count }: { partner: Partner; count?: number }) {
   const copy = partnerCopy(partner)
   return (
-    <div className="flex items-start gap-3 rounded-lg border border-border bg-surface-1 p-3">
-      <PartnerMark partner={partner} className="size-10" />
-      <div className="min-w-0 flex-1">
-        <h2 className="font-semibold">{copy.title}</h2>
-        <p className="text-text-muted">{copy.description}</p>
-        <p role="note" className="mt-1 flex items-start gap-1.5 text-small">
-          <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warn" aria-hidden />
-          {copy.notice}
-        </p>
+    <div className="set-card relative flex flex-col gap-3 overflow-hidden">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(50%_100%_at_0%_0%,var(--accent-tint),transparent_70%)]"
+      />
+      <div className="relative flex items-start gap-3.5">
+        <PartnerMark partner={partner} className="size-11 rounded-card shadow-card" />
+        <div className="min-w-0 flex-1">
+          <h2 className="set-card-title">{copy.title}</h2>
+          <p className="mt-0.5 text-text-muted">{copy.description}</p>
+        </div>
+        {typeof count === 'number' ? (
+          <Badge className="whitespace-nowrap tabular-nums">
+            {tPlural('webSetCapabilities.skillsCount', count)}
+          </Badge>
+        ) : null}
       </div>
-      {typeof count === 'number' ? (
-        <span className="text-small whitespace-nowrap text-text-muted">
-          {tPlural('webSetCapabilities.skillsCount', count)}
-        </span>
-      ) : null}
+      <Notice role="note" tone="warn" className="relative py-2 text-small">
+        {copy.notice}
+      </Notice>
     </div>
   )
 }
@@ -1124,12 +1159,12 @@ function CatalogRow({
   const category = item.category && item.category !== 'other' ? item.category : ''
 
   return (
-    <div className="flex items-start gap-3 px-3 py-2">
+    <div className="flex items-start gap-3 px-4 py-3">
       {isPartner(source) ? (
         <PartnerMark partner={source} />
       ) : (
         <span
-          className="grid size-8 shrink-0 place-items-center rounded-md bg-surface-3"
+          className="grid size-9 shrink-0 place-items-center rounded-control bg-surface-2 text-base shadow-highlight"
           aria-hidden
         >
           {item.emoji ? item.emoji : <Package className="size-4 text-text-muted" />}
@@ -1141,28 +1176,31 @@ function CatalogRow({
           {item.provider ? (
             <span className="text-small text-text-muted">{item.provider}</span>
           ) : null}
-          {category ? <Chip>{catLabel(category)}</Chip> : null}
+          {category ? <Badge>{catLabel(category)}</Badge> : null}
         </div>
-        {item.description ? <p className="text-small text-text-muted">{item.description}</p> : null}
-        <p className="flex flex-wrap gap-2 font-mono text-small text-text-muted">
-          <span>{item.source}</span>
+        {item.description ? (
+          <p className="mt-0.5 text-small text-pretty text-text-muted">{item.description}</p>
+        ) : null}
+        <p className="mt-1 flex flex-wrap items-center gap-2 text-small text-text-muted">
+          <span className="set-key">{item.source}</span>
           {homepage ? (
             <a
               href={homepage}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-accent underline"
+              className="inline-flex items-center gap-1 text-accent underline-offset-4 hover:underline"
             >
               {t('webSetCapabilities.skillsSource')}
+              <ExternalLink className="size-3" aria-hidden />
             </a>
           ) : null}
         </p>
       </div>
       {action === 'installed' ? (
-        <Chip className="border-ok/40 text-ok">
+        <Badge tone="ok" className="anim-scale-in mt-1 shrink-0">
           <Check className="size-3.5" aria-hidden />
           {t('webSetCapabilities.skillsInstalledBadge')}
-        </Chip>
+        </Badge>
       ) : (
         <Button
           size="sm"
@@ -1176,7 +1214,13 @@ function CatalogRow({
           }
           onClick={() => void actions.install(key, installSource(item), action === 'force')}
         >
-          {action === 'force' ? <TriangleAlert aria-hidden /> : <Download aria-hidden />}
+          {busy ? (
+            <Loader2 aria-hidden className="animate-spin" />
+          ) : action === 'force' ? (
+            <TriangleAlert aria-hidden />
+          ) : (
+            <Download aria-hidden />
+          )}
           {busy
             ? t('webSetCapabilities.skillsInstalling')
             : action === 'force'
@@ -1203,7 +1247,7 @@ function GithubInstall({
   const busy = actions.busy.has(target)
   return (
     <form
-      className="flex flex-col gap-1 rounded-lg border border-border p-3"
+      className="mt-3 flex flex-col gap-1.5 border-t border-border pt-3"
       onSubmit={async (e) => {
         e.preventDefault()
         if (!target || blocked.disabled) return
@@ -1213,16 +1257,17 @@ function GithubInstall({
       <label htmlFor={inputId} className="font-medium">
         {t('webSetCapabilities.skillsGithubLabel')}
       </label>
-      <p className="text-small text-text-muted">{t('webSetCapabilities.skillsGithubHelp')}</p>
-      <div className="flex gap-2">
-        <input
+      <p className="set-row-help">{t('webSetCapabilities.skillsGithubHelp')}</p>
+      <div className="mt-1 flex gap-2">
+        <Input
           id={inputId}
           type="url"
           autoComplete="off"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder={t('webSetCapabilities.skillsGithubPlaceholder')}
-          className={inputClass}
+          className="font-mono"
+          wrapperClassName="flex-1"
         />
         <Button
           type="submit"
@@ -1230,7 +1275,7 @@ function GithubInstall({
           disabled={blocked.disabled || !target || busy}
           aria-describedby={blocked.reason ? reasonId : undefined}
         >
-          <Download aria-hidden />
+          {busy ? <Loader2 aria-hidden className="animate-spin" /> : <Download aria-hidden />}
           {busy ? t('webSetCapabilities.skillsInstalling') : t('webSetCapabilities.skillsInstall')}
         </Button>
       </div>
