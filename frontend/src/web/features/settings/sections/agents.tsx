@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Copy, Lock, MessageSquare, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Bot, CircleAlert, Copy, Lock, MessageSquare, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useId, useState } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
@@ -31,7 +31,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/web/components/ui/alert-dialog'
+import { Badge } from '@/web/components/ui/badge'
 import { Button, buttonVariants } from '@/web/components/ui/button'
+import { Card } from '@/web/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -40,10 +42,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/web/components/ui/dialog'
+import { Input } from '@/web/components/ui/input'
 import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import { Switch } from '@/web/components/ui/switch'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { useRegisterFields } from '../fields'
+import { Notice } from '../ui'
 
 // Settings › Agents (overhaul-control-ui 7.5, Appendix A "Agents"): cards,
 // create, edit with a dirty-discard prompt, Customize (clone a built-in) and
@@ -79,9 +83,6 @@ const EMPTY_FORM: AgentForm = {
   enabled: true,
 }
 
-const inputClass =
-  'h-9 w-full rounded-md border border-border-control bg-surface-0 px-3 disabled:opacity-50 aria-[invalid=true]:border-danger touch:h-11 touch:text-base'
-
 function TextField({
   label,
   value,
@@ -99,13 +100,13 @@ function TextField({
 }) {
   const id = useId()
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1.5">
       <label htmlFor={id} className="font-medium">
         {label}
       </label>
-      <input
+      <Input
         id={id}
-        className={inputClass}
+        className="disabled:opacity-50"
         autoComplete="off"
         value={value}
         placeholder={placeholder}
@@ -115,7 +116,12 @@ function TextField({
         onChange={(e) => onChange(e.target.value)}
       />
       {error ? (
-        <p id={`${id}-error`} role="alert" className="text-small text-danger">
+        <p
+          id={`${id}-error`}
+          role="alert"
+          className="flex items-center gap-1.5 text-small text-danger"
+        >
+          <CircleAlert className="size-3.5 shrink-0" aria-hidden data-status-icon />
           {error}
         </p>
       ) : null}
@@ -221,7 +227,7 @@ function AgentDialog({
     <>
       <Dialog open onOpenChange={(open) => (open ? undefined : requestClose())}>
         <DialogContent>
-          <form onSubmit={submit} className="flex flex-col gap-4">
+          <form onSubmit={submit} className="flex flex-col gap-3.5">
             <DialogHeader>
               <DialogTitle>
                 {isCreate
@@ -279,24 +285,24 @@ function AgentDialog({
                   disabled={saving}
                   onChange={(v) => set('agentDir', v)}
                 />
-                <label className="flex items-center gap-2">
+                <label className="flex items-center justify-between gap-3 rounded-control border border-border bg-surface-2 px-3 py-2.5">
+                  <span className="font-medium">{t('webSetAccess.agFieldEnabled')}</span>
                   <Switch
                     checked={form.enabled}
                     disabled={saving}
                     onCheckedChange={(v) => set('enabled', v)}
                   />
-                  <span>{t('webSetAccess.agFieldEnabled')}</span>
                 </label>
               </>
             )}
             {error ? (
-              <p role="alert" className="text-small text-danger">
+              <Notice role="alert" tone="danger" className="anim-fade-in text-small">
                 {error}
-              </p>
+              </Notice>
             ) : notice ? (
-              <p role="status" className="text-small text-text-muted">
+              <Notice role="status" tone="info" className="anim-fade-in text-small">
                 {notice}
-              </p>
+              </Notice>
             ) : null}
             <DialogFooter className="items-center">
               <GateReason gate={write} className="mr-auto" />
@@ -346,90 +352,99 @@ function AgentCard({
   const d = agentDisplay(agent)
   return (
     <li>
-      <article
-        aria-label={t('webSetAccess.agCardLabel', { id: d.id })}
-        className="flex flex-col gap-2 rounded-lg border border-border bg-surface-1 p-4"
-      >
-        <header className="flex flex-wrap items-center gap-2">
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-medium">{d.name}</p>
-            <p className="truncate font-mono text-small text-text-muted">{d.id}</p>
-          </div>
-          <span
-            className={cn(
-              'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-small',
-              d.isBuiltin ? 'border-ok/50 text-ok' : 'border-info/50 text-info',
-            )}
-          >
-            {d.isBuiltin ? <Lock className="size-3" aria-hidden data-status-icon /> : null}
-            {d.isBuiltin ? t('webSetAccess.agBuiltin') : t('webSetAccess.agCustom')}
-          </span>
-        </header>
-        {d.description ? <p className="text-text-muted">{d.description}</p> : null}
-        <dl className="flex flex-wrap gap-x-4 gap-y-1 text-small">
-          {d.model ? (
-            <div className="flex gap-1">
-              <dt className="text-text-muted">{t('webSetAccess.agModel')}</dt>
-              <dd className="font-mono">{d.model}</dd>
+      <Card asChild className="flex h-full flex-col gap-3">
+        <article aria-label={t('webSetAccess.agCardLabel', { id: d.id })}>
+          <header className="flex items-start gap-3">
+            <span
+              aria-hidden
+              className={cn(
+                'grid size-9 shrink-0 place-items-center rounded-control shadow-highlight',
+                d.isBuiltin ? 'bg-surface-2 text-text-muted' : 'bg-accent-tint text-accent',
+              )}
+            >
+              <Bot className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium">{d.name}</p>
+              <p className="truncate font-mono text-small text-text-muted">{d.id}</p>
             </div>
+            <Badge tone={d.isBuiltin ? 'neutral' : 'info'}>
+              {d.isBuiltin ? <Lock aria-hidden data-status-icon /> : null}
+              {d.isBuiltin ? t('webSetAccess.agBuiltin') : t('webSetAccess.agCustom')}
+            </Badge>
+          </header>
+          {d.description ? (
+            <p className="line-clamp-3 text-small text-pretty text-text-muted">{d.description}</p>
           ) : null}
-          <div className="flex gap-1">
-            <dt className="text-text-muted">{t('webSetAccess.agTools')}</dt>
-            <dd className="font-mono">{d.toolCount}</dd>
-          </div>
-          <div className="flex gap-1">
-            <dt className="text-text-muted">{t('webSetAccess.agSkills')}</dt>
-            <dd className="font-mono">{d.skillCount}</dd>
-          </div>
-        </dl>
-        {d.toolChips.length ? (
-          <ul role="list" aria-label={t('webSetAccess.agTools')} className="flex flex-wrap gap-1">
-            {d.toolChips.map((tool) => (
-              <li key={tool} className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-small">
-                {tool}
-              </li>
-            ))}
-            {d.overflow ? (
-              <li className="px-1.5 py-0.5 text-small text-text-muted">+{d.overflow}</li>
+          <dl className="flex flex-wrap gap-x-4 gap-y-1 text-small">
+            {d.model ? (
+              <div className="flex gap-1">
+                <dt className="text-text-muted">{t('webSetAccess.agModel')}</dt>
+                <dd className="font-mono">{d.model}</dd>
+              </div>
             ) : null}
-          </ul>
-        ) : null}
-        <footer className="flex flex-wrap items-center gap-1.5 pt-1">
-          <Link
-            to={`/new?agent=${encodeURIComponent(d.id)}`}
-            className={buttonVariants({ size: 'sm', variant: 'outline' })}
-          >
-            <MessageSquare />
-            {t('webSetAccess.agChat')}
-          </Link>
-          {d.isBuiltin ? (
-            <>
-              <Button size="sm" variant="outline" disabled={write.disabled} onClick={onCustomize}>
-                <Copy />
-                {t('webSetAccess.agCustomize')}
-              </Button>
-              <span className="text-small text-text-muted">{t('webSetAccess.agLocked')}</span>
-            </>
-          ) : (
-            <>
-              <Button size="sm" variant="outline" disabled={write.disabled} onClick={onEdit}>
-                <Pencil />
-                {t('webSetAccess.agEdit')}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-danger"
-                disabled={write.disabled}
-                onClick={onDelete}
-              >
-                <Trash2 />
-                {t('webSetAccess.agDelete')}
-              </Button>
-            </>
-          )}
-        </footer>
-      </article>
+            <div className="flex gap-1">
+              <dt className="text-text-muted">{t('webSetAccess.agTools')}</dt>
+              <dd className="font-mono tabular-nums">{d.toolCount}</dd>
+            </div>
+            <div className="flex gap-1">
+              <dt className="text-text-muted">{t('webSetAccess.agSkills')}</dt>
+              <dd className="font-mono tabular-nums">{d.skillCount}</dd>
+            </div>
+          </dl>
+          {d.toolChips.length ? (
+            <ul role="list" aria-label={t('webSetAccess.agTools')} className="flex flex-wrap gap-1">
+              {d.toolChips.map((tool) => (
+                <li key={tool} className="set-key">
+                  {tool}
+                </li>
+              ))}
+              {d.overflow ? (
+                <li className="px-1.5 py-0.5 text-small text-text-muted tabular-nums">
+                  +{d.overflow}
+                </li>
+              ) : null}
+            </ul>
+          ) : null}
+          <footer className="mt-auto flex flex-wrap items-center gap-1.5 border-t border-border pt-3">
+            <Link
+              to={`/new?agent=${encodeURIComponent(d.id)}`}
+              className={buttonVariants({ size: 'sm', variant: 'outline' })}
+            >
+              <MessageSquare />
+              {t('webSetAccess.agChat')}
+            </Link>
+            {d.isBuiltin ? (
+              <>
+                <Button size="sm" variant="outline" disabled={write.disabled} onClick={onCustomize}>
+                  <Copy />
+                  {t('webSetAccess.agCustomize')}
+                </Button>
+                <span className="ml-auto text-small text-text-muted">
+                  {t('webSetAccess.agLocked')}
+                </span>
+              </>
+            ) : (
+              <>
+                <Button size="sm" variant="outline" disabled={write.disabled} onClick={onEdit}>
+                  <Pencil />
+                  {t('webSetAccess.agEdit')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="ml-auto text-danger hover:bg-danger/10"
+                  disabled={write.disabled}
+                  onClick={onDelete}
+                >
+                  <Trash2 />
+                  {t('webSetAccess.agDelete')}
+                </Button>
+              </>
+            )}
+          </footer>
+        </article>
+      </Card>
     </li>
   )
 }
@@ -484,7 +499,7 @@ export function AgentsSection() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2" data-field-id="agents.create">
+      <div className="flex flex-wrap items-center gap-3" data-field-id="agents.create">
         <Button
           variant="primary"
           disabled={write.disabled}
@@ -497,14 +512,15 @@ export function AgentsSection() {
       </div>
 
       {deleteError ? (
-        <p role="alert" className="text-small text-danger">
+        <Notice role="alert" tone="danger" className="anim-fade-in text-small">
           {deleteError}
-        </p>
+        </Notice>
       ) : null}
 
       {agentsQuery.isPending ? (
-        <LoadingRegion>
-          <Skeleton className="h-32" />
+        <LoadingRegion className="grid gap-3 sm:grid-cols-2">
+          <Skeleton className="h-44 rounded-card" />
+          <Skeleton className="h-44 rounded-card" />
         </LoadingRegion>
       ) : agentsQuery.isError ? (
         <ErrorState
@@ -514,11 +530,12 @@ export function AgentsSection() {
         />
       ) : agents.length === 0 ? (
         <EmptyState
+          icon={<Bot />}
           title={t('webSetAccess.agEmptyTitle')}
           description={t('webSetAccess.agEmptyBody')}
         />
       ) : (
-        <ul role="list" className="grid gap-3 sm:grid-cols-2">
+        <ul role="list" className="anim-stagger grid gap-3 sm:grid-cols-2">
           {agents.map((agent, i) => {
             const id = agentDisplay(agent).id
             return (
