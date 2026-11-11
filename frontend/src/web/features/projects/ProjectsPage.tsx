@@ -3,23 +3,17 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowUpRight,
-  BookOpen,
   Bot,
   Check,
   ChevronRight,
   Clock,
   FolderKanban,
-  FolderPlus,
-  FolderX,
-  Info,
   Loader2,
   MessageSquare,
-  MessageSquareDashed,
   MessageSquarePlus,
   MessagesSquare,
   Plus,
   Search,
-  SearchX,
   Trash2,
 } from 'lucide-react'
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
@@ -169,7 +163,7 @@ export function ProjectsPage() {
     projects.isError ? null : (
       <Card variant="plain" padding="none" className="border-dashed">
         <EmptyState
-          icon={<FolderPlus />}
+          icon={<FolderKanban />}
           title={t('webPagesWork.projectsEmpty')}
           description={t('webPagesWork.projectsEmptyBody')}
           action={
@@ -187,7 +181,7 @@ export function ProjectsPage() {
       {listed.length === 0 ? (
         <EmptyState
           size="sm"
-          icon={<SearchX />}
+          icon={<Search />}
           title={t('webPagesWork.projectsNoMatch')}
           action={
             <Button variant="outline" size="sm" onClick={() => setQuery('')}>
@@ -249,7 +243,7 @@ export function ProjectsPage() {
     detail = (
       <Card variant="plain" padding="none">
         <EmptyState
-          icon={<FolderX />}
+          icon={<FolderKanban />}
           title={t('webPagesWork.projectMissing')}
           description={t('webPagesWork.projectMissingBody')}
           action={
@@ -699,7 +693,6 @@ function ProjectDetail({
             htmlFor={knowledgeFieldId}
             className="flex items-center gap-2 text-section [&_svg]:size-4 [&_svg]:text-text-muted"
           >
-            <BookOpen aria-hidden />
             {t('webPagesWork.knowledge')}
           </label>
           <p className="text-small text-text-muted">{t('webPagesWork.knowledgeHint')}</p>
@@ -813,7 +806,6 @@ function ProjectDetail({
           </div>
           {partial ? (
             <p role="note" className="mx-5 mb-3 flex items-start gap-2 text-small text-text-muted">
-              <Info className="mt-px size-3.5 shrink-0" aria-hidden />
               {t('webPagesWork.projectSessionsPartial', {
                 shown: projectSessions.length,
                 total: projectSessionCount(project),
@@ -827,7 +819,7 @@ function ProjectDetail({
                   aria-hidden
                   className="grid size-9 shrink-0 place-items-center rounded-control bg-surface-2 [&_svg]:size-4"
                 >
-                  <MessageSquareDashed />
+                  <MessagesSquare />
                 </span>
                 <p className="text-pretty">{t('webPagesWork.projectNoSessions')}</p>
               </div>

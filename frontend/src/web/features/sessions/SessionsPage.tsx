@@ -5,11 +5,9 @@ import {
   ArrowDown,
   Bot,
   ChevronDown,
-  CircleAlert,
   ExternalLink,
   FolderInput,
   FolderKanban,
-  Info,
   Loader2,
   MessageSquare,
   MessagesSquare,
@@ -17,7 +15,6 @@ import {
   Pencil,
   Plus,
   Search,
-  SearchX,
   Trash2,
   X,
 } from 'lucide-react'
@@ -381,7 +378,7 @@ export function SessionsPage() {
         {filtered.length === 0 ? (
           <Card variant="plain" padding="none">
             <EmptyState
-              icon={<SearchX />}
+              icon={<Search />}
               title={t('webPagesWork.sessionsNoMatch')}
               description={t('webPagesWork.sessionsNoMatchBody')}
               action={
@@ -711,7 +708,7 @@ function StatTiles({
     },
     {
       label: t('webPagesWork.statFailed'),
-      icon: <CircleAlert />,
+      icon: <AlertTriangle />,
       value: formatNumber(stats.failedOrTimedOut),
       tone: stats.failedOrTimedOut > 0 ? 'danger' : 'default',
     },
@@ -729,7 +726,7 @@ function StatTiles({
           role="note"
           className="flex items-start gap-2 rounded-card border border-warn/30 bg-warn/10 px-3 py-2 text-small"
         >
-          <Info className="mt-px size-4 shrink-0 text-warn" aria-hidden data-status-icon />
+          <AlertTriangle className="mt-px size-4 shrink-0 text-warn" aria-hidden data-status-icon />
           {totals.total !== null
             ? t('webPagesWork.sessionsTruncated', {
                 shown: formatNumber(totals.listed),

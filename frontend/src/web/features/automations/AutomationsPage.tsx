@@ -2,14 +2,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   ArrowUp,
-  BellRing,
   CalendarClock,
   CheckCircle2,
   ChevronRight,
-  CircleAlert,
   Copy,
   History,
   Loader2,
+  MessageSquare,
   Pause,
   PauseCircle,
   Pencil,
@@ -17,9 +16,7 @@ import {
   PlayCircle,
   Plus,
   Search,
-  SearchX,
   ShieldAlert,
-  Sparkles,
   Timer,
   Trash2,
   Zap,
@@ -361,7 +358,7 @@ export function AutomationsPage() {
                           aria-hidden
                           className="grid size-8 shrink-0 place-items-center rounded-control bg-surface-2 text-text-muted transition-colors duration-[var(--duration-fast)] group-hover:bg-accent-tint group-hover:text-accent [&_svg]:size-4"
                         >
-                          {tpl.payloadKind === 'reminder' ? <BellRing /> : <Sparkles />}
+                          {tpl.payloadKind === 'reminder' ? <MessageSquare /> : <Zap />}
                         </span>
                         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                           <span className="font-medium">{tpl.name}</span>
@@ -405,7 +402,7 @@ export function AutomationsPage() {
             },
             {
               label: t('webPagesWork.statDegraded'),
-              icon: <CircleAlert />,
+              icon: <AlertTriangle />,
               value: formatNumber(degraded),
               tone: degraded > 0 ? 'danger' : 'default',
             },
@@ -459,7 +456,7 @@ export function AutomationsPage() {
           {visible.length === 0 ? (
             <Card variant="plain" padding="none">
               <EmptyState
-                icon={<SearchX />}
+                icon={<Search />}
                 title={t('webPagesWork.automationsNoMatch')}
                 action={
                   <Button variant="outline" onClick={() => setSearch('')}>

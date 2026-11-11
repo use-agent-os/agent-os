@@ -1,14 +1,14 @@
 import {
+  AlertTriangle,
   CalendarClock,
   CalendarPlus,
   ChevronRight,
-  CircleAlert,
   Loader2,
   Pencil,
   Send,
   ShieldAlert,
-  Workflow,
   X,
+  Zap,
 } from 'lucide-react'
 import { useId, useMemo, useState, type ReactNode } from 'react'
 import { t } from '@/i18n'
@@ -153,7 +153,7 @@ function FieldError({ id, text }: { id?: string; text: string }) {
       role="alert"
       className="anim-fade-in flex items-start gap-1.5 text-small text-danger [&_svg]:mt-px [&_svg]:size-3.5 [&_svg]:shrink-0"
     >
-      <CircleAlert aria-hidden data-status-icon />
+      <AlertTriangle aria-hidden data-status-icon />
       {text}
     </p>
   )
@@ -200,7 +200,7 @@ export function CronExplain({ expr, timeZone = '' }: { expr: string; timeZone?: 
         role="status"
         className="flex items-start gap-1.5 text-small text-danger [&_svg]:mt-px [&_svg]:size-3.5 [&_svg]:shrink-0"
       >
-        <CircleAlert aria-hidden data-status-icon />
+        <AlertTriangle aria-hidden data-status-icon />
         {t('webPagesWork.explainInvalid')}
       </p>
     )
@@ -535,11 +535,7 @@ export function AutomationEditor({
               </Field>
             </FormSection>
 
-            <FormSection
-              id={ids.section}
-              icon={<Workflow />}
-              title={t('webPagesWork.fieldPayload')}
-            >
+            <FormSection id={ids.section} icon={<Zap />} title={t('webPagesWork.fieldPayload')}>
               <Select
                 aria-labelledby={ids.section}
                 value={form.payloadKind}
@@ -882,7 +878,7 @@ export function AutomationEditor({
                 role="alert"
                 className="anim-fade-in flex items-start gap-2 rounded-control border border-danger/30 bg-danger/10 px-3 py-2"
               >
-                <CircleAlert
+                <AlertTriangle
                   className="mt-0.5 size-4 shrink-0 text-danger"
                   aria-hidden
                   data-status-icon
