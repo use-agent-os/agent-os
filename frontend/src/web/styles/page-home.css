@@ -1,0 +1,411 @@
+/* Home: the bento dashboard. The grid is laid out by its own width (a
+ * container), not the viewport, so it reads right whether the sessions pane
+ * is open or not. Durations and easings come from tokens.css; the global
+ * reduced-motion rule in base.css makes every animation instant, and every
+ * element rests in its final state. */
+
+@layer components {
+  /* ---- The bento grid ---------------------------------------------------- */
+
+  .hm-bento {
+    container: hm-bento / inline-size;
+  }
+  .hm-grid {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      'lead lead'
+      'prov up'
+      'usage usage'
+      'sess sess'
+      'next next'
+      'events events';
+  }
+  .hm-grid > [data-area] {
+    min-width: 0;
+  }
+  .hm-grid > [data-area='lead'] {
+    grid-area: lead;
+  }
+  .hm-grid > [data-area='prov'] {
+    grid-area: prov;
+  }
+  .hm-grid > [data-area='up'] {
+    grid-area: up;
+  }
+  .hm-grid > [data-area='usage'] {
+    grid-area: usage;
+  }
+  .hm-grid > [data-area='sess'] {
+    grid-area: sess;
+  }
+  .hm-grid > [data-area='next'] {
+    grid-area: next;
+  }
+  .hm-grid > [data-area='events'] {
+    grid-area: events;
+  }
+
+  @container hm-bento (min-width: 38rem) {
+    .hm-grid {
+      gap: 1rem;
+      grid-template-areas:
+        'lead lead'
+        'prov up'
+        'usage usage'
+        'sess next'
+        'events events';
+    }
+  }
+
+  /* Wide: a large lead with the two compact cells stacked beside it, then
+     usage and sessions, then the countdown beside a tall console. */
+  @container hm-bento (min-width: 52rem) {
+    .hm-grid {
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      grid-template-areas:
+        'lead lead lead lead lead lead lead lead prov prov prov prov'
+        'lead lead lead lead lead lead lead lead up up up up'
+        'usage usage usage usage usage usage usage sess sess sess sess sess'
+        'next next next next events events events events events events events events';
+    }
+  }
+
+  /* Entrance: each block rises in its own turn (style="--stagger-i: n"). */
+  .hm-rise {
+    animation: agentos-rise var(--duration-enter) var(--ease-enter) both;
+    animation-delay: calc(var(--stagger-i, 0) * var(--stagger-step));
+  }
+
+  /* ---- Tiles ------------------------------------------------------------- */
+
+  /* A compact cell: a quieter surface than a card, no shadow. */
+  .hm-cell {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: color-mix(in oklab, var(--surface-1) 60%, transparent);
+    transition:
+      border-color var(--duration-base) var(--ease-out),
+      background-color var(--duration-base) var(--ease-out);
+  }
+  @media (hover: hover) {
+    .hm-cell:hover {
+      border-color: var(--border-strong);
+      background: var(--surface-1);
+    }
+  }
+
+  .hm-cell-value {
+    font-size: 1.125rem;
+    line-height: 1.75rem;
+    letter-spacing: -0.015em;
+  }
+  @container hm-bento (min-width: 38rem) {
+    .hm-cell-value {
+      font-size: 1.5rem;
+      line-height: 2rem;
+      letter-spacing: -0.022em;
+    }
+  }
+
+  /* The readiness lead: a wash and a top edge in its tone, so the state
+     reads before any text does. */
+  .hm-lead {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+  }
+  .hm-lead::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(
+        70% 120% at 0% 0%,
+        color-mix(in oklab, var(--ov-tone) 13%, transparent),
+        transparent 62%
+      ),
+      radial-gradient(
+        40% 60% at 100% 100%,
+        color-mix(in oklab, var(--ov-tone) 5%, transparent),
+        transparent 70%
+      );
+  }
+  .hm-lead::after {
+    content: '';
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 1px;
+    pointer-events: none;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklab, var(--ov-tone) 55%, transparent) 30%,
+      transparent 85%
+    );
+  }
+
+  /* A finding that needs action: a row that leads to the fix. */
+  .hm-finding {
+    transition: background-color var(--duration-fast) var(--ease-out);
+  }
+  .hm-finding:hover {
+    background: var(--surface-2);
+  }
+
+  /* ---- Ring -------------------------------------------------------------- */
+
+  .hm-ring {
+    --ring-size: 5.5rem;
+    --ring-stroke: 7;
+    position: relative;
+    display: inline-grid;
+    flex-shrink: 0;
+    place-items: center;
+    width: var(--ring-size);
+    height: var(--ring-size);
+    color: var(--ov-tone, var(--accent));
+  }
+  .hm-ring[data-size='sm'] {
+    --ring-size: 3rem;
+    --ring-stroke: 9;
+  }
+  .hm-ring[data-size='lg'] {
+    --ring-size: 8.5rem;
+    --ring-stroke: 5;
+  }
+  .hm-ring > svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    rotate: -90deg;
+  }
+  .hm-ring circle {
+    fill: none;
+    stroke-width: var(--ring-stroke);
+  }
+  .hm-ring-track {
+    stroke: color-mix(in oklab, var(--ov-tone, var(--accent)) 14%, var(--surface-3));
+  }
+  .hm-ring-track[data-dashed] {
+    stroke: var(--border-strong);
+    stroke-dasharray: 3 6;
+    stroke-width: 2;
+  }
+  .hm-ring[data-rest='warn'] {
+    --ring-rest: var(--warn);
+  }
+  .hm-ring[data-rest='danger'] {
+    --ring-rest: var(--danger);
+  }
+  .hm-ring[data-rest] .hm-ring-track {
+    stroke: color-mix(in oklab, var(--ring-rest) 75%, transparent);
+  }
+  .hm-ring-fill {
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-dasharray: 100 100;
+    stroke-dashoffset: calc(100 - var(--ring-value, 0));
+    filter: drop-shadow(0 0 6px color-mix(in oklab, currentColor 45%, transparent));
+    transition: stroke-dashoffset var(--duration-slow) var(--ease-out);
+    /* Draws from empty on mount only; afterwards the transition carries
+       value changes (backwards fill: the element's own value wins once the
+       animation ends). */
+    animation: hm-ring-draw var(--duration-spring) var(--ease-enter) backwards;
+    animation-delay: calc(var(--stagger-i, 0) * var(--stagger-step));
+  }
+  .hm-ring[data-empty] .hm-ring-fill {
+    opacity: 0;
+  }
+  .hm-ring-center {
+    position: relative;
+    display: grid;
+    place-items: center;
+    text-align: center;
+  }
+  .hm-ring-center > svg {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+  .hm-ring[data-size='sm'] .hm-ring-center > svg {
+    width: 1.125rem;
+    height: 1.125rem;
+  }
+  .hm-countdown {
+    color: var(--text);
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  /* ---- Usage columns ----------------------------------------------------- */
+
+  .hm-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.3125rem;
+    height: 5.5rem;
+    padding-top: 0.25rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .hm-bar {
+    position: relative;
+    flex: 1 1 0;
+    height: calc(var(--h, 0) * 1%);
+    border-radius: 4px 4px 1px 1px;
+    /* Output on top (blue), input beneath (lime): one hard stop. */
+    background: linear-gradient(
+      to top,
+      var(--accent) calc(100% - var(--out, 0) * 1%),
+      var(--info) 0
+    );
+    opacity: 0.88;
+    transform-origin: bottom;
+    animation: hm-grow var(--duration-enter) var(--ease-enter) backwards;
+    animation-delay: calc(var(--i, 0) * var(--stagger-step) / 5 + var(--stagger-step) * 2);
+    transition: opacity var(--duration-fast) var(--ease-out);
+  }
+  .hm-bar:hover {
+    opacity: 1;
+  }
+  .hm-bar[data-slot-empty] {
+    height: 2px;
+    background: color-mix(in oklab, var(--text-muted) 22%, transparent);
+    border-radius: 1px;
+  }
+  .hm-bars[data-ghost] {
+    mask-image: linear-gradient(to top, black, transparent 95%);
+  }
+  .hm-bars[data-ghost] .hm-bar {
+    background: color-mix(in oklab, var(--text-muted) 11%, transparent);
+    opacity: 1;
+  }
+  /* The empty chart's message sits on a soft pool of the card's surface. */
+  .hm-chart-empty {
+    background: radial-gradient(
+      closest-side,
+      var(--surface-1) 55%,
+      color-mix(in oklab, var(--surface-1) 0%, transparent)
+    );
+  }
+
+  /* ---- Live events console ----------------------------------------------- */
+
+  .hm-console {
+    background-image: linear-gradient(
+      to right,
+      transparent calc(4.75rem + 1.25rem - 1px),
+      var(--border) calc(4.75rem + 1.25rem - 1px),
+      var(--border) calc(4.75rem + 1.25rem),
+      transparent calc(4.75rem + 1.25rem)
+    );
+  }
+  .hm-log-row {
+    animation: hm-log-in var(--duration-enter) var(--ease-enter) backwards;
+  }
+  .hm-radar {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 4.5rem;
+    height: 4.5rem;
+    border-radius: 9999px;
+    color: var(--accent);
+    background: radial-gradient(
+      circle,
+      color-mix(in oklab, var(--accent) 14%, transparent),
+      transparent 70%
+    );
+  }
+  .hm-radar::before,
+  .hm-radar::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
+  }
+  .hm-radar::after {
+    inset: 0.875rem;
+    border-color: color-mix(in oklab, var(--accent) 50%, transparent);
+  }
+  .hm-radar > svg {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  /* ---- Ghost rows (Sessions before there are any) ------------------------ */
+
+  .hm-ghost-rows {
+    mask-image: linear-gradient(to bottom, black 20%, transparent);
+  }
+  .hm-ghost-line {
+    display: block;
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: color-mix(in oklab, var(--text-muted) 16%, transparent);
+  }
+}
+
+@keyframes hm-ring-draw {
+  from {
+    stroke-dashoffset: 100;
+  }
+}
+@keyframes hm-grow {
+  from {
+    transform: scaleY(0);
+  }
+}
+@keyframes hm-log-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+    background-color: var(--accent-tint);
+  }
+}
+
+@media (forced-colors: active) {
+  .hm-lead::before,
+  .hm-lead::after {
+    display: none;
+  }
+  .hm-ring[data-rest='warn'] {
+    --ring-rest: var(--warn);
+  }
+  .hm-ring[data-rest='danger'] {
+    --ring-rest: var(--danger);
+  }
+  .hm-ring[data-rest] .hm-ring-track {
+    stroke: color-mix(in oklab, var(--ring-rest) 75%, transparent);
+  }
+  .hm-ring-fill {
+    stroke: CanvasText;
+    filter: none;
+  }
+  .hm-ring-track {
+    stroke: GrayText;
+  }
+  .hm-bar {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  .hm-bar[data-slot-empty] {
+    height: 2px;
+    background: color-mix(in oklab, var(--text-muted) 22%, transparent);
+    border-radius: 1px;
+  }
+  .hm-bars[data-ghost] .hm-bar {
+    background: GrayText;
+  }
+  .hm-cell {
+    border-color: CanvasText;
+  }
+}

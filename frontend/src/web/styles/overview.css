@@ -1,13 +1,13 @@
-/* The overview pages (Home, Usage, Inbox): icon tiles, the readiness lead,
- * animated meters and bars, the live event feed and the inbox's enter/exit
- * motion. Durations and easings come from tokens.css; the global
+/* The overview pages (Home, Usage, Inbox): icon tiles, animated meters and
+ * bars and the Usage table. Home's bento and Inbox's triage list live in
+ * page-home.css and page-inbox.css. Durations and easings come from tokens.css; the global
  * reduced-motion rule in base.css makes all of it instant, and every element
  * rests in its final state, so nothing waits on an animation to be visible. */
 
 @layer components {
   /* ---- Tones ------------------------------------------------------------ */
 
-  /* One knob for tiles, meters, the lead wash and inbox items. */
+  /* One knob for tiles, meters, Home's lead and rings and Inbox's rows. */
   [data-ov-tone] {
     --ov-tone: var(--text-muted);
   }
@@ -56,27 +56,6 @@
     height: 1.375rem;
   }
 
-  /* ---- Home: the readiness lead ----------------------------------------- */
-
-  /* A faint wash and a top edge in the readiness tone, so the state reads
-     before any text does. Decorative: forced colors drop it. */
-  .ov-lead {
-    position: relative;
-    isolation: isolate;
-  }
-  .ov-lead::before {
-    content: '';
-    position: absolute;
-    z-index: -1;
-    inset: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    background: radial-gradient(
-      90% 160% at 0% 0%,
-      color-mix(in oklab, var(--ov-tone) 10%, transparent),
-      transparent 60%
-    );
-  }
   /* ---- Entrance --------------------------------------------------------- */
 
   /* A rise with an explicit stagger index (style="--stagger-i: n"), for a
@@ -171,54 +150,6 @@
       rotate var(--duration-base) var(--ease-spring),
       opacity var(--duration-fast) var(--ease-out);
   }
-
-  /* ---- Home: live event feed -------------------------------------------- */
-
-  /* A new event slides in from the top with a brief accent wash. */
-  .ov-feed-row {
-    animation: ov-feed-in var(--duration-enter) var(--ease-enter) backwards;
-  }
-
-  /* ---- Inbox: items enter and leave ------------------------------------- */
-
-  /* One wrapper per item: rises in; when resolved it fades and the list
-     closes up over it (grid rows 1fr -> 0fr), never jumping. */
-  .ov-presence {
-    display: grid;
-    grid-template-rows: 1fr;
-  }
-  .ov-presence > * {
-    min-height: 0;
-    animation: agentos-rise var(--duration-enter) var(--ease-enter) both;
-    animation-delay: calc(var(--stagger-i, 0) * var(--stagger-step));
-  }
-  .ov-presence[data-leaving] {
-    pointer-events: none;
-    animation: ov-collapse var(--duration-base) var(--ease-in) both;
-  }
-  .ov-presence[data-leaving] > * {
-    overflow: hidden;
-    animation: ov-leave var(--duration-exit) var(--ease-in) both;
-  }
-
-  /* An inbox item: a stripe in the item's tone on its leading edge. */
-  .ov-item {
-    position: relative;
-    overflow: hidden;
-  }
-  .ov-item::before {
-    content: '';
-    position: absolute;
-    inset-block: 0;
-    inset-inline-start: 0;
-    width: 3px;
-    pointer-events: none;
-    background: linear-gradient(
-      180deg,
-      var(--ov-tone),
-      color-mix(in oklab, var(--ov-tone) 25%, transparent)
-    );
-  }
 }
 
 /* Overrides of utility classes on primitives, so they sit in the same
@@ -292,17 +223,6 @@
       max-height: none;
     }
   }
-
-  /* "Nothing needs you": the tile takes the ok tone and pops in. */
-  .ov-caught-up > :first-child {
-    color: var(--ok);
-    background: color-mix(in oklab, var(--ok) 10%, var(--surface-2));
-    border-color: color-mix(in oklab, var(--ok) 28%, transparent);
-    box-shadow:
-      0 0 0 6px color-mix(in oklab, var(--ok) 6%, transparent),
-      var(--elevation-card);
-    animation: agentos-scale-in var(--duration-spring) var(--ease-spring) both;
-  }
 }
 
 @keyframes ov-reveal {
@@ -313,27 +233,8 @@
     clip-path: inset(0 0 0 0 round 9999px);
   }
 }
-@keyframes ov-feed-in {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-    background-color: var(--accent-tint);
-  }
-}
-@keyframes ov-collapse {
-  to {
-    grid-template-rows: 0fr;
-  }
-}
-@keyframes ov-leave {
-  to {
-    opacity: 0;
-    transform: scale(0.98);
-  }
-}
 
-/* Forced colors: fills and tiles keep a visible system colour; the
-   decorative wash, edge and stripe go. */
+/* Forced colors: fills and tiles keep a visible system colour. */
 @media (forced-colors: active) {
   .ov-fill,
   .ov-swatch {
@@ -349,9 +250,5 @@
   }
   .ov-tile {
     border: 1px solid CanvasText;
-  }
-  .ov-lead::before,
-  .ov-item::before {
-    display: none;
   }
 }

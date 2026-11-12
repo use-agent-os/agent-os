@@ -8,7 +8,15 @@ import { approvalMonitor, useApprovals } from '@/services/approval-monitor'
 import { NOW, renderShell, resetShellState, sessionRow, shellRpc } from '@/test/web-shell'
 import { SESSIONS_LIST_LIMIT } from '@/views/sessions/logic'
 import { startOfLocalDay } from '@/views/usage/logic'
-import { homeUsageFigures } from './HomePage'
+import { homeGreeting, homeUsageFigures } from './HomePage'
+import { runCycle, usageColumns } from './home-widgets'
+
+/** Matches the element whose whole text (children included) is `text`. */
+const fullText =
+  (text: string | RegExp, tag = 'P') =>
+  (_: string, el: Element | null) =>
+    el?.tagName === tag &&
+    (typeof text === 'string' ? el.textContent === text : text.test(el.textContent ?? ''))
 
 beforeEach(() => {
   resetShellState()
@@ -53,7 +61,8 @@ describe('Home', () => {
 
     fail = false
     await user.click(within(usage).getByRole('button', { name: 'Retry' }))
-    expect(await within(usage).findByText('42 tokens')).toBeInTheDocument()
+    // The figure reads as one phrase; "tokens" is set smaller beside it.
+    expect(await within(usage).findByText(fullText('42 tokens'))).toBeInTheDocument()
     expect(within(usage).queryByRole('alert')).not.toBeInTheDocument()
   })
 
@@ -71,8 +80,17 @@ describe('Home', () => {
     )
     // Label in name (WCAG 2.5.3): every link reading "Details" is named starting with it.
     const detailLinks = screen.getAllByText('Details').map((text) => text.closest('a'))
-    expect(detailLinks).toHaveLength(7)
+    expect(detailLinks).toHaveLength(5)
     for (const link of detailLinks) expect(link?.getAttribute('aria-label')).toMatch(/^Details: /)
+    // The compact provider and uptime cells link with an arrow, named the same way.
+    expect(screen.getByRole('link', { name: 'Details: Models settings' })).toHaveAttribute(
+      'href',
+      '/settings/models',
+    )
+    expect(screen.getByRole('link', { name: 'Details: Gateway settings' })).toHaveAttribute(
+      'href',
+      '/settings/gateway',
+    )
     const next = screen.getByRole('region', { name: 'Next automation' })
     expect(await within(next).findByText(/Morning brief/)).toBeInTheDocument()
     expect(rpc.callsTo('doctor.status')).toEqual([{ agentId: 'main', deep: false }])
@@ -309,7 +327,9 @@ describe('Inbox', () => {
 
   it('says nothing is waiting when the list is empty and live', async () => {
     renderShell('/inbox')
-    expect(await screen.findByText('Nothing needs you')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'All caught up' })).toBeInTheDocument()
+    expect(screen.getByText(/Nothing needs you right now/)).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Waiting items' })).toBeNull()
   })
 })
 
@@ -327,10 +347,9 @@ describe('Home usage and sessions figures', () => {
     })
     renderShell('/home', rpc)
     const usage = await screen.findByRole('region', { name: 'Usage, all time' })
-    expect(await within(usage).findByText(/^1,?010 tokens$/)).toBeInTheDocument()
-    expect(within(usage).getByText(/\$40\.50 spent/)).toHaveTextContent(
-      '$40.50 spent · 1 session active today',
-    )
+    expect(await within(usage).findByText(fullText(/^1,?010 tokens$/))).toBeInTheDocument()
+    expect(within(usage).getByText(fullText('$40.50 spent'))).toBeInTheDocument()
+    expect(within(usage).getByText('1 session active today')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Today' })).toBeNull()
   })
 
@@ -593,11 +612,160 @@ describe('Inbox fixes', () => {
       }),
     )
     const issue = await screen.findByRole('article', { name: /Disk almost full/ })
-    const toggle = within(issue)
-      .getAllByRole('button')
-      .find((b) => b.hasAttribute('aria-expanded'))!
+    const toggle = within(issue).getByRole('button', { name: 'Open doctor fix steps' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
     await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
     await user.click(within(issue).getByRole('button', { name: 'Copy the command of step 1' }))
     expect(writeText).toHaveBeenCalledWith('agentos logs prune')
+  })
+})
+
+// ── Pages v2: Home dashboard and Inbox triage (2026-11-12) ─────────────────
+
+describe('Home dashboard', () => {
+  it('greets by the hour and states readiness in a pill beside it', async () => {
+    expect(homeGreeting(8)).toBe('Good morning')
+    expect(homeGreeting(14)).toBe('Good afternoon')
+    expect(homeGreeting(21)).toBe('Good evening')
+    expect(homeGreeting(3)).toBe('Good evening')
+    renderShell('/home', homeRpc())
+    const title = await screen.findByRole('heading', { level: 1 })
+    expect(title.textContent).toMatch(/^Good (morning|afternoon|evening)$/)
+    expect(await screen.findByText('All systems ready')).toBeInTheDocument()
+    // The one-line summary comes from the figures already loaded.
+    expect(await screen.findByText(/Running on openrouter/)).toBeInTheDocument()
+  })
+
+  it('lists the latest three sessions, newest first, each opening its chat', async () => {
+    const rows = ['a', 'b', 'c', 'd'].map((id, i) =>
+      sessionRow(`agent:main:webchat:${id}`, {
+        updated_at: NOW - i * 60_000,
+        display_name: `Session ${id}`,
+      }),
+    )
+    renderShell('/home', homeRpc().handle('sessions.list', { sessions: rows.reverse() }))
+    const sessions = await screen.findByRole('region', { name: 'Sessions' })
+    const links = await within(sessions).findAllByRole('link', { name: /Session [a-d]/ })
+    expect(links.map((a) => a.textContent)).toEqual([
+      expect.stringContaining('Session a'),
+      expect.stringContaining('Session b'),
+      expect.stringContaining('Session c'),
+    ])
+    expect(links[0]).toHaveAttribute('href', '/chat/main/webchat/a')
+  })
+
+  it('shows what an empty Home will hold instead of zeros alone', async () => {
+    renderShell(
+      '/home',
+      homeRpc().handle('usage.status', { sessions: [] }).handle('cron.list', { jobs: [] }),
+    )
+    const usage = await screen.findByRole('region', { name: 'Usage, all time' })
+    expect(await within(usage).findByText('No usage yet')).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('region', { name: 'Sessions' })).getByText('No sessions yet'),
+    ).toBeInTheDocument()
+    const next = screen.getByRole('region', { name: 'Next automation' })
+    expect(await within(next).findByText('Nothing scheduled')).toBeInTheDocument()
+    expect(within(next).getByRole('link', { name: /Create an automation/ })).toHaveAttribute(
+      'href',
+      '/automations',
+    )
+  })
+
+  it('charts the newest sessions with usage, oldest on the left', () => {
+    const columns = usageColumns([
+      { session: 'old', inputTokens: 10, outputTokens: 5, updatedAt: 1_000 },
+      { session: 'none', inputTokens: 0, outputTokens: 0, updatedAt: 3_000 },
+      { session: 'new', inputTokens: 30, outputTokens: 0, updatedAt: 2_000 },
+    ])
+    expect(columns).toEqual([
+      { key: 'old', input: 10, output: 5 },
+      { key: 'new', input: 30, output: 0 },
+    ])
+    const many = Array.from({ length: 20 }, (_, i) => ({
+      session: `s${i}`,
+      inputTokens: 1,
+      updatedAt: i * 1000,
+    }))
+    expect(usageColumns(many).map((c) => c.key)).toEqual(
+      Array.from({ length: 14 }, (_, i) => `s${i + 6}`),
+    )
+  })
+
+  it('measures the countdown ring from the last run, else the cron period', () => {
+    const next = new Date(2026, 10, 12, 9, 0).getTime()
+    expect(runCycle({ next_run: next, last_run: next - 3_600_000 })).toEqual({
+      start: next - 3_600_000,
+      end: next,
+    })
+    // Daily at 9:00 and never run: the wait spans the day before.
+    expect(runCycle({ next_run: next, expression: '0 9 * * *' })).toEqual({
+      start: next - 86_400_000,
+      end: next,
+    })
+    expect(runCycle({ next_run: next, expression: '*/30 * * * *' })).toEqual({
+      start: next - 1_800_000,
+      end: next,
+    })
+    expect(runCycle({ next_run: null })).toBeNull()
+  })
+})
+
+describe('Inbox triage', () => {
+  it('groups waiting items by kind with counts, first row of each group open', async () => {
+    const user = userEvent.setup()
+    useApprovals.getState().setFromPoll(
+      [
+        { id: 'a1', namespace: 'exec', toolName: 'shell', command: 'ls' },
+        { id: 'a2', namespace: 'exec', toolName: 'git', command: 'git push' },
+      ],
+      'prompt',
+    )
+    usePendingQuestions.getState().present({
+      id: 'question:agent:main:webchat:y',
+      sessionKey: 'agent:main:webchat:y',
+      questions: [{ question: 'Which branch?', options: [{ label: 'main' }], multiSelect: false }],
+      toolUseId: 't1',
+      presentedAt: NOW,
+    })
+    renderShell('/inbox')
+    const list = await screen.findByRole('region', { name: 'Waiting items' })
+    const approvals = within(list).getByRole('region', { name: /^Approvals/ })
+    expect(within(approvals).getByRole('heading', { level: 2 })).toHaveTextContent('Approvals2')
+    expect(within(list).getByRole('region', { name: /^Questions/ })).toBeInTheDocument()
+    expect(within(list).queryByRole('region', { name: /^Issues/ })).toBeNull()
+    expect(screen.getByText('3 waiting')).toBeInTheDocument()
+
+    const [first, second] = within(approvals).getAllByRole('article')
+    const head = (row: HTMLElement) =>
+      within(row)
+        .getAllByRole('button')
+        .find((b) => b.hasAttribute('aria-controls'))!
+    expect(head(first!)).toHaveAttribute('aria-expanded', 'true')
+    expect(head(second!)).toHaveAttribute('aria-expanded', 'false')
+    // A folded row previews its command.
+    expect(within(second!).getByText('git push', { selector: '.ib-preview' })).toBeInTheDocument()
+    await user.click(head(second!))
+    expect(head(second!)).toHaveAttribute('aria-expanded', 'true')
+    await user.click(head(first!))
+    expect(head(first!)).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('opens the row a notification points at, wherever it sits in its group', async () => {
+    useApprovals.getState().setFromPoll(
+      [
+        { id: 'a1', namespace: 'exec', toolName: 'shell', command: 'ls' },
+        { id: 'a2', namespace: 'exec', toolName: 'git', command: 'git push' },
+      ],
+      'prompt',
+    )
+    renderShell('/inbox?approval=a2')
+    const row = await screen.findByRole('article', { name: /^Approval · exec: git/ })
+    expect(
+      within(row)
+        .getAllByRole('button')
+        .find((b) => b.hasAttribute('aria-controls')),
+    ).toHaveAttribute('aria-expanded', 'true')
   })
 })
