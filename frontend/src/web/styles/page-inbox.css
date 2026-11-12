@@ -5,12 +5,6 @@
  * every element rests in its final state. */
 
 @layer components {
-  /* A group's blocks rise in turn (style="--stagger-i: n"). */
-  .ib-rise {
-    animation: agentos-rise var(--duration-enter) var(--ease-enter) both;
-    animation-delay: calc(var(--stagger-i, 0) * var(--stagger-step));
-  }
-
   /* ---- Group header ------------------------------------------------------ */
 
   .ib-group-dot {
@@ -86,7 +80,7 @@
     rotate: 180deg;
   }
 
-  /* ---- Rows enter and leave ---------------------------------------------- */
+  /* ---- Rows (and whole groups) enter and leave ---------------------------- */
 
   /* minmax(0, 1fr): a row's one-line preview must not widen the list. */
   .ib-presence {

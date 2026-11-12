@@ -682,59 +682,68 @@ export function InboxPage() {
       {entries.length === 0 ? (
         <ZeroState live={live} rechecking={rechecking} onRecheck={() => void recheck()} />
       ) : (
-        <section aria-label={t('webPagesOverview.inboxList')} className="flex flex-col gap-7">
+        <section aria-label={t('webPagesOverview.inboxList')} className="-mb-7 flex flex-col">
           {groups.map((group, gi) => {
             const count = group.entries
               .filter((e) => !e.leaving)
               .reduce((n, e) => n + e.item.members.length, 0)
             let shown = 0
+            // A group whose last row is leaving folds away with it.
+            const leaving = group.entries.every((e) => e.leaving)
             return (
-              <section
+              <div
                 key={group.kind}
-                aria-labelledby={`inbox-group-${group.kind}`}
-                className="ib-rise flex flex-col gap-2.5"
+                className="ib-presence"
+                data-leaving={leaving || undefined}
+                aria-hidden={leaving || undefined}
+                inert={leaving}
                 style={staggerStyle(gi)}
-                data-ov-tone={group.tone}
               >
-                <header className="flex min-w-0 items-center gap-2.5 px-1">
-                  <span aria-hidden className="ib-group-dot" />
-                  <h2
-                    id={`inbox-group-${group.kind}`}
-                    className="flex items-center gap-2 text-section"
-                  >
-                    {group.title()}
-                    <span className="ib-count tabular-nums">
-                      <Counted value={count} />
-                    </span>
-                  </h2>
-                  <p className="ml-auto hidden truncate text-small text-text-muted sm:block">
-                    {group.hint()}
-                  </p>
-                </header>
-                <div className="ib-list">
-                  {group.entries.map((entry) => {
-                    const { item, leaving } = entry
-                    const index = leaving ? -1 : shown++
-                    return (
-                      // One wrapper per row: it rises in, and when the item
-                      // is resolved it fades while the list closes up over it.
-                      <div
-                        key={item.id}
-                        className="ib-presence"
-                        data-leaving={leaving || undefined}
-                        aria-hidden={leaving || undefined}
-                        inert={leaving}
-                        onAnimationEnd={(e) => {
-                          if (leaving && e.target === e.currentTarget) done(item.id)
-                        }}
-                        style={staggerStyle(gi + Math.max(index, 0))}
-                      >
-                        <div>{renderItem(item, !leaving && isOpen(entry, index))}</div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </section>
+                <section
+                  aria-labelledby={`inbox-group-${group.kind}`}
+                  className="flex flex-col gap-2.5 pb-7"
+                  data-ov-tone={group.tone}
+                >
+                  <header className="flex min-w-0 items-center gap-2.5 px-1">
+                    <span aria-hidden className="ib-group-dot" />
+                    <h2
+                      id={`inbox-group-${group.kind}`}
+                      className="flex items-center gap-2 text-section"
+                    >
+                      {group.title()}
+                      <span className="ib-count tabular-nums">
+                        <Counted value={count} />
+                      </span>
+                    </h2>
+                    <p className="ml-auto hidden truncate text-small text-text-muted sm:block">
+                      {group.hint()}
+                    </p>
+                  </header>
+                  <div className="ib-list">
+                    {group.entries.map((entry) => {
+                      const { item, leaving } = entry
+                      const index = leaving ? -1 : shown++
+                      return (
+                        // One wrapper per row: it rises in, and when the item
+                        // is resolved it fades while the list closes up over it.
+                        <div
+                          key={item.id}
+                          className="ib-presence"
+                          data-leaving={leaving || undefined}
+                          aria-hidden={leaving || undefined}
+                          inert={leaving}
+                          onAnimationEnd={(e) => {
+                            if (leaving && e.target === e.currentTarget) done(item.id)
+                          }}
+                          style={staggerStyle(gi + Math.max(index, 0))}
+                        >
+                          <div>{renderItem(item, !leaving && isOpen(entry, index))}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </section>
+              </div>
             )
           })}
         </section>
