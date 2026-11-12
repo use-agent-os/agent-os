@@ -1,9 +1,10 @@
-import { ArrowDown, Loader2, MessageSquareText } from 'lucide-react'
+import { ArrowDown, Loader2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webChat'
 import { Button } from '@/web/components/ui/button'
 import { ErrorState } from '@/web/components/ui/states'
+import { EmptyConversation } from '../ChatStage'
 import type { TranscriptState, Turn } from '../model/types'
 import { useFollowScroll } from './follow'
 import { TurnView } from './TurnView'
@@ -190,19 +191,6 @@ export function TranscriptView(props: TranscriptViewProps) {
           {t('webChat.latest')}
         </Button>
       </div>
-    </div>
-  )
-}
-
-/** The empty conversation: a composed arrival, centred in the column. */
-function EmptyConversation() {
-  return (
-    <div className="anim-stagger my-auto flex flex-col items-center gap-3 py-10 text-center">
-      <span className="chat-hero-mark isolate mb-3" aria-hidden>
-        <MessageSquareText className="size-6" />
-      </span>
-      <h2 className="text-title text-balance">{t('webChat.emptyTitle')}</h2>
-      <p className="max-w-sm text-ui text-pretty text-text-muted">{t('webChat.emptyBody')}</p>
     </div>
   )
 }
