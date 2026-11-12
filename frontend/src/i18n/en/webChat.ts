@@ -176,13 +176,13 @@ export const webChat = defineNamespace('webChat', {
   newAgentLoading: 'Loading…',
   newSuggestions: 'Suggestions',
   newSuggestSummarise: 'Summarise a document',
-  newSuggestSummarisePrompt: 'Summarise this document in a few clear bullet points: ',
+  newSuggestSummarisePrompt: 'Summarise this document in a few clear bullet points:',
   newSuggestPlan: 'Plan a task',
-  newSuggestPlanPrompt: 'Help me plan this step by step, with risks and a first action: ',
+  newSuggestPlanPrompt: 'Help me plan this step by step, with risks and a first action:',
   newSuggestSearch: 'Search the web',
-  newSuggestSearchPrompt: 'Search the web for ',
+  newSuggestSearchPrompt: 'Search the web for',
   newSuggestReview: 'Review my code',
-  newSuggestReviewPrompt: 'Review this code and point out bugs, risks and simplifications: ',
+  newSuggestReviewPrompt: 'Review this code and point out bugs, risks and simplifications:',
 
   // Chat stage (new session, empty conversation)
   stageMorning: 'Good morning',
@@ -197,7 +197,6 @@ export const webChat = defineNamespace('webChat', {
   headerUntitled: 'New conversation',
   headerCopyId: 'Copy session ID',
   headerIdCopied: 'Session ID copied',
-  headerChannel: 'Channel: {value}',
 
   // Side panel
   panelTitle: 'Side panel',

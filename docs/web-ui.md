@@ -720,8 +720,10 @@ state, session state, and user-visible errors.
 
 The chat workspace is one centered column. Your messages are right-aligned
 bubbles; replies are full-width prose. Hover or focus a message to copy it as
-Markdown or see when it was sent. The header shows the session title (activate
-it to rename in place), the agent, channel and project, a **Details** toggle, a
+Markdown or see when it was sent. The header shows the session title (its
+name, else its first message, else **New conversation**; activate it to rename
+in place), the agent, channel and project, the session ID (activate it to copy
+the full key), a **Details** toggle, a
 **Panels** toggle and a ⋯ menu (Rename, Compact, Reset session (confirmed
 first), Export as Markdown, Copy session key). It stays visible while the transcript scrolls.
 The Details column lists the session's agent, model route, channel, project,
@@ -809,9 +811,9 @@ not kept in history.
 After a turn ends the composer may show a suggested next prompt as its
 placeholder; press Tab on an empty composer to use it.
 
-The main button follows the session: **Send** when idle, **Stop** while a turn
-runs (calls `chat.abort`), and **Queue** next to Stop once you have typed
-something. After Stop the turn shows **Stopping…** while the gateway winds it
+The main button follows the session: **Send** when idle, turning into **Stop**
+while a turn runs (calls `chat.abort`), with **Queue** next to it once you have
+typed something. After Stop the turn shows **Stopping…** while the gateway winds it
 down, and the button reads **Stop now**: pressing it (or Escape) again sends a
 second `chat.abort`, which ends the turn at once. A refused stop is reported. Messages sent while a turn runs
 wait in a queue kept per session for the life of the tab (switching sessions
@@ -848,9 +850,14 @@ approval**. Requests from other sessions appear in the approval tray.
 
 ### New session
 
-`/new` (rail **New session**, `Mod+Shift+O`) picks the agent (preset to the
-active one) and, optionally, a project, and takes the first message with
-attachments. **Start** creates the session, sends the message and opens it.
+`/new` (rail **New session**, `Mod+Shift+O`) greets you with one large
+composer. Its toolbar holds the **Agent** chip (preset to the active one) and
+the **Project** chip (optional); each opens a menu with a check on the current
+choice. Attach files with the paperclip, by pasting, or by dropping them
+anywhere on the page. The starter suggestions under the composer fill it in
+(they do not send). **Start** (the round button, or the send key from
+Settings › Appearance) creates the session, sends the message and opens it;
+while it cannot run, its tooltip and description say why.
 If creation fails, the page keeps your message and attachments and shows the
 error; if the first message fails, **Start** again sends into the same new
 session instead of creating another. A link may preset the choices:

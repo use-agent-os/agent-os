@@ -443,7 +443,8 @@ export function NewSessionPage() {
               key={label}
               type="button"
               className="stage-suggestion target"
-              onClick={() => fill(t(prompt))}
+              // The prompt ends where the user carries on typing.
+              onClick={() => fill(`${t(prompt)} `)}
             >
               <Icon aria-hidden />
               {t(label)}
