@@ -93,6 +93,27 @@ describe('ProviderForm · Test key', () => {
     expect(screen.getByText(/Fetched from the provider just now/)).toBeInTheDocument()
   })
 
+  it('keeps the model menu usable when the probe answers before the catalog does', async () => {
+    // A large catalog (Surplus: 500+ models) can still be in flight when the
+    // key probe returns its own list; the menu must not stay locked on it.
+    rpcCall.mockImplementation(async (method: string) => {
+      if (method === 'models.list') return new Promise(() => {})
+      if (method === 'providers.probe') {
+        return { ok: true, models: [{ id: 'glm-5.3' }], model: 'glm-5.3', error: null }
+      }
+      return {}
+    })
+    renderForm()
+    const select = screen.getByLabelText('Default model') as HTMLSelectElement
+    expect(select).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-test-123' } })
+    fireEvent.click(screen.getByTestId('key-probe-button'))
+
+    await waitFor(() => expect(select).not.toBeDisabled())
+    expect([...select.options].map((o) => o.value)).toEqual(['', 'glm-5.3'])
+  })
+
   it('shows the provider’s rejection verbatim', async () => {
     rpcCall.mockImplementation(async (method: string) =>
       method === 'providers.probe'
@@ -106,6 +127,53 @@ describe('ProviderForm · Test key', () => {
       expect(screen.getByTestId('key-probe')).toHaveAttribute('data-verdict', 'bad'),
     )
     expect(screen.getByTestId('key-probe')).toHaveTextContent('Invalid API key')
+  })
+
+  it('tries the key the gateway reads from its environment the moment the form opens', async () => {
+    rpcCall.mockImplementation(async (method: string, params?: { provider?: string }) => {
+      if (method === 'providers.status') {
+        return {
+          providers: [
+            { providerId: params?.provider, apiKeyEnv: 'OPENCAP_API_KEY', apiKeyConfigured: true },
+          ],
+        }
+      }
+      if (method === 'providers.probe') {
+        return { ok: true, models: [{ id: 'gpt-5.6-terra' }], error: null, latencyMs: 90 }
+      }
+      return []
+    })
+    renderForm(openai)
+
+    await waitFor(() =>
+      expect(screen.getByTestId('key-probe')).toHaveAttribute('data-verdict', 'ok'),
+    )
+    const probeCall = rpcCall.mock.calls.find((c) => c[0] === 'providers.probe')
+    expect(probeCall?.[1]).toMatchObject({ providerId: 'openai', apiKeyEnv: 'OPENCAP_API_KEY' })
+    expect(probeCall?.[1].apiKey).toBeUndefined()
+    expect(screen.getByTestId('key-probe-button')).not.toBeDisabled()
+  })
+
+  it('does not call out when the gateway has no key for the provider', async () => {
+    rpcCall.mockImplementation(async (method: string, params?: { provider?: string }) =>
+      method === 'providers.status'
+        ? {
+            providers: [
+              {
+                providerId: params?.provider,
+                apiKeyEnv: 'OPENCAP_API_KEY',
+                apiKeyConfigured: false,
+              },
+            ],
+          }
+        : [],
+    )
+    renderForm(openai)
+    await waitFor(() =>
+      expect(rpcCall.mock.calls.some((c) => c[0] === 'providers.status')).toBe(true),
+    )
+    expect(rpcCall.mock.calls.some((c) => c[0] === 'providers.probe')).toBe(false)
+    expect(screen.getByTestId('key-probe-button')).toBeDisabled()
   })
 
   it('links to the page where the key is issued when one is known', () => {

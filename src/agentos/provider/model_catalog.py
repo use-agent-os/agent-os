@@ -12,6 +12,7 @@ from agentos import model_registry
 from agentos.env import trust_env as _trust_env
 from agentos.secrets import clean_header_secret
 
+from .openai import is_openai_reasoning_model
 from .openrouter_attribution import openrouter_app_headers
 from .registry import UnknownProviderError, get_provider_spec
 from .types import ModelCapabilities, ModelInfo
@@ -115,6 +116,16 @@ class ModelCatalog:
             for model in self._models.values()
             if not provider or model.provider.strip().lower() == provider
         ]
+
+    def replace(self, models: list[ModelInfo]) -> None:
+        """Swap the whole cache for ``models`` in one assignment.
+
+        Used when the active provider changes at runtime: the boot fetch filled
+        this cache with the previous provider's catalog, and entries are keyed
+        by bare model id, so merging would let one provider's limits shadow
+        another's for a shared id.
+        """
+        self._models = {m.model_id: m for m in models if m.model_id}
 
     def _populate_from_data(
         self,
@@ -264,7 +275,7 @@ class ModelCatalog:
         if (
             provider_id == "openai"
             and "api.openai.com" in base_url.lower()
-            and model_l.startswith(("gpt-5", "o1", "o3", "o4"))
+            and is_openai_reasoning_model(model_id)
         ):
             return ModelCapabilities(
                 supports_reasoning=True,

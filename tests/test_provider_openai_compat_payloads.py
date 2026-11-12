@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 import httpx
+import pytest
 
 from agentos.engine.types import ThinkingLevel
 from agentos.provider.openai import OpenAIProvider
@@ -1212,6 +1213,153 @@ def test_direct_openai_gpt_5_5_reasoning_uses_max_completion_tokens_without_temp
     assert captured["payload"]["max_completion_tokens"] == cfg.max_tokens
     assert "max_tokens" not in captured["payload"]
     assert captured["payload"]["reasoning_effort"] == "medium"
+    assert "temperature" not in captured["payload"]
+
+
+@pytest.mark.parametrize("model", ["gpt-5.6-terra", "gpt-5", "o3-mini", "o4-mini"])
+def test_direct_openai_reasoning_family_omits_non_default_temperature(
+    monkeypatch: Any, model: str
+) -> None:
+    """These models 400 on a non-default temperature even with thinking off."""
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    provider = OpenAIProvider(
+        api_key="test",
+        model=model,
+        base_url="https://api.openai.com/v1",
+        provider_kind="openai",
+    )
+
+    _collect(provider, ChatConfig(temperature=0.0))
+
+    assert "temperature" not in captured["payload"]
+
+
+def test_direct_openai_reasoning_family_keeps_default_temperature(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    provider = OpenAIProvider(
+        api_key="test",
+        model="gpt-5.6-terra",
+        base_url="https://api.openai.com/v1",
+        provider_kind="openai",
+    )
+
+    _collect(provider, ChatConfig(temperature=1.0))
+
+    assert captured["payload"]["temperature"] == 1.0
+
+
+def test_direct_openai_gpt_4o_still_sends_temperature(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    provider = OpenAIProvider(
+        api_key="test",
+        model="gpt-4o-mini",
+        base_url="https://api.openai.com/v1",
+        provider_kind="openai",
+    )
+
+    _collect(provider, ChatConfig(temperature=0))
+
+    assert captured["payload"]["temperature"] == 0
+
+
+_OPENAI_REASONING_CAPS = ModelCapabilities(
+    supports_reasoning=True, supports_tools=True, reasoning_format="openai"
+)
+
+
+def _lookup_tool() -> ToolDefinition:
+    return ToolDefinition(
+        name="lookup",
+        description="Lookup a value.",
+        input_schema=ToolInputSchema(properties={"q": {"type": "string"}}, required=["q"]),
+    )
+
+
+def _direct_openai(model: str, base_url: str = "https://api.openai.com/v1") -> OpenAIProvider:
+    return OpenAIProvider(api_key="test", model=model, base_url=base_url, provider_kind="openai")
+
+
+@pytest.mark.parametrize(
+    ("model", "caps"),
+    [
+        # Live API, 2026-11-12: with function tools, /v1/chat/completions
+        # 400s these unless reasoning_effort is "none"; gpt-5.6 / gpt-6 do not
+        # default to "none", so omitting the field fails too. A tool turn that
+        # asks for thinking goes to /v1/responses instead (see
+        # test_provider_openai_responses_reasoning.py).
+        ("gpt-5.6-luna", _OPENAI_REASONING_CAPS),
+        ("gpt-5.6-terra", _OPENAI_REASONING_CAPS),
+        ("gpt-5.6-sol", None),
+        ("gpt-6-luna", _OPENAI_REASONING_CAPS),
+        ("gpt-5.5", None),
+        ("gpt-5.4-nano", _OPENAI_REASONING_CAPS),
+    ],
+)
+def test_direct_openai_tool_turns_without_thinking_send_reasoning_effort_none(
+    monkeypatch: Any, model: str, caps: ModelCapabilities | None
+) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    cfg = ChatConfig(thinking=caps is None, model_capabilities=caps)
+
+    _collect_events(_direct_openai(model), cfg, tools=[_lookup_tool()])
+
+    assert captured["url"].endswith("/chat/completions")
+    assert captured["payload"]["reasoning_effort"] == "none"
+
+
+def test_direct_openai_turn_without_tools_keeps_the_requested_effort(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    cfg = ChatConfig(thinking=True, model_capabilities=_OPENAI_REASONING_CAPS)
+
+    _collect_events(_direct_openai("gpt-5.6-terra"), cfg)
+
+    assert captured["payload"]["reasoning_effort"] == "medium"
+
+
+@pytest.mark.parametrize("model", ["gpt-5", "gpt-5-mini", "gpt-5.2"])
+def test_older_gpt5_tool_turns_keep_reasoning(monkeypatch: Any, model: str) -> None:
+    """gpt-5 / gpt-5-mini reject "none"; gpt-5.1 / 5.2 accept effort with tools."""
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    cfg = ChatConfig(thinking=True, model_capabilities=_OPENAI_REASONING_CAPS)
+
+    _collect_events(_direct_openai(model), cfg, tools=[_lookup_tool()])
+
+    assert captured["payload"]["reasoning_effort"] == "medium"
+
+
+def test_gateway_gpt_5_6_tool_turns_are_left_to_the_gateway(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    provider = OpenAIProvider(
+        api_key="test",
+        model="gpt-5.6-luna",
+        base_url="https://gw.capminal.ai/api/inference/v1",
+        provider_kind="opencap",
+    )
+
+    _collect_events(provider, ChatConfig(), tools=[_lookup_tool()])
+
+    assert "reasoning_effort" not in captured["payload"]
+
+
+def test_direct_openai_gpt_6_uses_max_completion_tokens_without_temperature(
+    monkeypatch: Any,
+) -> None:
+    """gpt-6 refuses ``max_tokens`` like gpt-5 does (live API, 2026-11-12)."""
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    cfg = ChatConfig(max_tokens=512, temperature=0.2)
+
+    _collect(_direct_openai("gpt-6-luna"), cfg)
+
+    assert captured["payload"]["max_completion_tokens"] == 512
+    assert "max_tokens" not in captured["payload"]
     assert "temperature" not in captured["payload"]
 
 

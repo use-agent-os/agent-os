@@ -49,6 +49,11 @@ interface ProbeResult {
   error: string | null
 }
 
+/** The slice of `providers.status` the form reads: does the gateway hold a key? */
+interface ProviderStatusResult {
+  providers?: { providerId: string; apiKeyEnv?: string; apiKeyConfigured?: boolean }[]
+}
+
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
@@ -281,9 +286,27 @@ export function ProviderForm({
   const invalid = Boolean(customErrors.baseUrl || customErrors.model)
   const state = providerState(spec, config, configured)
   const hasStoredKey = state.active && Boolean(config.llm?.api_key)
+  // The config only names an env var when this provider was set up through
+  // one; a key exported in the gateway's environment (OPENAI_API_KEY in
+  // ~/.agentos/.env) is invisible to it. Ask the gateway, which reads its
+  // own environment, so that key is tried too.
+  const keyStatus = useQuery({
+    queryKey: ['settings', 'providerKey', spec.providerId],
+    enabled: !custom && Boolean(spec.requiresApiKey),
+    staleTime: 60_000,
+    retry: false,
+    queryFn: () =>
+      rpc.call<ProviderStatusResult>('providers.status', { provider: spec.providerId }),
+  })
+  const statusRow = keyStatus.data?.providers?.find((p) => p.providerId === spec.providerId)
+  const gatewayEnvKey =
+    Boolean(statusRow?.apiKeyConfigured) &&
+    Boolean(statusRow?.apiKeyEnv) &&
+    statusRow?.apiKeyEnv === saved.apiKeyEnv.trim()
   const hasEnvKey =
     (state.active && Boolean(config.llm?.api_key_env) && !config.llm?.api_key) ||
-    (!state.active && Boolean(state.profile?.api_key_env))
+    (!state.active && Boolean(state.profile?.api_key_env)) ||
+    (!hasStoredKey && gatewayEnvKey)
 
   const models = useQuery({
     queryKey: ['settings', 'models', spec.providerId],
@@ -585,7 +608,7 @@ export function ProviderForm({
             className="mac-select"
             aria-label={t('settings.providers.model')}
             value={draft.model}
-            disabled={disabled || models.isPending}
+            disabled={disabled || (models.isPending && !hasCatalog)}
             onChange={(e) => setDraft((d) => ({ ...d, model: e.target.value }))}
           >
             <option value="">{t('settings.providers.model.none')}</option>

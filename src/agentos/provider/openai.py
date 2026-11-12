@@ -153,6 +153,17 @@ def _resolve_reasoning_effort(level: ThinkingLevel | None, budget: int) -> str:
         return "high"
 
 
+def _responses_reasoning_effort(level: ThinkingLevel | None, budget: int) -> str:
+    """Effort for a direct-OpenAI /v1/responses request (gpt-5.4 and later).
+
+    These models take none / low / medium / high / xhigh (and max) but refuse
+    ``minimal`` (gpt-5.6-terra, checked live 2026-11-12), so the lowest
+    thinking level maps to ``low``.
+    """
+    effort = _resolve_reasoning_effort(level, budget)
+    return "low" if effort == "minimal" else effort
+
+
 def _resolve_deepseek_reasoning_effort(level: ThinkingLevel | None) -> str:
     """Map AgentOS thinking levels to DeepSeek V4's documented effort values."""
     from agentos.engine.types import (
@@ -200,6 +211,9 @@ def _should_disable_openrouter_reasoning_by_default(model: str) -> bool:
     }
 
 
+_GPT_VERSION_RE = re.compile(r"gpt-(\d+)(?:\.(\d+))?")
+
+
 def _direct_openai_uses_max_completion_tokens(
     provider_kind: str,
     base_url: str,
@@ -207,8 +221,47 @@ def _direct_openai_uses_max_completion_tokens(
 ) -> bool:
     if provider_kind != "openai" or "api.openai.com" not in base_url.lower():
         return False
+    return is_openai_reasoning_model(model)
+
+
+def is_openai_reasoning_model(model: str) -> bool:
+    """OpenAI's reasoning families: o1 / o3 / o4 and gpt-5 onwards (gpt-6 too).
+
+    On api.openai.com they take ``max_completion_tokens`` (``max_tokens`` is a
+    400), refuse a non-default temperature, and accept ``reasoning_effort``.
+    """
     model_name = model.rsplit("/", 1)[-1].strip().lower()
-    return model_name.startswith(("gpt-5", "o1", "o3", "o4"))
+    if model_name.startswith(("o1", "o3", "o4")):
+        return True
+    match = _GPT_VERSION_RE.match(model_name)
+    return match is not None and int(match.group(1)) >= 5
+
+
+def _direct_openai_tools_require_reasoning_none(
+    provider_kind: str,
+    base_url: str,
+    model: str,
+) -> bool:
+    """True when api.openai.com refuses function tools unless reasoning is off.
+
+    Checked live on 2026-11-12: from gpt-5.4 on (5.4, 5.5, 5.6, 6), a
+    /v1/chat/completions request with ``tools`` 400s ("Function tools with
+    reasoning_effort are not supported ... use /v1/responses or set
+    reasoning_effort to 'none'") for any effort but ``none``. gpt-5.6 and
+    gpt-6 do not default to ``none``, so omitting the field fails as well.
+    gpt-5 / gpt-5-mini reject ``none`` outright, and gpt-5.1 / 5.2 accept
+    effort with tools, so the cut is by version.
+
+    A tool turn that asks for thinking goes to /v1/responses instead (see
+    ``OpenAIProvider._stream``); one that does not sends ``none``.
+    """
+    if provider_kind != "openai" or "api.openai.com" not in base_url.lower():
+        return False
+    match = _GPT_VERSION_RE.match(model.rsplit("/", 1)[-1].strip().lower())
+    if match is None:
+        return False
+    version = (int(match.group(1)), int(match.group(2) or 0))
+    return version >= (5, 4)
 
 
 def _is_kimi_fixed_sampling_model(provider_kind: str, model: str) -> bool:
@@ -223,21 +276,20 @@ def _should_send_temperature(
     base_url: str,
     model: str,
     cfg: ChatConfig,
-    caps: Any,
 ) -> bool:
     if cfg.temperature is None:
         return False
     if _is_kimi_fixed_sampling_model(provider_kind, model) and cfg.temperature != 1.0:
         return False
+    # OpenAI's reasoning families (gpt-5*, o1/o3/o4) answer a non-default
+    # temperature with a 400 ("Only the default (1) value is supported"),
+    # thinking or not: gpt-5.6-terra rejects ``temperature=0`` with no
+    # ``reasoning_effort`` sent. Dropping the knob costs determinism only.
     if (
-        provider_kind == "openai"
-        and "api.openai.com" in base_url.lower()
-        and cfg.thinking
-        and bool(caps and caps.supports_reasoning)
+        _direct_openai_uses_max_completion_tokens(provider_kind, base_url, model)
+        and cfg.temperature != 1.0
     ):
-        model_name = model.rsplit("/", 1)[-1].strip().lower()
-        if model_name.startswith(("gpt-5.4", "gpt-5.5", "gpt-5.6")):
-            return False
+        return False
     return True
 
 
@@ -1197,7 +1249,6 @@ class OpenAIProvider:
             self._base_url,
             self._model,
             cfg,
-            caps,
         ):
             payload["temperature"] = cfg.temperature
         if cfg.stop_sequences:
@@ -1236,7 +1287,23 @@ class OpenAIProvider:
 
         # Reasoning injection (gated on thinking being enabled)
         direct_deepseek_v4 = _is_direct_deepseek_v4_request(self._provider_kind, self._model)
-        if (caps and caps.supports_reasoning and cfg.thinking) or (
+        # Set when this request goes to /v1/responses instead (see below).
+        responses_effort: str | None = None
+        if tools and _direct_openai_tools_require_reasoning_none(
+            self._provider_kind, self._base_url, self._model
+        ):
+            if caps and caps.supports_reasoning and cfg.thinking:
+                # Reasoning with function tools is Responses-API only for
+                # these models: build the usual payload (budget checks, cache
+                # key, tool choice) and send it as a Responses request.
+                responses_effort = _responses_reasoning_effort(
+                    cfg.thinking_level, cfg.thinking_budget_tokens
+                )
+                payload["reasoning_effort"] = responses_effort
+            else:
+                # No thinking asked: Chat Completions takes tools with "none".
+                payload["reasoning_effort"] = "none"
+        elif (caps and caps.supports_reasoning and cfg.thinking) or (
             direct_deepseek_v4 and cfg.thinking
         ):
             effort = _resolve_reasoning_effort(cfg.thinking_level, cfg.thinking_budget_tokens)
@@ -1341,6 +1408,28 @@ class OpenAIProvider:
         headers.update(openrouter_app_headers(self._base_url))
         if self._org_id:
             headers["OpenAI-Organization"] = self._org_id
+
+        if responses_effort is not None:
+            from .openai_responses import (  # local: openai_responses imports this module
+                reasoning_items_by_tool_call,
+                responses_payload_from_chat,
+                stream_responses,
+            )
+
+            async for event in stream_responses(
+                http=self._http,
+                url=self._api_url("/v1/responses"),
+                headers=headers,
+                payload=responses_payload_from_chat(
+                    payload,
+                    reasoning_effort=responses_effort,
+                    reasoning_by_call=reasoning_items_by_tool_call(messages),
+                ),
+                config=cfg,
+                model=self._model,
+            ):
+                yield event
+            return
 
         # tool_call accumulator: index -> {id, name, json_parts}
         pending_calls: dict[int, dict[str, Any]] = {}

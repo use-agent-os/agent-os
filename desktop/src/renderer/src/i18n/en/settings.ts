@@ -330,6 +330,8 @@ export const settings = {
   'settings.router.tier.makeDefault': 'Make default',
   'settings.router.tier.model': 'Model',
   'settings.router.tier.thinking': 'Thinking',
+  'settings.router.tier.modelsLoading': 'Loading the provider’s models…',
+  'settings.router.tier.modelsFailed': 'Couldn’t load the provider’s models',
   'settings.router.tier.thinking.inherit': 'Model default',
   'settings.router.noProvider': 'Configure a provider in Models first.',
   'settings.router.directOnly':

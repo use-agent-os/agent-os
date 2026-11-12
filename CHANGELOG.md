@@ -6,6 +6,66 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.12.post1] - 2026-11-12
+
+### Fixed
+- Chat on the OpenAI provider works again with GPT-5.4 and later (GPT-5.5,
+  GPT-5.6 Luna / Terra / Sol, GPT-6 Luna). Every agent turn carries tools,
+  and OpenAI's Chat Completions refuses function tools on these models unless
+  `reasoning_effort` is `none`; GPT-5.6 does not default to `none`, so every
+  message failed with "Function tools with reasoning_effort are not
+  supported". Tool turns on direct OpenAI that do not ask for thinking now
+  send `reasoning_effort: none` for these models. GPT-6 is also treated as a
+  reasoning model: it gets `max_completion_tokens` instead of the refused
+  `max_tokens`.
+- Thinking works again on the direct OpenAI provider for GPT-5.4 and later.
+  A tool turn that asks for thinking (`--thinking`, `llm.thinking`, or the
+  Pilot Router's c1–c3 levels) is now sent to OpenAI's Responses API, the
+  only OpenAI endpoint that takes reasoning together with function tools,
+  instead of running with reasoning off. The model's reasoning summary
+  streams as thinking, `reasoning_tokens` and cached tokens are reported in
+  usage, and the encrypted reasoning items are kept with the assistant
+  message and sent back across tool calls, so a multi-step tool loop
+  continues from its own reasoning. The minimal level maps to `low`, which
+  these models accept. Turns without tools, turns without thinking, older
+  GPT-5 models and OpenAI-compatible gateways stay on Chat Completions.
+  Responses requests (including `llm.provider = "openai_responses"`) also no
+  longer send `stop`, which the API rejects, and mark tools `strict: false`
+  so optional tool arguments stay optional.
+- Settings → Pilot Router and Settings → Providers list Surplus Intelligence's
+  models again (all 500+ of them). Switching the provider to Surplus or OpenCAP
+  without restarting left the gateway on the previous provider's catalog, and a
+  boot fetch that missed its 5 s budget left it empty; either way `models.list`
+  returned nothing, so the tier menus showed only the five built-in profile
+  models and the Providers form waited on the key test. The gateway now fetches
+  the public catalog on demand, keeps it for five minutes, shares one request
+  between concurrent callers, and keeps serving the last good copy if a refresh
+  fails. When the provider is the active one, its turns also pick up the right
+  context windows and capabilities. The tier menus say when the list is still
+  loading or could not be loaded, and the Providers model menu no longer stays
+  locked once the key test has returned a list.
+
+## [2026.11.12] - 2026-11-12
+
+### Fixed
+- Settings → Providers: "Test key" no longer reports a valid OpenAI key as
+  rejected. The 1-token check pinned `temperature=0`, which GPT-5.x and
+  o-series models refuse with a 400; it now sends no sampling settings, and
+  direct OpenAI requests to those models drop any non-default temperature
+  (session titles, suggestions and flows sent one too).
+- Settings → Providers: opening a provider whose key lives in the gateway's
+  environment (for example `OPENAI_API_KEY` in `~/.agentos/.env`) now tests
+  that key right away, as it already did for a saved key.
+- Direct Anthropic sessions (`llm.provider = "anthropic"`) are sized and
+  billed per model. The Messages API's hyphenated ids
+  (`claude-opus-5-5`) were missing from the model registry, so every Claude
+  model fell back to a 200K context window, a 16K output cap and gateway or
+  default prices (Haiku 4.5 at $3 / $15, Opus 4.8 at $15 / $75). The
+  Anthropic model list now lives in the registry with Anthropic's published
+  windows and list prices, and adds Claude Haiku 5.5, Claude Fable 5 and
+  Claude Opus 4.7. The context meter in Usage reads the same per-provider
+  window as the turn runner.
+
 ## [2026.11.11] - 2026-11-11
 
 ### Added

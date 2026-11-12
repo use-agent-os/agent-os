@@ -575,3 +575,26 @@ def test_usage_status_no_data_returns_zeros() -> None:
     assert payload["totalCacheReadTokens"] == 0
     assert payload["totalCacheWriteTokens"] == 0
     assert payload["totalSessions"] == 0
+
+
+def test_usage_status_sizes_a_direct_anthropic_session_from_the_messages_api_window() -> None:
+    """Hyphenated Messages API ids live in the provider's table, not the shared one."""
+    session = SimpleNamespace(
+        session_key="agent:webchat:claude",
+        status="running",
+        input_tokens=300_000,
+        output_tokens=1_000,
+        context_tokens=300_000,
+        compaction_count=0,
+        model="claude-opus-5-5",
+    )
+    ctx = RpcContext(
+        conn_id="test",
+        session_manager=_FakeSessionManager([session]),
+        usage_tracker=UsageTracker(),
+        config=SimpleNamespace(llm=SimpleNamespace(provider="anthropic", model="claude-opus-5-5")),
+    )
+    payload = asyncio.run(_handle_usage_status(None, ctx))
+
+    [row] = payload["sessions"]
+    assert row["contextStatus"]["contextWindowTokens"] == 1_000_000
