@@ -149,6 +149,21 @@
 }
 .prose-chat td {
   border-top: 1px solid var(--border);
+  /* Cells wrap between words, never mid-word: `anywhere` (inherited from
+     .prose-chat) let a narrow window squeeze the table into one-letter
+     columns instead of scrolling it inside .table-scroll. The min width
+     keeps a column of short words readable. */
+  overflow-wrap: break-word;
+  min-width: 6.5em;
+}
+/* Long unbroken tokens (a URL, a hash in code) may still break, so one
+   token does not stretch its column across the whole table; such a column
+   gets a wider floor so it does not shrink into a tall sliver either. */
+.prose-chat td :is(a, code) {
+  overflow-wrap: anywhere;
+}
+.prose-chat td:has(a, code) {
+  min-width: 12em;
 }
 .prose-chat tr:first-child > td {
   border-top: 0;

@@ -40,6 +40,21 @@ describe('command palette', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
+  it('scrolls the list back to the selected first result when the query changes', async () => {
+    const user = userEvent.setup()
+    renderShell('/home', shellRpc(rows))
+    await screen.findByText('Weekly DCA')
+    const dialog = await openPalette(user)
+    const list = dialog.querySelector<HTMLElement>('[cmdk-list]')!
+    // As if the user had arrowed far down a long list.
+    list.scrollTop = 300
+    await user.type(within(dialog).getByRole('combobox'), 'gro')
+    await waitFor(() =>
+      expect(within(dialog).getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true'),
+    )
+    await waitFor(() => expect(list.scrollTop).toBe(0))
+  })
+
   it('marks the highlighted option with a 3:1 accent bar over a soft fill, not an outline', async () => {
     const user = userEvent.setup()
     renderShell('/home', shellRpc(rows))

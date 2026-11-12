@@ -91,6 +91,24 @@
     container: set-pane / inline-size;
   }
 
+  /* Focus is never hidden under a docked bar (WCAG 2.4.11): the settings
+     scroller keeps the room the bottom bar takes (the save bar, "Saved", the
+     restart notice: each publishes it as --tray-clearance, tray-clearance.tsx)
+     and the approval tray stacked above it (--tray-stack) clear when focus
+     scrolls a field into view, and on sections with a sticky filter, the
+     filter's height at the top. Phones scroll <main>, wider windows the
+     pane itself. */
+  main:has(.set-pane),
+  .set-pane {
+    scroll-padding-bottom: calc(
+      var(--tray-clearance, 0px) + var(--tray-stack, 0px) + var(--float-gap, 0.5rem) + 0.5rem
+    );
+  }
+  main:has(.set-sticky-filter),
+  .set-pane:has(.set-sticky-filter) {
+    scroll-padding-top: 4.75rem;
+  }
+
   .set-title {
     font-size: var(--text-title);
     line-height: var(--text-title--line-height);
