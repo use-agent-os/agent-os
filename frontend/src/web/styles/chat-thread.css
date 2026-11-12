@@ -613,7 +613,6 @@
   .chat-kv {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
-    column-gap: 16px;
     font-size: 12px;
   }
   .chat-kv dt,
@@ -624,6 +623,7 @@
     color: var(--text-muted);
   }
   .chat-kv dd {
+    padding-left: 16px;
     text-align: end;
     font-variant-numeric: tabular-nums;
     overflow-wrap: anywhere;
