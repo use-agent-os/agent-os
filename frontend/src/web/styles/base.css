@@ -233,8 +233,8 @@ input[type='search']::-webkit-search-decoration {
 .set-pane {
   background-color: var(--surface-0);
   background-image:
-    radial-gradient(ellipse 46% 210px at 50% -60px, var(--page-wash), transparent 72%),
-    radial-gradient(ellipse 30% 180px at 90% -50px, var(--page-wash-2), transparent 72%),
+    radial-gradient(ellipse 52% 230px at 28% -30px, var(--page-wash), transparent 72%),
+    radial-gradient(ellipse 34% 190px at 88% -40px, var(--page-wash-2), transparent 72%),
     radial-gradient(ellipse 82% 250px at 50% 0, transparent 30%, var(--surface-0) 100%),
     radial-gradient(circle at center, var(--page-dot) 1px, transparent 1.6px);
   background-size:
@@ -254,7 +254,7 @@ input[type='search']::-webkit-search-decoration {
   #main-content:has(.set-pane) {
     background-color: var(--surface-0);
     background-image:
-      radial-gradient(ellipse 46% 210px at 50% -60px, var(--page-wash), transparent 72%),
+      radial-gradient(ellipse 80% 200px at 30% -30px, var(--page-wash), transparent 72%),
       radial-gradient(ellipse 82% 250px at 50% 0, transparent 30%, var(--surface-0) 100%),
       radial-gradient(circle at center, var(--page-dot) 1px, transparent 1.6px);
     background-size:

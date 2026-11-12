@@ -111,6 +111,7 @@ export function PagesList({ onNavigate }: { onNavigate?: () => void }) {
   // links' offset parent; the hook sums offsets through the group lists).
   const track = useGlide<HTMLDivElement>()
   const counts = usePageCounts()
+  const ids = useId()
 
   const extra = (page: PageEntry): { trailing?: ReactNode; said: string[] } => {
     if (page.id === 'sessions' && counts.sessions !== null && counts.sessions > 0) {
@@ -156,7 +157,7 @@ export function PagesList({ onNavigate }: { onNavigate?: () => void }) {
         className="glide-track scroll-contained flex min-h-0 flex-1 flex-col gap-4 px-2 pt-1 pb-2 [--glide-bg:var(--surface-3)] [--glide-radius:8px]"
       >
         {GROUPS.map((group) => {
-          const headingId = `pages-group-${group.id}`
+          const headingId = `${ids}-${group.id}`
           return (
             <section key={group.id} aria-labelledby={headingId} className="flex flex-col">
               <h3 id={headingId} className="pane-group-label">

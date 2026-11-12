@@ -84,7 +84,7 @@
   /* The page atmosphere under a page header (base.css): dot grid, lime wash
      and a cooler second wash. Decorative only. */
   --page-dot: rgb(236 238 241 / 0.1);
-  --page-wash: rgb(204 255 0 / 0.075);
+  --page-wash: rgb(204 255 0 / 0.07);
   --page-wash-2: rgb(90 200 190 / 0.05);
   /* A faint lime wash at the top of primary pages. Decorative only. */
   --canvas-atmosphere:
@@ -154,7 +154,7 @@
     0 4px 16px -2px rgb(77 102 0 / 0.3);
 
   --page-dot: rgb(23 26 30 / 0.12);
-  --page-wash: rgb(140 190 0 / 0.11);
+  --page-wash: rgb(150 200 0 / 0.14);
   --page-wash-2: rgb(60 150 140 / 0.06);
   --canvas-atmosphere:
     radial-gradient(900px 420px at 85% -120px, rgb(77 102 0 / 0.06), transparent 70%),
