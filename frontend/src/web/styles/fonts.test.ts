@@ -19,10 +19,10 @@ function files(dir: string, suffixes: string[]): string[] {
 describe('bundled fonts', () => {
   const base = readFileSync(path.join(STYLES, 'base.css'), 'utf8')
 
-  it('declares Inter and JetBrains Mono from bundled files', () => {
+  it('declares Geist and JetBrains Mono from bundled files', () => {
     const faces = [...base.matchAll(/@font-face\s*\{([^}]*)\}/g)].map((m) => m[1]!)
     const families = faces.map((f) => /font-family:\s*'([^']+)'/.exec(f)?.[1])
-    expect(families).toEqual(['Inter Variable', 'JetBrains Mono Variable'])
+    expect(families).toEqual(['Geist Variable', 'JetBrains Mono Variable'])
     for (const face of faces) {
       const url = /url\('([^']+)'\)/.exec(face)?.[1]
       expect(url).toBeDefined()
@@ -30,9 +30,11 @@ describe('bundled fonts', () => {
     }
   })
 
-  it('uses Inter for the interface and JetBrains Mono for code', () => {
+  it('uses Geist for the interface and JetBrains Mono for code', () => {
     const tokens = readFileSync(path.join(STYLES, 'tokens.css'), 'utf8')
-    expect(tokens).toMatch(/--font-sans:\s*'Inter Variable'/)
+    expect(tokens).toMatch(/--font-sans:\s*'Geist Variable'/)
+    // Glyphs Geist lacks (the dong sign, box drawing) fall back to system faces.
+    expect(tokens).toMatch(/--font-sans:[^;]*system-ui[^;]*sans-serif;/)
     expect(tokens).toMatch(/--font-mono:\s*'JetBrains Mono Variable'/)
     expect(base).toMatch(/code,\s*kbd,\s*samp,\s*pre\s*\{\s*font-family: var\(--font-mono\)/)
   })

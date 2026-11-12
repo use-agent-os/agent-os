@@ -685,13 +685,15 @@ build.
 
 ### React Control UI fonts
 
-- Inter Variable — Copyright (c) 2016 The Inter Project Authors
-  (https://github.com/rsms/inter), SIL Open Font License 1.1.
+- Geist Variable 1.800 — Copyright 2024 The Geist Project Authors
+  (https://github.com/vercel/geist-font), SIL Open Font License 1.1.
+  Converted to WOFF2 without other changes from the Google Fonts build
+  (https://github.com/google/fonts/tree/main/ofl/geist).
 - JetBrains Mono Variable — Copyright 2020 The JetBrains Mono Project Authors
   (https://github.com/JetBrains/JetBrainsMono), SIL Open Font License 1.1.
 
 The complete upstream notices and OFL 1.1 texts are kept in
-`frontend/src/assets/fonts/Inter-LICENSE.txt` and
+`frontend/src/assets/fonts/Geist-LICENSE.txt` and
 `frontend/src/assets/fonts/JetBrainsMono-LICENSE.txt`. The shared Control UI
 builder appends both files verbatim to the license ledger shipped beside the
 font binaries.

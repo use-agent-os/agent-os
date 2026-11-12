@@ -1061,6 +1061,13 @@
 }
 
 @media (forced-colors: active) {
+  .chat-shimmer {
+    background: none;
+    color: CanvasText;
+  }
+  .chat-user-bubble {
+    border: 1px solid CanvasText;
+  }
   .chat-dots > span,
   .chat-streaming > .prose-chat :last-child::after {
     forced-color-adjust: none;

@@ -261,7 +261,11 @@
 }
 
 @theme inline {
-  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  /* Geist carries Vietnamese and Latin Extended itself; the system faces
+     behind it cover what it lacks (the dong sign, box drawing). */
+  --font-sans:
+    'Geist Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
 
   --color-surface-0: var(--surface-0);
@@ -340,21 +344,24 @@
   --text-small--line-height: 1.4;
 
   /* Hierarchy: page title > section title > body; stat figures stand out;
-     labels are small, medium weight, muted by the caller. */
-  --text-title: 22px;
-  --text-title--line-height: 1.25;
-  --text-title--letter-spacing: -0.018em;
+     labels are small, medium weight, muted by the caller. Tuned for Geist,
+     which sets narrower and a touch smaller than Inter at the same size and
+     has no optical-size axis, so display sizes take a little more size and
+     tighter tracking by hand. */
+  --text-title: 24px;
+  --text-title--line-height: 1.2;
+  --text-title--letter-spacing: -0.024em;
   --text-title--font-weight: 600;
   --text-section: 15px;
   --text-section--line-height: 1.4;
-  --text-section--letter-spacing: -0.006em;
+  --text-section--letter-spacing: -0.01em;
   --text-section--font-weight: 600;
-  --text-stat: 28px;
-  --text-stat--line-height: 1.15;
-  --text-stat--letter-spacing: -0.022em;
+  --text-stat: 30px;
+  --text-stat--line-height: 1.1;
+  --text-stat--letter-spacing: -0.03em;
   --text-stat--font-weight: 600;
   --text-label: 12px;
   --text-label--line-height: 1.35;
-  --text-label--letter-spacing: 0.01em;
+  --text-label--letter-spacing: 0.005em;
   --text-label--font-weight: 500;
 }
