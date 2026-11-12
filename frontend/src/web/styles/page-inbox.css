@@ -79,10 +79,6 @@
   .ib-row-head:focus-visible {
     outline-offset: -2px;
   }
-  /* The one-line preview repeats what the open body shows in full. */
-  .ib-row[data-open] .ib-preview {
-    display: none;
-  }
   .ib-chevron {
     transition: rotate var(--duration-base) var(--ease-spring);
   }
@@ -92,11 +88,14 @@
 
   /* ---- Rows enter and leave ---------------------------------------------- */
 
+  /* minmax(0, 1fr): a row's one-line preview must not widen the list. */
   .ib-presence {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: 1fr;
   }
   .ib-presence > * {
+    min-width: 0;
     min-height: 0;
     animation: agentos-rise var(--duration-enter) var(--ease-enter) both;
     animation-delay: calc(var(--stagger-i, 0) * var(--stagger-step));
@@ -169,6 +168,12 @@
     width: 2rem;
     height: 2rem;
   }
+}
+
+/* The one-line preview repeats what the open body shows in full. Outside
+   the layers, so it beats the preview's own display utility. */
+.ib-row[data-open] .ib-preview {
+  display: none;
 }
 
 @keyframes ib-draw {

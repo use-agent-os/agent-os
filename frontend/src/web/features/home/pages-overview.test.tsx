@@ -8,7 +8,7 @@ import { approvalMonitor, useApprovals } from '@/services/approval-monitor'
 import { NOW, renderShell, resetShellState, sessionRow, shellRpc } from '@/test/web-shell'
 import { SESSIONS_LIST_LIMIT } from '@/views/sessions/logic'
 import { startOfLocalDay } from '@/views/usage/logic'
-import { homeGreeting, homeUsageFigures } from './HomePage'
+import { homeGreeting, homeUsageFigures, sessionsPulse } from './HomePage'
 import { runCycle, usageColumns } from './home-widgets'
 
 /** Matches the element whose whole text (children included) is `text`. */
@@ -637,22 +637,44 @@ describe('Home dashboard', () => {
     expect(await screen.findByText(/Running on openrouter/)).toBeInTheDocument()
   })
 
-  it('lists the latest three sessions, newest first, each opening its chat', async () => {
-    const rows = ['a', 'b', 'c', 'd'].map((id, i) =>
-      sessionRow(`agent:main:webchat:${id}`, {
-        updated_at: NOW - i * 60_000,
-        display_name: `Session ${id}`,
-      }),
-    )
-    renderShell('/home', homeRpc().handle('sessions.list', { sessions: rows.reverse() }))
+  it('sums the sessions up by channel and recent activity without repeating the rail', async () => {
+    const rows = [
+      sessionRow('agent:main:webchat:a', { display_name: 'Unique title A' }),
+      sessionRow('agent:main:webchat:b'),
+      sessionRow('agent:main:telegram:direct:1:c'),
+      sessionRow('agent:main:webchat:d', { run_status: 'running' }),
+    ]
+    renderShell('/home', homeRpc().handle('sessions.list', { sessions: rows }))
     const sessions = await screen.findByRole('region', { name: 'Sessions' })
-    const links = await within(sessions).findAllByRole('link', { name: /Session [a-d]/ })
-    expect(links.map((a) => a.textContent)).toEqual([
-      expect.stringContaining('Session a'),
-      expect.stringContaining('Session b'),
-      expect.stringContaining('Session c'),
+    expect(await within(sessions).findByText('4')).toBeInTheDocument()
+    expect(within(sessions).getByText('1 running')).toBeInTheDocument()
+    const split = within(sessions).getByRole('list', { name: 'Sessions by channel' })
+    expect(
+      within(split)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['webchat3', 'telegram1'])
+    // Titles stay in the rail: Home does not list them a second time.
+    expect(screen.getAllByText('Unique title A')).toHaveLength(1)
+  })
+
+  it('places each session on the past day by when it was last active', () => {
+    const now = NOW
+    const pulse = sessionsPulse(
+      [
+        { key: 'agent:main:webchat:a', updated_at: now - 6 * 3_600_000 },
+        { key: 'agent:main:webchat:b', updated_at: now - 2 * 86_400_000 },
+        { key: 'agent:main:cron:c', updated_at: now },
+        { key: 'agent:main:webchat:child', parent_session_key: 'agent:main:webchat:a' },
+      ],
+      now,
+    )
+    expect(pulse.day).toEqual([75, 100])
+    expect(pulse.channels).toEqual([
+      ['webchat', 2],
+      ['cron', 1],
     ])
-    expect(links[0]).toHaveAttribute('href', '/chat/main/webchat/a')
+    expect(pulse.running).toBe(0)
   })
 
   it('shows what an empty Home will hold instead of zeros alone', async () => {
@@ -663,7 +685,9 @@ describe('Home dashboard', () => {
     const usage = await screen.findByRole('region', { name: 'Usage, all time' })
     expect(await within(usage).findByText('No usage yet')).toBeInTheDocument()
     expect(
-      within(screen.getByRole('region', { name: 'Sessions' })).getByText('No sessions yet'),
+      within(screen.getByRole('region', { name: 'Sessions' })).getByText(
+        'Waiting for the first session',
+      ),
     ).toBeInTheDocument()
     const next = screen.getByRole('region', { name: 'Next automation' })
     expect(await within(next).findByText('Nothing scheduled')).toBeInTheDocument()

@@ -17,7 +17,7 @@ import {
   ShieldQuestion,
   ShieldX,
 } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useRpc } from '@/app/providers'
 import { formatNumber, t, tPlural } from '@/i18n'
@@ -38,7 +38,6 @@ import {
   formatUptime,
   readinessStatusLabel,
 } from '@/views/overview/logic'
-import { relTimeLabel } from '@/views/sessions/logic'
 import {
   activeSinceCount,
   formatCost,
@@ -53,18 +52,14 @@ import { PageHeader } from '@/web/components/ui/page-header'
 import { ErrorState, LoadingRegion, Skeleton, StaleBadge } from '@/web/components/ui/states'
 import { useCountUp } from '@/web/components/ui/use-count-up'
 import { useSessionsTotal } from '@/web/features/sessions/sessions-total'
-import { ChannelIcon } from '@/web/shell/channel-icon'
 import { useDocumentVisible, useSessionsList } from '@/web/shell/session-data'
 import {
   sessionChannel,
-  sessionAgent,
   sessionIsRunning,
   sessionParent,
-  sessionTitle,
   sessionUpdatedMs,
   type SessionRow,
 } from '@/web/shell/session-list'
-import { sessionKeyToPath } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { Countdown, Ring, UsageBars, usageColumns } from './home-widgets'
 import { DetailsLink, IconTile, PAGE_CLASS, staggerStyle, type OverviewTone } from './overview-ui'
@@ -82,7 +77,6 @@ import { DetailsLink, IconTile, PAGE_CLASS, staggerStyle, type OverviewTone } fr
 
 const POLL_MS = 30_000
 const EVENT_LOG_CAP = 30
-const LATEST_SESSIONS = 3
 
 interface StatusPayload {
   uptime_ms?: number | null
@@ -352,7 +346,7 @@ function CellValue({ children }: { children: ReactNode }) {
   return (
     <p
       title={typeof children === 'string' ? children : undefined}
-      className="hm-cell-value truncate font-semibold tabular-nums"
+      className="hm-cell-value line-clamp-2 font-semibold break-words tabular-nums"
     >
       {children}
     </p>
@@ -603,28 +597,50 @@ function ReadinessLead({
   )
 }
 
-/** The latest sessions, newest first, each opening its chat. */
-function LatestSessions({ rows }: { rows: SessionRow[] }) {
-  const latest = rows
-    .filter((row) => !sessionParent(row))
-    .sort((a, b) => sessionUpdatedMs(b) - sessionUpdatedMs(a))
-    .slice(0, LATEST_SESSIONS)
-  if (latest.length === 0) {
-    // What the card will hold: two faint rows, then the way to start one.
+const DAY_MS = 86_400_000
+/** Channels the split names before it folds the rest into "other". */
+const CHANNELS_SHOWN = 4
+
+/**
+ * The sessions at a glance, without repeating the rail's list: how many,
+ * how many run now, the split by channel and when each was last active over
+ * the past day. Titles stay in the rail (and the Sessions page).
+ */
+export function sessionsPulse(rows: readonly SessionRow[], now: number = Date.now()) {
+  const top = rows.filter((row) => !sessionParent(row))
+  const counts = new Map<string, number>()
+  for (const row of top) {
+    const channel = sessionChannel(row)
+    counts.set(channel, (counts.get(channel) ?? 0) + 1)
+  }
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  const shown = ranked.slice(0, CHANNELS_SHOWN)
+  const rest = ranked.slice(CHANNELS_SHOWN).reduce((n, [, c]) => n + c, 0)
+  return {
+    running: top.filter(sessionIsRunning).length,
+    channels:
+      rest > 0 ? [...shown, [t('webPagesOverview.homeSessionsOther'), rest] as const] : shown,
+    // Position on the past-24-hours strip, 0 (a day ago) to 100 (now).
+    day: top
+      .map((row) => sessionUpdatedMs(row))
+      .filter((ms) => ms > now - DAY_MS && ms <= now)
+      .map((ms) => ((ms - (now - DAY_MS)) / DAY_MS) * 100),
+  }
+}
+
+function SessionsPulse({ rows, figure }: { rows: SessionRow[]; figure: ReactNode }) {
+  const pulse = sessionsPulse(rows)
+  const total = pulse.channels.reduce((n, [, c]) => n + c, 0)
+  if (total === 0) {
+    // What the card will hold: a faint split and strip, then the way to start.
     return (
-      <div className="flex flex-col gap-3">
-        <ul aria-hidden className="hm-ghost-rows -mx-2 flex flex-col">
-          {[0.7, 0.5].map((w, i) => (
-            <li key={i} className="flex items-center gap-3 px-2 py-2">
-              <span className="size-8 shrink-0 rounded-lg border border-dashed border-border-strong" />
-              <span className="flex flex-1 flex-col gap-1.5">
-                <span className="hm-ghost-line" style={{ width: `${w * 100}%` }} />
-                <span className="hm-ghost-line w-1/4" />
-              </span>
-            </li>
-          ))}
-        </ul>
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+      <div className="flex flex-1 flex-col gap-4">
+        <p className="text-stat text-text-muted tabular-nums">{figure}</p>
+        <div aria-hidden className="flex flex-col gap-3">
+          <span className="hm-split" data-ghost />
+          <span className="hm-day" data-ghost />
+        </div>
+        <div className="mt-auto flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <div className="min-w-0">
             <p className="font-medium">{t('webPagesOverview.homeSessionsEmpty')}</p>
             <p className="text-small text-text-muted">
@@ -645,42 +661,52 @@ function LatestSessions({ rows }: { rows: SessionRow[] }) {
     )
   }
   return (
-    <ul role="list" className="-mx-2 flex flex-col">
-      {latest.map((row) => {
-        const channel = sessionChannel(row)
-        const running = sessionIsRunning(row)
-        const updated = sessionUpdatedMs(row)
-        return (
-          <li key={row.key} className="anim-fade-in">
-            <Link
-              to={sessionKeyToPath(row.key)}
-              viewTransition
-              className="press group/row flex min-w-0 items-center gap-3 rounded-lg px-2 py-2 hover:bg-surface-2"
-            >
-              <span className="relative grid size-8 shrink-0 place-items-center rounded-lg border border-border bg-surface-2 text-text-muted transition-colors duration-[var(--duration-fast)] group-hover/row:text-text">
-                <ChannelIcon channel={channel} className="flex" />
-                {running ? (
-                  <StatusDot
-                    tone="accent"
-                    live
-                    className="absolute -top-0.5 -right-0.5 size-2 ring-2 ring-[var(--surface-1)]"
-                  />
-                ) : null}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-ui font-medium">{sessionTitle(row)}</span>
-                <span className="block truncate text-small text-text-muted">
-                  {[sessionAgent(row), channel].filter(Boolean).join(' · ')}
-                </span>
-              </span>
-              <span className="shrink-0 text-small text-text-muted tabular-nums">
-                {updated ? relTimeLabel(updated) : null}
-              </span>
-            </Link>
-          </li>
-        )
-      })}
-    </ul>
+    <div className="flex flex-1 flex-col gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <p className="text-stat tabular-nums">
+          {figure}{' '}
+          <span className="text-ui font-normal tracking-normal text-text-muted">
+            {t('webPagesOverview.homeSessionsUnit')}
+          </span>
+        </p>
+        {pulse.running > 0 ? (
+          <Badge tone="accent" live className="mb-1">
+            {tPlural('webPagesOverview.homeSessionsRunning', pulse.running)}
+          </Badge>
+        ) : null}
+      </div>
+      <div className="flex flex-col gap-2">
+        <span aria-hidden className="hm-split">
+          {pulse.channels.map(([channel, count], i) => (
+            <span key={channel} data-c={i} style={{ flexGrow: count, '--i': i } as CSSProperties} />
+          ))}
+        </span>
+        <ul
+          role="list"
+          aria-label={t('webPagesOverview.homeSessionsSplit')}
+          className="flex flex-wrap gap-x-3.5 gap-y-1 text-small text-text-muted"
+        >
+          {pulse.channels.map(([channel, count], i) => (
+            <li key={channel} className="inline-flex items-center gap-1.5">
+              <span aria-hidden className="hm-key" data-c={i} />
+              {channel}
+              <span className="text-text tabular-nums">{formatNumber(count)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="mt-auto flex flex-col gap-1.5">
+        <span aria-hidden className="hm-day">
+          {pulse.day.map((pct, i) => (
+            <span key={i} style={{ '--x': pct, '--i': Math.min(i, 13) } as CSSProperties} />
+          ))}
+        </span>
+        <span className="flex justify-between text-small text-text-muted">
+          <span>{t('webPagesOverview.homeSessionsDay')}</span>
+          <span>{t('webPagesOverview.homeSessionsDayEnd')}</span>
+        </span>
+      </div>
+    </div>
   )
 }
 
@@ -782,12 +808,12 @@ function EventConsole({ live, index }: { live: boolean; index: number }) {
               {events.map((event) => (
                 <li
                   key={event.id}
-                  className="hm-log-row grid min-w-0 grid-cols-[4.75rem_auto_minmax(0,1fr)] items-baseline gap-x-5 px-4 py-[3px] leading-5 hover:bg-surface-2 sm:px-5"
+                  className="hm-log-row grid min-w-0 grid-cols-[4.75rem_7.5rem_minmax(0,1fr)] sm:grid-cols-[4.75rem_11rem_minmax(0,1fr)] items-baseline gap-x-5 px-4 py-[3px] leading-5 hover:bg-surface-2 sm:px-5"
                 >
                   <span className="text-text-muted tabular-nums">{event.ts}</span>
                   <span
                     className={cn(
-                      'inline-flex max-w-44 items-center gap-1.5 truncate font-medium',
+                      'inline-flex min-w-0 items-center gap-1.5 font-medium',
                       EVENT_TEXT[eventTone(event.name)],
                     )}
                   >
@@ -1009,14 +1035,14 @@ export function HomePage() {
               <div className="min-w-0">
                 <p className="text-stat tabular-nums">
                   <Counted value={usageFigures?.tokens ?? 0} render={tokensShown} />{' '}
-                  <span className="ml-1.5 text-ui font-normal tracking-normal text-text-muted">
+                  <span className="text-ui font-normal tracking-normal text-text-muted">
                     {t('webPagesOverview.homeTokensUnit')}
                   </span>
                 </p>
               </div>
               <p className="text-[1.25rem] leading-8 font-semibold tracking-[-0.015em] tabular-nums">
                 {formatCost(usageFigures?.cost ?? 0, { decimals: 2 })}{' '}
-                <span className="ml-1.5 text-ui font-normal tracking-normal text-text-muted">
+                <span className="text-ui font-normal tracking-normal text-text-muted">
                   {t('webPagesOverview.homeSpentUnit')}
                 </span>
               </p>
@@ -1072,20 +1098,7 @@ export function HomePage() {
             to="/sessions"
             linkLabel={t('webPagesOverview.homeSessionsLink')}
             query={sessions}
-            bodyClassName="gap-3"
-            headerExtra={
-              sessions.data ? (
-                <span className="rounded-full bg-surface-2 px-2 py-px text-small font-medium tabular-nums">
-                  {totals.total !== null ? (
-                    <Counted value={totals.total} render={formatNumber} />
-                  ) : (
-                    t('webPagesOverview.homeSessionsAtLeast', {
-                      count: formatNumber(totals.listed),
-                    })
-                  )}
-                </span>
-              ) : null
-            }
+            bodyClassName="flex-1 gap-3"
           >
             {totals.truncated && totals.total === null ? (
               <Hint>
@@ -1094,7 +1107,16 @@ export function HomePage() {
                 })}
               </Hint>
             ) : null}
-            <LatestSessions rows={sessions.rows} />
+            <SessionsPulse
+              rows={sessions.rows}
+              figure={
+                totals.total !== null ? (
+                  <Counted value={totals.total} render={formatNumber} />
+                ) : (
+                  t('webPagesOverview.homeSessionsAtLeast', { count: formatNumber(totals.listed) })
+                )
+              }
+            />
           </Tile>
 
           <Tile

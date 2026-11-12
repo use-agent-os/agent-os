@@ -237,7 +237,7 @@ Chat is the center of the console; everything else is a page in the rail's
 | Page | Route | Use it for |
 | --- | --- | --- |
 | Chat | `/chat/…` | Run and resume sessions, follow tool activity, read artifacts and cards, compact. |
-| Home | `/home` | A dashboard under a greeting and a readiness pill: readiness (checks passing as a ring; when not ready, the findings that need attention, each leading to Health), provider and route, uptime, usage (all time, plus how many sessions were active today) with a chart of tokens per session, the latest three sessions, a countdown to the next automation run, and a live event feed. Each figure loads on its own and links to its detail. |
+| Home | `/home` | A dashboard under a greeting and a readiness pill: readiness (checks passing as a ring; when not ready, the findings that need attention, each leading to Health), provider and route, uptime, usage (all time, plus how many sessions were active today) with a chart of tokens per session, sessions by channel and when they were last active over the past day, a countdown to the next automation run, and a live event feed. Each figure loads on its own and links to its detail. |
 | Sessions | `/sessions` | Search and filter every session, stat tiles with an open/completed/failed/aborted breakdown and how many are executing now, a lifecycle chip per row, inline rename, a row menu with Open chat and Open in new tab, bulk delete, move to a project, a new-session dialog that can create an agent, orphan flags. |
 | Projects | `/projects` | Group sessions, edit each project's shared knowledge (injected into every member session), and start a new chat inside a project at once, under the project's agent. |
 | Usage | `/usage` | The sessions active in a range with their token and estimated-cost totals, the top sessions charted, a rollup by model, CSV export. The sessions table fits its card: a narrower one drops the cache columns, a phone-width one shows each session as a card of labelled values. |
@@ -1030,8 +1030,8 @@ The rebuilt console leaves out a few things the previous one had, on purpose:
 - **Engine-run objects in Automations.** Automations covers scheduled jobs
   only. DCA mandates, price triggers, brackets and missions are managed from
   the desktop app or the CLI (`agentos trade …`).
-- **The full Home recent-sessions panel.** Home shows the latest three
-  sessions; the Sessions list in the rail shows the rest on every page.
+- **The Home recent-sessions panel.** The Sessions list in the rail shows the
+  newest sessions on every page, Home included.
 - **Home's Disconnect button.** Use **Disconnect** in Settings › Gateway.
 - **Sessions paging.** The rows-per-page selector and previous/next paging
   are replaced by **Show more**.
