@@ -174,12 +174,15 @@ def test_a_spelling_divergence_cannot_be_declared_without_a_reason() -> None:
 
 
 def test_every_tier_default_takes_supports_image_from_the_registry() -> None:
+    """Text tiers read the flag from the registry. An ``image_only`` tier always
+    carries it: a vision-capable model that doubles as a text tier is declared
+    ``supports_image=False`` there (``gpt-6-luna``), and the image tier must
+    still take the image."""
     for profile in ROUTER_TIER_PROFILE_IDS:
         for name, tier in _router_tier_profile_defaults(profile).items():
             model = str(tier["model"])
-            assert tier["supports_image"] == model_registry.supports_image(model), (
-                f"{profile}.{name} ({model})"
-            )
+            expected = bool(tier.get("image_only")) or model_registry.supports_image(model)
+            assert tier["supports_image"] == expected, f"{profile}.{name} ({model})"
 
 
 def test_a_tier_cannot_be_built_from_an_undeclared_model() -> None:

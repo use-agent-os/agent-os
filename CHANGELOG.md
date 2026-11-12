@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Sending an image on the OpenAI or Gemini provider with the Pilot Router on
+  no longer fails with "No image-capable Pilot Router tier is configured". Both
+  recommended profiles shipped four text tiers and no image tier, so there was
+  nothing to route an attachment to. They now include one: GPT-6 Luna for
+  OpenAI and Gemini 3.1 Flash-Lite for Gemini, both at medium thinking, and
+  the tier shows up in Settings so it can be changed.
+
 ## [2026.11.12.post2] - 2026-11-12
 
 ### Changed
