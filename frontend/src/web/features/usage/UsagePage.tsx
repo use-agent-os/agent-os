@@ -276,7 +276,7 @@ function SessionsTable({ rows }: { rows: UsageRow[] }) {
       {/* Scrolls on its own, so the header can stick while the rows move.
           The columns fit the card at desktop widths; a narrower card drops
           the cache columns, and a phone-width one turns rows into cards. */}
-      <div className="scroll-contained max-h-[36rem] overflow-auto">
+      <div className="scroll-contained relative max-h-[36rem] overflow-auto">
         <table className="ov-table">
           <caption className="sr-only">{t('webPagesOverview.usageTable')}</caption>
           <thead className="text-small text-text-muted">

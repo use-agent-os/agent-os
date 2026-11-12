@@ -49,6 +49,18 @@
     overflow-x: hidden;
   }
 
+  /* While the console shell is mounted the document never scrolls: the
+     shell is the viewport and its panes scroll inside it (Shell.tsx also
+     clips and contains its own content). Without this, anything that
+     escaped the shell let the wheel slide the whole app up. The connect
+     screen has no shell and keeps a scrolling page on short windows. */
+  html:has(> body > #app > .app-shell) {
+    overflow: hidden;
+  }
+  html:has(> body > #app > .app-shell) > body {
+    overflow: clip;
+  }
+
   h1,
   h2,
   h3 {

@@ -228,7 +228,7 @@ export function AdvancedSection() {
               {t('webSetConfig.formYamlPending')}
             </Notice>
           ) : null}
-          <div className="sticky top-0 z-[1] -mx-1 mb-3 bg-surface-0/85 px-1 py-2 backdrop-blur">
+          <div className="set-sticky-filter sticky top-0 z-[1] -mx-1 mb-3 bg-surface-0/85 px-1 py-2 backdrop-blur">
             <Input
               type="search"
               icon={<Search />}

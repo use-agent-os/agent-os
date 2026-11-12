@@ -65,7 +65,9 @@ check is skipped entirely when the Control UI is disabled.
 A real-browser UI audit is opt-in and never part of the default test run. It
 boots two `agentos gateway run` processes on throwaway state directories (the
 default base path and a custom one) and checks every destination at 360, 768
-and 1280 px in light and dark: page-level horizontal scroll, console and
+and 1280 px in light and dark: page-level horizontal scroll, a document
+that scrolls at all (the shell is the viewport; only its panes scroll, and
+wheeling past a pane's end must not move the shell), console and
 network errors, axe-core (serious and critical violations fail), content
 clipped to zero size, interactive controls pushed outside the viewport or cut
 by a clipping box, a page header description squeezed beside its actions on a
@@ -165,7 +167,10 @@ a New session button.
 
 A pending approval from a session other than the one on screen appears in the
 approval tray at the bottom right of every page. It can collapse to a count but
-stays until every request is resolved; on phones it starts collapsed.
+stays until every request is resolved. It starts collapsed on phones and on
+chat pages (the open session has its own approval card above the composer, and
+the expanded tray would cover the newest lines); once you expand or collapse
+it, that choice holds as you move between pages.
 
 ### Routes
 

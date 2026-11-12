@@ -1,6 +1,6 @@
 import { Command } from 'cmdk'
 import { CornerDownLeft, FileText, MessageSquare, Search, Settings, Zap } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
@@ -80,6 +80,22 @@ export function CommandPalette({
   const overview = useShortcutOverlay()
   const phone = usePhone()
   const [query, setQuery] = useState('')
+  const list = useRef<HTMLDivElement>(null)
+
+  // A new query selects the first result (cmdk), but the list kept its
+  // scroll offset: after arrowing down, the selected row sat off screen and
+  // Enter opened something the user could not see. Back to the top, where
+  // the first result is; again after cmdk's own scheduled update, which can
+  // still move the list on the same change.
+  useLayoutEffect(() => {
+    const el = list.current
+    if (!el) return
+    el.scrollTop = 0
+    const frame = requestAnimationFrame(() => {
+      el.scrollTop = 0
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [query])
 
   const currentKey = pathname.startsWith('/chat/') ? pathToSessionKey(pathname) : null
   const currentRow = currentKey ? sessions.rows.find((r) => r.key === currentKey) : undefined
@@ -155,7 +171,7 @@ export function CommandPalette({
               {t('webPalette.keyEscape')}
             </Kbd>
           </div>
-          <Command.List className="scroll-contained max-h-[min(60dvh,420px)] p-2">
+          <Command.List ref={list} className="scroll-contained max-h-[min(60dvh,420px)] p-2">
             <Command.Empty className="flex flex-col items-center gap-2 px-2 py-10 text-center text-text-muted">
               <Search className="size-5" aria-hidden />
               {t('webPalette.empty', { query })}
