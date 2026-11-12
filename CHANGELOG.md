@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.12.post2] - 2026-11-12
+
 ### Changed
 - The web console has a new look. Every screen was re-composed rather than
   restyled, with CSS-only motion that honours reduced-motion, in both the dark
