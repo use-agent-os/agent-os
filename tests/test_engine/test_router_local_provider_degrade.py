@@ -131,7 +131,7 @@ async def test_cloud_provider_applies_tier_model_unchanged(
 
     routed = await apply_agentos_router(ctx)
 
-    assert routed.model == "openai/gpt-6-luna"
+    assert routed.model == "anthropic/claude-haiku-5.5"
     assert routed.metadata.get("routing_degraded") is not True
 
 
@@ -164,7 +164,7 @@ async def test_empty_llm_model_keeps_route_and_does_not_lie(
 
     routed = await apply_agentos_router(ctx)
 
-    assert routed.model == "openai/gpt-6-luna"
+    assert routed.model == "anthropic/claude-haiku-5.5"
     assert routed.metadata.get("routing_degraded") is not True
 
 

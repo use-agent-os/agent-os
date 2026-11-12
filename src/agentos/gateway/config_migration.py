@@ -88,28 +88,29 @@ DEPRECATED_MEMORY_LEAVES: frozenset[str] = frozenset(
 
 # The Bankr gateway serves bare model ids; the older "virtuals/" namespace is
 # mapped to its bare form for configs that still carry it. Removed ids
-# (kimi-k2.6) map to the new default for their old tier role. Superseded
+# (kimi-k2.6) and retired defaults (minimax-m3, the image tier until Claude
+# Haiku 5.5 took it) map to the new default for their old tier role. Superseded
 # defaults that still resolve upstream (claude-opus-4.8) are refreshed to the
 # current default for the same tier, mirroring LEGACY_OPENROUTER_MODEL_IDS.
 LEGACY_GATEWAY_MODEL_IDS: dict[str, str] = {
-    "virtuals/minimax-m3": "minimax-m3",
+    "virtuals/minimax-m3": "claude-haiku-5.5",
     "virtuals/deepseek-v4-flash": "deepseek-v4-flash",
     "virtuals/qwen3.7-max": "qwen3.7-max",
     "virtuals/claude-opus-4.8": "claude-opus-5.5",
-    "virtuals/kimi-k2.6": "minimax-m3",
+    "virtuals/kimi-k2.6": "claude-haiku-5.5",
     "claude-opus-4.8": "claude-opus-5.5",
 }
 
 # Prior OpenRouter tier defaults, mapped to the defaults that replaced them.
 # Unlike the "virtuals/" ids these still resolve upstream, so the rewrite only
 # refreshes configs that carried an old *default* forward — the same treatment
-# "virtuals/kimi-k2.6" got when minimax-m3 replaced it as the gateway default.
+# "virtuals/kimi-k2.6" got when its gateway default was replaced.
 LEGACY_OPENROUTER_MODEL_IDS: dict[str, str] = {
-    "deepseek/deepseek-v4-pro": "minimax/minimax-m3",
-    "z-ai/glm-5.1": "z-ai/glm-5.3",
+    "deepseek/deepseek-v4-pro": "anthropic/claude-haiku-5.5",
+    "z-ai/glm-5.1": "anthropic/claude-sonnet-5.5",
     "anthropic/claude-opus-4.7": "anthropic/claude-opus-5.5",
     "anthropic/claude-opus-4.8": "anthropic/claude-opus-5.5",
-    "moonshotai/kimi-k2.6": "minimax/minimax-m3",
+    "moonshotai/kimi-k2.6": "anthropic/claude-haiku-5.5",
 }
 
 #: The skills-block budget every config written before 2026-07 carries. Only

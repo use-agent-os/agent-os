@@ -230,7 +230,7 @@ def test_effort_by_tier_leaves_explicit_levels_alone() -> None:
 def test_router_records_where_the_thinking_level_came_from() -> None:
     router_cfg = SimpleNamespace(auto_thinking=True)
     tier_ctx = SimpleNamespace(metadata={})
-    _record_thinking_metadata(tier_ctx, router_cfg, {"thinking_level": "high"}, tier_name="c1")
+    _record_thinking_metadata(tier_ctx, router_cfg, {"thinking_level": "medium"}, tier_name="c1")
     assert tier_ctx.metadata["thinking_level_source"] == "tier_default"
 
     ctrl_ctx = SimpleNamespace(metadata={})
@@ -264,7 +264,7 @@ def test_tier_thinking_source_tells_shipped_levels_from_operator_levels() -> Non
     _record_thinking_metadata(ctx, shipped, shipped.tiers["c2"], tier_name="c2")
     assert ctx.metadata["thinking_level_source"] == "tier_default"
 
-    # The default table ships c1 at "high": that is the level effort by tier caps.
+    # The default table ships c1 at "medium".
     default = AgentOSRouterConfig()
     ctx = SimpleNamespace(metadata={})
     _record_thinking_metadata(ctx, default, default.tiers["c1"], tier_name="c1")
@@ -273,6 +273,29 @@ def test_tier_thinking_source_tells_shipped_levels_from_operator_levels() -> Non
     lowered = AgentOSRouterConfig(tiers={**default.tiers, "c1": {"thinking_level": "xhigh"}})
     ctx = SimpleNamespace(metadata={})
     _record_thinking_metadata(ctx, lowered, lowered.tiers["c1"], tier_name="c1")
+    assert ctx.metadata["thinking_level_source"] == "tier_config"
+
+
+@pytest.mark.parametrize("profile", [None, "bankr", "opencap", "surplus"])
+def test_a_config_written_before_the_tier_levels_moved_is_still_capped(
+    profile: str | None,
+) -> None:
+    """c0 and c1 shipped at "high" until they moved to low / medium. A persisted
+    table still says "high"; reading that as the operator's choice would lift
+    the cap and run every trivial turn at high thinking after an upgrade."""
+    router_cfg = SimpleNamespace(auto_thinking=True, tier_profile=profile)
+    for tier, capped in (("c0", ThinkingLevel.LOW), ("c1", ThinkingLevel.MEDIUM)):
+        ctx = SimpleNamespace(metadata={})
+        _record_thinking_metadata(ctx, router_cfg, {"thinking_level": "high"}, tier_name=tier)
+        assert ctx.metadata["thinking_level_source"] == "tier_default"
+        turn = _turn(tier, thinking_level_source=ctx.metadata["thinking_level_source"])
+        assert _runner()._resolve_turn_thinking(turn) == capped
+
+    # c2 never shipped anything the cap would touch, and other profiles had
+    # their own levels: "high" there is a level somebody chose.
+    openai = SimpleNamespace(auto_thinking=True, tier_profile="openai")
+    ctx = SimpleNamespace(metadata={})
+    _record_thinking_metadata(ctx, openai, {"thinking_level": "high"}, tier_name="c1")
     assert ctx.metadata["thinking_level_source"] == "tier_config"
 
 
@@ -313,6 +336,9 @@ async def test_a_model_hold_is_not_capped_by_effort_by_tier() -> None:
         provider_selector=None,
         config=SimpleNamespace(llm=SimpleNamespace(thinking=None), agentos_router=cfg),
     )
+    # A hand-picked model is hosted on the default tier (c1) and takes its
+    # level as it stands; effort by tier does not lower it further.
+    assert cfg.tiers["c1"]["thinking_level"] == "medium"
     assert runner._resolve_turn_thinking(SimpleNamespace(metadata=out.metadata)) == (
-        ThinkingLevel.HIGH
+        ThinkingLevel.MEDIUM
     )

@@ -398,7 +398,7 @@ async def test_image_attachments_bypass_text_hold(monkeypatch) -> None:
 
     assert out.metadata["routing_source"] == "image_route"
     assert out.metadata.get("router_control_hold_applied") is not True
-    assert out.model == "minimax/minimax-m3"
+    assert out.model == "anthropic/claude-haiku-5.5"
 
 
 @pytest.mark.asyncio

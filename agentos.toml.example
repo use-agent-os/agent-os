@@ -136,7 +136,7 @@
 
 [llm]
 provider = "openrouter"
-model = "openai/gpt-6-luna"
+model = "anthropic/claude-haiku-5.5"
 # api_key = ""          # OpenRouter API key; env OPENROUTER_API_KEY also works
 base_url = "https://openrouter.ai/api/v1"
 # proxy = ""            # e.g. http://127.0.0.1:7890
@@ -201,9 +201,8 @@ base_url = "https://openrouter.ai/api/v1"
 
 # OpenRouter: pin namespaced model IDs to a preferred upstream provider.
 # [llm.provider_routing]
-# "deepseek/deepseek-v4-flash" = "deepseek"
-# "minimax/minimax-m3" = "minimax"
-# "z-ai/glm-5.3" = "z-ai"
+# "anthropic/claude-haiku-5.5" = "anthropic"
+# "anthropic/claude-sonnet-5.5" = "anthropic"
 # "anthropic/claude-opus-5.5" = "anthropic"
 #
 # OpenCAP and Surplus use bare model IDs and send values as a provider/seller
@@ -211,7 +210,7 @@ base_url = "https://openrouter.ai/api/v1"
 # its live model catalog for current model and upstream provider IDs. Omit this
 # table to keep gateway auto-routing.
 # [llm.provider_routing]
-# "glm-5.3" = "provider-id-from-live-catalog"
+# "claude-sonnet-5.5" = "provider-id-from-live-catalog"
 
 # Prompt caching controls. Enables prefix caching for supported providers
 # (Anthropic, OpenAI, DeepSeek, OpenRouter, etc.).
@@ -490,21 +489,21 @@ safety_net_threshold = 0.5
 
 [agentos_router.tiers.c0]
 provider = "openrouter"
-model = "deepseek/deepseek-v4-flash"
-description = "Fast DeepSeek V4 Flash route for trivial chat, short rewrites, extraction, and low-risk simple Q&A"
+model = "anthropic/claude-haiku-5.5"
+description = "Fast Claude Haiku 5.5 route for trivial chat, short rewrites, extraction, and low-risk simple Q&A"
 supports_image = false
-thinking_level = "high"
+thinking_level = "low"
 
 [agentos_router.tiers.c1]
 provider = "openrouter"
-model = "openai/gpt-6-luna"
+model = "anthropic/claude-haiku-5.5"
 description = "Default balanced text route for normal agent work, coding assistance, debugging, and moderate analysis"
 supports_image = false
-thinking_level = "high"
+thinking_level = "medium"
 
 [agentos_router.tiers.c2]
 provider = "openrouter"
-model = "z-ai/glm-5.3"
+model = "anthropic/claude-sonnet-5.5"
 description = "Stronger text route for multi-step coding, structured reasoning, larger context synthesis, and harder analysis"
 supports_image = false
 thinking_level = "high"
@@ -518,7 +517,7 @@ thinking_level = "high"
 
 [agentos_router.tiers.image_model]
 provider = "openrouter"
-model = "minimax/minimax-m3"
+model = "anthropic/claude-haiku-5.5"
 description = "Image model: vision-capable route for user-supplied image attachments, screenshots, diagrams, and visual question answering"
 supports_image = true
 image_only = true

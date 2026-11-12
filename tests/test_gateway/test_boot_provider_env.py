@@ -74,6 +74,8 @@ def test_openrouter_runtime_uses_default_provider_routing() -> None:
     runtime = resolve_llm_runtime_config(cfg)
 
     assert runtime.provider_routing == {
+        "anthropic/claude-haiku-5.5": "anthropic",
+        "anthropic/claude-sonnet-5.5": "anthropic",
         "deepseek/deepseek-v4-flash": "deepseek",
         "minimax/minimax-m3": "minimax",
         "z-ai/glm-5.3": "z-ai",

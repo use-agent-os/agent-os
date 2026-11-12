@@ -56,7 +56,7 @@ def test_onboard_noninteractive_provider(tmp_path, monkeypatch):
     assert "openrouter ·" not in result.stdout
     assert "AgentOS Setup Handoff" in result.stdout
     assert "Provider Configured" not in result.stdout
-    assert "LLM: openrouter / openai/gpt-6-luna" in result.stdout
+    assert "LLM: openrouter / anthropic/claude-haiku-5.5" in result.stdout
 
 
 def test_onboard_finish_commands_remain_copyable_with_long_config_path(
@@ -830,7 +830,7 @@ def test_onboard_catalog_accepts_short_capability_section_aliases(
 @pytest.mark.parametrize(
     ("section", "expected"),
     [
-        ("providers", ["openrouter", "OPENROUTER_API_KEY", "openai/gpt-6-luna"]),
+        ("providers", ["openrouter", "OPENROUTER_API_KEY", "anthropic/claude-haiku-5.5"]),
         ("router", ["recommended", "openrouter-mix", "c0", "c3"]),
         ("search", ["duckduckgo", "brave", "BRAVE_SEARCH_API_KEY"]),
         ("channels", ["discord", "Bot token", "agentos channels describe discord --json"]),
@@ -949,7 +949,7 @@ def test_onboard_catalog_focused_provider_examples_match_key_requirements(
     assert result.exit_code == 0, result.stdout
     assert (
         "Try: agentos onboard configure provider --provider openrouter "
-        "--model openai/gpt-6-luna --api-key-env OPENROUTER_API_KEY "
+        "--model anthropic/claude-haiku-5.5 --api-key-env OPENROUTER_API_KEY "
         f"--config {_config_arg(target)}"
     ) in result.stdout
     assert (

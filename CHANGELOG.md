@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- The Pilot Router's recommended tiers move to the current model generation.
+  Tiers you set yourself are left alone; a config that still carries the old
+  defaults keeps running on them until you pick the recommended profile again.
+  - **Surplus, OpenCAP, OpenRouter, Bankr.** c0 and c1 are Claude Haiku 5.5
+    (low and medium thinking), c2 is Claude Sonnet 5.5, c3 stays Claude Opus
+    5.5, and images go to Claude Haiku 5.5. The default model for a new
+    install follows c1. On Surplus, Haiku 5.5 is listed with a 100K context
+    window, so long c0 and c1 sessions compact sooner there.
+  - **OpenAI.** c0 and c1 are GPT-6 Luna (low and medium thinking), c2 is
+    GPT-6.1 Terra and c3 is GPT-6.1 Sol. GPT-6.1 Sol cannot run with reasoning
+    off, so its tool turns always use the Responses API.
+  - **Gemini.** c0 is Gemini 3.5 Flash-Lite, c1 is Gemini 3.8 Flash, c2 is
+    Gemini 4 Argon and c3 is Gemini 4 Carbon; images go to Gemini 3.5
+    Flash-Lite. This replaces Gemini 2.5 Pro, which Google retires on
+    1 December 2026. Thinking levels now apply to Gemini 4 models.
+
 ### Fixed
 - Sending an image on the OpenAI or Gemini provider with the Pilot Router on
   no longer fails with "No image-capable Pilot Router tier is configured". Both

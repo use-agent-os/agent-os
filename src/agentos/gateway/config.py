@@ -448,7 +448,7 @@ class LlmProviderConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENTOS_LLM_")
 
     provider: str = "openrouter"
-    model: str = "openai/gpt-6-luna"
+    model: str = "anthropic/claude-haiku-5.5"
     api_key: str = ""
     api_key_env: str = ""
     base_url: str = "https://openrouter.ai/api/v1"
@@ -475,6 +475,7 @@ class LlmProviderConfig(BaseSettings):
             "deepseek/deepseek-v4-pro": "deepseek-v4-pro",
             "openai/gpt-5.6-luna": "gpt-5.6-luna",
             "openai/gpt-6-luna": "gpt-6-luna",
+            "anthropic/claude-haiku-5.5": "claude-haiku-5.5",
         }
         model = str(self.model or "").strip()
         if model in aliases:
@@ -867,7 +868,7 @@ def _tier(
         "description": description,
         "supports_image": facts.supports_image,
     }
-    # Absent keys must stay absent: the dashscope and gemini c0 tiers carry no
+    # Absent keys must stay absent: the dashscope tiers carry no
     # thinking_level, and only image tiers carry image_only.
     if image_only:
         tier["image_only"] = True
@@ -890,7 +891,7 @@ def _default_tiers() -> dict:
 def _bankr_tiers() -> dict:
     """Bankr LLM Gateway routing config.
 
-    Model ids are bare (e.g. ``deepseek-v4.1-flash``) as served by the Bankr
+    Model ids are bare (e.g. ``claude-haiku-5.5``) as served by the Bankr
     gateway at ``llm.bankr.bot``. Where a bare id is shared with a direct
     provider contract that allows more output than the gateway does (the older
     ``deepseek-v4-flash``: 393K direct, 128K here), the bankr entry in
@@ -899,25 +900,25 @@ def _bankr_tiers() -> dict:
     return {
         "c0": _tier(
             provider="bankr",
-            model="deepseek-v4.1-flash",
+            model="claude-haiku-5.5",
             description=(
-                "fast DeepSeek V4.1 Flash route for trivial chat, short rewrites, extraction, and "
+                "fast Claude Haiku 5.5 route for trivial chat, short rewrites, extraction, and "
                 "low-risk simple Q&A"
             ),
-            thinking_level="high",
+            thinking_level="low",
         ),
         "c1": _tier(
             provider="bankr",
-            model="gpt-6-luna",
+            model="claude-haiku-5.5",
             description=(
                 "default balanced text model for normal agent work, coding assistance, debugging, "
                 "and moderate analysis"
             ),
-            thinking_level="high",
+            thinking_level="medium",
         ),
         "c2": _tier(
             provider="bankr",
-            model="glm-5.3",
+            model="claude-sonnet-5.5",
             description=(
                 "stronger text model for multi-step coding, structured reasoning, larger context "
                 "synthesis, and harder analysis"
@@ -935,7 +936,7 @@ def _bankr_tiers() -> dict:
         ),
         "image_model": _tier(
             provider="bankr",
-            model="minimax-m3",
+            model="claude-haiku-5.5",
             description=(
                 "Image model: vision-capable route for user-supplied image attachments, "
                 "screenshots, diagrams, and visual question answering"
@@ -961,25 +962,25 @@ def _opencap_tiers() -> dict:
     return {
         "c0": _tier(
             provider="opencap",
-            model="deepseek-v4.1-flash",
+            model="claude-haiku-5.5",
             description=(
-                "fast DeepSeek V4.1 Flash route for trivial chat, short rewrites, extraction, and "
+                "fast Claude Haiku 5.5 route for trivial chat, short rewrites, extraction, and "
                 "low-risk simple Q&A"
             ),
-            thinking_level="high",
+            thinking_level="low",
         ),
         "c1": _tier(
             provider="opencap",
-            model="gpt-6-luna",
+            model="claude-haiku-5.5",
             description=(
                 "default balanced text model for normal agent work, coding assistance, debugging, "
                 "and moderate analysis"
             ),
-            thinking_level="high",
+            thinking_level="medium",
         ),
         "c2": _tier(
             provider="opencap",
-            model="glm-5.3",
+            model="claude-sonnet-5.5",
             description=(
                 "stronger text model for multi-step coding, structured reasoning, larger context "
                 "synthesis, and harder analysis"
@@ -997,7 +998,7 @@ def _opencap_tiers() -> dict:
         ),
         "image_model": _tier(
             provider="opencap",
-            model="minimax-m3",
+            model="claude-haiku-5.5",
             description=(
                 "Image model: vision-capable route for user-supplied image attachments, "
                 "screenshots, diagrams, and visual question answering"
@@ -1016,33 +1017,32 @@ def _surplus_tiers() -> dict:
     tiers rather than a particular vendor's endpoint. Each id was checked
     against the live public catalog.
 
-    The image tier is ``glm-5.3-flash`` rather than the ``minimax-m3`` the
-    OpenCAP profile uses: Surplus publishes ``minimax-m3`` without vision in
-    its supported features, and ``glm-5.3-flash`` is both vision-capable and
-    the cheapest such route in the catalog.
+    ``claude-haiku-5.5`` serves c0, c1 and the image tier. Surplus lists it at
+    100K context / 50K output where the other gateways publish 1M / 128K; the
+    registry carries that as a Surplus-only window override.
     """
     return {
         "c0": _tier(
             provider="surplus",
-            model="deepseek-v4.1-flash",
+            model="claude-haiku-5.5",
             description=(
-                "fast DeepSeek V4.1 Flash route for trivial chat, short rewrites, extraction, and "
+                "fast Claude Haiku 5.5 route for trivial chat, short rewrites, extraction, and "
                 "low-risk simple Q&A"
             ),
-            thinking_level="high",
+            thinking_level="low",
         ),
         "c1": _tier(
             provider="surplus",
-            model="gpt-6-luna",
+            model="claude-haiku-5.5",
             description=(
                 "default balanced text model for normal agent work, coding assistance, debugging, "
                 "and moderate analysis"
             ),
-            thinking_level="high",
+            thinking_level="medium",
         ),
         "c2": _tier(
             provider="surplus",
-            model="glm-5.3",
+            model="claude-sonnet-5.5",
             description=(
                 "stronger text model for multi-step coding, structured reasoning, larger context "
                 "synthesis, and harder analysis"
@@ -1060,7 +1060,7 @@ def _surplus_tiers() -> dict:
         ),
         "image_model": _tier(
             provider="surplus",
-            model="glm-5.3-flash",
+            model="claude-haiku-5.5",
             description=(
                 "Image model: vision-capable route for user-supplied image attachments, "
                 "screenshots, diagrams, and visual question answering"
@@ -1076,25 +1076,25 @@ def _openrouter_tiers() -> dict:
     return {
         "c0": _tier(
             provider="openrouter",
-            model="deepseek/deepseek-v4-flash",
+            model="anthropic/claude-haiku-5.5",
             description=(
-                "fast DeepSeek V4 Flash route for trivial chat, short rewrites, extraction, and "
+                "fast Claude Haiku 5.5 route for trivial chat, short rewrites, extraction, and "
                 "low-risk simple Q&A"
             ),
-            thinking_level="high",
+            thinking_level="low",
         ),
         "c1": _tier(
             provider="openrouter",
-            model="openai/gpt-6-luna",
+            model="anthropic/claude-haiku-5.5",
             description=(
                 "default balanced text model for normal agent work, coding assistance, debugging, "
                 "and moderate analysis"
             ),
-            thinking_level="high",
+            thinking_level="medium",
         ),
         "c2": _tier(
             provider="openrouter",
-            model="z-ai/glm-5.3",
+            model="anthropic/claude-sonnet-5.5",
             description=(
                 "stronger text model for multi-step coding, structured reasoning, larger context "
                 "synthesis, and harder analysis"
@@ -1112,7 +1112,7 @@ def _openrouter_tiers() -> dict:
         ),
         "image_model": _tier(
             provider="openrouter",
-            model="minimax/minimax-m3",
+            model="anthropic/claude-haiku-5.5",
             description=(
                 "Image model: vision-capable route for user-supplied image attachments, "
                 "screenshots, diagrams, and visual question answering"
@@ -1175,29 +1175,29 @@ def _router_tier_profile_defaults(profile: str | None) -> dict:
         "openai": {
             "c0": _tier(
                 provider="openai",
-                model="gpt-5.6-luna",
+                model="gpt-6-luna",
                 description=(
-                    "OpenAI fast route: GPT-5.6 Luna for fast, high-throughput simple work."
+                    "OpenAI fast route: GPT-6 Luna for fast, high-throughput simple work."
                 ),
-                thinking_level="none",
+                thinking_level="low",
             ),
             "c1": _tier(
                 provider="openai",
-                model="gpt-5.6-terra",
-                description="OpenAI balanced route: GPT-5.6 Terra for normal agent work.",
-                thinking_level="low",
+                model="gpt-6-luna",
+                description="OpenAI balanced route: GPT-6 Luna for normal agent work.",
+                thinking_level="medium",
             ),
             "c2": _tier(
                 provider="openai",
-                model="gpt-5.6-sol",
-                description="OpenAI strong route: GPT-5.6 Sol for complex text tasks.",
+                model="gpt-6.1-terra",
+                description="OpenAI strong route: GPT-6.1 Terra for complex text tasks.",
                 thinking_level="medium",
             ),
             "c3": _tier(
                 provider="openai",
-                model="gpt-5.6-sol",
+                model="gpt-6.1-sol",
                 description=(
-                    "OpenAI highest route: GPT-5.6 Sol with high reasoning; the Pro variant is "
+                    "OpenAI highest route: GPT-6.1 Sol with high reasoning; the Pro variant is "
                     "excluded because it is not streaming-compatible."
                 ),
                 thinking_level="high",
@@ -1284,38 +1284,36 @@ def _router_tier_profile_defaults(profile: str | None) -> dict:
         "gemini": {
             "c0": _tier(
                 provider="gemini",
-                model="gemini-3.1-flash-lite",
-                description="Gemini fast route: 3.1 Flash-Lite for low-latency tasks.",
+                model="gemini-3.5-flash-lite",
+                description="Gemini fast route: 3.5 Flash-Lite for low-latency tasks.",
+                thinking_level="low",
             ),
             "c1": _tier(
                 provider="gemini",
-                model="gemini-3.5-flash",
-                description="Gemini balanced route: 3.5 Flash for normal agent work.",
+                model="gemini-3.8-flash",
+                description="Gemini balanced route: 3.8 Flash for normal agent work.",
                 thinking_level="low",
             ),
             "c2": _tier(
                 provider="gemini",
-                model="gemini-2.5-pro",
-                description=(
-                    "Gemini strong route: 2.5 Pro for complex coding and reasoning; 3.x Pro "
-                    "remains preview-only."
-                ),
+                model="gemini-4-argon",
+                description="Gemini strong route: 4 Argon for complex coding and reasoning.",
                 thinking_level="medium",
             ),
             "c3": _tier(
                 provider="gemini",
-                model="gemini-2.5-pro",
+                model="gemini-4-carbon",
                 description=(
-                    "Gemini highest route: 2.5 Pro with high thinking; 3.1 Pro preview remains "
-                    "opt-in."
+                    "Gemini highest route: 4 Carbon with high thinking for the hardest "
+                    "coding and agentic work."
                 ),
                 thinking_level="high",
             ),
             "image_model": _tier(
                 provider="gemini",
-                model="gemini-3.1-flash-lite",
+                model="gemini-3.5-flash-lite",
                 description=(
-                    "Image model: Gemini 3.1 Flash-Lite for user-supplied image attachments, "
+                    "Image model: Gemini 3.5 Flash-Lite for user-supplied image attachments, "
                     "screenshots, diagrams, and visual question answering"
                 ),
                 thinking_level="medium",

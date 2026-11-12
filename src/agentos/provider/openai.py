@@ -264,6 +264,16 @@ def _direct_openai_tools_require_reasoning_none(
     return version >= (5, 4)
 
 
+def _openai_model_rejects_reasoning_none(model: str) -> bool:
+    """True for OpenAI models whose reasoning cannot be switched off.
+
+    gpt-6.1-sol takes ``low`` and up (OpenAI's model page, 2026-11-12), so the
+    "tools with ``none``" escape Chat Completions offers its siblings is not
+    available: a tool turn has to go to /v1/responses at the lowest effort.
+    """
+    return model.rsplit("/", 1)[-1].strip().lower().startswith("gpt-6.1-sol")
+
+
 def _is_kimi_fixed_sampling_model(provider_kind: str, model: str) -> bool:
     if provider_kind != "moonshot":
         return False
@@ -1299,6 +1309,11 @@ class OpenAIProvider:
                 responses_effort = _responses_reasoning_effort(
                     cfg.thinking_level, cfg.thinking_budget_tokens
                 )
+                payload["reasoning_effort"] = responses_effort
+            elif _openai_model_rejects_reasoning_none(self._model):
+                # No thinking asked, but this model has no "none": the turn
+                # still needs /v1/responses, at the lowest effort it takes.
+                responses_effort = "low"
                 payload["reasoning_effort"] = responses_effort
             else:
                 # No thinking asked: Chat Completions takes tools with "none".

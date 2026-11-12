@@ -172,12 +172,12 @@ def test_legacy_openrouter_default_models_are_migrated_forward() -> None:
     )
 
     assert result.changed is True
-    assert result.payload["llm"]["model"] == "minimax/minimax-m3"
+    assert result.payload["llm"]["model"] == "anthropic/claude-haiku-5.5"
     tiers = result.payload["agentos_router"]["tiers"]
-    assert tiers["c1"]["model"] == "minimax/minimax-m3"
-    assert tiers["c2"]["model"] == "z-ai/glm-5.3"
+    assert tiers["c1"]["model"] == "anthropic/claude-haiku-5.5"
+    assert tiers["c2"]["model"] == "anthropic/claude-sonnet-5.5"
     assert tiers["c3"]["model"] == "anthropic/claude-opus-5.5"
-    assert tiers["image_model"]["model"] == "minimax/minimax-m3"
+    assert tiers["image_model"]["model"] == "anthropic/claude-haiku-5.5"
 
 
 def test_superseded_opus_c3_default_is_migrated_to_current_opus() -> None:

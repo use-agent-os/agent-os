@@ -522,7 +522,7 @@ def test_ollama_onboarding_rewrites_default_tiers_to_local_provider():
         assert router.tiers[name]["provider"] == "ollama"
         assert router.tiers[name]["model"] == "qwen3.5:9b"
     # thinking_level survives so thinking tiering still works.
-    assert router.tiers["c1"]["thinking_level"] == "high"
+    assert router.tiers["c1"]["thinking_level"] == "medium"
     # image_model keeps its role flags so image-aware routing still works.
     assert router.tiers["image_model"]["supports_image"] is True
     assert router.tiers["image_model"]["image_only"] is True

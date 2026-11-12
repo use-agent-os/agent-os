@@ -16,11 +16,11 @@ _INIT_PROVIDER_CHOICES = (
 
 
 def test_init_uses_bankr_gateway_model_default() -> None:
-    assert _default_model_for_provider("bankr") == "gpt-6-luna"
+    assert _default_model_for_provider("bankr") == "claude-haiku-5.5"
 
 
 def test_init_uses_opencap_gateway_model_default() -> None:
-    assert _default_model_for_provider("opencap") == "gpt-6-luna"
+    assert _default_model_for_provider("opencap") == "claude-haiku-5.5"
 
 
 def test_init_uses_direct_deepseek_model_default() -> None:
@@ -29,7 +29,7 @@ def test_init_uses_direct_deepseek_model_default() -> None:
 
 def test_init_matches_openrouter_router_c1_default() -> None:
     # Must stay in sync with the c1 tier default in _openrouter_tiers().
-    assert _default_model_for_provider("openrouter") == "openai/gpt-6-luna"
+    assert _default_model_for_provider("openrouter") == "anthropic/claude-haiku-5.5"
 
 
 def test_init_unknown_provider_falls_back_to_openai() -> None:

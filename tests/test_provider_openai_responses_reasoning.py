@@ -399,6 +399,20 @@ def test_other_turns_stay_on_chat_completions(
     assert captured[0]["url"].endswith("/v1/chat/completions")
 
 
+@pytest.mark.parametrize("thinking", [False, True])
+def test_gpt_6_1_sol_tool_turn_never_sends_effort_none(monkeypatch: Any, thinking: bool) -> None:
+    """gpt-6.1-sol has no ``none``, so a tool turn without thinking cannot take
+    the Chat Completions escape its siblings use."""
+    captured: list[dict[str, Any]] = []
+    _patch(monkeypatch, captured, _sse(_tool_call_stream("gpt-6.1-sol")))
+
+    _run(_provider("gpt-6.1-sol"), _thinking_cfg(thinking=thinking))
+
+    assert captured[0]["url"] == "https://api.openai.com/v1/responses"
+    effort = captured[0]["payload"]["reasoning"]["effort"]
+    assert effort == ("medium" if thinking else "low")
+
+
 def test_gateway_tool_turns_are_not_rerouted(monkeypatch: Any) -> None:
     captured: list[dict[str, Any]] = []
     _patch(monkeypatch, captured, b"data: [DONE]\n\n")

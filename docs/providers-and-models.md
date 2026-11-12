@@ -104,17 +104,17 @@ current catalog.
 
 OpenCAP defaults to `https://gw.capminal.ai/api/inference/v1` and uses one
 OpenAI-compatible key for inference. Its public model catalog is unauthenticated.
-The default direct/fallback model is the balanced `c1` model, `gpt-6-luna`. The `recommended`
+The default direct/fallback model is the balanced `c1` model, `claude-haiku-5.5`. The `recommended`
 router profile selects bare OpenCAP model IDs across
 [`c0`–`c3`](features/agentos-router.md#model-tiers) and the vision route:
 
 | Tier | Model | Role |
 | --- | --- | --- |
-| `c0` | `deepseek-v4.1-flash` | trivial chat, short rewrites, extraction |
-| `c1` | `gpt-6-luna` | default balanced route for normal agent work |
-| `c2` | `glm-5.3` | multi-step coding, structured reasoning, larger synthesis |
+| `c0` | `claude-haiku-5.5` (low thinking) | trivial chat, short rewrites, extraction |
+| `c1` | `claude-haiku-5.5` (medium thinking) | default balanced route for normal agent work |
+| `c2` | `claude-sonnet-5.5` | multi-step coding, structured reasoning, larger synthesis |
 | `c3` | `claude-opus-5.5` | difficult planning, deep review, high-stakes synthesis |
-| `image_model` | `minimax-m3` | image attachments, screenshots, diagrams |
+| `image_model` | `claude-haiku-5.5` | image attachments, screenshots, diagrams |
 
 These are OpenCAP's own defaults, not a copy of the Bankr profile — the two
 gateways publish overlapping but different catalogs. Run `agentos models list`
@@ -130,7 +130,7 @@ upstream provider ID advertised by the current live catalog:
 
 ```toml
 [llm.provider_routing]
-"glm-5.3" = "provider-id-from-live-catalog"
+"claude-sonnet-5.5" = "provider-id-from-live-catalog"
 ```
 
 AgentOS sends this as OpenCAP's provider allow-list. OpenRouter uses the same
@@ -146,21 +146,22 @@ so no wallet or on-chain payment support is required.
 
 It defaults to `https://api.surplusintelligence.ai/v1`. Its model catalog is
 public and unauthenticated. The default direct/fallback model is the balanced
-`c1` model, `gpt-6-luna`. The `recommended` router profile selects bare
+`c1` model, `claude-haiku-5.5`. The `recommended` router profile selects bare
 Surplus model IDs across
 [`c0`–`c3`](features/agentos-router.md#model-tiers) and the vision route:
 
 | Tier | Model | Role |
 | --- | --- | --- |
-| `c0` | `deepseek-v4.1-flash` | trivial chat, short rewrites, extraction |
-| `c1` | `gpt-6-luna` | default balanced route for normal agent work |
-| `c2` | `glm-5.3` | multi-step coding, structured reasoning, larger context |
+| `c0` | `claude-haiku-5.5` (low thinking) | trivial chat, short rewrites, extraction |
+| `c1` | `claude-haiku-5.5` (medium thinking) | default balanced route for normal agent work |
+| `c2` | `claude-sonnet-5.5` | multi-step coding, structured reasoning, larger context |
 | `c3` | `claude-opus-5.5` | difficult planning, deep review, high-stakes synthesis |
-| `image_model` | `glm-5.3-flash` | image attachments, screenshots, diagrams |
+| `image_model` | `claude-haiku-5.5` | image attachments, screenshots, diagrams |
 
-The image tier differs from the OpenCAP profile: Surplus publishes `minimax-m3`
-without vision in its supported features, and `glm-5.3-flash` is both
-vision-capable and the cheapest such route it serves.
+Surplus lists `claude-haiku-5.5` with a 100K context window and a 50K output
+cap, where OpenCAP publishes 1M and 128K for the same id. AgentOS sizes
+requests to the Surplus figures, so long sessions on `c0` and `c1` compact
+sooner here than on the other gateways.
 
 Because prices move with seller competition, cost estimates come from the live
 catalog rather than a static table. At gateway boot AgentOS fetches it once and
@@ -175,7 +176,7 @@ advertised by the current live catalog:
 
 ```toml
 [llm.provider_routing]
-"glm-5.3" = "seller-id-from-live-catalog"
+"claude-sonnet-5.5" = "seller-id-from-live-catalog"
 ```
 
 AgentOS sends this as Surplus's provider allow-list, the same shape OpenCAP
