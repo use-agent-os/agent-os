@@ -57,9 +57,9 @@ def test_bundled_font_binaries_keep_their_ofl_notices() -> None:
     font_dir = ROOT / "frontend" / "src" / "assets" / "fonts"
 
     expected = {
-        "Inter-Variable.woff2": (
-            "Inter-LICENSE.txt",
-            "Copyright (c) 2016 The Inter Project Authors",
+        "Geist-Variable.woff2": (
+            "Geist-LICENSE.txt",
+            "Copyright 2024 The Geist Project Authors",
         ),
         "JetBrainsMono-Variable.woff2": (
             "JetBrainsMono-LICENSE.txt",

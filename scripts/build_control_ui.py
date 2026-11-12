@@ -30,7 +30,7 @@ LICENSE_BUNDLE_PREAMBLE = (
     "do not edit by hand.\n"
 )
 BUNDLED_FONT_LICENSES = (
-    "Inter-LICENSE.txt",
+    "Geist-LICENSE.txt",
     "JetBrainsMono-LICENSE.txt",
 )
 # A few npm packages publish a tarball that carries no license file at all —
