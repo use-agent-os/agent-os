@@ -121,13 +121,14 @@
   .chat-msg-actions[data-side='user'] {
     align-self: flex-end;
   }
-  /* On a pointer, the user's pill floats beside the bubble, not under it. */
-  @media (hover: hover) and (min-width: 640px) {
+  /* On a pointer, the user's pill hangs under the bubble's corner, in the
+   * gap before the reply: it takes no room. */
+  @media (hover: hover) {
     .chat-msg-actions[data-side='user'] {
       position: absolute;
-      right: calc(min(80%, 40rem) + 8px);
-      bottom: 0;
-      transform: translateX(4px);
+      top: calc(100% - 2px);
+      right: 4px;
+      z-index: 1;
     }
   }
   /* The reply's pill hangs in the gap below it: it takes no room. */
@@ -146,10 +147,14 @@
     background: transparent;
     box-shadow: none;
   }
+  /* On touch the pill is always there, so it stays quiet: no chrome. */
   @media (pointer: coarse) {
     .chat-msg-actions {
       opacity: 1;
       transform: none;
+      border-color: transparent;
+      background: transparent;
+      box-shadow: none;
     }
     .chat-reply > .chat-msg-actions {
       position: static;
