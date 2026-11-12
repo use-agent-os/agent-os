@@ -106,7 +106,8 @@ function Workspace() {
   useEdgeSwipe(phone, openDrawer)
 
   return (
-    <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-surface-0 text-text">
+    // `.app-shell` (shell.css): the viewport; only its panes scroll.
+    <div className="app-shell flex h-dvh min-h-0 bg-surface-0 text-text">
       {phone ? null : (
         <>
           <Rail />

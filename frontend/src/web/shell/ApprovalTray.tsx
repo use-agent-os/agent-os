@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/web/components/ui/button'
 import { useDisplayedConnection } from './use-displayed-connection'
 import { pathToSessionKey, sessionKeyToPath } from './session-url'
-import { PHONE_QUERY } from './use-media-query'
+import { usePhone } from './use-media-query'
 
 /** Whether an approval belongs to (or is visible from) the open session. */
 export function approvalTargetsSession(item: Approval, sessionKey: string | null): boolean {
@@ -218,6 +218,40 @@ function publishTrayStack(el: HTMLElement | null) {
 }
 
 /**
+ * Marks which edges of a scroller hide content (`data-scroll-fade` = `start`,
+ * `end` or `both`), so the stylesheet can fade them: a tray body cut off by
+ * its capped height otherwise reads as a card chopped at the bottom.
+ */
+function trackScrollEdges(el: HTMLElement | null) {
+  if (!el) return
+  const update = () => {
+    const before = el.scrollTop > 1
+    const after = el.scrollHeight - el.clientHeight - el.scrollTop > 1
+    const edge = before && after ? 'both' : before ? 'start' : after ? 'end' : null
+    if (edge) el.dataset.scrollFade = edge
+    else delete el.dataset.scrollFade
+  }
+  update()
+  el.addEventListener('scroll', update, { passive: true })
+  // The body's own box stops changing once it is capped, so watch the cards
+  // too (an error line, a card added or resolved).
+  const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+  const watch = () => {
+    resize?.disconnect()
+    resize?.observe(el)
+    for (const child of el.children) resize?.observe(child)
+  }
+  watch()
+  const mutations = new MutationObserver(watch)
+  mutations.observe(el, { childList: true })
+  return () => {
+    el.removeEventListener('scroll', update)
+    resize?.disconnect()
+    mutations.disconnect()
+  }
+}
+
+/**
  * The non-modal approval tray (shell spec "Approval tray"): every pending
  * request whose session is not the open one. It may collapse to a count but
  * never disappears while a request is pending.
@@ -230,11 +264,14 @@ export function ApprovalTray() {
     () => pending.filter((item) => !approvalTargetsSession(item, openKey)),
     [pending, openKey],
   )
-  // On phones the tray starts as a compact pill so it does not cover the page;
-  // it is never dismissed while a request waits.
-  const [collapsed, setCollapsed] = useState(
-    () => window.matchMedia?.(PHONE_QUERY).matches ?? false,
-  )
+  // It starts as a compact pill on phones, and on chat pages at any width:
+  // there the open session has its own approval dock, and the expanded tray
+  // sat over the newest lines of the transcript. Once the user expands or
+  // collapses it, that choice holds across pages. It is never dismissed
+  // while a request waits.
+  const phone = usePhone()
+  const [choice, setChoice] = useState<boolean | null>(null)
+  const collapsed = choice ?? (phone || pathname.startsWith('/chat'))
   const [announcement, setAnnouncement] = useState('')
   const seen = useRef(new Set<string>())
 
@@ -307,7 +344,7 @@ export function ApprovalTray() {
           variant="ghost"
           aria-expanded={!collapsed}
           aria-label={collapsed ? t('webShell.trayExpand') : t('webShell.trayCollapse')}
-          onClick={() => setCollapsed((c) => !c)}
+          onClick={() => setChoice(!collapsed)}
           className={cn('text-text-muted hover:text-text', collapsed && 'rounded-full')}
         >
           <ChevronDown
@@ -319,7 +356,11 @@ export function ApprovalTray() {
         </Button>
       </div>
       {collapsed ? null : (
-        <ul role="list" className="anim-fade-in scroll-contained flex min-h-0 flex-col gap-2 p-2.5">
+        <ul
+          ref={trackScrollEdges}
+          role="list"
+          className="tray-body anim-fade-in scroll-contained flex min-h-0 flex-col gap-2 p-2.5"
+        >
           {items.map((item) => (
             <ApprovalCard key={item.id} item={item} className="anim-enter bg-surface-2" />
           ))}

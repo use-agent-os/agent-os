@@ -246,6 +246,23 @@
   }
 }
 
+/* ---- The shell ----------------------------------------------------------- */
+
+/* The shell is the viewport: only its panes scroll, never the document
+   (base.css also stops the document while the shell is mounted). It is the
+   containing block for anything absolutely positioned with no positioned
+   ancestor (an sr-only caption or label), and clips it with `overflow: clip`
+   rather than `hidden`, which would leave a scroller that focus or
+   scrollIntoView could still move. The main pane is positioned too, so such
+   an element scrolls with the page it belongs to. */
+.app-shell {
+  position: relative;
+  overflow: clip;
+}
+#main-content {
+  position: relative;
+}
+
 /* ---- Floating layers ---------------------------------------------------- */
 
 /* Everything that floats over the bottom of the page stacks in one column
@@ -296,6 +313,26 @@
     70dvh,
     calc(100dvh - var(--float-bottom) - var(--tray-clearance, 0px) - var(--toast-slot))
   );
+}
+/* The tray body scrolls inside the capped height; an edge that hides cards
+   fades out (ApprovalTray.tsx sets data-scroll-fade), so a card cut by the
+   cap reads as "more below" rather than as a broken card. */
+.tray-body[data-scroll-fade] {
+  --fade-start: 0px;
+  --fade-end: 0px;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 var(--fade-start),
+    #000 calc(100% - var(--fade-end)),
+    transparent
+  );
+}
+.tray-body:is([data-scroll-fade='start'], [data-scroll-fade='both']) {
+  --fade-start: 1.25rem;
+}
+.tray-body:is([data-scroll-fade='end'], [data-scroll-fade='both']) {
+  --fade-end: 2.5rem;
 }
 @media (max-width: 639.98px) {
   .approval-tray:not([data-collapsed]) {

@@ -965,7 +965,7 @@ function JobCard({
             onClick={onHistory}
           >
             <History />
-            <span className="@max-[26rem]:sr-only">{t('webPagesWork.history')}</span>
+            <span className="@max-[26rem]:hidden">{t('webPagesWork.history')}</span>
           </Button>
           <Button
             size="sm"
@@ -976,7 +976,7 @@ function JobCard({
             onClick={onEdit}
           >
             <Pencil />
-            <span className="@max-[26rem]:sr-only">{t('webPagesWork.edit')}</span>
+            <span className="@max-[26rem]:hidden">{t('webPagesWork.edit')}</span>
           </Button>
           <Button
             size="icon-sm"
