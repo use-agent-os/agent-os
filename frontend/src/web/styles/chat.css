@@ -10,45 +10,6 @@
 
 /* Layered, so a utility class on the same element still wins. */
 @layer components {
-  /* ---- Header: a shadow that appears once content scrolls beneath ------- */
-
-  /* The scroller publishes a scroll timeline its sibling header can read. */
-  .chat-pane {
-    timeline-scope: --chat-scroll;
-  }
-  .chat-scroller {
-    scroll-timeline: --chat-scroll y;
-  }
-  .chat-header {
-    --chat-shade: hsl(var(--shadow-color) / 0.32);
-  }
-  :root[data-theme='light'] .chat-header {
-    --chat-shade: hsl(var(--shadow-color) / 0.07);
-  }
-  .chat-header::after {
-    content: '';
-    position: absolute;
-    inset-inline: 0;
-    top: 100%;
-    height: 16px;
-    pointer-events: none;
-    border-top: 1px solid var(--border);
-    background: linear-gradient(to bottom, var(--chat-shade), transparent);
-    opacity: 0;
-  }
-  @supports (animation-timeline: scroll()) {
-    .chat-header::after {
-      animation: chat-reveal linear both;
-      animation-timeline: --chat-scroll;
-      animation-range: 0 48px;
-    }
-  }
-  @keyframes chat-reveal {
-    to {
-      opacity: 1;
-    }
-  }
-
   /* ---- Layout ------------------------------------------------------------ */
 
   /* The reading column the transcript, the dock and the composer share. */
@@ -363,97 +324,6 @@
     white-space: pre-wrap;
   }
 
-  /* ---- Composer ---------------------------------------------------------- */
-
-  .chat-composer {
-    position: relative;
-    border-radius: 22px;
-    border: 1px solid color-mix(in oklab, var(--border-control), transparent 45%);
-    background: var(--surface-1);
-    box-shadow: var(--elevation-overlay);
-    transition:
-      border-color var(--duration-base) var(--ease-out),
-      box-shadow var(--duration-base) var(--ease-out);
-  }
-  /* `:where()` keeps this at the specificity of `.chat-composer`, so the
-   * focus rule below still replaces the shadow in the light theme. */
-  :where(:root[data-theme='light']) .chat-composer {
-    box-shadow:
-      0 1px 2px hsl(var(--shadow-color) / 0.05),
-      0 12px 32px -12px hsl(var(--shadow-color) / 0.18);
-  }
-  @media (hover: hover) {
-    .chat-composer:hover {
-      border-color: color-mix(in oklab, var(--border-control), transparent 20%);
-    }
-  }
-  /* Focus, both themes: the accent boundary (3:1) thickened by a 1px ring,
-   * plus the soft focus glow the form fields use. */
-  .chat-composer:focus-within {
-    border-color: var(--ring);
-    box-shadow:
-      0 0 0 1px var(--ring),
-      var(--focus-glow),
-      var(--elevation-overlay);
-  }
-  .chat-composer[data-dragging='true'] {
-    border-color: var(--ring);
-    border-style: dashed;
-  }
-  .chat-dropzone {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    border-radius: inherit;
-    background: color-mix(in oklab, var(--surface-1), var(--accent) 7%);
-    color: var(--accent);
-    font-weight: 500;
-    pointer-events: none;
-    animation: agentos-fade-in var(--duration-fast) var(--ease-out) both;
-  }
-
-  .chat-chip {
-    display: inline-flex;
-    max-width: 15rem;
-    align-items: center;
-    gap: 8px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--surface-2);
-    box-shadow: var(--highlight);
-    padding: 4px 4px 4px 6px;
-    font-size: 12px;
-  }
-  .chat-chip-thumb {
-    display: inline-flex;
-    flex-shrink: 0;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    overflow: hidden;
-    border-radius: 7px;
-    background: var(--surface-3);
-    color: var(--text-muted);
-  }
-
-  /* Messages queued behind the running turn: a tab on top of the composer. */
-  .chat-queue {
-    margin-inline: 12px;
-    margin-bottom: -1px;
-    padding: 6px 8px 8px;
-    border: 1px solid var(--border);
-    border-bottom: 0;
-    border-radius: var(--radius-card) var(--radius-card) 0 0;
-    background: color-mix(in oklab, var(--surface-2), transparent 20%);
-    box-shadow: var(--highlight);
-    backdrop-filter: blur(8px);
-  }
-
   /* ---- Panels and cards --------------------------------------------------- */
 
   .chat-panel-in {
@@ -555,36 +425,6 @@
     background: color-mix(in oklab, var(--surface-1), var(--warn) 5%);
   }
 
-  /* ---- Empty conversation ---------------------------------------------- */
-
-  .chat-hero-mark {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 56px;
-    height: 56px;
-    border-radius: 16px;
-    border: 1px solid var(--border-strong);
-    background: linear-gradient(
-      180deg,
-      var(--surface-2),
-      color-mix(in oklab, var(--surface-1), var(--accent) 4%)
-    );
-    color: var(--accent);
-    box-shadow:
-      var(--highlight),
-      0 12px 40px -12px var(--accent-glow);
-  }
-  .chat-hero-mark::before {
-    content: '';
-    position: absolute;
-    inset: -40px;
-    z-index: -1;
-    border-radius: 9999px;
-    background: radial-gradient(closest-side, var(--accent-tint), transparent);
-  }
-
   /* ---- Jump to latest ---------------------------------------------------- */
 
   .chat-latest > * {
@@ -632,33 +472,6 @@
   }
 }
 
-/* Unlayered on purpose: these restyle Button variants, whose utilities
- * would otherwise win over a component-layer rule. */
-.chat-send {
-  width: 34px;
-  height: 34px;
-  border-radius: 9999px;
-  padding: 0;
-}
-.chat-primary:disabled {
-  opacity: 1;
-  background: var(--surface-3);
-  background-image: none;
-  color: var(--text-muted);
-  box-shadow: none;
-}
-.chat-stop {
-  border-radius: 9999px;
-  background: var(--text);
-  color: var(--surface-0);
-  border-color: transparent;
-}
-@media (hover: hover) {
-  .chat-stop:hover:not(:disabled) {
-    background: color-mix(in oklab, var(--text), var(--surface-0) 14%);
-  }
-}
-
 /* Unlayered: the chat's menus (model picker, capabilities, slash commands,
  * session actions), matching the command palette. The highlighted row is a
  * soft lime-washed fill with a 3px bar in the ring colour on its left edge
@@ -674,23 +487,11 @@
   box-shadow: inset 3px 0 0 var(--ring);
 }
 
-@media (pointer: coarse) {
-  .chat-send {
-    width: 44px;
-    height: 44px;
-  }
-}
-
 @media (forced-colors: active) {
   .chat-shimmer {
     background: none;
     color: CanvasText;
   }
-  .chat-header::after,
-  .chat-hero-mark::before {
-    display: none;
-  }
-  .chat-composer,
   .chat-user-bubble {
     border: 1px solid CanvasText;
   }

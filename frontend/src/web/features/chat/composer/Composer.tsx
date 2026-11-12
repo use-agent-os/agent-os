@@ -1,18 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import {
-  ArrowUp,
-  Check,
-  ChevronDown,
-  FileText,
-  Loader2,
-  Paperclip,
-  Pencil,
-  Route,
-  Settings2,
-  Square,
-  Trash2,
-  X,
-} from 'lucide-react'
+import { Check, Loader2, Paperclip, Pencil, Route, Settings2, Trash2 } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -72,6 +59,7 @@ import {
 } from './drafts'
 import { composerEnterAction } from './keys'
 import { enqueueMessage, readQueue, useQueue, writeQueue } from './queue'
+import { AttachmentTray, isUploading, SendButton, ToolbarChip } from './parts'
 import { useTrayClearance } from './tray-clearance'
 
 const MAX_HEIGHT_PX = 240
@@ -104,10 +92,6 @@ export interface ComposerProps {
   editRequest?: { text: string; nonce: number } | null
   /** Called after a send so the transcript follows again. */
   onSent?(): void
-}
-
-function isUploading(att: PendingAttachment): boolean {
-  return att.kind === 'uploading' || att.kind === 'inline_pending'
 }
 
 /** The slash-command filter: commands whose key or alias starts with the typed word. */
@@ -512,50 +496,24 @@ export function Composer(props: ComposerProps) {
         </ul>
       ) : null}
 
-      {/* Focus: the accent boundary with a 1px ring and a soft glow (chat.css).
-          The border colour change alone is only ~1.6:1 in the light theme. */}
-      <div className="chat-composer" data-dragging={dragging || undefined}>
+      {/* Focus: the accent boundary with a 1px ring and a soft glow
+          (chat-stage.css). The border colour change alone is ~1.6:1 in light. */}
+      <div
+        className="chat-composer"
+        data-dragging={dragging || undefined}
+        data-running={running || undefined}
+      >
         {dragging ? (
           <div className="chat-dropzone" aria-hidden>
             <Paperclip className="size-4" />
-            {t('webChat.attach')}
+            {t('webChat.stageDrop')}
           </div>
         ) : null}
-        {attachments.attachments.length > 0 || attachments.rejection ? (
-          <div className="flex flex-wrap gap-2 px-3 pt-3" aria-label={t('webChat.attach')}>
-            {attachments.attachments.map((att) => (
-              <span
-                key={att.local_id}
-                data-attachment-state={att.kind}
-                className="chat-chip anim-scale-in origin-left"
-              >
-                <span className="chat-chip-thumb" aria-hidden>
-                  {isUploading(att) ? (
-                    <Loader2 className="motion-status size-3.5 animate-spin text-accent" />
-                  ) : att.dataUrl && att.mime.startsWith('image/') ? (
-                    <img src={att.dataUrl} alt="" className="size-full object-cover" />
-                  ) : (
-                    <FileText className="size-3.5" />
-                  )}
-                </span>
-                <span className="truncate">{att.name}</span>
-                <button
-                  type="button"
-                  aria-label={t('webChat.removeAttachment', { name: att.name })}
-                  onClick={() => attachments.remove(att.local_id)}
-                  className="target inline-flex items-center justify-center rounded-md text-text-muted transition-colors duration-[var(--duration-fast)] hover:bg-surface-3 hover:text-text"
-                >
-                  <X className="size-3.5" aria-hidden />
-                </button>
-              </span>
-            ))}
-            {attachments.rejection ? (
-              <p role="alert" className="w-full text-small text-danger">
-                {attachments.rejection}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
+        <AttachmentTray
+          attachments={attachments.attachments}
+          rejection={attachments.rejection}
+          onRemove={attachments.remove}
+        />
         <textarea
           ref={textarea}
           data-composer-input
@@ -576,9 +534,9 @@ export function Composer(props: ComposerProps) {
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           enterKeyHint={touch ? 'enter' : 'send'}
-          className="block w-full resize-none bg-transparent px-4 pt-3.5 pb-1.5 text-[length:var(--text-prose)] leading-relaxed outline-none placeholder:text-text-muted max-md:text-base touch:text-base"
+          className="chat-composer-input max-md:text-base touch:text-base"
         />
-        <div className="flex min-w-0 items-center gap-0.5 px-2 pb-2">
+        <div className="chat-toolbar">
           <input
             ref={fileInput}
             type="file"
@@ -594,7 +552,7 @@ export function Composer(props: ComposerProps) {
             variant="ghost"
             aria-label={t('webChat.attach')}
             onClick={() => fileInput.current?.click()}
-            className="text-text-muted hover:text-text"
+            className="chat-tool-icon size-8 hover:text-text"
           >
             <Paperclip />
           </Button>
@@ -604,13 +562,8 @@ export function Composer(props: ComposerProps) {
             visualEffects={visualEffects}
             setVisualEffects={(v) => setPreference('visualEffects', v)}
           />
+          <span className="min-w-0 flex-1" />
           <UsageReadout sessionKey={sessionKey} />
-          <span className="flex-1" />
-          {sendReason && hasDraft && primary === 'send' ? (
-            <span id="send-reason" className="min-w-0 truncate text-small text-text-muted">
-              {sendReason}
-            </span>
-          ) : null}
           {suggestion && !touch ? (
             <kbd
               title={t('webChat.nextSuggestionKeyTitle')}
@@ -619,6 +572,18 @@ export function Composer(props: ComposerProps) {
               {t('webChat.nextSuggestionKey')}
             </kbd>
           ) : null}
+          {primary === 'queue' ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              aria-label={t('webChat.queue')}
+              onClick={() => void submit()}
+              disabled={Boolean(sendReason)}
+              className="anim-scale-in h-8 origin-right rounded-full px-3.5"
+            >
+              {t('webChat.queue')}
+            </Button>
+          ) : null}
           {running && stopping && !forcing ? (
             // The gateway is winding the turn down; a second press ends it now.
             <Button
@@ -626,43 +591,26 @@ export function Composer(props: ComposerProps) {
               variant="secondary"
               title={t('webChat.stopNowTitle')}
               onClick={onAbort}
-              className="chat-stop anim-scale-in shrink-0"
+              className="chat-stop anim-scale-in h-9 shrink-0 origin-right"
             >
               <Loader2 className="motion-status animate-spin" />
               {t('webChat.stopNow')}
             </Button>
-          ) : running ? (
-            <Button
-              size="icon-sm"
-              variant="secondary"
-              aria-label={forcing ? t('webChat.stopping') : t('webChat.stop')}
-              title={forcing ? t('webChat.stopping') : undefined}
-              disabled={forcing}
-              onClick={onAbort}
-              className="chat-stop chat-send anim-scale-in"
-            >
-              {forcing ? (
-                <Loader2 className="motion-status animate-spin" />
-              ) : (
-                <Square className="size-3! fill-current" />
-              )}
-            </Button>
-          ) : null}
-          {primary === null ? null : (
-            <Button
-              size={primary === 'queue' ? 'sm' : 'icon-sm'}
-              variant="primary"
-              aria-label={primary === 'queue' ? t('webChat.queue') : t('webChat.send')}
-              aria-describedby={sendReason ? 'send-reason' : undefined}
-              disabled={!hasDraft || Boolean(sendReason)}
-              onClick={() => void submit()}
-              className={cn(
-                'anim-scale-in ml-1',
-                primary === 'queue' ? 'rounded-full' : 'chat-send chat-primary [&_svg]:size-[18px]',
-              )}
-            >
-              {primary === 'queue' ? t('webChat.queue') : <ArrowUp strokeWidth={2.4} />}
-            </Button>
+          ) : (
+            // One round button that morphs: send while idle, stop while a turn
+            // runs (Stop stays reachable next to Queue: a phone has no Escape).
+            <SendButton
+              mode={running ? 'stop' : 'send'}
+              label={
+                running ? (forcing ? t('webChat.stopping') : t('webChat.stop')) : t('webChat.send')
+              }
+              busy={running && forcing}
+              disabled={running ? forcing : !hasDraft || Boolean(sendReason)}
+              reason={running ? null : hasDraft ? sendReason : null}
+              reasonId="send-reason"
+              reasonDisplay="inline"
+              onClick={() => (running ? onAbort() : void submit())}
+            />
           )}
         </div>
       </div>
@@ -698,18 +646,14 @@ function RoutePicker({ sessionKey }: { sessionKey: string }) {
   return (
     <DropdownMenu onOpenChange={(open) => open && pin.reload()}>
       <DropdownMenuTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
+        <ToolbarChip
           aria-label={`${t('webChat.route')}: ${label}`}
           data-pinned={pin.isPinned || undefined}
           // The one toolbar control that gives way on a narrow composer, so Send stays inside it.
-          className="min-w-0 shrink rounded-full text-text-muted hover:text-text data-[state=open]:bg-surface-3 data-[state=open]:text-text"
-        >
-          <Route />
-          <span className="max-w-32 min-w-0 truncate">{label}</span>
-          <ChevronDown className="size-3" />
-        </Button>
+          icon={<Route aria-hidden />}
+          label={label}
+          className="ml-0.5 min-w-0 shrink"
+        />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
         <CheckItem checked={!pin.isPinned} onSelect={() => pin.clear()}>
@@ -774,7 +718,7 @@ function CapabilityMenu({
           size="icon-sm"
           variant="ghost"
           aria-label={t('webChat.capabilities')}
-          className="text-text-muted hover:text-text data-[state=open]:bg-surface-3 data-[state=open]:text-text"
+          className="chat-tool-icon size-8 hover:text-text data-[state=open]:bg-surface-3 data-[state=open]:text-text"
         >
           <Settings2 />
         </Button>
@@ -816,7 +760,7 @@ function UsageReadout({ sessionKey }: { sessionKey: string }) {
   const cost = data.cost === null ? '—' : `$${data.cost.toFixed(4)}`
   return (
     <span
-      className="hidden pl-1.5 text-small text-text-muted tabular-nums sm:inline"
+      className="hidden px-2 text-small whitespace-nowrap text-text-muted tabular-nums md:inline"
       title={t('webChat.usage', { tokens, cost })}
     >
       {tokens} · {cost}

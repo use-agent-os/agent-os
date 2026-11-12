@@ -267,8 +267,8 @@ describe('composer', () => {
   it('marks focus with a ring as well as the border (the border alone is ~1.6:1 in light)', async () => {
     const { composer } = await openChat(chatRpc())
     expect(composer.closest('.chat-composer')).not.toBeNull()
-    // The focus chrome lives in chat.css: the accent border plus a 1px ring.
-    const css = readFileSync('src/web/styles/chat.css', 'utf8')
+    // The focus chrome lives in chat-stage.css: the accent border plus a 1px ring.
+    const css = readFileSync('src/web/styles/chat-stage.css', 'utf8')
     const rule = /\.chat-composer:focus-within\s*\{([^}]*)\}/.exec(css)?.[1] ?? ''
     expect(rule).toMatch(/border-color:\s*var\(--ring\)/)
     expect(rule).toMatch(/0 0 0 1px var\(--ring\)/)

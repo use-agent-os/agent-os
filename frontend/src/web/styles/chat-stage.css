@@ -1,0 +1,886 @@
+/* The chat stage (chat v2): the new-session hero, the empty conversation,
+ * the composer card (hero and docked), its toolbar chips, the send/stop
+ * button and the conversation header.
+ *
+ * Motion: transform/opacity only (the header's reveal and the running sweep
+ * aside), token durations, every rule neutralised by the reduced-motion block
+ * in base.css. The aurora is the one slow decorative loop the chat brief asks
+ * for; under reduced motion it rests at its first frame. */
+
+@layer components {
+  /* ---- The stage ------------------------------------------------------- */
+
+  .chat-stage {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    min-height: 100%;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    /* Content sits a little above the middle (~42% line). */
+    padding: 40px 20px calc(48px + 9vh);
+    overflow: clip;
+  }
+  .stage-inner {
+    display: flex;
+    width: 100%;
+    max-width: 45rem;
+    flex-direction: column;
+    align-items: center;
+    gap: 28px;
+  }
+  @media (max-width: 639px) {
+    .chat-stage {
+      justify-content: flex-start;
+      padding: 32px 16px 40px;
+    }
+    .stage-inner {
+      gap: 22px;
+    }
+  }
+
+  /* ---- Backdrop: aurora + dot grid ------------------------------------- */
+
+  .stage-backdrop {
+    --stage-drift: 26s; /* decorative loop period (brief: >= 20s) */
+    --stage-dot: color-mix(in oklab, var(--text) 13%, transparent);
+    --stage-lime: color-mix(in oklab, var(--accent) 15%, transparent);
+    --stage-teal: color-mix(
+      in oklab,
+      color-mix(in oklab, var(--accent), var(--info) 62%) 13%,
+      transparent
+    );
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  :root[data-theme='light'] .stage-backdrop {
+    --stage-dot: color-mix(in oklab, var(--text) 15%, transparent);
+    --stage-lime: color-mix(in oklab, var(--accent) 11%, transparent);
+    --stage-teal: color-mix(
+      in oklab,
+      color-mix(in oklab, var(--accent), var(--info) 55%) 8%,
+      transparent
+    );
+  }
+  .stage-backdrop::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(circle at center, var(--stage-dot) 1px, transparent 1.6px);
+    background-size: 22px 22px;
+    background-position: center top;
+    mask-image: radial-gradient(ellipse 62% 58% at 50% 40%, black 10%, transparent 74%);
+  }
+  .stage-aurora {
+    position: absolute;
+    top: 4%;
+    left: 50%;
+    width: min(52rem, 120vw);
+    aspect-ratio: 1.55;
+    border-radius: 9999px;
+    background: radial-gradient(closest-side, var(--stage-lime), transparent);
+    transform: translate(-74%, -6%) scale(1);
+    animation: stage-drift-a var(--stage-drift) var(--ease-in-out) infinite alternate;
+  }
+  .stage-aurora-b {
+    top: 14%;
+    background: radial-gradient(closest-side, var(--stage-teal), transparent);
+    transform: translate(-26%, 6%) scale(1.06);
+    animation-name: stage-drift-b;
+    animation-duration: calc(var(--stage-drift) * 1.3);
+  }
+  @keyframes stage-drift-a {
+    to {
+      transform: translate(-50%, 8%) scale(1.14);
+    }
+  }
+  @keyframes stage-drift-b {
+    to {
+      transform: translate(-54%, -8%) scale(0.92);
+    }
+  }
+  /* Inside the transcript column: a quieter patch, no grid past the column. */
+  .stage-backdrop-contained .stage-aurora {
+    top: -10%;
+    width: 100%;
+  }
+  .stage-backdrop-contained::before {
+    mask-image: radial-gradient(ellipse 50% 50% at 50% 40%, black 0%, transparent 72%);
+  }
+
+  /* ---- The mark -------------------------------------------------------- */
+
+  .stage-mark {
+    position: relative;
+    isolation: isolate;
+    display: inline-grid;
+    place-items: center;
+    width: 60px;
+    height: 60px;
+    flex-shrink: 0;
+    border-radius: 18px;
+    border: 1px solid var(--border-strong);
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--surface-2), var(--accent) 3%),
+      color-mix(in oklab, var(--surface-1), var(--accent) 7%)
+    );
+    box-shadow:
+      var(--highlight),
+      0 1px 2px hsl(var(--shadow-color) / 0.3),
+      0 14px 40px -12px var(--accent-glow);
+  }
+  .stage-mark[data-size='md'] {
+    width: 48px;
+    height: 48px;
+    border-radius: 15px;
+  }
+  .stage-mark > .shell-brand-mark {
+    width: 30px;
+    height: 30px;
+    filter: drop-shadow(0 0 6px var(--accent-glow));
+  }
+  .stage-mark[data-size='md'] > .shell-brand-mark {
+    width: 24px;
+    height: 24px;
+  }
+  /* The breathing halo behind the tile. */
+  .stage-mark::before {
+    content: '';
+    position: absolute;
+    inset: -44px;
+    z-index: -1;
+    border-radius: 9999px;
+    background: radial-gradient(
+      closest-side,
+      color-mix(in oklab, var(--accent) 22%, transparent),
+      transparent
+    );
+    opacity: 0.6;
+    animation: stage-breathe calc(var(--pulse-period) * 3) var(--ease-in-out) infinite alternate;
+  }
+  :root[data-theme='light'] .stage-mark {
+    background: linear-gradient(180deg, var(--surface-1), var(--accent-soft));
+    box-shadow:
+      var(--highlight),
+      0 1px 2px hsl(var(--shadow-color) / 0.08),
+      0 14px 36px -14px var(--accent-glow);
+  }
+  :root[data-theme='light'] .stage-mark::before {
+    background: radial-gradient(
+      closest-side,
+      color-mix(in oklab, var(--accent) 14%, transparent),
+      transparent
+    );
+  }
+  @keyframes stage-breathe {
+    to {
+      opacity: 1;
+      transform: scale(1.12);
+    }
+  }
+
+  /* ---- Display heading ------------------------------------------------- */
+
+  .stage-title {
+    max-width: 18em;
+    font-size: clamp(1.75rem, 1.05rem + 2.3vw, 2.75rem);
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.034em;
+  }
+  .stage-title-lead,
+  .stage-title-rest {
+    color: transparent;
+    -webkit-background-clip: text;
+    background-clip: text;
+  }
+  .stage-title-lead {
+    background-image: linear-gradient(
+      180deg,
+      var(--text) 30%,
+      color-mix(in oklab, var(--text), var(--text-muted) 45%)
+    );
+  }
+  .stage-title-rest {
+    display: block;
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--text), var(--text-muted) 55%),
+      var(--text-muted)
+    );
+  }
+  .stage-title-dot {
+    color: var(--accent);
+    text-shadow: 0 0 18px var(--accent-glow);
+  }
+
+  /* ---- Entrance: mark -> heading -> composer -> suggestions -> hints ---- */
+
+  .stage-enter > * {
+    animation: stage-rise var(--duration-enter) var(--ease-enter) both;
+    /* Five steps at ~35ms: the last starts by 140ms, ends by 440ms. */
+    animation-delay: calc(var(--stage-i, 4) * var(--stagger-step) * 1.15);
+  }
+  .stage-enter > :nth-child(1) {
+    --stage-i: 0;
+  }
+  .stage-enter > :nth-child(2) {
+    --stage-i: 1;
+  }
+  .stage-enter > :nth-child(3) {
+    --stage-i: 2;
+  }
+  .stage-enter > :nth-child(4) {
+    --stage-i: 3;
+  }
+  @keyframes stage-rise {
+    from {
+      opacity: 0;
+      transform: translateY(14px) scale(0.985);
+    }
+  }
+
+  /* ---- Starter suggestions ------------------------------------------- */
+
+  .stage-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+  .stage-suggestion {
+    display: inline-flex;
+    height: 36px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 14px 0 12px;
+    border-radius: 9999px;
+    border: 1px solid var(--border);
+    background: color-mix(in oklab, var(--surface-1), transparent 25%);
+    box-shadow: var(--highlight);
+    backdrop-filter: blur(10px);
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    transition:
+      translate var(--duration-base) var(--ease-out),
+      scale var(--duration-press) var(--ease-out),
+      color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out),
+      box-shadow var(--duration-base) var(--ease-out);
+  }
+  .stage-suggestion > svg {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    transition: color var(--duration-fast) var(--ease-out);
+  }
+  @media (hover: hover) {
+    .stage-suggestion:hover {
+      translate: 0 -1px;
+      border-color: var(--border-strong);
+      background: var(--surface-2);
+      color: var(--text);
+      box-shadow:
+        var(--highlight),
+        0 8px 24px -12px hsl(var(--shadow-color) / 0.5);
+    }
+    .stage-suggestion:hover > svg {
+      color: var(--accent);
+    }
+  }
+  .stage-suggestion:active {
+    scale: 0.97;
+  }
+  :root[data-theme='light'] .stage-suggestion {
+    background: color-mix(in oklab, var(--surface-1), transparent 15%);
+    box-shadow: 0 1px 2px hsl(var(--shadow-color) / 0.05);
+  }
+  @media (hover: hover) {
+    :root[data-theme='light'] .stage-suggestion:hover {
+      background: var(--surface-1);
+      box-shadow: 0 8px 22px -12px hsl(var(--shadow-color) / 0.25);
+    }
+  }
+  @media (pointer: coarse) {
+    .stage-suggestion {
+      height: 44px;
+    }
+  }
+
+  /* ---- Keyboard hints --------------------------------------------------- */
+
+  .stage-hints {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px 20px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+  @media (pointer: coarse) {
+    .stage-hints {
+      display: none;
+    }
+  }
+
+  /* A calm line under the composer: why Start cannot run, or why it failed. */
+  .stage-note {
+    display: inline-flex;
+    max-width: 100%;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px 8px 10px;
+    border-radius: 9999px;
+    border: 1px solid var(--border);
+    background: color-mix(in oklab, var(--surface-1), transparent 15%);
+    box-shadow: var(--highlight);
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+  .stage-note > svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  .stage-note[data-tone='warn'] > svg {
+    color: var(--warn);
+  }
+  .stage-note[data-tone='danger'] {
+    border-color: color-mix(in oklab, var(--danger), transparent 70%);
+    background: color-mix(in oklab, var(--surface-1), var(--danger) 6%);
+    color: var(--text);
+  }
+  .stage-note[data-tone='danger'] > svg {
+    color: var(--danger);
+  }
+
+  /* ---- Composer card ---------------------------------------------------- */
+
+  .chat-composer {
+    --composer-elevation:
+      0 1px 2px hsl(var(--shadow-color) / 0.3), 0 18px 44px -18px hsl(var(--shadow-color) / 0.7);
+    position: relative;
+    border-radius: 22px;
+    border: 1px solid color-mix(in oklab, var(--border-control), transparent 50%);
+    background-color: var(--surface-1);
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--surface-2), transparent 35%),
+      transparent 70%
+    );
+    box-shadow: var(--highlight), var(--composer-elevation);
+    transition:
+      border-color var(--duration-base) var(--ease-out),
+      box-shadow var(--duration-slow) var(--ease-out);
+  }
+  .chat-composer[data-size='hero'] {
+    --composer-elevation:
+      0 1px 2px hsl(var(--shadow-color) / 0.3), 0 28px 70px -24px hsl(var(--shadow-color) / 0.8);
+    min-height: 128px;
+    border-radius: 24px;
+  }
+  :root[data-theme='light'] .chat-composer {
+    --composer-elevation:
+      0 1px 2px hsl(var(--shadow-color) / 0.06), 0 14px 36px -14px hsl(var(--shadow-color) / 0.2);
+    background-image: none;
+  }
+  :root[data-theme='light'] .chat-composer[data-size='hero'] {
+    --composer-elevation:
+      0 1px 2px hsl(var(--shadow-color) / 0.06), 0 24px 60px -22px hsl(var(--shadow-color) / 0.26);
+  }
+  @media (hover: hover) {
+    .chat-composer:hover {
+      border-color: color-mix(in oklab, var(--border-control), transparent 22%);
+    }
+  }
+  /* Focus, both themes: the accent boundary (3:1) thickened by a 1px ring,
+   * the form fields' focus glow, and a soft lime bloom under the card. */
+  .chat-composer:focus-within {
+    border-color: var(--ring);
+    box-shadow:
+      0 0 0 1px var(--ring),
+      var(--focus-glow),
+      0 18px 60px -22px var(--accent-glow),
+      var(--composer-elevation);
+  }
+  .chat-composer[data-dragging='true'] {
+    border-color: var(--ring);
+    border-style: dashed;
+  }
+  .chat-composer-input {
+    display: block;
+    width: 100%;
+    resize: none;
+    background: transparent;
+    padding: 14px 18px 6px;
+    font-size: var(--text-prose);
+    line-height: 1.6;
+    outline: none;
+  }
+  .chat-composer-input::placeholder {
+    color: var(--text-muted);
+  }
+  .chat-composer[data-size='hero'] .chat-composer-input {
+    padding: 20px 22px 8px;
+    font-size: calc(var(--text-prose) * 1.06);
+  }
+  @media (max-width: 767px), (pointer: coarse) {
+    .chat-composer-input,
+    .chat-composer[data-size='hero'] .chat-composer-input {
+      font-size: 16px; /* iOS zooms into smaller inputs */
+    }
+    .chat-composer[data-size='hero'] .chat-composer-input {
+      padding: 16px 18px 6px;
+    }
+  }
+
+  /* A turn is running: a slow lime sweep along the card's top edge. */
+  .chat-composer[data-running='true']::after {
+    content: '';
+    position: absolute;
+    inset-inline: 22px;
+    top: -1px;
+    height: 1px;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent) no-repeat;
+    background-size: 35% 100%;
+    animation: chat-sweep calc(var(--pulse-period) * 1.2) var(--ease-in-out) infinite;
+  }
+  @keyframes chat-sweep {
+    from {
+      background-position: -60% 0;
+    }
+    to {
+      background-position: 160% 0;
+    }
+  }
+
+  .chat-toolbar {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 8px 8px;
+  }
+  .chat-composer[data-size='hero'] .chat-toolbar {
+    gap: 6px;
+    padding: 8px 12px 12px;
+  }
+
+  .chat-dropzone {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-radius: inherit;
+    background: color-mix(in oklab, var(--surface-1), var(--accent) 8%);
+    color: var(--accent);
+    font-weight: 500;
+    pointer-events: none;
+    animation: agentos-fade-in var(--duration-fast) var(--ease-out) both;
+  }
+
+  /* ---- Toolbar chips (agent, project, model route) --------------------- */
+
+  .chat-tool-chip {
+    display: inline-flex;
+    height: 32px;
+    min-width: 0;
+    flex: 0 1 auto;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px 0 7px;
+    border-radius: 9999px;
+    border: 1px solid var(--border);
+    background: color-mix(in oklab, var(--surface-2), transparent 35%);
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    transition:
+      scale var(--duration-press) var(--ease-out),
+      color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out);
+  }
+  .chat-tool-chip > svg:not(.chat-tool-chip-chevron) {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+  }
+  .chat-tool-chip-label {
+    min-width: 0;
+    max-width: 11rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .chat-tool-chip-chevron {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    opacity: 0.7;
+    transition: rotate var(--duration-base) var(--ease-out);
+  }
+  @media (hover: hover) {
+    .chat-tool-chip:hover:not(:disabled) {
+      border-color: var(--border-strong);
+      background: var(--surface-3);
+      color: var(--text);
+    }
+  }
+  .chat-tool-chip:active:not(:disabled) {
+    scale: 0.97;
+  }
+  .chat-tool-chip[data-state='open'] {
+    border-color: color-mix(in oklab, var(--accent), transparent 55%);
+    background: var(--surface-3);
+    color: var(--text);
+  }
+  .chat-tool-chip[data-state='open'] > .chat-tool-chip-chevron {
+    rotate: 180deg;
+  }
+  .chat-tool-chip:disabled {
+    cursor: default;
+  }
+  /* A pinned route reads as set: the accent icon. */
+  .chat-tool-chip[data-pinned='true'] > svg:first-child {
+    color: var(--accent);
+  }
+  :root[data-theme='light'] .chat-tool-chip {
+    background: var(--surface-1);
+  }
+  @media (max-width: 639px) {
+    .chat-tool-chip-label {
+      max-width: 6rem;
+    }
+  }
+  @media (max-width: 400px) {
+    .chat-tool-chip-chevron {
+      display: none;
+    }
+    .chat-tool-chip {
+      padding-inline-end: 9px;
+    }
+  }
+  @media (pointer: coarse) {
+    .chat-tool-chip {
+      height: 44px;
+    }
+  }
+  /* The menus the chips open: items with a check on the chosen one. */
+  .chat-pick-item {
+    padding-inline-end: 32px;
+  }
+
+  /* Toolbar icon button (attach, capabilities). */
+  .chat-tool-icon {
+    border-radius: 9999px;
+    color: var(--text-muted);
+  }
+
+  /* ---- Attachment tray ------------------------------------------------ */
+
+  .chat-tray {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 12px 0;
+  }
+  .chat-chip {
+    display: inline-flex;
+    max-width: 16rem;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 5px 5px 5px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface-2);
+    box-shadow: var(--highlight);
+    font-size: 12px;
+  }
+  .chat-chip-thumb {
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    overflow: hidden;
+    border-radius: 10px;
+    background: var(--surface-3);
+    color: var(--text-muted);
+  }
+  .chat-chip-remove {
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    border-radius: 8px;
+    color: var(--text-muted);
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
+  }
+  @media (hover: hover) {
+    .chat-chip-remove:hover {
+      background: var(--surface-3);
+      color: var(--text);
+    }
+  }
+
+  /* Messages queued behind the running turn: a tab on top of the composer. */
+  .chat-queue {
+    margin-inline: 14px;
+    margin-bottom: -1px;
+    padding: 6px 8px 8px;
+    border: 1px solid var(--border);
+    border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+    background: color-mix(in oklab, var(--surface-2), transparent 20%);
+    box-shadow: var(--highlight);
+    backdrop-filter: blur(8px);
+  }
+
+  /* ---- Header ------------------------------------------------------------ */
+
+  /* The scroller publishes a scroll timeline its sibling header can read. */
+  .chat-pane {
+    timeline-scope: --chat-scroll;
+  }
+  .chat-scroller {
+    scroll-timeline: --chat-scroll y;
+  }
+  .chat-header {
+    --chat-shade: hsl(var(--shadow-color) / 0.3);
+    isolation: isolate;
+  }
+  :root[data-theme='light'] .chat-header {
+    --chat-shade: hsl(var(--shadow-color) / 0.06);
+  }
+  /* Transparent at rest; a blurred surface and a hairline once content has
+   * scrolled beneath it. */
+  .chat-header::before,
+  .chat-header::after {
+    content: '';
+    position: absolute;
+    pointer-events: none;
+    opacity: 0;
+  }
+  .chat-header::before {
+    inset: 0;
+    z-index: -1;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in oklab, var(--surface-0), transparent 18%);
+    backdrop-filter: blur(16px) saturate(1.3);
+  }
+  .chat-header::after {
+    inset-inline: 0;
+    top: 100%;
+    height: 14px;
+    background: linear-gradient(to bottom, var(--chat-shade), transparent);
+  }
+  @supports (animation-timeline: scroll()) {
+    .chat-header::before,
+    .chat-header::after {
+      animation: chat-reveal linear both;
+      animation-timeline: --chat-scroll;
+      animation-range: 0 40px;
+    }
+  }
+  @keyframes chat-reveal {
+    to {
+      opacity: 1;
+    }
+  }
+  .chat-title-button {
+    min-width: 0;
+    max-width: 100%;
+    border-radius: var(--radius-control);
+    padding: 4px 8px;
+    text-align: start;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+    transition: background-color var(--duration-fast) var(--ease-out);
+  }
+  @media (hover: hover) {
+    .chat-title-button:hover {
+      background: var(--surface-2);
+    }
+  }
+  .chat-meta-chip {
+    display: inline-flex;
+    height: 24px;
+    min-width: 0;
+    flex-shrink: 1;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px 0 4px;
+    border-radius: 9999px;
+    border: 1px solid var(--border);
+    background: color-mix(in oklab, var(--surface-1), transparent 40%);
+    color: var(--text-muted);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .chat-meta-chip > svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+  }
+  .chat-meta-chip[data-plain] {
+    padding-inline: 7px;
+  }
+  .chat-id-chip {
+    font-family: var(--font-mono);
+    padding-inline: 8px 6px;
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out);
+  }
+  .chat-id-chip > svg {
+    opacity: 0.6;
+  }
+  @media (hover: hover) {
+    .chat-id-chip:hover {
+      border-color: var(--border-strong);
+      background: var(--surface-2);
+      color: var(--text);
+    }
+  }
+}
+
+/* Unlayered: the round send/stop is its own control, not a Button variant. */
+.chat-send-slot {
+  display: inline-flex;
+  flex-shrink: 0;
+  border-radius: 9999px;
+}
+.chat-send {
+  position: relative;
+  isolation: isolate;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  background-color: var(--accent);
+  color: var(--accent-fg);
+  box-shadow:
+    var(--elevation-primary),
+    0 6px 18px -6px var(--accent-glow);
+  transition:
+    scale var(--duration-press) var(--ease-out),
+    background-color var(--duration-base) var(--ease-out),
+    color var(--duration-base) var(--ease-out),
+    box-shadow var(--duration-base) var(--ease-out);
+}
+.chat-send[data-size='lg'] {
+  width: 40px;
+  height: 40px;
+}
+/* The gradient lives on a layer, so send -> stop can fade it out. */
+.chat-send::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-image: var(--accent-gradient);
+  transition: opacity var(--duration-base) var(--ease-out);
+}
+.chat-send-icon {
+  grid-area: 1 / 1;
+  width: 18px;
+  height: 18px;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    transform var(--duration-spring) var(--ease-spring);
+}
+.chat-send-icon[data-icon='stop'] {
+  width: 12px;
+  height: 12px;
+}
+.chat-send[data-mode='send'] > [data-icon='stop'],
+.chat-send[data-mode='stop'] > [data-icon='send'] {
+  opacity: 0;
+  transform: scale(0.3) rotate(-90deg);
+}
+@media (hover: hover) {
+  .chat-send:hover:not(:disabled) {
+    box-shadow:
+      var(--elevation-primary-hover),
+      0 8px 24px -6px var(--accent-glow);
+  }
+}
+.chat-send:active:not(:disabled) {
+  scale: 0.92;
+}
+.chat-send[data-mode='stop'] {
+  background-color: var(--text);
+  color: var(--surface-0);
+  box-shadow: 0 6px 18px -8px hsl(var(--shadow-color) / 0.6);
+}
+.chat-send:disabled {
+  cursor: default;
+  background-color: var(--surface-3);
+  color: var(--text-muted);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.chat-send:is([data-mode='stop'], :disabled)::before {
+  opacity: 0;
+}
+:root[data-theme='light'] .chat-send:disabled {
+  background-color: var(--surface-2);
+}
+@media (pointer: coarse) {
+  .chat-send,
+  .chat-send[data-size='lg'] {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* "Stop now" while the gateway winds a turn down: an ink pill. */
+.chat-stop {
+  border-radius: 9999px;
+  background: var(--text);
+  color: var(--surface-0);
+  border-color: transparent;
+}
+@media (hover: hover) {
+  .chat-stop:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--text), var(--surface-0) 14%);
+  }
+}
+
+@media (forced-colors: active) {
+  .chat-composer {
+    border: 1px solid CanvasText;
+  }
+  .chat-header::before,
+  .chat-header::after,
+  .stage-mark::before,
+  .chat-composer::after {
+    display: none;
+  }
+  .stage-title-lead,
+  .stage-title-rest {
+    background: none;
+    color: CanvasText;
+  }
+  .chat-send::before {
+    display: none;
+  }
+}
