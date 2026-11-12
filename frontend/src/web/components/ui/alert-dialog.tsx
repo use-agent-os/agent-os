@@ -23,7 +23,7 @@ export function AlertDialogContent({
         data-slot="alert-dialog-content"
         className={cn(
           'anim-dialog-in fixed top-1/2 left-1/2 z-[var(--z-overlay)] grid w-[calc(100vw-2rem)] max-w-md',
-          '-translate-x-1/2 -translate-y-1/2 gap-4 rounded-overlay border border-border bg-surface-overlay p-6 shadow-overlay',
+          '-translate-x-1/2 -translate-y-1/2 gap-5 rounded-overlay border border-border bg-surface-overlay p-6 shadow-overlay',
           className,
         )}
         {...props}
@@ -53,7 +53,12 @@ export function AlertDialogTitle({
   className,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Title>) {
-  return <AlertDialogPrimitive.Title className={cn('text-section', className)} {...props} />
+  return (
+    <AlertDialogPrimitive.Title
+      className={cn('text-[17px] leading-snug font-semibold tracking-[-0.016em]', className)}
+      {...props}
+    />
+  )
 }
 
 export function AlertDialogDescription({
@@ -61,7 +66,10 @@ export function AlertDialogDescription({
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Description>) {
   return (
-    <AlertDialogPrimitive.Description className={cn('text-text-muted', className)} {...props} />
+    <AlertDialogPrimitive.Description
+      className={cn('text-pretty text-text-muted', className)}
+      {...props}
+    />
   )
 }
 

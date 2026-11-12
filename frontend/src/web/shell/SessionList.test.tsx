@@ -7,6 +7,7 @@ import { testQueryClient, WebTestProviders } from '@/test/render-web'
 import { renderShell, resetShellState, sessionRow, shellRpc } from '@/test/web-shell'
 import { webRoutes } from '@/web/app/WebApp'
 import { createSessionOptimistic, SESSIONS_REFRESH_MS } from './session-data'
+import { sessionHeadline } from './SessionList'
 import { PINS_KEY } from './session-list'
 
 beforeEach(resetShellState)
@@ -41,6 +42,29 @@ describe('session rows', () => {
     const tg = screen.getByRole('link', { name: /telegram · dm/ })
     expect(within(tg).getByRole('img', { name: 'Channel: telegram' })).toBeInTheDocument()
     expect(within(tg).getByRole('img', { name: 'Running' })).toBeInTheDocument()
+  })
+
+  it('titles an unnamed session "New conversation" with its short id beside it', async () => {
+    renderShell(
+      '/home',
+      shellRpc([
+        // The gateway's fallback derived title is the short session id.
+        sessionRow(A, { derived_title: '5ace50d7' }),
+        sessionRow(B, { derived_title: 'Plan the launch' }),
+      ]),
+    )
+    const unnamed = await screen.findByRole('link', { name: /New conversation/ })
+    expect(unnamed).toHaveAttribute('href', '/chat/main/webchat/a')
+    expect(within(unnamed).getByText('5ace50d7')).toHaveClass('font-mono')
+    expect(within(unnamed).queryByText('5ace50d7', { selector: '.session-title' })).toBeNull()
+    // A real derived title is still the headline.
+    const titled = screen.getByRole('link', { name: /Plan the launch/ })
+    expect(within(titled).queryByText('New conversation')).toBeNull()
+    expect(sessionHeadline(sessionRow(A, { display_name: 'Named' }))).toEqual({
+      title: 'Named',
+      id: 'a',
+    })
+    expect(sessionHeadline(sessionRow(A))).toEqual({ title: null, id: 'a' })
   })
 
   it('leaves modifier and middle clicks to the browser (new tab)', async () => {

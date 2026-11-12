@@ -130,21 +130,33 @@ describe('list pane', () => {
 })
 
 describe('pages and titles', () => {
-  it('lists every page with its description and marks the current one', async () => {
+  it('lists every page in its group with its description and marks the current one', async () => {
     const user = userEvent.setup()
     const { router } = renderShell('/home')
     await user.click(await within(rail()).findByRole('button', { name: 'Pages' }))
     const pages = await screen.findByRole('navigation', { name: 'Pages' })
-    const links = within(pages).getAllByRole('link')
-    expect(links.map((l) => l.querySelector('.font-medium')?.textContent)).toEqual([
-      'Home',
-      'Sessions',
-      'Projects',
-      'Usage',
-      'Automations',
-      'Inbox',
-    ])
-    expect(within(pages).getByText('Scheduled jobs and their runs')).toBeInTheDocument()
+    // Compact one-line links in two named groups, then Settings at the foot.
+    const group = (name: string) =>
+      within(within(pages).getByRole('region', { name }))
+        .getAllByRole('link')
+        .map((l) => l.querySelector('[data-page-label]')?.textContent)
+    expect(group('Overview')).toEqual(['Home', 'Usage', 'Inbox'])
+    expect(group('Work')).toEqual(['Sessions', 'Projects', 'Automations'])
+    expect(within(pages).getAllByRole('link').at(-1)).toHaveAccessibleName('Settings')
+    // The description is no longer a second line of text: it is the link's
+    // accessible description.
+    expect(within(pages).queryByText('Scheduled jobs and their runs')).not.toBeVisible()
+    expect(within(pages).getByRole('link', { name: 'Automations' })).toHaveAccessibleDescription(
+      'Scheduled jobs and their runs',
+    )
+    // Arrow keys move between the links.
+    within(pages).getByRole('link', { name: 'Home' }).focus()
+    await user.keyboard('{ArrowDown}')
+    expect(within(pages).getByRole('link', { name: 'Usage' })).toHaveFocus()
+    await user.keyboard('{End}')
+    expect(within(pages).getByRole('link', { name: 'Settings' })).toHaveFocus()
+    await user.keyboard('{ArrowDown}')
+    expect(within(pages).getByRole('link', { name: 'Home' })).toHaveFocus()
     await user.click(within(pages).getByRole('link', { name: /Automations/ }))
     expect(router.state.location.pathname).toBe('/automations')
     await waitFor(() =>

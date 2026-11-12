@@ -44,7 +44,7 @@ export function DialogContent({
         data-slot="dialog-content"
         className={cn(
           'anim-dialog-in fixed top-1/2 left-1/2 z-[var(--z-overlay)] grid w-[calc(100vw-2rem)] max-w-lg',
-          '-translate-x-1/2 -translate-y-1/2 gap-4 rounded-overlay border border-border bg-surface-overlay p-6 shadow-overlay',
+          '-translate-x-1/2 -translate-y-1/2 gap-5 rounded-overlay border border-border bg-surface-overlay p-6 shadow-overlay',
           'max-h-[calc(100dvh-2rem)] overflow-y-auto',
           className,
         )}
@@ -84,7 +84,10 @@ export function DialogTitle({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Title>) {
   return (
-    <DialogPrimitive.Title className={cn('text-section leading-tight', className)} {...props} />
+    <DialogPrimitive.Title
+      className={cn('text-[17px] leading-snug font-semibold tracking-[-0.016em]', className)}
+      {...props}
+    />
   )
 }
 

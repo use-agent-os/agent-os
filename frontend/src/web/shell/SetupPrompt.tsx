@@ -57,7 +57,7 @@ export function SetupPrompt() {
       <Link
         to="/settings/setup"
         viewTransition
-        className={buttonVariants({ size: 'sm', variant: 'primary' })}
+        className={buttonVariants({ size: 'sm', variant: 'outline' })}
       >
         {t('webSettings.setupPromptAction')}
       </Link>
@@ -65,7 +65,7 @@ export function SetupPrompt() {
         type="button"
         aria-label={t('webSettings.setupPromptDismiss')}
         onClick={dismiss}
-        className="press target inline-flex size-7 items-center justify-center rounded-md text-text-muted hover:bg-surface-3 hover:text-text touch:size-11"
+        className="press target inline-flex size-7 items-center justify-center rounded-md text-text-muted hover:bg-surface-3 hover:text-text touch:size-11 [&_svg]:size-3.5"
       >
         <X className="size-4" aria-hidden />
       </button>

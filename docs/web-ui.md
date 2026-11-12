@@ -137,7 +137,11 @@ The console is chat-first. On screens wider than 768 px it has three columns:
   and **Pages** view buttons and **Search**; at the bottom **Home**, **Inbox**
   (with a badge counting approvals, agent questions and runtime issues) and the
   status menu (connection state, theme, keyboard shortcuts, Settings).
-- **List pane**: the Sessions list or the Pages catalog. Activate the selected
+- **List pane**: the Sessions list or the Pages catalog. The catalog is a
+  compact list in two groups (Overview: Home, Usage, Inbox; Work: Sessions,
+  Projects, Automations) with Settings at the foot; Sessions shows the session
+  count (with a live dot while one runs) and Inbox how many items wait. Arrow
+  keys, Home and End move between its links. Activate the selected
   view's button again, or press Ctrl+B (⌘B on macOS), to collapse it. Drag its
   edge (or focus the edge and use the arrow keys) to resize it; the width is
   remembered by the browser. A fresh load always starts with the pane open.
@@ -147,8 +151,9 @@ The Sessions list shows every session from `sessions.list`, grouped **By date**
 (Pinned, Today, Yesterday, Previous 7 days, Older) or **By project** (Pinned,
 one section per project, No project). Each row is a link, so a middle-click or
 Ctrl/⌘-click opens the session in a new tab. A row shows the session's title
-(its name, else its derived title, else a label from its key), its channel and
-when it was last updated, plus a running indicator while a task is queued or
+(its name, else its derived title; an unnamed session reads "New conversation"
+with its short id beside the agent), its channel as an icon, its agent and when
+it was last updated, plus a running indicator while a task is queued or
 running. Child sessions (subagents) are folded under their parent, which shows
 how many it has. The filter box matches titles and keys; the filter menu narrows
 by agent, channel or project; **Clear filters** resets them all. A row's ⋯ menu

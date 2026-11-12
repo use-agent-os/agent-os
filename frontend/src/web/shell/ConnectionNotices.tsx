@@ -101,7 +101,7 @@ export function ConnectionNotices({
             <Link
               to="/settings/updates"
               viewTransition
-              className="font-medium text-accent underline-offset-2 hover:underline"
+              className="font-medium text-accent underline-offset-2 hover:underline max-sm:hidden"
             >
               {t('webConnection.updateNoticeLink')}
             </Link>

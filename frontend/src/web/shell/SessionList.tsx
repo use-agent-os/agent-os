@@ -69,7 +69,6 @@ import {
   filterOptions,
   groupSessions,
   hasActiveFilters,
-  keyLabel,
   matchesFilters,
   movePin,
   nestSessions,
@@ -78,6 +77,7 @@ import {
   sessionAgent,
   sessionChannel,
   sessionIsRunning,
+  keyLabel,
   sessionTitle,
   togglePin,
   type SessionFilters,
@@ -88,6 +88,31 @@ import {
 } from './session-list'
 import { pathToSessionKey, sessionKeyToPath } from './session-url'
 import { useShell } from './shell-store'
+
+// ── Row titles ──────────────────────────────────────────────────────────────
+
+/**
+ * The gateway's fallback "derived title" for an unnamed session is the short
+ * opaque session id (8 hex characters): an identifier, not a title.
+ */
+function isOpaqueTitle(title: string): boolean {
+  return /^[0-9a-f]{8}$/i.test(title.trim())
+}
+
+/**
+ * How a list row names a session. A real name or derived title is the
+ * headline; an unnamed session reads as untitled (the caller shows "New
+ * conversation", as the chat header does) with its short id as a secondary
+ * identifier, never the id as the headline.
+ */
+export function sessionHeadline(row: SessionRow): { title: string | null; id: string } {
+  const display = String(row.display_name || row.displayName || '').trim()
+  const derived = String(row.derived_title || row.derivedTitle || '').trim()
+  const key = keyLabel(row.key)
+  if (display) return { title: display, id: key }
+  if (derived && !isOpaqueTitle(derived) && derived !== key) return { title: derived, id: key }
+  return { title: null, id: derived && isOpaqueTitle(derived) ? derived : key }
+}
 
 // ── Browser-stored list preferences ─────────────────────────────────────────
 
@@ -288,9 +313,9 @@ export function SessionList({ onNavigate }: { onNavigate?: () => void }) {
             <section
               key={section.id}
               aria-label={sectionTitle(section)}
-              className="mt-3 first:mt-1"
+              className="mt-4 first:mt-1"
             >
-              <h3 className="px-2.5 pb-1 text-label text-text-muted">{sectionTitle(section)}</h3>
+              <h3 className="pane-group-label">{sectionTitle(section)}</h3>
               <ul
                 role="list"
                 className={stagger ? 'anim-stagger flex flex-col gap-px' : 'flex flex-col gap-px'}
@@ -695,9 +720,9 @@ function SessionItem(props: ItemProps) {
   )
 
   const current = currentKey === row.key
-  // A session with no name or derived title shows a label from its key (an
-  // id like `d07013c3`): set it as an identifier so it reads as one.
-  const keyTitled = title === keyLabel(row.key)
+  // An unnamed session reads "New conversation" with its short id beside the
+  // agent, as the chat header does; the id is never the headline.
+  const headline = sessionHeadline(row)
   const channel = sessionChannel(row)
   const agent = sessionAgent(row)
   return (
@@ -707,7 +732,7 @@ function SessionItem(props: ItemProps) {
           <div
             data-current={current || undefined}
             className={cn(
-              'session-row group relative flex items-center rounded-lg transition-colors duration-[var(--duration-fast)]',
+              'session-row group relative flex items-center rounded-[10px] transition-colors duration-[var(--duration-fast)]',
               current ? 'bg-surface-3 shadow-highlight' : 'hover:bg-surface-2',
             )}
             style={{ paddingLeft: depth * 14 }}
@@ -774,45 +799,54 @@ function SessionItem(props: ItemProps) {
                   onNavigate?.()
                 }}
                 aria-current={current ? 'page' : undefined}
-                className="target flex min-w-0 flex-1 items-center gap-2.5 rounded-lg py-1.5 pr-2 pl-2 text-ui"
+                className="target flex min-w-0 flex-1 items-center gap-2.5 rounded-[10px] py-[7px] pr-2.5 pl-2 text-ui"
               >
                 <span
-                  className={`relative grid size-7 shrink-0 place-items-center rounded-md border transition-colors duration-[var(--duration-fast)] ${
-                    current
-                      ? 'border-accent/30 bg-accent-tint text-accent'
-                      : 'border-border bg-surface-2 text-text-muted group-hover:text-text'
-                  }`}
+                  className={cn(
+                    'session-tile relative grid size-7 shrink-0 place-items-center rounded-[9px]',
+                    current && 'session-tile-current',
+                  )}
                 >
                   <ChannelIcon channel={channel} className="flex" />
                   {running ? (
                     <span
                       role="img"
                       aria-label={t('webShell.sessionRunning')}
-                      className="absolute -top-1 -right-1 flex rounded-full bg-surface-1 p-0.5 text-accent"
+                      className="absolute -top-0.5 -right-0.5 flex rounded-full bg-surface-1 p-[3px] text-accent"
                     >
                       <span
                         data-live
                         data-status-icon
-                        className="status-dot motion-status size-2"
+                        className="status-dot motion-status size-1.5"
                       />
                     </span>
                   ) : null}
                 </span>
-                <span className="flex min-w-0 flex-1 flex-col">
+                <span className="flex min-w-0 flex-1 flex-col gap-px">
                   <span className="flex min-w-0 items-baseline gap-2">
                     <span
-                      className={`min-w-0 flex-1 truncate ${keyTitled ? 'font-mono text-[13px] tracking-tight' : ''} ${current ? 'font-medium text-text' : 'text-text'}`}
+                      className={cn(
+                        'session-title min-w-0 flex-1 truncate',
+                        headline.title === null && 'text-text-muted',
+                        current && 'font-medium',
+                      )}
                     >
-                      {title}
+                      {headline.title ?? t('webShell.sessionUntitled')}
                     </span>
                     <span className="shrink-0 text-small text-text-muted tabular-nums group-focus-within:invisible group-hover:invisible">
                       {relTimeLabel(row.updated_at ?? row.updatedAt ?? '')}
                     </span>
                   </span>
                   <span className="flex min-w-0 items-center gap-1.5 text-small leading-4 text-text-muted">
-                    <span className="truncate">
+                    <span className="min-w-0 truncate">
+                      {headline.title === null ? (
+                        <span className="font-mono text-[11.5px] tracking-tight">
+                          {headline.id}
+                          <span aria-hidden>{' · '}</span>
+                        </span>
+                      ) : null}
                       {agent}
-                      <span aria-hidden>
+                      <span className="sr-only">
                         {' · '}
                         {channel}
                       </span>
@@ -824,7 +858,7 @@ function SessionItem(props: ItemProps) {
                     ) : null}
                     {!expanded && node.childCount > 0 ? (
                       <span
-                        className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-surface-2 px-1.5 tabular-nums"
+                        className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-3 px-1.5 leading-4 tabular-nums"
                         title={tPlural('webShell.sessionChildren', node.childCount)}
                       >
                         <span className="sr-only">

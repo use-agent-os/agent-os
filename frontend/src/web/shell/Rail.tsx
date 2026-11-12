@@ -82,10 +82,7 @@ export function Rail({ onNavigate }: { onNavigate?: () => void }) {
   }
 
   return (
-    <nav
-      aria-label={t('webShell.railLabel')}
-      className="flex h-full w-[var(--rail-width)] shrink-0 flex-col items-center border-r border-border bg-surface-1 pt-3 pb-2"
-    >
+    <nav aria-label={t('webShell.railLabel')} className="rail">
       <span aria-hidden className="rail-brand">
         <span className="shell-brand-mark" />
       </span>

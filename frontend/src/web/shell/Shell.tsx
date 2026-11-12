@@ -120,7 +120,7 @@ function Workspace() {
       )}
       <div className="flex min-w-0 flex-1 flex-col">
         {phone ? (
-          <header className="flex h-12 shrink-0 items-center gap-1.5 border-b border-border bg-surface-1 px-1.5 pt-[env(safe-area-inset-top)] shadow-highlight">
+          <header className="phone-bar">
             <Button
               variant="ghost"
               size="icon"

@@ -1,9 +1,14 @@
 import type { ReactNode } from 'react'
 
-// The title row of a top-level page. Phones stack it (title and description
-// full width, actions on their own row, left-aligned) so the actions never
-// squeeze the description into a narrow column; from `sm` up the actions sit
-// on the right.
+// The title row of a top-level page: a display title in Geist, a quiet
+// description and the page's actions. The page atmosphere (a faint dot grid
+// and a lime wash fading out under the header) is painted by the scroller
+// that holds a header (base.css `.page-atmosphere`), so it sits under the
+// content, scrolls with it and needs nothing from the page.
+//
+// Phones stack it (title and description full width, actions on their own
+// row, left-aligned) so the actions never squeeze the description into a
+// narrow column; from `sm` up the actions sit on the right.
 
 export function PageHeader({
   title,
@@ -26,15 +31,15 @@ export function PageHeader({
   return (
     <header
       data-page-header
-      className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start"
+      className="page-header flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start"
     >
       <div className="min-w-0 sm:flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-title">{title}</h1>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <h1 className="page-title">{title}</h1>
           {badge}
         </div>
         {description ? (
-          <p data-page-header-description className="mt-1 text-pretty text-text-muted">
+          <p data-page-header-description className="page-description">
             {description}
           </p>
         ) : null}
