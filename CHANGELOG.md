@@ -30,6 +30,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Responses requests (including `llm.provider = "openai_responses"`) also no
   longer send `stop`, which the API rejects, and mark tools `strict: false`
   so optional tool arguments stay optional.
+- Settings → Pilot Router and Settings → Providers list Surplus Intelligence's
+  models again (all 500+ of them). Switching the provider to Surplus or OpenCAP
+  without restarting left the gateway on the previous provider's catalog, and a
+  boot fetch that missed its 5 s budget left it empty; either way `models.list`
+  returned nothing, so the tier menus showed only the five built-in profile
+  models and the Providers form waited on the key test. The gateway now fetches
+  the public catalog on demand, keeps it for five minutes, shares one request
+  between concurrent callers, and keeps serving the last good copy if a refresh
+  fails. When the provider is the active one, its turns also pick up the right
+  context windows and capabilities. The tier menus say when the list is still
+  loading or could not be loaded, and the Providers model menu no longer stays
+  locked once the key test has returned a list.
 
 ## [2026.11.12] - 2026-11-12
 

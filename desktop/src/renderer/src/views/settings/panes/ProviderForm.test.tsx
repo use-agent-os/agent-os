@@ -93,6 +93,27 @@ describe('ProviderForm · Test key', () => {
     expect(screen.getByText(/Fetched from the provider just now/)).toBeInTheDocument()
   })
 
+  it('keeps the model menu usable when the probe answers before the catalog does', async () => {
+    // A large catalog (Surplus: 500+ models) can still be in flight when the
+    // key probe returns its own list; the menu must not stay locked on it.
+    rpcCall.mockImplementation(async (method: string) => {
+      if (method === 'models.list') return new Promise(() => {})
+      if (method === 'providers.probe') {
+        return { ok: true, models: [{ id: 'glm-5.3' }], model: 'glm-5.3', error: null }
+      }
+      return {}
+    })
+    renderForm()
+    const select = screen.getByLabelText('Default model') as HTMLSelectElement
+    expect(select).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-test-123' } })
+    fireEvent.click(screen.getByTestId('key-probe-button'))
+
+    await waitFor(() => expect(select).not.toBeDisabled())
+    expect([...select.options].map((o) => o.value)).toEqual(['', 'glm-5.3'])
+  })
+
   it('shows the provider’s rejection verbatim', async () => {
     rpcCall.mockImplementation(async (method: string) =>
       method === 'providers.probe'

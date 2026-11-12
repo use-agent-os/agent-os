@@ -608,7 +608,7 @@ export function ProviderForm({
             className="mac-select"
             aria-label={t('settings.providers.model')}
             value={draft.model}
-            disabled={disabled || models.isPending}
+            disabled={disabled || (models.isPending && !hasCatalog)}
             onChange={(e) => setDraft((d) => ({ ...d, model: e.target.value }))}
           >
             <option value="">{t('settings.providers.model.none')}</option>

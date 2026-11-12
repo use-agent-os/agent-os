@@ -185,6 +185,14 @@ function RouterForm({
     queryFn: () =>
       rpc.call<ModelListEntry[]>('models.list', { provider, capabilities: ['vision'] }),
   })
+  // Until the provider's own list arrives the menu holds only the offline
+  // profile models; say so instead of passing them off as the whole catalog.
+  const listStatus = (query: { isLoading: boolean; isError: boolean }) =>
+    query.isLoading
+      ? t('settings.router.tier.modelsLoading')
+      : query.isError
+        ? t('settings.router.tier.modelsFailed')
+        : ''
   const textOptions = mergeModelOptions(textQuery.data, offlineTierModels(profile?.tiers))
   const visionOptions = mergeModelOptions(
     visionQuery.data,
@@ -406,6 +414,7 @@ function RouterForm({
           {draft.tiers.map((row) => {
             const isImage = row.tier === 'image_model'
             const options = isImage ? visionOptions : textOptions
+            const status = listStatus(isImage ? visionQuery : textQuery)
             const known = options.some((o) => o.id === row.model)
             const isDefault = !isImage && row.tier === draft.defaultTier
             return (
@@ -443,6 +452,11 @@ function RouterForm({
                         {tierOptionLabel(o)}
                       </option>
                     ))}
+                    {status ? (
+                      <option value="" disabled>
+                        {status}
+                      </option>
+                    ) : null}
                   </select>
                   {row.description ? (
                     <span className="stg-tier__desc">{row.description}</span>
