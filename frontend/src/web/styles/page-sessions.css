@@ -1,0 +1,625 @@
+/* Sessions: the summary line, the toolbar's filter chips, the session list
+ * (a table that turns into cards in a narrow container), the bulk bar and the
+ * empty state. Imported by the Sessions page only, so it ships with its lazy
+ * chunk. The channel tiles use the `.pj-hue` palette from page-projects.css.
+ * Durations and easings come from tokens.css; the reduced-motion rule in
+ * base.css makes every animation here instant. */
+
+@layer components {
+  /* ---- Summary line ------------------------------------------------------ */
+
+  .sx-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.375rem 0.5rem;
+    margin-top: 0.25rem;
+  }
+  .sx-summary-total {
+    margin-right: 0.25rem;
+    color: var(--text);
+    font-size: var(--text-ui);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  /* The lifecycle mix as one bar; segments grow in once, on mount. */
+  .sx-meter {
+    display: flex;
+    gap: 2px;
+    width: 6.5rem;
+    height: 6px;
+    margin-right: 0.375rem;
+    overflow: hidden;
+    border-radius: 9999px;
+    background: var(--surface-3);
+  }
+  .sx-meter > span {
+    min-width: 4px;
+    border-radius: 9999px;
+    background: currentColor;
+    transform-origin: left center;
+    animation: sx-grow var(--duration-enter) var(--ease-enter) both;
+  }
+  @keyframes sx-grow {
+    from {
+      transform: scaleX(0);
+    }
+  }
+  .sx-summary-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4375rem;
+    height: 1.625rem;
+    padding: 0 0.625rem;
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    background: var(--surface-1);
+    color: var(--text);
+    font-size: var(--text-small);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .sx-summary-chip[data-zero] {
+    color: var(--text-muted);
+    background: transparent;
+  }
+  .sx-summary-chip[data-live] {
+    border-color: color-mix(in oklab, var(--accent) 35%, transparent);
+    background: var(--accent-tint);
+    color: var(--accent);
+    font-weight: 500;
+  }
+  .sx-summary-quiet {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    color: var(--text-muted);
+    font-size: var(--text-small);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .sx-summary-quiet > svg {
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+  .sx-toolbar-meta {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.875rem;
+    margin-left: auto;
+  }
+
+  /* ---- Toolbar ----------------------------------------------------------- */
+
+  .sx-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+  }
+  .sx-search {
+    flex: 1 1 14rem;
+    max-width: 22rem;
+  }
+
+  /* A filter chip: dashed until it holds a value, then solid and tinted. */
+  .sx-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    height: 2rem;
+    max-width: 100%;
+    padding: 0 0.5rem 0 0.625rem;
+    border: 1px dashed var(--border-control);
+    border-radius: 9999px;
+    background: transparent;
+    color: var(--text);
+    font-size: var(--text-small);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .sx-chip:hover {
+    border-style: solid;
+    background: var(--surface-2);
+  }
+  .sx-chip[data-state='open'] {
+    border-style: solid;
+    background: var(--surface-3);
+  }
+  .sx-chip[data-active] {
+    border-style: solid;
+    border-color: color-mix(in oklab, var(--accent) 50%, var(--border-control));
+    background: var(--accent-tint);
+  }
+  .sx-chip-icon {
+    display: inline-flex;
+    color: var(--text-muted);
+  }
+  .sx-chip-icon > svg,
+  .sx-chip-caret {
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+  .sx-chip-caret {
+    color: var(--text-muted);
+    transition: rotate var(--duration-base) var(--ease-out);
+  }
+  .sx-chip[data-state='open'] .sx-chip-caret {
+    rotate: 180deg;
+  }
+  .sx-chip-value {
+    overflow: hidden;
+    max-width: 10rem;
+    padding-left: 0.375rem;
+    border-left: 1px solid var(--border-strong);
+    text-overflow: ellipsis;
+  }
+
+  /* ---- The list ---------------------------------------------------------- */
+
+  .sx-list {
+    container: sx-list / inline-size;
+  }
+  .sx-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: 0;
+    text-align: left;
+  }
+  .sx-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 0.5rem 0.75rem;
+    background: var(--surface-0);
+    box-shadow: inset 0 -1px 0 var(--border);
+    color: var(--text-muted);
+    font-size: var(--text-label);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .sx-table thead th[data-col='check'] {
+    width: 2.75rem;
+  }
+  .sx-table thead th[data-col='context'] {
+    width: 11rem;
+  }
+  .sx-table thead th[data-col='status'] {
+    width: 8rem;
+  }
+  .sx-table thead th[data-col='messages'] {
+    width: 5.75rem;
+  }
+  .sx-table thead th[data-col='updated'] {
+    width: 6.5rem;
+  }
+  .sx-table thead th[data-col='actions'] {
+    width: 3rem;
+  }
+  .sx-table [data-col='messages'] {
+    text-align: right;
+  }
+  .sx-table [data-col='check'] {
+    padding-inline: 0.875rem 0.25rem;
+  }
+  .sx-table tbody td {
+    padding: 0.625rem 0.75rem;
+    border-top: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  .sx-table tbody tr:first-child td {
+    border-top-color: transparent;
+  }
+  .sx-table tbody td:is([data-col='messages'], [data-col='updated']) {
+    color: var(--text-muted);
+    font-size: var(--text-small);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .sx-table tbody td[data-col='actions'] {
+    padding-inline: 0.25rem 0.75rem;
+    text-align: right;
+  }
+
+  .sx-row {
+    transition: background-color var(--duration-fast) var(--ease-out);
+  }
+  .sx-row:hover {
+    background: color-mix(in oklab, var(--surface-1), var(--text) 2%);
+  }
+  .sx-row[data-selected] {
+    background: var(--accent-tint);
+  }
+  /* The accent edge on a selected row. */
+  .sx-row[data-selected] > td:first-child {
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+
+  .sx-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-inline: -0.25rem;
+    padding-inline: 0.25rem;
+    border-radius: var(--radius-sm);
+  }
+  .sx-sort:hover,
+  .sx-sort[data-active] {
+    color: var(--text);
+  }
+
+  .sx-check {
+    width: 1rem;
+    height: 1rem;
+    accent-color: var(--accent);
+    cursor: pointer;
+    vertical-align: middle;
+  }
+
+  /* The channel tile; a ring in the accent while a task runs. */
+  .sx-tile {
+    position: relative;
+    display: inline-grid;
+    flex-shrink: 0;
+    place-items: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: var(--radius-control);
+    transition: box-shadow var(--duration-base) var(--ease-out);
+  }
+  .sx-tile svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .sx-tile[data-live],
+  .sx-tile.pj-hue[data-live] {
+    box-shadow:
+      0 0 0 2px var(--surface-0),
+      0 0 0 3.5px var(--accent);
+  }
+
+  .sx-title {
+    display: flex;
+    min-width: 0;
+    min-height: 1.5rem;
+    align-items: center;
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-weight: 500;
+  }
+  .sx-title:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-color: var(--border-strong);
+  }
+  @media (pointer: coarse) {
+    .sx-title {
+      min-height: 2.75rem;
+    }
+  }
+  .sx-key {
+    overflow: hidden;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Agent and project, as quiet tags. */
+  .sx-tag {
+    display: inline-flex;
+    min-width: 0;
+    max-width: 100%;
+    height: 1.375rem;
+    align-items: center;
+    gap: 0.3125rem;
+    padding: 0 0.4375rem;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: var(--text-small);
+  }
+  .sx-tag > svg {
+    width: 0.8125rem;
+    height: 0.8125rem;
+    flex-shrink: 0;
+    color: var(--text-muted);
+  }
+
+  /* Row tools that only matter on hover (rename): visible on touch, on hover
+     and whenever focus is inside the row. */
+  @media (hover: hover) and (pointer: fine) {
+    .sx-reveal {
+      opacity: 0;
+      transition: opacity var(--duration-fast) var(--ease-out);
+    }
+    .sx-row:hover .sx-reveal,
+    .sx-row:focus-within .sx-reveal,
+    .sx-reveal:focus-visible {
+      opacity: 1;
+    }
+  }
+
+  .sx-more {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 1rem 0 0.25rem;
+    border-top: 1px solid var(--border);
+  }
+
+  /* Narrow containers (phones, a narrow window): each row becomes a card.
+     Line one: checkbox, tile and title, actions. Line two: status, agent and
+     project, messages, then the time on the right. Every cell is rendered
+     once; only the layout changes. */
+  @container sx-list (max-width: 46rem) {
+    .sx-table,
+    .sx-table thead,
+    .sx-table tbody {
+      display: block;
+    }
+    .sx-table tr {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .sx-table thead {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      margin-bottom: 0.5rem;
+      background: var(--surface-0);
+      box-shadow: inset 0 -1px 0 var(--border);
+    }
+    .sx-table thead th {
+      position: static;
+      width: auto;
+      background: none;
+      box-shadow: none;
+    }
+    .sx-table
+      thead
+      th:is(
+        [data-col='context'],
+        [data-col='status'],
+        [data-col='messages'],
+        [data-col='actions']
+      ) {
+      display: none;
+    }
+    .sx-table thead th[data-col='session'] {
+      flex: 1 1 0;
+    }
+    .sx-table tbody {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .sx-table tbody tr {
+      padding: 0.375rem 0 0.625rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-card);
+      background: var(--surface-1);
+      box-shadow: var(--shadow-card);
+    }
+    .sx-table tbody tr[data-selected] {
+      border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+      background: color-mix(in oklab, var(--surface-1), var(--accent) 7%);
+    }
+    .sx-table tbody tr[data-selected] > td:first-child {
+      box-shadow: none;
+    }
+    .sx-table tbody td {
+      padding: 0.25rem 0.5rem;
+      border-top: 0;
+    }
+    .sx-table [data-col='check'] {
+      order: 0;
+      width: 2.75rem;
+      flex: none;
+    }
+    .sx-table tbody [data-col='session'] {
+      order: 1;
+      flex: 1 1 0;
+      min-width: 0;
+    }
+    .sx-table tbody [data-col='actions'] {
+      order: 2;
+      flex: none;
+    }
+    /* A zero-height full-width item forces the meta cells onto line two. */
+    .sx-table tbody tr::after {
+      content: '';
+      order: 3;
+      flex-basis: 100%;
+    }
+    /* Line two: status, messages, the time on the right; line three: the
+       agent and project tags. */
+    .sx-table tbody [data-col='status'] {
+      order: 4;
+      padding-inline-start: 0.875rem;
+    }
+    .sx-table tbody [data-col='messages'] {
+      order: 5;
+    }
+    .sx-table tbody [data-col='updated'] {
+      order: 6;
+      margin-inline-start: auto;
+      padding-inline-end: 0.875rem;
+    }
+    .sx-table tbody [data-col='context'] {
+      order: 7;
+      flex-basis: 100%;
+      min-width: 0;
+      padding-inline: 0.875rem;
+    }
+  }
+
+  /* ---- Bulk bar ---------------------------------------------------------- */
+
+  .sx-bulk {
+    position: sticky;
+    bottom: 1rem;
+    z-index: var(--z-sticky);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.375rem 0.5rem;
+    width: fit-content;
+    max-width: 100%;
+    margin-inline: auto;
+    padding: 0.375rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-overlay);
+    background: var(--surface-overlay);
+    box-shadow: var(--shadow-overlay), var(--highlight);
+  }
+  .sx-bulk-count {
+    display: grid;
+    min-width: 1.375rem;
+    height: 1.375rem;
+    place-items: center;
+    padding: 0 0.375rem;
+    border-radius: 9999px;
+    background: var(--accent);
+    background-image: var(--accent-gradient);
+    color: var(--accent-fg);
+    font-size: var(--text-small);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---- Empty: ghost rows of what the list becomes, the call below ------- */
+
+  .sx-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-block: 0.5rem 2rem;
+  }
+  .sx-ghost {
+    display: flex;
+    width: 100%;
+    max-width: 46rem;
+    flex-direction: column;
+    pointer-events: none;
+    mask-image: linear-gradient(to bottom, black 15%, transparent 92%);
+  }
+  .sx-ghost-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border-top: 1px solid var(--border);
+  }
+  .sx-ghost-row:first-child {
+    border-top-color: transparent;
+  }
+  .sx-ghost-row .sx-tile {
+    opacity: 0.85;
+  }
+  .sx-ghost-lines {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 0.4375rem;
+  }
+  .sx-ghost-lines > span {
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: var(--surface-3);
+  }
+  .sx-ghost-lines > span + span {
+    height: 0.375rem;
+    background: var(--surface-2);
+  }
+  .sx-ghost-chip,
+  .sx-ghost-badge,
+  .sx-ghost-time {
+    flex-shrink: 0;
+    border-radius: 9999px;
+  }
+  .sx-ghost-chip {
+    width: 5rem;
+    height: 1.25rem;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+  }
+  .sx-ghost-badge {
+    width: 4.5rem;
+    height: 1.25rem;
+    background: color-mix(in oklab, var(--info) 16%, transparent);
+  }
+  .sx-ghost-row:first-child .sx-ghost-badge {
+    background: color-mix(in oklab, var(--ok) 18%, transparent);
+  }
+  .sx-ghost-time {
+    width: 2.75rem;
+    height: 0.4375rem;
+    background: var(--surface-3);
+  }
+  @media (max-width: 40rem) {
+    .sx-ghost-chip,
+    .sx-ghost-badge {
+      display: none;
+    }
+  }
+  .sx-empty-copy {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: -4.5rem;
+    text-align: center;
+  }
+  .sx-empty-icon {
+    display: grid;
+    width: 3rem;
+    height: 3rem;
+    margin-bottom: 0.5rem;
+    place-items: center;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-card);
+    background: var(--surface-1);
+    color: var(--accent);
+    box-shadow:
+      0 0 0 6px var(--surface-0),
+      var(--shadow-card),
+      0 10px 32px -10px var(--accent-glow);
+  }
+  .sx-empty-icon > svg {
+    width: 1.375rem;
+    height: 1.375rem;
+  }
+}
+
+@media (forced-colors: active) {
+  .sx-chip,
+  .sx-summary-chip,
+  .sx-tag,
+  .sx-tile {
+    border: 1px solid CanvasText;
+  }
+  .sx-chip[data-active] {
+    border-width: 2px;
+  }
+  .sx-row[data-selected] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .sx-meter > span {
+    background: CanvasText;
+  }
+  .sx-tile[data-live],
+  .sx-tile.pj-hue[data-live] {
+    outline: 2px solid Highlight;
+  }
+}

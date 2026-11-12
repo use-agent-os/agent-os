@@ -5,26 +5,30 @@ import {
   ArrowDown,
   Bot,
   ChevronDown,
+  Clock,
   ExternalLink,
   FolderInput,
   FolderKanban,
+  Hash,
   Loader2,
+  MessageCircle,
   MessageSquare,
   MessagesSquare,
   MoreHorizontal,
   Pencil,
   Plus,
   Search,
+  Send,
   Trash2,
   X,
 } from 'lucide-react'
 import { useId, useMemo, useState, type ReactNode } from 'react'
-import { Link, useHref, useNavigate } from 'react-router'
+import { Link, useHref } from 'react-router'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { formatNumber, t, tPlural } from '@/i18n'
 import '@/i18n/en/webPagesWork'
-import { blockedBecause, gate, requireConnection, type Gate } from '@/lib/disabled-reason'
+import { gate, requireConnection, type Gate } from '@/lib/disabled-reason'
 import { usePendingQuestions } from '@/lib/pending-questions'
 import { cn } from '@/lib/utils'
 import { filterSessionsByProject } from '@/views/projects/logic'
@@ -58,17 +62,8 @@ import {
 } from '@/web/components/ui/alert-dialog'
 import { Badge, StatusDot } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
-import { Card } from '@/web/components/ui/card'
-import { Input, Select } from '@/web/components/ui/input'
+import { Input } from '@/web/components/ui/input'
 import { PageHeader } from '@/web/components/ui/page-header'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/web/components/ui/dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -76,49 +71,63 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/web/components/ui/dropdown-menu'
-import { EmptyState, ErrorState, Skeleton } from '@/web/components/ui/states'
+import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import {
-  AGENTS_QUERY_KEY,
-  createSessionOptimistic,
-  PROJECTS_QUERY_KEY,
-  SESSIONS_QUERY_KEY,
   useAgents,
   useProjectNames,
   useSessionsList,
+  SESSIONS_QUERY_KEY,
 } from '@/web/shell/session-data'
 import {
   sessionAgent,
+  sessionChannel,
   sessionProject,
   sessionTitle,
   type SessionRow,
 } from '@/web/shell/session-list'
+import { ChannelIcon } from '@/web/shell/channel-icon'
 import { openInNewTab } from '@/web/shell/SessionList'
 import { sessionKeyToPath } from '@/web/shell/session-url'
-import type { RpcState } from '@/lib/ws-rpc'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { PAGE_CLASS } from '@/web/features/home/overview-ui'
-import { StatStrip, useArrival, WorkSkeleton, type StripItem } from './StatStrip'
+import { hueOf } from '@/web/features/projects/hue'
+import { FilterMenu, type FilterOption } from './FilterMenu'
+import { MoveDialog, NewSessionDialog } from './session-dialogs'
 import { useSessionsTotal, type SessionsTotal } from './sessions-total'
+import { useArrival, useFreshKeys } from './use-arrival'
+import '@/web/styles/page-projects.css'
+import '@/web/styles/page-sessions.css'
 
-// `/sessions` (task 8.2): every session in one table, on views/sessions/logic.
-// Search, agent and project filters, stat tiles, inline rename, bulk delete,
-// move to project, a new-session dialog that can create an agent, and a flag on
-// rows whose agent is no longer registered.
+// `/sessions` (task 8.2): every session in one refined list, on
+// views/sessions/logic. A one-line summary under the title, a toolbar of
+// search and filter chips (agent, project, status), rows with a channel tile,
+// inline rename, a row menu, bulk delete and move, a new-session dialog that
+// can create an agent, and a flag on rows whose agent is no longer
+// registered. Narrow containers turn the rows into cards.
 
 const PAGE_SIZE = 50
-const NEW_AGENT = '__new__'
-const AGENT_ID = /^[a-z0-9_-]+$/
+const ALL = 'all'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function errorCode(error: unknown): string {
-  return (error as { code?: string } | null)?.code ?? ''
-}
-
 type Confirm = { keys: string[] } | null
 type Notice = { tone: 'ok' | 'warn' | 'danger'; text: string } | null
+
+/** The status filter's buckets, on the row's visual status. */
+type StatusFilter = typeof ALL | 'executing' | 'running' | 'done' | 'failed' | 'killed'
+
+function matchesStatus(row: SessionRow, status: StatusFilter): boolean {
+  if (status === ALL) return true
+  if (status === 'executing') {
+    const run = sessionRunStatus(row)
+    return run === 'queued' || run === 'running'
+  }
+  const visual = sessionVisualStatus(row)
+  if (status === 'failed') return visual === 'failed' || visual === 'timeout'
+  return visual === status
+}
 
 export function SessionsPage() {
   const rpc = useRpc()
@@ -131,8 +140,9 @@ export function SessionsPage() {
   const reasonId = useId()
 
   const [search, setSearch] = useState('')
-  const [agentFilter, setAgentFilter] = useState('')
-  const [projectFilter, setProjectFilter] = useState('all')
+  const [agentFilter, setAgentFilter] = useState(ALL)
+  const [projectFilter, setProjectFilter] = useState(ALL)
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(ALL)
   const [sortCol, setSortCol] = useState<SortColumn>('updated_at')
   const [sortAsc, setSortAsc] = useState(false)
   const [limit, setLimit] = useState(PAGE_SIZE)
@@ -149,20 +159,13 @@ export function SessionsPage() {
     [agents.data],
   )
   const projectNames = projects.data
-  const agentOptions = useMemo(() => {
-    const ids = new Set(agentsById.keys())
-    for (const row of rows) {
-      const id = sessionAgent(row)
-      if (id) ids.add(id)
-    }
-    return [...ids].sort()
-  }, [agentsById, rows])
 
   const filtered = useMemo(() => {
-    const byAgent = agentFilter ? rows.filter((r) => sessionAgent(r) === agentFilter) : rows
+    const byAgent = agentFilter === ALL ? rows : rows.filter((r) => sessionAgent(r) === agentFilter)
     const byProject = filterSessionsByProject(byAgent, projectFilter) as SessionRow[]
-    return sortSessions(filterSessions(byProject, search), sortCol, sortAsc) as SessionRow[]
-  }, [rows, agentFilter, projectFilter, search, sortCol, sortAsc])
+    const byStatus = byProject.filter((r) => matchesStatus(r, statusFilter))
+    return sortSessions(filterSessions(byStatus, search), sortCol, sortAsc) as SessionRow[]
+  }, [rows, agentFilter, projectFilter, statusFilter, search, sortCol, sortAsc])
   const visible = filtered.slice(0, limit)
   const stats = useMemo(() => sessionStats(rows), [rows])
   const totals = useSessionsTotal(sessions.data?.length ?? 0)
@@ -173,9 +176,16 @@ export function SessionsPage() {
   const chosen = [...selected].filter((k) => listedKeys.has(k))
   const selectable = visible.filter((r) => !r.provisional)
   const allVisibleSelected = selectable.length > 0 && selectable.every((r) => selected.has(r.key))
-  const filtersActive = !!search.trim() || !!agentFilter || projectFilter !== 'all'
-  // Rows rise in once, when the list first arrives; never on a refetch.
+  const someVisibleSelected = !allVisibleSelected && selectable.some((r) => selected.has(r.key))
+  const filtersActive =
+    !!search.trim() || agentFilter !== ALL || projectFilter !== ALL || statusFilter !== ALL
+  // Rows rise in once, when the list first arrives; never on a refetch. A
+  // row that shows up later (created, moved in) rises in on its own.
   const arriving = useArrival(!sessions.isPending)
+  const fresh = useFreshKeys(
+    useMemo(() => rows.map((r) => r.key), [rows]),
+    !arriving,
+  )
 
   const toggle = (key: string, on: boolean) =>
     setSelected((prev) => {
@@ -193,10 +203,13 @@ export function SessionsPage() {
       }
       return next
     })
+  const resetPage = () => setLimit(PAGE_SIZE)
   const clearFilters = () => {
     setSearch('')
-    setAgentFilter('')
-    setProjectFilter('all')
+    setAgentFilter(ALL)
+    setProjectFilter(ALL)
+    setStatusFilter(ALL)
+    resetPage()
   }
   const onSort = (col: SortColumn) => {
     if (sortCol === col) setSortAsc((v) => !v)
@@ -247,21 +260,25 @@ export function SessionsPage() {
     }
   }
 
+  const empty = !sessions.isPending && !sessions.isError && rows.length === 0
+  const newButton = (primary: boolean) => (
+    <Button
+      variant={primary ? 'primary' : 'outline'}
+      disabled={act.disabled}
+      aria-describedby={act.reason ? reasonId : undefined}
+      onClick={() => setCreating(true)}
+    >
+      <Plus />
+      {t('webPagesWork.sessionsNew')}
+    </Button>
+  )
+
   const header = (
     <PageHeader
       title={t('webPagesWork.sessionsTitle')}
       description={t('webPagesWork.sessionsSubtitle')}
-      actions={
-        <Button
-          variant="primary"
-          disabled={act.disabled}
-          aria-describedby={act.reason ? reasonId : undefined}
-          onClick={() => setCreating(true)}
-        >
-          <Plus />
-          {t('webPagesWork.sessionsNew')}
-        </Button>
-      }
+      // The empty state below carries the one primary action.
+      actions={newButton(!empty)}
       note={
         act.reason ? (
           <span id={reasonId} className="text-small text-text-muted">
@@ -269,8 +286,61 @@ export function SessionsPage() {
           </span>
         ) : null
       }
+      footer={rows.length > 0 ? <SessionsSummary stats={stats} totals={totals} /> : null}
     />
   )
+
+  // Filter menus: every option says how many listed sessions it matches.
+  const agentOptions = useMemo((): FilterOption[] => {
+    const counts = new Map<string, number>()
+    for (const id of agentsById.keys()) counts.set(id, 0)
+    for (const row of rows) {
+      const id = sessionAgent(row)
+      if (id) counts.set(id, (counts.get(id) ?? 0) + 1)
+    }
+    return [
+      { value: ALL, label: t('webPagesWork.filterAllAgents'), count: rows.length },
+      ...[...counts.keys()].sort().map((id) => ({
+        value: id,
+        label: agentsById.get(id)?.name ?? id,
+        count: counts.get(id),
+      })),
+    ]
+  }, [agentsById, rows])
+  const projectOptions = useMemo((): FilterOption[] => {
+    const counts = new Map<string, number>()
+    let none = 0
+    for (const row of rows) {
+      const id = sessionProject(row)
+      if (id) counts.set(id, (counts.get(id) ?? 0) + 1)
+      else none++
+    }
+    return [
+      { value: ALL, label: t('webPagesWork.filterAllProjects'), count: rows.length },
+      { value: 'none', label: t('webPagesWork.filterNoProject'), count: none },
+      ...[...(projectNames ?? new Map<string, string>())].map(([id, name]) => ({
+        value: id,
+        label: name,
+        count: counts.get(id) ?? 0,
+      })),
+    ]
+  }, [projectNames, rows])
+  const statusOptions = useMemo((): FilterOption[] => {
+    const option = (value: StatusFilter, label: string, tone?: string): FilterOption => ({
+      value,
+      label,
+      count: rows.filter((r) => matchesStatus(r, value)).length,
+      mark: tone ? <StatusDot className={cn('size-2', tone)} /> : undefined,
+    })
+    return [
+      option(ALL, t('webPagesWork.filterAllStatuses')),
+      option('executing', t('webPagesWork.filterExecuting'), 'text-accent'),
+      option('running', t('webPagesWork.lifecycleOpen'), 'text-ok'),
+      option('done', t('webPagesWork.lifecycleDone'), 'text-info'),
+      option('failed', t('webPagesWork.summaryFailedTitle'), 'text-danger'),
+      option('killed', t('webPagesWork.lifecycleKilled'), 'text-text-muted'),
+    ]
+  }, [rows])
 
   let body: ReactNode
   if (sessions.isPending) {
@@ -279,71 +349,73 @@ export function SessionsPage() {
     // The error notice above says what failed; there is nothing to show under it.
     body = null
   } else if (rows.length === 0) {
-    body = (
-      <Card variant="plain" padding="none">
-        <EmptyState
-          icon={<MessagesSquare />}
-          title={t('webPagesWork.sessionsEmpty')}
-          description={t('webPagesWork.sessionsEmptyBody')}
-          action={
-            <Button variant="primary" disabled={act.disabled} onClick={() => setCreating(true)}>
-              <Plus />
-              {t('webPagesWork.sessionsNew')}
-            </Button>
-          }
-        />
-      </Card>
-    )
+    body = <SessionsEmpty action={newButton(true)} />
   } else {
     body = (
       <>
-        <StatTiles stats={stats} totals={totals} />
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="sx-toolbar">
           <Input
             type="search"
             aria-label={t('webPagesWork.sessionsSearch')}
             icon={<Search />}
-            wrapperClassName="flex-[2_1_16rem]"
+            wrapperClassName="sx-search"
             value={search}
             onChange={(e) => {
               setSearch(e.target.value)
-              setLimit(PAGE_SIZE)
+              resetPage()
             }}
             placeholder={t('webPagesWork.sessionsSearch')}
           />
-          <label className="flex min-w-0 flex-[1_1_11rem] items-center gap-2">
-            <span className="shrink-0 text-label text-text-muted max-sm:w-12">
-              {t('webPagesWork.filterAgent')}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <FilterMenu
+              label={t('webPagesWork.filterAgent')}
+              icon={<Bot />}
+              value={agentFilter}
+              options={agentOptions}
+              onChange={(v) => {
+                setAgentFilter(v)
+                resetPage()
+              }}
+            />
+            <FilterMenu
+              label={t('webPagesWork.filterProject')}
+              icon={<FolderKanban />}
+              value={projectFilter}
+              options={projectOptions}
+              onChange={(v) => {
+                setProjectFilter(v)
+                resetPage()
+              }}
+            />
+            <FilterMenu
+              label={t('webPagesWork.filterStatus')}
+              icon={<Activity />}
+              value={statusFilter}
+              options={statusOptions}
+              onChange={(v) => {
+                setStatusFilter(v as StatusFilter)
+                resetPage()
+              }}
+            />
+            {filtersActive ? (
+              <Button variant="ghost" size="sm" className="anim-fade-in" onClick={clearFilters}>
+                <X />
+                {t('webPagesWork.clearFilters')}
+              </Button>
+            ) : null}
+          </div>
+          <p className="sx-toolbar-meta">
+            <span className="sx-summary-quiet">
+              <MessageSquare aria-hidden />
+              {tPlural('webPagesWork.summaryMessages', stats.totalMessages, {
+                count: formatNumber(stats.totalMessages),
+              })}
             </span>
-            <Select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)}>
-              <option value="">{t('webPagesWork.filterAllAgents')}</option>
-              {agentOptions.map((id) => (
-                <option key={id} value={id}>
-                  {agentsById.get(id)?.name ?? id}
-                </option>
-              ))}
-            </Select>
-          </label>
-          <label className="flex min-w-0 flex-[1_1_11rem] items-center gap-2">
-            <span className="shrink-0 text-label text-text-muted max-sm:w-12">
-              {t('webPagesWork.filterProject')}
+            <span className="sx-summary-quiet">
+              <Bot aria-hidden />
+              {tPlural('webPagesWork.summaryAgents', stats.agents)}
             </span>
-            <Select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
-              <option value="all">{t('webPagesWork.filterAllProjects')}</option>
-              <option value="none">{t('webPagesWork.filterNoProject')}</option>
-              {[...(projectNames ?? new Map<string, string>())].map(([id, name]) => (
-                <option key={id} value={id}>
-                  {name}
-                </option>
-              ))}
-            </Select>
-          </label>
-          {filtersActive ? (
-            <Button variant="ghost" size="sm" className="anim-fade-in" onClick={clearFilters}>
-              <X />
-              {t('webPagesWork.clearFilters')}
-            </Button>
-          ) : null}
+          </p>
         </div>
 
         {notice ? (
@@ -377,38 +449,34 @@ export function SessionsPage() {
         ) : null}
 
         {filtered.length === 0 ? (
-          <Card variant="plain" padding="none">
-            <EmptyState
-              icon={<Search />}
-              title={t('webPagesWork.sessionsNoMatch')}
-              description={t('webPagesWork.sessionsNoMatchBody')}
-              action={
-                filtersActive ? (
-                  <Button variant="outline" onClick={clearFilters}>
-                    {t('webPagesWork.clearFilters')}
-                  </Button>
-                ) : undefined
-              }
-            />
-          </Card>
+          <EmptyState
+            size="sm"
+            icon={<Search />}
+            title={t('webPagesWork.sessionsNoMatch')}
+            description={t('webPagesWork.sessionsNoMatchBody')}
+            action={
+              filtersActive ? (
+                <Button variant="outline" onClick={clearFilters}>
+                  {t('webPagesWork.clearFilters')}
+                </Button>
+              ) : undefined
+            }
+          />
         ) : (
-          <Card
-            variant="plain"
-            padding="none"
-            role="region"
-            aria-label={t('webPagesWork.sessionsTable')}
-            className="work-table-wrap overflow-clip"
-          >
-            <table className="work-table">
-              <thead className="text-label text-text-muted">
+          <div role="region" aria-label={t('webPagesWork.sessionsTable')} className="sx-list">
+            <table className="sx-table">
+              <thead>
                 <tr>
-                  <th scope="col" data-col="check" className="w-11 py-2.5 pr-1 pl-4">
+                  <th scope="col" data-col="check">
                     <input
                       type="checkbox"
                       aria-label={t('webPagesWork.selectAll')}
                       checked={allVisibleSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someVisibleSelected
+                      }}
                       onChange={(e) => toggleAll(e.target.checked)}
-                      className="work-check"
+                      className="sx-check"
                     />
                   </th>
                   <SortHeader
@@ -418,13 +486,10 @@ export function SessionsPage() {
                     asc={sortAsc}
                     onSort={onSort}
                   />
-                  <th scope="col" data-col="agent" className="px-3 py-2.5 font-medium">
-                    {t('webPagesWork.colAgent')}
+                  <th scope="col" data-col="context">
+                    {t('webPagesWork.colContext')}
                   </th>
-                  <th scope="col" data-col="project" className="px-3 py-2.5 font-medium">
-                    {t('webPagesWork.colProject')}
-                  </th>
-                  <th scope="col" data-col="status" className="px-3 py-2.5 font-medium">
+                  <th scope="col" data-col="status">
                     {t('webPagesWork.colStatus')}
                   </th>
                   <SortHeader
@@ -433,7 +498,6 @@ export function SessionsPage() {
                     sortCol={sortCol}
                     asc={sortAsc}
                     onSort={onSort}
-                    numeric
                   />
                   <SortHeader
                     col="updated_at"
@@ -442,7 +506,7 @@ export function SessionsPage() {
                     asc={sortAsc}
                     onSort={onSort}
                   />
-                  <th scope="col" data-col="actions" className="w-12 py-2.5 pr-3">
+                  <th scope="col" data-col="actions">
                     <span className="sr-only">{t('webPagesWork.colActions')}</span>
                   </th>
                 </tr>
@@ -452,6 +516,7 @@ export function SessionsPage() {
                   <SessionTableRow
                     key={row.key}
                     row={row}
+                    fresh={fresh.has(row.key)}
                     selected={selected.has(row.key)}
                     onSelect={(on) => toggle(row.key, on)}
                     agentsById={agentsById}
@@ -465,7 +530,7 @@ export function SessionsPage() {
               </tbody>
             </table>
             {filtered.length > visible.length ? (
-              <div className="flex flex-wrap items-center justify-center gap-3 border-t border-border bg-surface-2/50 px-4 py-3">
+              <div className="sx-more">
                 <span className="text-small text-text-muted tabular-nums">
                   {t('webPagesWork.showingOf', { shown: visible.length, total: filtered.length })}
                 </span>
@@ -475,14 +540,14 @@ export function SessionsPage() {
                 </Button>
               </div>
             ) : null}
-          </Card>
+          </div>
         )}
 
         {chosen.length > 0 ? (
           <div
             role="region"
             aria-label={t('webPagesWork.bulkRegion')}
-            className="anim-enter sticky bottom-4 z-[var(--z-sticky)] mx-auto flex w-fit max-w-full flex-wrap items-center gap-x-2 gap-y-1.5 rounded-overlay border border-border-strong bg-surface-overlay p-1.5 shadow-overlay"
+            className="sx-bulk anim-enter"
           >
             <span className="flex min-w-0 items-center gap-1 max-sm:w-full">
               <Button
@@ -494,10 +559,7 @@ export function SessionsPage() {
               >
                 <X />
               </Button>
-              <span
-                aria-hidden
-                className="grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-small font-semibold text-accent-fg tabular-nums"
-              >
+              <span key={chosen.length} aria-hidden className="sx-bulk-count anim-scale-in">
                 {chosen.length}
               </span>
               <span className="pr-2 pl-1 font-medium whitespace-nowrap">
@@ -542,6 +604,20 @@ export function SessionsPage() {
           onRetry={() => void sessions.refetch()}
           retrying={sessions.isFetching}
         />
+      ) : null}
+      {totals.truncated && rows.length > 0 ? (
+        <p
+          role="note"
+          className="flex items-start gap-2 rounded-card border border-warn/30 bg-warn/10 px-3 py-2 text-small"
+        >
+          <AlertTriangle className="mt-px size-4 shrink-0 text-warn" aria-hidden data-status-icon />
+          {totals.total !== null
+            ? t('webPagesWork.sessionsTruncated', {
+                shown: formatNumber(totals.listed),
+                total: formatNumber(totals.total),
+              })
+            : t('webPagesWork.sessionsTruncatedUnknown', { shown: formatNumber(totals.listed) })}
+        </p>
       ) : null}
       {body}
 
@@ -599,35 +675,7 @@ export function SessionsPage() {
   )
 }
 
-// ── Loading shape ────────────────────────────────────────────────────────────
-
-function SessionsSkeleton() {
-  return (
-    <WorkSkeleton label={t('webPagesWork.sessionsLoading')} cells={5} wide>
-      <div className="flex flex-wrap gap-2">
-        <Skeleton className="h-9 flex-[2_1_16rem]" />
-        <Skeleton className="h-9 flex-[1_1_11rem]" />
-        <Skeleton className="h-9 flex-[1_1_11rem]" />
-      </div>
-      <Card variant="plain" padding="none" className="overflow-hidden">
-        <div className="h-10 border-b border-border bg-surface-2" />
-        {Array.from({ length: 6 }, (_, i) => (
-          <div key={i} className="flex items-center gap-4 border-b border-border px-4 py-3.5">
-            <Skeleton className="size-4 shrink-0" />
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <Skeleton className="h-4 w-40 max-w-full" />
-              <Skeleton className="h-3 w-56 max-w-full" />
-            </div>
-            <Skeleton className="h-5 w-20 max-sm:hidden" />
-            <Skeleton className="h-4 w-12 max-sm:hidden" />
-          </div>
-        ))}
-      </Card>
-    </WorkSkeleton>
-  )
-}
-
-// ── Stat tiles ───────────────────────────────────────────────────────────────
+// ── Summary line ─────────────────────────────────────────────────────────────
 
 /** The count of stored sessions: the true total, or "500+" when the gateway did not say. */
 function sessionsCountText(totals: SessionsTotal): string {
@@ -635,7 +683,12 @@ function sessionsCountText(totals: SessionsTotal): string {
   return t('webPagesWork.atLeast', { count: formatNumber(totals.listed) })
 }
 
-function StatTiles({
+/**
+ * One slim line under the title: the total, a proportion bar of the
+ * lifecycle mix, a chip per state, what is executing right now (live), then
+ * messages and agents, quieter.
+ */
+function SessionsSummary({
   stats,
   totals,
 }: {
@@ -643,105 +696,143 @@ function StatTiles({
   totals: SessionsTotal
 }) {
   const live = stats.activeRuns > 0
-  // Open, completed, failed or timed out, aborted: the same order as the hint.
   const parts = [
-    { n: stats.lifecycleOpen, tone: 'text-ok' },
-    { n: stats.done, tone: 'text-info' },
-    { n: stats.failedOrTimedOut, tone: 'text-danger' },
-    { n: stats.aborted, tone: 'text-text-muted' },
-  ]
-  const hint = t('webPagesWork.statSessionsHint', {
-    open: stats.lifecycleOpen,
-    done: stats.done,
-    failed: stats.failedOrTimedOut,
-    aborted: stats.aborted,
-  })
-  // The hint becomes a legend keyed to the meter. The separators stay in the
-  // text (screen readers and copy read the sentence); a catalog that words it
-  // differently just shows as one plain line.
-  const legend = hint.split(' · ')
-  const items: StripItem[] = [
     {
-      label: t('webPagesWork.statSessions'),
-      icon: <MessagesSquare />,
-      value: sessionsCountText(totals),
-      wide: true,
-      detail: (
-        <span className="flex flex-col gap-2">
-          {parts.some((part) => part.n > 0) ? (
-            <span className="work-meter" aria-hidden>
-              {parts
-                .filter((part) => part.n > 0)
-                .map((part) => (
-                  <span key={part.tone} className={part.tone} style={{ flexGrow: part.n }} />
-                ))}
-            </span>
-          ) : null}
-          <span className="flex flex-wrap gap-x-3 gap-y-0.5">
-            {legend.map((text, i) => (
-              <span key={i} className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                {legend.length === parts.length ? (
-                  <StatusDot className={cn('size-1.5', parts[i]!.tone)} />
-                ) : null}
-                {text}
-                {i < legend.length - 1 ? <span className="sr-only"> · </span> : null}
-              </span>
-            ))}
-          </span>
-        </span>
-      ),
+      key: 'open',
+      n: stats.lifecycleOpen,
+      tone: 'text-ok',
+      text: (count: string) => t('webPagesWork.summaryOpen', { count }),
     },
     {
-      label: t('webPagesWork.statRunning'),
-      icon: <Activity />,
-      value: formatNumber(stats.activeRuns),
-      tone: live ? 'accent' : 'default',
-      iconTone: live ? 'accent' : 'neutral',
-      detail: (
-        <span role="status" className="flex min-w-0 items-center gap-1.5">
-          <StatusDot tone={live ? 'accent' : 'neutral'} live={live} className="size-1.5" />
-          <span className="line-clamp-2">
-            {live
-              ? tPlural('webPagesWork.executingNow', stats.activeRuns)
-              : t('webPagesWork.executingNone')}
-          </span>
-        </span>
-      ),
+      key: 'done',
+      n: stats.done,
+      tone: 'text-info',
+      text: (count: string) => t('webPagesWork.summaryCompleted', { count }),
     },
     {
-      label: t('webPagesWork.statFailed'),
-      icon: <AlertTriangle />,
-      value: formatNumber(stats.failedOrTimedOut),
-      tone: stats.failedOrTimedOut > 0 ? 'danger' : 'default',
-      iconTone: stats.failedOrTimedOut > 0 ? 'danger' : 'neutral',
+      key: 'failed',
+      n: stats.failedOrTimedOut,
+      tone: 'text-danger',
+      text: (count: string) => t('webPagesWork.summaryFailed', { count }),
     },
     {
-      label: t('webPagesWork.statMessages'),
-      icon: <MessageSquare />,
-      value: formatNumber(stats.totalMessages),
+      key: 'aborted',
+      n: stats.aborted,
+      tone: 'text-text-muted',
+      text: (count: string) => t('webPagesWork.summaryAborted', { count }),
     },
-    { label: t('webPagesWork.statAgents'), icon: <Bot />, value: formatNumber(stats.agents) },
-  ]
+  ] as const
+  const count = totals.total ?? totals.listed
   return (
-    <div className="flex flex-col gap-2">
-      {totals.truncated ? (
-        <p
-          role="note"
-          className="flex items-start gap-2 rounded-card border border-warn/30 bg-warn/10 px-3 py-2 text-small"
-        >
-          <AlertTriangle className="mt-px size-4 shrink-0 text-warn" aria-hidden data-status-icon />
-          {totals.total !== null
-            ? t('webPagesWork.sessionsTruncated', {
-                shown: formatNumber(totals.listed),
-                total: formatNumber(totals.total),
-              })
-            : t('webPagesWork.sessionsTruncatedUnknown', { shown: formatNumber(totals.listed) })}
-        </p>
+    <ul aria-label={t('webPagesWork.summaryLabel')} className="sx-summary">
+      <li className="sx-summary-total">
+        {tPlural('webPagesWork.summarySessions', count, { count: sessionsCountText(totals) })}
+      </li>
+      {parts.some((p) => p.n > 0) ? (
+        <li aria-hidden className="sx-meter" title={t('webPagesWork.summaryMeter')}>
+          {parts
+            .filter((p) => p.n > 0)
+            .map((p) => (
+              <span key={p.key} className={p.tone} style={{ flexGrow: p.n }} />
+            ))}
+        </li>
       ) : null}
-      <StatStrip items={items} />
-    </div>
+      {parts.map((p) => (
+        <li
+          key={p.key}
+          className="sx-summary-chip"
+          data-zero={p.n === 0 || undefined}
+          title={p.key === 'failed' ? t('webPagesWork.summaryFailedTitle') : undefined}
+        >
+          <StatusDot className={cn('size-1.5', p.tone)} />
+          {p.text(formatNumber(p.n))}
+        </li>
+      ))}
+      <li role="status" className="sx-summary-chip" data-live={live || undefined}>
+        <StatusDot tone={live ? 'accent' : 'neutral'} live={live} className="size-1.5" />
+        {live
+          ? tPlural('webPagesWork.executingNow', stats.activeRuns)
+          : t('webPagesWork.executingNone')}
+      </li>
+    </ul>
   )
 }
+
+// ── Empty and loading ────────────────────────────────────────────────────────
+
+/** Ghost rows: what the list becomes, one per kind of source. */
+const GHOSTS = [
+  { icon: MessageCircle, title: '62%', key: '78%', hue: 'webchat' },
+  { icon: Send, title: '48%', key: '64%', hue: 'telegram' },
+  { icon: Hash, title: '56%', key: '70%', hue: 'slack' },
+  { icon: Clock, title: '40%', key: '58%', hue: 'cron' },
+]
+
+function SessionsEmpty({ action }: { action: ReactNode }) {
+  const titleId = useId()
+  return (
+    <section aria-labelledby={titleId} className="sx-empty anim-enter">
+      <div aria-hidden className="sx-ghost">
+        {GHOSTS.map((g) => (
+          <div key={g.hue} className="sx-ghost-row">
+            <span className="sx-tile pj-hue" data-tone="soft" data-hue={hueOf(g.hue)}>
+              <g.icon />
+            </span>
+            <span className="sx-ghost-lines">
+              <span style={{ width: g.title }} />
+              <span style={{ width: g.key }} />
+            </span>
+            <span className="sx-ghost-chip" />
+            <span className="sx-ghost-badge" />
+            <span className="sx-ghost-time" />
+          </div>
+        ))}
+      </div>
+      <div className="sx-empty-copy">
+        <span aria-hidden className="sx-empty-icon">
+          <MessagesSquare />
+        </span>
+        <h2 id={titleId} className="text-section">
+          {t('webPagesWork.sessionsEmpty')}
+        </h2>
+        <p className="max-w-md text-pretty text-text-muted">
+          {t('webPagesWork.sessionsEmptyBody')}
+        </p>
+        <div className="mt-2">{action}</div>
+      </div>
+    </section>
+  )
+}
+
+function SessionsSkeleton() {
+  return (
+    <LoadingRegion label={t('webPagesWork.sessionsLoading')} className="flex flex-col gap-4">
+      <div className="flex flex-wrap gap-2">
+        <Skeleton className="h-9 flex-[1_1_14rem] sm:max-w-xs" />
+        <Skeleton className="h-8 w-20 rounded-full" />
+        <Skeleton className="h-8 w-24 rounded-full" />
+        <Skeleton className="h-8 w-20 rounded-full" />
+      </div>
+      <div className="flex flex-col">
+        {Array.from({ length: 6 }, (_, i) => (
+          <div key={i} className="flex items-center gap-3 border-b border-border px-2 py-3">
+            <Skeleton className="size-4 shrink-0" />
+            <Skeleton className="size-9 shrink-0 rounded-control" />
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <Skeleton className="h-4 w-40 max-w-full" />
+              <Skeleton className="h-3 w-56 max-w-full" />
+            </div>
+            <Skeleton className="h-5 w-24 rounded-full max-sm:hidden" />
+            <Skeleton className="h-5 w-20 rounded-full max-sm:hidden" />
+            <Skeleton className="h-4 w-12 max-sm:hidden" />
+          </div>
+        ))}
+      </div>
+    </LoadingRegion>
+  )
+}
+
+// ── Table pieces ─────────────────────────────────────────────────────────────
 
 const LIFECYCLE_LABEL: Record<string, () => string> = {
   running: () => t('webPagesWork.lifecycleOpen'),
@@ -781,14 +872,12 @@ function SortHeader({
   sortCol,
   asc,
   onSort,
-  numeric = false,
 }: {
   col: SortColumn
   label: string
   sortCol: SortColumn
   asc: boolean
   onSort: (col: SortColumn) => void
-  numeric?: boolean
 }) {
   const active = sortCol === col
   const dataCol = col === 'key' ? 'session' : col === 'message_count' ? 'messages' : 'updated'
@@ -797,15 +886,12 @@ function SortHeader({
       scope="col"
       data-col={dataCol}
       aria-sort={active ? (asc ? 'ascending' : 'descending') : 'none'}
-      className={cn('px-3 py-2.5 font-medium', numeric && 'text-right')}
     >
       <button
         type="button"
         onClick={() => onSort(col)}
-        className={cn(
-          'press group/sort target -mx-1 inline-flex items-center gap-1 rounded-md px-1 hover:text-text',
-          active && 'text-text',
-        )}
+        data-active={active || undefined}
+        className="sx-sort press group/sort target"
       >
         {label}
         <ArrowDown
@@ -821,10 +907,26 @@ function SortHeader({
   )
 }
 
-// ── One table row ────────────────────────────────────────────────────────────
+/** The channel the session came from, as a tinted tile; a live ring while it runs. */
+function SessionTile({ row, live }: { row: SessionRow; live: boolean }) {
+  const channel = sessionChannel(row)
+  return (
+    <span
+      className="sx-tile pj-hue"
+      data-tone="soft"
+      data-hue={hueOf(channel)}
+      data-live={live || undefined}
+    >
+      <ChannelIcon channel={channel} className="flex" />
+    </span>
+  )
+}
+
+// ── One row ──────────────────────────────────────────────────────────────────
 
 function SessionTableRow({
   row,
+  fresh,
   selected,
   onSelect,
   agentsById,
@@ -835,6 +937,7 @@ function SessionTableRow({
   onDelete,
 }: {
   row: SessionRow
+  fresh: boolean
   selected: boolean
   onSelect: (on: boolean) => void
   agentsById: Map<string, { id: string; name: string }>
@@ -900,115 +1003,117 @@ function SessionTableRow({
     <tr
       data-session-key={row.key}
       data-selected={selected || undefined}
-      className={cn(
-        'align-middle transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]',
-        selected ? 'bg-accent-tint' : 'hover:bg-surface-2',
-      )}
+      className={cn('sx-row', fresh && 'anim-enter')}
     >
-      <td data-col="check" className="py-3 pr-1 pl-4">
+      <td data-col="check">
         {row.provisional ? null : (
           <input
             type="checkbox"
             aria-label={t('webPagesWork.selectRow', { title })}
             checked={selected}
             onChange={(e) => onSelect(e.target.checked)}
-            className="work-check"
+            className="sx-check"
           />
         )}
       </td>
-      <td data-col="session" className="max-w-[24rem] min-w-0 px-3 py-2.5">
-        {renaming ? (
-          <form
-            className="anim-fade-in flex items-center gap-1.5"
-            onSubmit={(e) => {
-              e.preventDefault()
-              void submitRename()
-            }}
-          >
-            <Input
-              size="sm"
-              autoFocus
-              aria-label={t('webPagesWork.renameLabel')}
-              placeholder={t('webPagesWork.renamePlaceholder')}
-              value={draft}
-              disabled={busy}
-              onChange={(e) => setDraft(e.target.value)}
-              onFocus={(e) => e.currentTarget.select()}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  e.stopPropagation()
-                  cancelRename()
-                }
-              }}
-              aria-invalid={error ? true : undefined}
-              aria-describedby={error ? errorId : undefined}
-              className="flex-1"
-            />
-            <Button size="sm" variant="primary" type="submit" disabled={busy || act.disabled}>
-              {busy ? <Loader2 className="animate-spin" /> : null}
-              {t('webPagesWork.save')}
-            </Button>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label={t('webPagesWork.cancel')}
-              disabled={busy}
-              onClick={cancelRename}
-            >
-              <X />
-            </Button>
-          </form>
-        ) : (
-          <div className="flex min-w-0 items-center gap-1">
-            <Link
-              key={renamedAt}
-              to={sessionKeyToPath(row.key)}
-              viewTransition
-              className={cn(
-                'flex min-h-6 min-w-0 items-center rounded-sm font-medium hover:underline hover:underline-offset-2 touch:min-h-11',
-                renamedAt ? 'anim-flash' : null,
-              )}
-            >
-              <span className="truncate">{title}</span>
-            </Link>
-            {row.provisional ? (
-              <Badge tone="neutral" className="ml-1">
-                <Loader2 className="animate-spin" aria-hidden />
-                {t('webPagesWork.provisional')}
-              </Badge>
-            ) : (
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                className="work-reveal shrink-0 text-text-muted"
-                aria-label={t('webPagesWork.renameRow', { title })}
-                disabled={act.disabled}
-                title={act.reason ?? undefined}
-                onClick={startRename}
+      <td data-col="session">
+        <div className="flex min-w-0 items-center gap-3">
+          <SessionTile row={row} live={executing} />
+          <div className="min-w-0 flex-1">
+            {renaming ? (
+              <form
+                className="anim-fade-in flex items-center gap-1.5"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  void submitRename()
+                }}
               >
-                <Pencil />
-              </Button>
+                <Input
+                  size="sm"
+                  autoFocus
+                  aria-label={t('webPagesWork.renameLabel')}
+                  placeholder={t('webPagesWork.renamePlaceholder')}
+                  value={draft}
+                  disabled={busy}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onFocus={(e) => e.currentTarget.select()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.stopPropagation()
+                      cancelRename()
+                    }
+                  }}
+                  aria-invalid={error ? true : undefined}
+                  aria-describedby={error ? errorId : undefined}
+                  className="flex-1"
+                />
+                <Button size="sm" variant="primary" type="submit" disabled={busy || act.disabled}>
+                  {busy ? <Loader2 className="animate-spin" /> : null}
+                  {t('webPagesWork.save')}
+                </Button>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={t('webPagesWork.cancel')}
+                  disabled={busy}
+                  onClick={cancelRename}
+                >
+                  <X />
+                </Button>
+              </form>
+            ) : (
+              <div className="flex min-w-0 items-center gap-1">
+                <Link
+                  key={renamedAt}
+                  to={sessionKeyToPath(row.key)}
+                  viewTransition
+                  className={cn('sx-title', renamedAt ? 'anim-flash' : null)}
+                >
+                  <span className="truncate">{title}</span>
+                </Link>
+                {row.provisional ? (
+                  <Badge tone="neutral" className="ml-1">
+                    <Loader2 className="animate-spin" aria-hidden />
+                    {t('webPagesWork.provisional')}
+                  </Badge>
+                ) : (
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    className="sx-reveal shrink-0 text-text-muted"
+                    aria-label={t('webPagesWork.renameRow', { title })}
+                    disabled={act.disabled}
+                    title={act.reason ?? undefined}
+                    onClick={startRename}
+                  >
+                    <Pencil />
+                  </Button>
+                )}
+              </div>
             )}
+            <div className="sx-key" title={row.key}>
+              {row.key}
+            </div>
+            {error ? (
+              <p
+                id={errorId}
+                role="alert"
+                className="anim-fade-in mt-1 flex items-center gap-1 text-small text-danger"
+              >
+                <AlertTriangle className="size-3.5 shrink-0" aria-hidden data-status-icon />
+                {error}
+              </p>
+            ) : null}
           </div>
-        )}
-        <div className="truncate font-mono text-small text-text-muted" title={row.key}>
-          {row.key}
         </div>
-        {error ? (
-          <p
-            id={errorId}
-            role="alert"
-            className="anim-fade-in mt-1 flex items-center gap-1 text-small text-danger"
-          >
-            <AlertTriangle className="size-3.5 shrink-0" aria-hidden data-status-icon />
-            {error}
-          </p>
-        ) : null}
       </td>
-      <td data-col="agent" className="px-3 py-2.5">
-        <span className="inline-flex min-w-0 flex-wrap items-center gap-1.5">
-          <span className="truncate">
-            {agentsById.get(agentId)?.name ?? (agentId || t('webPagesWork.dash'))}
+      <td data-col="context">
+        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <span className="sx-tag">
+            <Bot aria-hidden />
+            <span className="truncate">
+              {agentsById.get(agentId)?.name ?? (agentId || t('webPagesWork.dash'))}
+            </span>
           </span>
           {subline?.orphan ? (
             <Badge tone="warn" title={t('webPagesWork.orphanTitle', { agent: agentId })}>
@@ -1016,19 +1121,15 @@ function SessionTableRow({
               {t('webPagesWork.orphan')}
             </Badge>
           ) : null}
+          {project ? (
+            <span className="sx-tag">
+              <FolderKanban aria-hidden />
+              <span className="truncate">{projectNames?.get(project) ?? project}</span>
+            </span>
+          ) : null}
         </span>
       </td>
-      <td data-col="project" data-empty={project ? undefined : ''} className="px-3 py-2.5">
-        {project ? (
-          <span className="inline-flex max-w-full items-center gap-1.5">
-            <FolderKanban className="size-3.5 shrink-0 text-text-muted" aria-hidden />
-            <span className="truncate">{projectNames?.get(project) ?? project}</span>
-          </span>
-        ) : (
-          <span className="text-text-muted">{t('webPagesWork.dash')}</span>
-        )}
-      </td>
-      <td data-col="status" className="px-3 py-2.5">
+      <td data-col="status">
         <div className="flex flex-wrap items-center gap-1.5">
           <LifecycleChip row={row} live={executing} />
           {executing && badge ? (
@@ -1038,17 +1139,14 @@ function SessionTableRow({
           ) : null}
         </div>
       </td>
-      <td data-col="messages" className="px-3 py-2.5 text-right tabular-nums">
-        <MessageSquare
-          className="work-narrow-only mr-1 size-3.5 align-[-2px] text-text-muted"
-          aria-hidden
-        />
-        {formatNumber(Number(row.message_count) || 0)}
+      <td data-col="messages">
+        <span className="inline-flex items-center gap-1.5">
+          <MessageSquare className="size-3.5 text-text-muted" aria-hidden />
+          {formatNumber(Number(row.message_count) || 0)}
+        </span>
       </td>
-      <td data-col="updated" className="px-3 py-2.5 whitespace-nowrap text-text-muted">
-        {relTimeLabel(row.updated_at ?? row.updatedAt ?? '')}
-      </td>
-      <td data-col="actions" className="py-2.5 pr-3">
+      <td data-col="updated">{relTimeLabel(row.updated_at ?? row.updatedAt ?? '')}</td>
+      <td data-col="actions">
         {row.provisional ? null : (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1091,263 +1189,5 @@ function SessionTableRow({
         )}
       </td>
     </tr>
-  )
-}
-
-// ── Move to project ──────────────────────────────────────────────────────────
-
-function MoveDialog({
-  keys,
-  projectNames,
-  current,
-  act,
-  onClose,
-}: {
-  keys: string[]
-  projectNames?: ReadonlyMap<string, string>
-  current: string
-  act: Gate
-  onClose: (moved: boolean) => void
-}) {
-  const rpc = useRpc()
-  const queryClient = useQueryClient()
-  const [target, setTarget] = useState(current)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const selectId = useId()
-
-  const submit = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      // sessions.patch takes one key; a null project detaches the session.
-      for (const key of keys) {
-        await rpc.call('sessions.patch', { key, projectId: target || null })
-      }
-      toast.success(target ? t('webPagesWork.moved') : t('webPagesWork.detached'))
-      void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY })
-      void queryClient.invalidateQueries({ queryKey: PROJECTS_QUERY_KEY })
-      onClose(true)
-    } catch (e) {
-      setError(t('webPagesWork.moveFailed', { message: errorMessage(e) }))
-      void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Dialog open onOpenChange={(open) => !open && !busy && onClose(false)}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{tPlural('webPagesWork.moveTitle', keys.length)}</DialogTitle>
-          <DialogDescription>{t('webPagesWork.moveBody')}</DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor={selectId} className="text-label">
-            {t('webPagesWork.colProject')}
-          </label>
-          <Select id={selectId} value={target} onChange={(e) => setTarget(e.target.value)}>
-            <option value="">{t('webPagesWork.filterNoProject')}</option>
-            {[...(projectNames ?? new Map<string, string>())].map(([id, name]) => (
-              <option key={id} value={id}>
-                {name}
-              </option>
-            ))}
-          </Select>
-        </div>
-        {error ? (
-          <p
-            role="alert"
-            className="anim-fade-in rounded-control border border-danger/30 bg-danger/10 px-3 py-2"
-          >
-            {error}
-          </p>
-        ) : null}
-        <DialogFooter>
-          <Button variant="outline" disabled={busy} onClick={() => onClose(false)}>
-            {t('webPagesWork.cancel')}
-          </Button>
-          <Button
-            variant="primary"
-            disabled={busy || act.disabled}
-            title={act.reason ?? undefined}
-            onClick={() => void submit()}
-          >
-            {busy ? <Loader2 className="animate-spin" /> : null}
-            {t('webPagesWork.move')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ── New session (can create the agent first) ─────────────────────────────────
-
-function NewSessionDialog({
-  agents,
-  projectNames,
-  connection,
-  onClose,
-}: {
-  agents: { id: string; name: string }[]
-  projectNames?: ReadonlyMap<string, string>
-  connection: RpcState
-  onClose: () => void
-}) {
-  const rpc = useRpc()
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
-  const [agent, setAgent] = useState(
-    agents.some((a) => a.id === 'main') ? 'main' : (agents[0]?.id ?? NEW_AGENT),
-  )
-  const [newAgentId, setNewAgentId] = useState('')
-  const [project, setProject] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const agentSelectId = useId()
-  const newAgentFieldId = useId()
-  const projectSelectId = useId()
-  const reasonId = useId()
-
-  const creatingAgent = agent === NEW_AGENT
-  const agentId = creatingAgent ? newAgentId.trim().toLowerCase() : agent
-  const startGate = gate(
-    requireConnection(connection),
-    !agentId ? blockedBecause(t('webPagesWork.newNeedsAgent')) : null,
-    creatingAgent && agentId && !AGENT_ID.test(agentId)
-      ? blockedBecause(t('webPagesWork.newAgentInvalid'))
-      : null,
-  )
-
-  const submit = async () => {
-    if (startGate.disabled) return
-    setBusy(true)
-    setError(null)
-    let createdAgent = false
-    try {
-      if (creatingAgent) {
-        try {
-          await rpc.call('agents.create', { id: agentId, name: agentId })
-          createdAgent = true
-        } catch (e) {
-          // An agent that already exists is fine: open a session on it.
-          if (errorCode(e) !== 'agent.exists') throw e
-        }
-        void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY })
-      }
-      const key = await createSessionOptimistic(rpc, queryClient, {
-        agentId,
-        projectId: project || null,
-      })
-      toast.success(
-        createdAgent
-          ? t('webPagesWork.createdWithAgent', { agent: agentId })
-          : t('webPagesWork.created'),
-      )
-      onClose()
-      navigate(sessionKeyToPath(key))
-    } catch (e) {
-      const code = errorCode(e)
-      if (code === 'UNAUTHORIZED' && creatingAgent) setError(t('webPagesWork.createUnauthorized'))
-      else if (code === 'agent.not_found')
-        setError(t('webPagesWork.createAgentMissing', { agent: agentId }))
-      else setError(t('webPagesWork.createFailed', { message: errorMessage(e) }))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
-      <DialogContent>
-        <form
-          className="grid gap-4"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void submit()
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>{t('webPagesWork.newTitle')}</DialogTitle>
-            <DialogDescription>{t('webPagesWork.newBody')}</DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={agentSelectId} className="text-label">
-              {t('webPagesWork.colAgent')}
-            </label>
-            <Select id={agentSelectId} value={agent} onChange={(e) => setAgent(e.target.value)}>
-              {agents.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-              <option value={NEW_AGENT}>{t('webPagesWork.newAgentOption')}</option>
-            </Select>
-          </div>
-          {creatingAgent ? (
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={newAgentFieldId} className="text-label">
-                {t('webPagesWork.newAgentId')}
-              </label>
-              <Input
-                id={newAgentFieldId}
-                autoFocus
-                className="font-mono"
-                value={newAgentId}
-                placeholder={t('webPagesWork.newAgentPlaceholder')}
-                onChange={(e) => setNewAgentId(e.target.value)}
-              />
-              <span className="text-small text-text-muted">{t('webPagesWork.newAgentHint')}</span>
-            </div>
-          ) : null}
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={projectSelectId} className="text-label">
-              {t('webPagesWork.colProject')}
-            </label>
-            <Select
-              id={projectSelectId}
-              value={project}
-              onChange={(e) => setProject(e.target.value)}
-            >
-              <option value="">{t('webPagesWork.filterNoProject')}</option>
-              {[...(projectNames ?? new Map<string, string>())].map(([id, name]) => (
-                <option key={id} value={id}>
-                  {name}
-                </option>
-              ))}
-            </Select>
-          </div>
-          {error ? (
-            <p
-              role="alert"
-              className="anim-fade-in rounded-control border border-danger/30 bg-danger/10 px-3 py-2"
-            >
-              {error}
-            </p>
-          ) : null}
-          <DialogFooter className="items-center">
-            {startGate.reason ? (
-              <span id={reasonId} className="text-small text-text-muted sm:mr-auto">
-                {startGate.reason}
-              </span>
-            ) : null}
-            <Button variant="outline" disabled={busy} onClick={onClose}>
-              {t('webPagesWork.cancel')}
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={busy || startGate.disabled}
-              aria-describedby={startGate.reason ? reasonId : undefined}
-            >
-              {busy ? <Loader2 className="animate-spin" /> : null}
-              {creatingAgent ? t('webPagesWork.newCreateAndStart') : t('webPagesWork.newStart')}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   )
 }
