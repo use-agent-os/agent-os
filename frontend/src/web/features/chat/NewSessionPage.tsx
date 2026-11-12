@@ -384,6 +384,7 @@ export function NewSessionPage() {
                   <ToolbarChip
                     aria-label={t('webChat.newProject')}
                     aria-describedby={projectValueId}
+                    data-empty={chosenProject ? undefined : true}
                     icon={chosenProject ? <FolderOpen aria-hidden /> : <Folder aria-hidden />}
                     label={<span id={projectValueId}>{projectName}</span>}
                   />

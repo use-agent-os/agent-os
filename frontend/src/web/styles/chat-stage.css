@@ -59,10 +59,10 @@
   }
   :root[data-theme='light'] .stage-backdrop {
     --stage-dot: color-mix(in oklab, var(--text) 15%, transparent);
-    --stage-lime: color-mix(in oklab, var(--accent) 11%, transparent);
+    --stage-lime: color-mix(in oklab, var(--accent) 17%, transparent);
     --stage-teal: color-mix(
       in oklab,
-      color-mix(in oklab, var(--accent), var(--info) 55%) 8%,
+      color-mix(in oklab, var(--accent), var(--info) 55%) 13%,
       transparent
     );
   }
@@ -103,13 +103,17 @@
       transform: translate(-54%, -8%) scale(0.92);
     }
   }
-  /* Inside the transcript column: a quieter patch, no grid past the column. */
+  /* Inside the transcript column: a quieter patch whose edges dissolve, so
+   * the column's box never shows. */
+  .stage-backdrop-contained {
+    mask-image: radial-gradient(closest-side, black 35%, transparent);
+  }
   .stage-backdrop-contained .stage-aurora {
-    top: -10%;
-    width: 100%;
+    top: -6%;
+    width: 90%;
   }
   .stage-backdrop-contained::before {
-    mask-image: radial-gradient(ellipse 50% 50% at 50% 40%, black 0%, transparent 72%);
+    mask-image: none;
   }
 
   /* ---- The mark -------------------------------------------------------- */
@@ -563,6 +567,23 @@
   @media (max-width: 639px) {
     .chat-tool-chip-label {
       max-width: 6rem;
+    }
+  }
+  /* An unset chip (no project) folds to its icon on phones, so the agent's
+   * name keeps its room. The label still describes the button. */
+  @media (max-width: 639px) {
+    .chat-tool-chip[data-empty] {
+      padding-inline: 0;
+      width: 32px;
+      justify-content: center;
+    }
+    .chat-tool-chip[data-empty] > :not(svg:first-child) {
+      display: none;
+    }
+  }
+  @media (max-width: 639px) and (pointer: coarse) {
+    .chat-tool-chip[data-empty] {
+      width: 44px;
     }
   }
   @media (max-width: 400px) {
