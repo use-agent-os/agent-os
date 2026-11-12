@@ -16,6 +16,7 @@ import { pathToSessionKey, sessionKeyToPath, defaultSessionKey } from '@/web/she
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { PHONE_QUERY, useMediaQuery } from '@/web/shell/use-media-query'
 import '@/web/styles/chat.css'
+import '@/web/styles/chat-stage.css'
 import { ApprovalDock } from './ApprovalDock'
 import { ChatHeader } from './ChatHeader'
 import { Composer } from './composer/Composer'
@@ -235,6 +236,7 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
             onTogglePanels={() => (panelTabs ? closeAllPanels() : undefined)}
             onCompact={compact}
             onReset={() => void reset()}
+            firstMessage={session.state.turns.find((turn) => turn.userMessage)?.userMessage?.text}
           />
           <div className="flex min-h-0 flex-1">
             <div className="flex min-w-0 flex-1 flex-col">
