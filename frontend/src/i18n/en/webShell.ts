@@ -53,6 +53,9 @@ export const webShell = defineNamespace('webShell', {
   listPaneLabel: 'Sessions and pages',
   listPaneResize: 'Resize sidebar',
   pagesHeading: 'Pages',
+  pagesGroupOverview: 'Overview',
+  pagesGroupWork: 'Work',
+  pagesCountRunning: '{count} running',
 
   // Session list
   sessionsHeading: 'Sessions',
@@ -82,6 +85,7 @@ export const webShell = defineNamespace('webShell', {
   sectionOlder: 'Older',
   sectionNoProject: 'No project',
   sessionRunning: 'Running',
+  sessionUntitled: 'New conversation',
   sessionChildren_one: '{count} child session',
   sessionChildren_other: '{count} child sessions',
   sessionChildrenRunning: 'a child session is running',

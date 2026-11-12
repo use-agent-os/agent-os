@@ -8,8 +8,8 @@ const TONE: Record<'accent' | 'info' | 'warn', string> = {
 
 /**
  * A slim notice bar above the page (setup prompt, restart, protocol and
- * update notices): a tone-tinted wash fading off to the right, the icon in a
- * small tile, and an entrance that grows the bar's row (shell.css
+ * update notices): a faint tone wash fading off to the right, the icon in the
+ * tone with a soft halo, and an entrance that grows the bar's row (shell.css
  * `.shell-bar`). Dismissal is instant: exits never outlast entrances, and
  * the notice is gone the moment it is dismissed.
  */
@@ -33,12 +33,9 @@ export function ShellBar({
     >
       <div>
         <div
-          className={`flex min-h-11 items-center gap-3 py-1.5 pr-2 pl-3 max-sm:gap-2 ${className ?? ''}`}
+          className={`flex min-h-10 items-center gap-2.5 py-1 pr-1.5 pl-4 text-[13px] max-sm:gap-2 max-sm:pl-3 ${className ?? ''}`}
         >
-          <span
-            aria-hidden
-            className="grid size-6 shrink-0 place-items-center rounded-md bg-[color-mix(in_oklab,var(--bar-tone)_16%,transparent)] text-[color:var(--bar-tone)] [&_svg]:size-3.5"
-          >
+          <span aria-hidden className="shell-bar-icon">
             {icon}
           </span>
           {children}

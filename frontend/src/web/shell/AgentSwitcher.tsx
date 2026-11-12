@@ -44,7 +44,7 @@ export function AgentSwitcher() {
           >
             <span
               aria-hidden
-              className="grid size-8 place-items-center rounded-full border border-border-strong bg-[linear-gradient(160deg,var(--surface-3),var(--surface-2))] text-small font-semibold tracking-wide text-text shadow-highlight transition-[border-color,box-shadow] duration-[var(--duration-fast)] group-hover/avatar:border-accent/60 group-data-[state=open]/avatar:border-accent group-data-[state=open]/avatar:shadow-[0_0_0_3px_var(--accent-tint)]"
+              className="rail-avatar grid size-7 place-items-center rounded-full text-small font-semibold text-text"
             >
               {initials(shown)}
             </span>

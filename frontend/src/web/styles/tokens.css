@@ -81,6 +81,11 @@
     inset 0 1px 0 0 rgb(255 255 255 / 0.5), 0 1px 2px rgb(0 0 0 / 0.4),
     0 4px 18px -2px rgb(204 255 0 / 0.3);
 
+  /* The page atmosphere under a page header (base.css): dot grid, lime wash
+     and a cooler second wash. Decorative only. */
+  --page-dot: rgb(236 238 241 / 0.1);
+  --page-wash: rgb(204 255 0 / 0.075);
+  --page-wash-2: rgb(90 200 190 / 0.05);
   /* A faint lime wash at the top of primary pages. Decorative only. */
   --canvas-atmosphere:
     radial-gradient(900px 420px at 85% -120px, rgb(204 255 0 / 0.05), transparent 70%),
@@ -148,6 +153,9 @@
     inset 0 1px 0 0 rgb(255 255 255 / 0.2), 0 1px 2px rgb(23 25 20 / 0.18),
     0 4px 16px -2px rgb(77 102 0 / 0.3);
 
+  --page-dot: rgb(23 26 30 / 0.12);
+  --page-wash: rgb(140 190 0 / 0.11);
+  --page-wash-2: rgb(60 150 140 / 0.06);
   --canvas-atmosphere:
     radial-gradient(900px 420px at 85% -120px, rgb(77 102 0 / 0.06), transparent 70%),
     radial-gradient(700px 360px at 10% -160px, rgb(255 190 120 / 0.06), transparent 70%);
@@ -198,7 +206,7 @@
 
   --radius-control: 8px;
   --radius-card: 12px;
-  --radius-overlay: 14px;
+  --radius-overlay: 16px;
 
   --rail-width: 56px;
   --list-pane-min: 240px;
@@ -336,7 +344,7 @@
   /* Semantic radii (also plain vars in :root above): rounded-control/card/overlay. */
   --radius-control: 8px;
   --radius-card: 12px;
-  --radius-overlay: 14px;
+  --radius-overlay: 16px;
 
   --text-ui: 14px;
   --text-ui--line-height: 1.45;
