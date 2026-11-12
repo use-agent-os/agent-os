@@ -1283,28 +1283,31 @@ def _direct_openai(model: str, base_url: str = "https://api.openai.com/v1") -> O
 
 
 @pytest.mark.parametrize(
-    ("model", "thinking"),
+    ("model", "caps"),
     [
         # Live API, 2026-11-12: with function tools, /v1/chat/completions
         # 400s these unless reasoning_effort is "none"; gpt-5.6 / gpt-6 do not
-        # default to "none", so omitting the field fails too.
-        ("gpt-5.6-luna", False),
-        ("gpt-5.6-terra", True),
-        ("gpt-5.6-sol", True),
-        ("gpt-6-luna", False),
-        ("gpt-5.5", True),
-        ("gpt-5.4-nano", True),
+        # default to "none", so omitting the field fails too. A tool turn that
+        # asks for thinking goes to /v1/responses instead (see
+        # test_provider_openai_responses_reasoning.py).
+        ("gpt-5.6-luna", _OPENAI_REASONING_CAPS),
+        ("gpt-5.6-terra", _OPENAI_REASONING_CAPS),
+        ("gpt-5.6-sol", None),
+        ("gpt-6-luna", _OPENAI_REASONING_CAPS),
+        ("gpt-5.5", None),
+        ("gpt-5.4-nano", _OPENAI_REASONING_CAPS),
     ],
 )
-def test_direct_openai_tool_turns_send_reasoning_effort_none(
-    monkeypatch: Any, model: str, thinking: bool
+def test_direct_openai_tool_turns_without_thinking_send_reasoning_effort_none(
+    monkeypatch: Any, model: str, caps: ModelCapabilities | None
 ) -> None:
     captured: dict[str, Any] = {}
     _patch_transport(monkeypatch, captured)
-    cfg = ChatConfig(thinking=thinking, model_capabilities=_OPENAI_REASONING_CAPS)
+    cfg = ChatConfig(thinking=caps is None, model_capabilities=caps)
 
     _collect_events(_direct_openai(model), cfg, tools=[_lookup_tool()])
 
+    assert captured["url"].endswith("/chat/completions")
     assert captured["payload"]["reasoning_effort"] == "none"
 
 

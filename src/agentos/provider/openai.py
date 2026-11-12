@@ -153,6 +153,17 @@ def _resolve_reasoning_effort(level: ThinkingLevel | None, budget: int) -> str:
         return "high"
 
 
+def _responses_reasoning_effort(level: ThinkingLevel | None, budget: int) -> str:
+    """Effort for a direct-OpenAI /v1/responses request (gpt-5.4 and later).
+
+    These models take none / low / medium / high / xhigh (and max) but refuse
+    ``minimal`` (gpt-5.6-terra, checked live 2026-11-12), so the lowest
+    thinking level maps to ``low``.
+    """
+    effort = _resolve_reasoning_effort(level, budget)
+    return "low" if effort == "minimal" else effort
+
+
 def _resolve_deepseek_reasoning_effort(level: ThinkingLevel | None) -> str:
     """Map AgentOS thinking levels to DeepSeek V4's documented effort values."""
     from agentos.engine.types import (
@@ -240,6 +251,9 @@ def _direct_openai_tools_require_reasoning_none(
     gpt-6 do not default to ``none``, so omitting the field fails as well.
     gpt-5 / gpt-5-mini reject ``none`` outright, and gpt-5.1 / 5.2 accept
     effort with tools, so the cut is by version.
+
+    A tool turn that asks for thinking goes to /v1/responses instead (see
+    ``OpenAIProvider._stream``); one that does not sends ``none``.
     """
     if provider_kind != "openai" or "api.openai.com" not in base_url.lower():
         return False
@@ -1273,12 +1287,22 @@ class OpenAIProvider:
 
         # Reasoning injection (gated on thinking being enabled)
         direct_deepseek_v4 = _is_direct_deepseek_v4_request(self._provider_kind, self._model)
+        # Set when this request goes to /v1/responses instead (see below).
+        responses_effort: str | None = None
         if tools and _direct_openai_tools_require_reasoning_none(
             self._provider_kind, self._base_url, self._model
         ):
-            # Reasoning with function tools is Responses-API only for these
-            # models; on Chat Completions a tool turn runs without it.
-            payload["reasoning_effort"] = "none"
+            if caps and caps.supports_reasoning and cfg.thinking:
+                # Reasoning with function tools is Responses-API only for
+                # these models: build the usual payload (budget checks, cache
+                # key, tool choice) and send it as a Responses request.
+                responses_effort = _responses_reasoning_effort(
+                    cfg.thinking_level, cfg.thinking_budget_tokens
+                )
+                payload["reasoning_effort"] = responses_effort
+            else:
+                # No thinking asked: Chat Completions takes tools with "none".
+                payload["reasoning_effort"] = "none"
         elif (caps and caps.supports_reasoning and cfg.thinking) or (
             direct_deepseek_v4 and cfg.thinking
         ):
@@ -1384,6 +1408,28 @@ class OpenAIProvider:
         headers.update(openrouter_app_headers(self._base_url))
         if self._org_id:
             headers["OpenAI-Organization"] = self._org_id
+
+        if responses_effort is not None:
+            from .openai_responses import (  # local: openai_responses imports this module
+                reasoning_items_by_tool_call,
+                responses_payload_from_chat,
+                stream_responses,
+            )
+
+            async for event in stream_responses(
+                http=self._http,
+                url=self._api_url("/v1/responses"),
+                headers=headers,
+                payload=responses_payload_from_chat(
+                    payload,
+                    reasoning_effort=responses_effort,
+                    reasoning_by_call=reasoning_items_by_tool_call(messages),
+                ),
+                config=cfg,
+                model=self._model,
+            ):
+                yield event
+            return
 
         # tool_call accumulator: index -> {id, name, json_parts}
         pending_calls: dict[int, dict[str, Any]] = {}

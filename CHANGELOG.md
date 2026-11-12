@@ -12,10 +12,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   and OpenAI's Chat Completions refuses function tools on these models unless
   `reasoning_effort` is `none`; GPT-5.6 does not default to `none`, so every
   message failed with "Function tools with reasoning_effort are not
-  supported". Tool turns on direct OpenAI now send `reasoning_effort: none`
-  for these models (reasoning with tools needs the Responses API). GPT-6 is
-  also treated as a reasoning model: it gets `max_completion_tokens` instead
-  of the refused `max_tokens`.
+  supported". Tool turns on direct OpenAI that do not ask for thinking now
+  send `reasoning_effort: none` for these models. GPT-6 is also treated as a
+  reasoning model: it gets `max_completion_tokens` instead of the refused
+  `max_tokens`.
+- Thinking works again on the direct OpenAI provider for GPT-5.4 and later.
+  A tool turn that asks for thinking (`--thinking`, `llm.thinking`, or the
+  Pilot Router's c1–c3 levels) is now sent to OpenAI's Responses API, the
+  only OpenAI endpoint that takes reasoning together with function tools,
+  instead of running with reasoning off. The model's reasoning summary
+  streams as thinking, `reasoning_tokens` and cached tokens are reported in
+  usage, and the encrypted reasoning items are kept with the assistant
+  message and sent back across tool calls, so a multi-step tool loop
+  continues from its own reasoning. The minimal level maps to `low`, which
+  these models accept. Turns without tools, turns without thinking, older
+  GPT-5 models and OpenAI-compatible gateways stay on Chat Completions.
+  Responses requests (including `llm.provider = "openai_responses"`) also no
+  longer send `stop`, which the API rejects, and mark tools `strict: false`
+  so optional tool arguments stay optional.
 
 ## [2026.11.12] - 2026-11-12
 
