@@ -204,7 +204,7 @@ function RunSummary({ runs }: { runs: RawRun[] }) {
   const ordered = [...runs].reverse()
   const ok = runs.filter((r) => (r.status || 'unknown') === 'ok').length
   const durations = runs.map((r) => r.duration_ms).filter((d): d is number => typeof d === 'number')
-  const longest = Math.max(1, ...durations)
+  const longest = Math.max(0, ...durations)
   const average = durations.length
     ? durations.reduce((sum, d) => sum + d, 0) / durations.length
     : null
@@ -232,7 +232,10 @@ function RunSummary({ runs }: { runs: RawRun[] }) {
             data-failed={(run.status || 'unknown') !== 'ok' || undefined}
             style={
               {
-                height: `${Math.max(10, ((run.duration_ms ?? 0) / longest) * 100)}%`,
+                // Runs that all took no measurable time read as full bars.
+                height: longest
+                  ? `${Math.max(18, ((run.duration_ms ?? 0) / longest) * 100)}%`
+                  : '100%',
                 '--bar-i': Math.min(i, 9),
               } as CSSProperties
             }

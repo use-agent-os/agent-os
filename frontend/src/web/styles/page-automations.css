@@ -683,8 +683,9 @@
     align-items: flex-end;
     gap: 3px;
   }
+  /* Ten slots (the history's limit), so a short history stays left-aligned. */
   .am-runs-strip > span {
-    flex: 1 1 0;
+    flex: 0 0 calc((100% - 27px) / 10);
     min-height: 4px;
     border-radius: 3px;
     background: var(--ok);
