@@ -18,7 +18,6 @@ export const webPalette = defineNamespace('webPalette', {
 
   actionNewSession: 'New session',
   actionToggleSidebar: 'Toggle sidebar',
-  actionToggleDetails: 'Toggle Details',
   actionThemeSystem: 'Switch to system theme',
   actionThemeLight: 'Switch to light theme',
   actionThemeDark: 'Switch to dark theme',

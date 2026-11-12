@@ -227,7 +227,7 @@ export function DataCard({ category, artifact }: { category: string; artifact: A
               <div className="flex items-start justify-between gap-2">
                 <p className="min-w-0 font-medium">{card.title}</p>
                 {card.badge ? (
-                  <span className="chat-id-chip shrink-0 font-sans">{card.badge}</span>
+                  <span className="chat-mono-chip shrink-0 font-sans">{card.badge}</span>
                 ) : null}
               </div>
               {card.subtitle ? <p className="text-small text-text-muted">{card.subtitle}</p> : null}

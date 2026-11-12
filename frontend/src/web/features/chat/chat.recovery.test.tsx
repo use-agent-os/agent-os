@@ -115,20 +115,6 @@ describe('the queue', () => {
     expect(readQueue(KEY).map((q) => q.text)).toEqual(['one'])
   })
 
-  it('reports its length in Details', async () => {
-    const user = userEvent.setup()
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1600 })
-    const rpc = runningRpc()
-    const { composer } = await openChat(rpc)
-    await within(log()).findByText('working')
-    await user.type(composer, 'later')
-    await user.click(screen.getByRole('button', { name: 'Queue' }))
-    const details = await screen.findByRole('complementary', { name: 'Session details' })
-    await waitFor(() =>
-      expect(within(details).getByText('Queued messages').nextSibling).toHaveTextContent('1'),
-    )
-  })
-
   it('holds a card answer given while a turn runs', async () => {
     const user = userEvent.setup()
     const result = JSON.stringify({

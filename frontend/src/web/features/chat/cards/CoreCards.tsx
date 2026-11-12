@@ -248,7 +248,11 @@ export function AcpCard({ args, result }: { args: unknown; result: unknown }) {
   const [cancelled, setCancelled] = useState(false)
   return (
     <CardShell icon={<Bot />} title={t('webChat.acpTitle', { name })}>
-      {key ? <p className="chat-id-chip w-fit max-w-full truncate">{key}</p> : null}
+      {key ? (
+        <p className="chat-mono-chip max-w-full">
+          <span className="truncate">{key}</span>
+        </p>
+      ) : null}
       {key ? (
         <div className="chat-card-footer">
           <Button

@@ -57,7 +57,6 @@ export const webChat = defineNamespace('webChat', {
 
   // Header
   headerRename: 'Rename session',
-  headerDetails: 'Details',
   headerPanels: 'Panels',
   headerMenu: 'Session actions',
   headerCompact: 'Compact',
@@ -112,26 +111,6 @@ export const webChat = defineNamespace('webChat', {
 
   // Approval dock
   dockTitle: 'Approval needed: {tool}',
-
-  // Details
-  detailsTitle: 'Session details',
-  detailsClose: 'Close details',
-  detailsAgent: 'Agent',
-  detailsRoute: 'Model route',
-  detailsChannel: 'Channel',
-  detailsProject: 'Project',
-  detailsCreated: 'Created',
-  detailsUpdated: 'Updated',
-  detailsUsage: 'Usage',
-  detailsCost: 'Estimated cost',
-  detailsTask: 'Active task',
-  detailsSubagents: 'Subagents',
-  detailsPlan: 'Plan mode',
-  detailsArtifacts: 'Artifacts',
-  detailsQueued: 'Queued messages',
-  detailsNone: 'None',
-  planOn: 'On',
-  planOff: 'Off',
 
   // Cards
   planTitle: 'Proposed plan',
@@ -205,22 +184,8 @@ export const webChat = defineNamespace('webChat', {
   panelResize: 'Resize side panel',
   panelEmpty: 'Open tool output, artifacts or reasoning to see them here.',
 
-  // Chat v2: the reply identity line, the inspector, the side panel
+  // Chat v2: the reply identity line, the side panel
   agentFallback: 'Agent',
-  inspectorUntitled: 'New conversation',
-  inspectorCopyId: 'Copy session id',
-  inspectorTokens: 'Tokens',
-  inspectorCost: 'Est. cost',
-  inspectorTurns: 'Turns',
-  inspectorSession: 'Session',
-  inspectorRuntime: 'Runtime',
-  inspectorActivity: 'Activity',
-  inspectorRunning: 'Running',
-  inspectorQueued: 'Queued',
-  inspectorCompleted: 'Completed',
-  inspectorFailed: 'Failed',
-  inspectorStopped: 'Stopped',
-  inspectorIdle: 'Idle',
   panelToolOutput: 'Tool output',
   panelArtifact: 'Artifact',
   panelThinking: 'Reasoning',

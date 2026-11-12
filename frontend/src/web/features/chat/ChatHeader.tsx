@@ -4,7 +4,6 @@ import {
   FolderOpen,
   MoreHorizontal,
   PanelRight,
-  PanelRightOpen,
   Pencil,
   RotateCcw,
   Scissors,
@@ -71,8 +70,6 @@ export interface ChatHeaderProps {
   row: SessionRow | undefined
   running: boolean
   phone: boolean
-  detailsOpen: boolean
-  onToggleDetails(): void
   onTogglePanels(): void
   onCompact(): void
   onReset(): void
@@ -143,13 +140,10 @@ export function ChatHeader(props: ChatHeaderProps) {
           <button
             type="button"
             onClick={() => {
-              if (phone) props.onToggleDetails()
-              else {
-                setValue(title)
-                setEditing(true)
-              }
+              setValue(title)
+              setEditing(true)
             }}
-            title={phone ? undefined : t('webChat.headerRename')}
+            title={t('webChat.headerRename')}
             className="chat-title-button target"
           >
             <h1 className="truncate">{title}</h1>
@@ -200,18 +194,6 @@ export function ChatHeader(props: ChatHeaderProps) {
           </div>
         ) : null}
       </div>
-      <SimpleTooltip side="bottom" label={t('webChat.headerDetails')}>
-        <Button
-          size="icon"
-          variant="ghost"
-          aria-label={t('webChat.headerDetails')}
-          aria-pressed={props.detailsOpen}
-          onClick={props.onToggleDetails}
-          className={cn(ICON_BUTTON, phone && 'hidden')}
-        >
-          <PanelRightOpen />
-        </Button>
-      </SimpleTooltip>
       <SimpleTooltip side="bottom" label={t('webChat.headerPanels')}>
         <Button
           size="icon"

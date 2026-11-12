@@ -411,9 +411,8 @@ shortcut overview, which shows the keys for your platform.
 
 `Mod+K`, or the rail's **Search** button, opens the command palette. Type to
 search, in labelled groups, across **Sessions** (titles and keys), **Pages**,
-**Settings** sections and **Actions**: New session, Toggle sidebar, Toggle
-Details, Switch to system / light / dark theme, Open keyboard shortcuts, Retry
-connection, Open Inbox, Compact current session and Export current session. An
+**Settings** sections and **Actions**: New session, Toggle sidebar, Switch to
+system / light / dark theme, Open keyboard shortcuts, Retry connection, Open Inbox, Compact current session and Export current session. An
 action that cannot run right now is listed as disabled with its reason (for
 example, Compact while a turn is running). Arrow keys move, `Enter` runs,
 `Escape` closes and returns focus to where it was. If sessions cannot be
@@ -719,17 +718,14 @@ state, session state, and user-visible errors.
 ### Layout
 
 The chat workspace is one centered column. Your messages are right-aligned
-bubbles; replies are full-width prose. Hover or focus a message to copy it as
-Markdown or see when it was sent. The header shows the session title (its
+bubbles; each reply opens with the agent's name (and the model, when known),
+then full-width prose. Tool calls and reasoning gather in an activity block
+that folds into one line (**Worked for …**) when the turn ends. Hover or focus
+a message to copy it as Markdown or see when it was sent. The header shows the session title (its
 name, else its first message, else **New conversation**; activate it to rename
 in place), the agent, channel and project, the session ID (activate it to copy
-the full key), a **Details** toggle, a
-**Panels** toggle and a ⋯ menu (Rename, Compact, Reset session (confirmed
-first), Export as Markdown, Copy session key). It stays visible while the transcript scrolls.
-The Details column lists the session's agent, model route, channel, project,
-when it was created and last updated, its token usage and estimated cost
-(refreshed when each turn ends), the active task, subagents, plan mode,
-artifacts and queued messages.
+the full key), a **Panels** toggle and a ⋯ menu (Rename, Compact, Reset
+session (confirmed first), Export as Markdown, Copy session key). It stays visible while the transcript scrolls.
 
 Opening, reloading or switching to a session lands on its latest message.
 While you are at the end of the transcript, new content keeps the latest in
@@ -832,13 +828,7 @@ last event seen. If live updates were missed, a toast says so and the
 conversation is reloaded, and a running turn with no events for 210 seconds is
 checked against the gateway again. Long replies are drawn once per frame.
 
-### Details, side panel and approvals
-
-**Details** shows the session's agent, model route, channel, project, created
-and updated times, usage and estimated cost, the active task and subagents,
-plan mode, artifacts and the number of messages in the composer's queue. On a wide chat pane it
-docks beside the transcript; on a narrow one it opens as an overlay (a sheet on
-phones). Closing it keeps it closed for that session until you reopen it.
+### Side panel and approvals
 
 The side panel opens beside the transcript for full tool output, artifacts and
 reasoning, one tab per item. Drag its edge to resize it (the width is

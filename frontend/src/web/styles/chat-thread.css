@@ -1,7 +1,7 @@
 /* The conversation thread (chat v2): turns, the reply identity line, the
  * message action pill, the activity block, the thinking indicator, the failed
- * turn card, transcript cards, the approval dock, the inspector and the side
- * panel. Imported by the transcript and panel components (chat chunk only).
+ * turn card, transcript cards, the approval dock and the side panel.
+ * Imported by the transcript and panel components (chat chunk only).
  *
  * Motion rules: transform/opacity (plus grid rows) only, token durations
  * only. Nothing here restarts while a reply streams: entrances sit on
@@ -699,12 +699,11 @@
     cursor: default;
   }
 
-  /* A mono id in a hairline chip (session key, a card's badge). */
-  .chat-id-chip {
+  /* A mono id or badge in a hairline chip (a harness session, a card badge). */
+  .chat-mono-chip {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
-    padding: 1px 2px 1px 8px;
+    padding: 1px 8px;
     border: 1px solid var(--border);
     border-radius: 7px;
     background: var(--surface-2);
@@ -712,30 +711,6 @@
     font-family: var(--font-mono);
     font-size: 12px;
     line-height: 20px;
-  }
-  p.chat-id-chip,
-  span.chat-id-chip:not(:has(button)) {
-    padding-right: 8px;
-  }
-  .chat-id-copy {
-    display: inline-grid;
-    flex-shrink: 0;
-    place-items: center;
-    width: 22px;
-    height: 20px;
-    border-radius: 5px;
-    color: var(--text-muted);
-    transition:
-      background-color var(--duration-fast) var(--ease-out),
-      color var(--duration-fast) var(--ease-out);
-  }
-  .chat-id-copy:hover {
-    background: var(--surface-3);
-    color: var(--text);
-  }
-  .chat-id-copy > svg {
-    width: 12px;
-    height: 12px;
   }
 
   /* ---- Approval dock ----------------------------------------------------- */
@@ -774,116 +749,14 @@
     border-radius: 13px;
   }
 
-  /* ---- Inspector (session details) --------------------------------------- */
+  /* ---- Side panel (tool output, artifacts) ------------------------------- */
 
-  .chat-inspector {
-    background: var(--surface-1);
-  }
   .chat-overline {
     color: var(--text-muted);
     font-size: 12px;
     font-weight: 500;
     letter-spacing: 0.02em;
   }
-  .chat-insp-body {
-    display: flex;
-    flex-direction: column;
-    gap: 22px;
-    padding: 8px 16px 24px;
-  }
-  .chat-insp-title {
-    font-size: 17px;
-    font-weight: 600;
-    line-height: 1.35;
-    letter-spacing: -0.012em;
-    overflow-wrap: anywhere;
-    text-wrap: balance;
-  }
-  .chat-insp-stats {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 6px;
-  }
-  .chat-insp-stat {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--surface-2);
-    box-shadow: var(--highlight);
-  }
-  .chat-insp-stat-value {
-    overflow: hidden;
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    font-variant-numeric: tabular-nums;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .chat-insp-section {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .chat-insp-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    min-height: 38px;
-    padding-block: 6px;
-    font-size: 13px;
-  }
-  .chat-insp-row + .chat-insp-row {
-    border-top: 1px solid var(--border);
-  }
-  .chat-insp-row > dt {
-    display: flex;
-    flex-shrink: 0;
-    align-items: center;
-    gap: 10px;
-    color: var(--text-muted);
-  }
-  .chat-insp-row > dd {
-    display: flex;
-    min-width: 0;
-    justify-content: flex-end;
-    text-align: end;
-    overflow-wrap: anywhere;
-  }
-  .chat-insp-icon {
-    display: inline-flex;
-    flex-shrink: 0;
-    color: var(--text-muted);
-  }
-  .chat-insp-icon > svg {
-    width: 16px;
-    height: 16px;
-  }
-  .chat-insp-empty {
-    color: color-mix(in oklab, var(--text-muted), transparent 30%);
-  }
-  .chat-insp-file {
-    display: flex;
-    width: 100%;
-    align-items: center;
-    gap: 10px;
-    min-height: 34px;
-    padding: 4px 8px;
-    margin-inline: -8px;
-    border-radius: 9px;
-    font-size: 13px;
-    text-align: start;
-  }
-  .chat-insp-file:hover {
-    background: var(--surface-2);
-  }
-
-  /* ---- Side panel (tool output, artifacts) ------------------------------- */
 
   .chat-panel-in {
     animation: chat-panel-in var(--duration-slow) var(--ease-enter) both;

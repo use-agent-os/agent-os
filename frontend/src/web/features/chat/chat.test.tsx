@@ -620,35 +620,6 @@ describe('approvals in the open session', () => {
   })
 })
 
-describe('Details', () => {
-  it('docks on a wide pane with the session context, and an explicit close sticks', async () => {
-    const user = userEvent.setup()
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1600 })
-    const rpc = chatRpc([userRow('u1', 'a'), assistantRow('a1', 'b')], { project_id: 'p1' })
-    await openChat(rpc)
-    const details = await screen.findByRole('complementary', { name: 'Session details' })
-    expect(within(details).getByText('Agent').nextSibling).toHaveTextContent('main')
-    expect(within(details).getByText('Project').nextSibling).toHaveTextContent('Alpha')
-    expect(within(details).getByText('Queued messages')).toBeInTheDocument()
-    await user.click(within(details).getByRole('button', { name: 'Close details' }))
-    expect(screen.queryByRole('complementary', { name: 'Session details' })).not.toBeInTheDocument()
-    emit(rpc, 'text_delta', { text: 'new message' })
-    expect(screen.queryByRole('complementary', { name: 'Session details' })).not.toBeInTheDocument()
-  })
-
-  it('opens as an overlay on a narrow pane', async () => {
-    const user = userEvent.setup()
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 900 })
-    await openChat()
-    expect(screen.queryByRole('complementary', { name: 'Session details' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Details' }))
-    const sheet = await screen.findByRole('dialog', { name: 'Session details' })
-    expect(
-      within(sheet).getByRole('complementary', { name: 'Session details' }),
-    ).toBeInTheDocument()
-  })
-})
-
 describe('side panel', () => {
   it('opens a document artifact in a tab and keeps the draft', async () => {
     const user = userEvent.setup()
