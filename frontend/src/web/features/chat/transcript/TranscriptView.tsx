@@ -114,9 +114,9 @@ export function TranscriptView(props: TranscriptViewProps) {
   const empty = !error && !loading && state.turns.length === 0
   const agentName = useAgentName()
 
+  // The bottom edge fades into the canvas, so the composer reads as floating.
   return (
     <AgentNameContext.Provider value={agentName}>
-      // The bottom edge fades into the canvas, so the composer reads as floating.
       <div className="chat-fade relative min-h-0 flex-1">
         <div
           ref={attachScroller}

@@ -53,6 +53,11 @@ describe('transcript layout', () => {
       'data-role',
       'assistant',
     )
+    // The reply opens with the agent's identity line.
+    const reply = within(log()).getByText('Hi! How can I help?').closest('[data-role]')!
+    expect(reply.querySelector('.chat-ident')).toHaveTextContent(/main/i)
+    // No source comment leaks into the page as text (a `//` line once sat in JSX).
+    expect(log().parentElement!.parentElement!.textContent).not.toMatch(/\/\/|\/\*/)
   })
 
   it('copies a reply as Markdown with a confirmation', async () => {

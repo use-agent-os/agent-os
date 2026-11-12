@@ -68,6 +68,7 @@
   /* ---- Reply ------------------------------------------------------------ */
 
   .chat-reply {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 14px;
@@ -129,8 +130,11 @@
       transform: translateX(4px);
     }
   }
+  /* The reply's pill hangs in the gap below it: it takes no room. */
   .chat-reply > .chat-msg-actions {
-    margin-top: -4px;
+    position: absolute;
+    top: calc(100% + 2px);
+    left: -4px;
   }
   :is(.chat-user, .chat-reply):is(:hover, :focus-within) > .chat-msg-actions,
   .chat-reply[data-last] > .chat-msg-actions {
@@ -146,6 +150,10 @@
     .chat-msg-actions {
       opacity: 1;
       transform: none;
+    }
+    .chat-reply > .chat-msg-actions {
+      position: static;
+      margin-top: -6px;
     }
   }
 
@@ -431,7 +439,7 @@
     padding: 3px 10px 3px 4px;
     border: 1px solid var(--border);
     border-radius: 9999px;
-    background: color-mix(in oklab, var(--surface-1), transparent 25%);
+    background: var(--surface-1);
     color: var(--text-muted);
     font-size: 13px;
     font-weight: 500;
@@ -457,11 +465,17 @@
     display: inline-flex;
   }
   .chat-fold-icons > .chat-node {
+    width: 22px;
+    height: 22px;
     border-radius: 9999px;
-    outline: 2px solid var(--surface-0);
+    box-shadow: 0 0 0 2px var(--surface-1);
+  }
+  .chat-fold-icons > .chat-node > svg {
+    width: 12px;
+    height: 12px;
   }
   .chat-fold-icons > .chat-node + .chat-node {
-    margin-left: -6px;
+    margin-left: -5px;
   }
 
   /* ---- Failed turn: a calm card ------------------------------------------ */
