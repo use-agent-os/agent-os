@@ -14,8 +14,8 @@
 
 /* Served from the console bundle — never from a third-party font host. */
 @font-face {
-  font-family: 'Inter Variable';
-  src: url('../../assets/fonts/Inter-Variable.woff2') format('woff2');
+  font-family: 'Geist Variable';
+  src: url('../../assets/fonts/Geist-Variable.woff2') format('woff2');
   font-weight: 100 900;
   font-display: swap;
 }
@@ -31,8 +31,10 @@
     background: var(--surface-0);
     color: var(--text);
     font-family: var(--font-sans);
-    /* Inter: open digits and a straight-sided l/1 read better in dense UI. */
-    font-feature-settings: 'cv01', 'cv02', 'cv11';
+    /* Geist: ss03 gives l a tail and ss05 gives I serifs, so Il1 stay
+       distinct in ids, keys and model names. Figures stay proportional in
+       prose; tables and stats opt into `tabular-nums` where they need it. */
+    font-feature-settings: 'ss03', 'ss05';
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-size-adjust: 100%;
