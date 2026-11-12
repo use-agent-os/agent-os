@@ -147,7 +147,7 @@ describe('trading cards', () => {
 })
 
 describe('mobile chat layout', () => {
-  it('leaves navigation to the shell top bar, has a title that opens Details as a sheet, and Panels', async () => {
+  it('leaves navigation to the shell top bar, has a title that renames in place, and Panels', async () => {
     stubMatchMedia(
       (q) =>
         q.includes('max-width: 768px') ||
@@ -164,7 +164,7 @@ describe('mobile chat layout', () => {
       /(^|\s)min-w-0(\s|$)/,
     )
     within(header).getByRole('heading', { level: 1 }).click()
-    expect(await screen.findByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
+    expect(await within(header).findByRole('textbox')).toBeInTheDocument()
     // Inputs are at least 16px on touch so the browser does not zoom.
     expect(composer.className).toContain('touch:text-base')
     expect(composer.closest('[class*="safe-area-inset-bottom"]')).not.toBeNull()

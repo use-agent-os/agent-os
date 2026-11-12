@@ -193,6 +193,27 @@ describe('approval tray', () => {
     expect(within(tray).queryByRole('button', { name: /close|dismiss/i })).not.toBeInTheDocument()
   })
 
+  it('starts collapsed on a chat page, and a choice made there holds on other pages', async () => {
+    const user = userEvent.setup()
+    const { router } = renderShell('/chat/main/webchat/b')
+    act(() => useApprovals.getState().upsert(approval()))
+    const tray = () => screen.findByRole('complementary', { name: 'Pending approvals' })
+    expect(
+      await within(await tray()).findByRole('heading', { name: '1 approval waiting' }),
+    ).toBeInTheDocument()
+    expect(within(await tray()).queryByRole('button', { name: 'Deny' })).not.toBeInTheDocument()
+    // Untouched, it follows the page: expanded away from chat.
+    await act(() => router.navigate('/usage'))
+    expect(await within(await tray()).findByRole('button', { name: 'Deny' })).toBeInTheDocument()
+    await act(() => router.navigate('/chat/main/webchat/b'))
+    await user.click(
+      await within(await tray()).findByRole('button', { name: 'Show pending approvals' }),
+    )
+    expect(await within(await tray()).findByRole('button', { name: 'Deny' })).toBeInTheDocument()
+    await act(() => router.navigate('/chat/main/webchat/c'))
+    expect(await within(await tray()).findByRole('button', { name: 'Deny' })).toBeInTheDocument()
+  })
+
   it('does not offer Always allow when the request cannot be always-allowed', async () => {
     renderShell('/usage')
     act(() => useApprovals.getState().upsert(approval({ namespace: 'flow', command: undefined })))

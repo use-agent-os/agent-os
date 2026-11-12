@@ -1,11 +1,15 @@
 /* Rendered Markdown inside chat messages (overhaul-control-ui D12). Scoped
  * to .prose-chat so it never leaks into the interface chrome. Syntax colours
- * come from the theme tokens (--hl-*), contrast-checked in tokens.test.ts. */
+ * come from the theme tokens (--hl-*), contrast-checked in tokens.test.ts.
+ *
+ * Nothing in here animates: a streaming reply rebuilds this DOM on every
+ * delta, so any entrance would replay many times a second. */
 
 .prose-chat {
   font-size: var(--text-prose);
-  line-height: var(--leading-prose);
+  line-height: 1.65;
   overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 .prose-chat > :first-child {
   margin-top: 0;
@@ -17,116 +21,239 @@
 .prose-chat ul,
 .prose-chat ol,
 .prose-chat blockquote,
-.prose-chat table,
+.prose-chat .table-scroll,
 .prose-chat .code-block {
-  margin: 0.6em 0;
+  margin: 0.75em 0;
+}
+.prose-chat strong {
+  font-weight: 600;
 }
 .prose-chat ul {
   list-style: disc;
-  padding-left: 1.4em;
+  padding-left: 1.35em;
 }
 .prose-chat ol {
   list-style: decimal;
-  padding-left: 1.4em;
+  padding-left: 1.45em;
+}
+.prose-chat li {
+  margin: 0.3em 0;
+  padding-left: 0.2em;
+}
+.prose-chat li::marker {
+  color: var(--text-muted);
+}
+.prose-chat ul > li::marker {
+  color: color-mix(in oklab, var(--accent), var(--text-muted) 35%);
+}
+.prose-chat ol > li::marker {
+  font-variant-numeric: tabular-nums;
+}
+.prose-chat li > ul,
+.prose-chat li > ol {
+  margin: 0.3em 0;
 }
 .prose-chat h1,
 .prose-chat h2,
 .prose-chat h3,
 .prose-chat h4 {
-  margin: 1em 0 0.4em;
+  margin: 1.6em 0 0.55em;
   font-weight: 600;
   line-height: 1.3;
+  letter-spacing: -0.012em;
+  text-wrap: balance;
 }
 .prose-chat h1 {
-  font-size: 1.35em;
+  font-size: 1.5em;
+  letter-spacing: -0.022em;
 }
 .prose-chat h2 {
-  font-size: 1.2em;
+  font-size: 1.28em;
+  letter-spacing: -0.018em;
 }
 .prose-chat h3 {
-  font-size: 1.08em;
+  font-size: 1.1em;
+}
+.prose-chat :is(h1, h2, h3, h4) + :is(p, ul, ol) {
+  margin-top: 0.4em;
+}
+.prose-chat h4 {
+  font-size: 1em;
+  color: var(--text-muted);
 }
 .prose-chat a {
   color: var(--accent);
   text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in oklab, var(--accent), transparent 55%);
+  text-underline-offset: 3px;
+  transition: text-decoration-color var(--duration-fast) var(--ease-out);
+}
+.prose-chat a:hover {
+  text-decoration-color: currentColor;
 }
 .prose-chat blockquote {
-  border-left: 3px solid var(--border-control);
-  padding-left: 0.8em;
+  border-left: 3px solid color-mix(in oklab, var(--accent), transparent 40%);
+  border-radius: 2px 10px 10px 2px;
+  padding: 0.6em 1em;
+  background: color-mix(in oklab, var(--surface-1), transparent 30%);
   color: var(--text-muted);
 }
 .prose-chat hr {
   border: 0;
-  border-top: 1px solid var(--border);
-  margin: 1em 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
+  margin: 1.75em 0;
 }
 .prose-chat img {
   max-width: 100%;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+}
+.prose-chat input[type='checkbox'] {
+  accent-color: var(--accent);
+  margin-inline-end: 0.4em;
+  vertical-align: -0.1em;
 }
 .prose-chat code {
   font-family: var(--font-mono);
-  font-size: 0.9em;
+  font-size: 0.86em;
 }
 .prose-chat :not(pre) > code {
-  background: var(--surface-3);
-  border-radius: 4px;
-  padding: 0.1em 0.35em;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.12em 0.38em;
+  white-space: break-spaces;
 }
 
-/* Wide content scrolls inside its own container, never the page. */
+/* Tables: a rounded frame, header on a raised step, row dividers only.
+ * Wide tables scroll inside their own frame, never the page. */
 .prose-chat .table-scroll {
   overflow-x: auto;
   max-width: 100%;
+  width: fit-content;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--elevation-card);
+  background: var(--surface-1);
 }
 .prose-chat table {
   border-collapse: collapse;
-  font-size: 0.95em;
+  font-size: 0.93em;
+  font-variant-numeric: tabular-nums;
 }
 .prose-chat th,
 .prose-chat td {
-  border: 1px solid var(--border);
-  padding: 0.3em 0.6em;
+  padding: 0.5em 0.9em;
   text-align: left;
+  vertical-align: top;
 }
 .prose-chat th {
   background: var(--surface-2);
+  border-bottom: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  font-size: max(12px, 0.92em);
   font-weight: 600;
+  white-space: nowrap;
+}
+.prose-chat td {
+  border-top: 1px solid var(--border);
+  /* Cells wrap between words, never mid-word: `anywhere` (inherited from
+     .prose-chat) let a narrow window squeeze the table into one-letter
+     columns instead of scrolling it inside .table-scroll. The min width
+     keeps a column of short words readable. */
+  overflow-wrap: break-word;
+  min-width: 6.5em;
+}
+/* Long unbroken tokens (a URL, a hash in code) may still break, so one
+   token does not stretch its column across the whole table; such a column
+   gets a wider floor so it does not shrink into a tall sliver either. */
+.prose-chat td :is(a, code) {
+  overflow-wrap: anywhere;
+}
+.prose-chat td:has(a, code) {
+  min-width: 12em;
+}
+.prose-chat tr:first-child > td {
+  border-top: 0;
+}
+.prose-chat tbody tr {
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  .prose-chat tbody tr:hover {
+    background: color-mix(in oklab, var(--surface-2), transparent 40%);
+  }
 }
 
+/* Code blocks: a card with a header (language, Copy). */
 .prose-chat .code-block {
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: 14px;
   background: var(--code-bg);
   color: var(--code-text);
   overflow: hidden;
+  box-shadow: var(--highlight);
 }
 .prose-chat .code-block-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.25em 0.5em 0.25em 0.8em;
+  min-height: 36px;
+  padding: 0 0.4em 0 1em;
   border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--code-bg), var(--text) 3%);
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-muted);
 }
 .prose-chat .code-block pre {
   margin: 0;
-  padding: 0.75em 0.9em;
+  padding: 0.85em 1em;
   overflow-x: auto;
   font-size: 0.88em;
-  line-height: 1.5;
+  line-height: 1.6;
+  tab-size: 2;
 }
 .prose-chat .copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
   min-height: 24px;
-  padding: 0 0.5em;
-  border-radius: 4px;
+  padding: 0 0.55em;
+  border-radius: 6px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
   color: var(--text-muted);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    scale var(--duration-press) var(--ease-out);
+}
+.prose-chat .copy-btn::before {
+  content: '';
+  width: 13px;
+  height: 13px;
+  background: currentColor;
+  mask: var(--copy-icon) center / contain no-repeat;
+  --copy-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='14' height='14' x='8' y='8' rx='2' ry='2'/%3E%3Cpath d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/%3E%3C/svg%3E");
 }
 .prose-chat .copy-btn:hover {
   background: var(--surface-3);
   color: var(--text);
+}
+.prose-chat .copy-btn:active {
+  scale: 0.96;
+}
+/* Copied: a check in the success colour, for a moment. */
+.prose-chat .copy-btn[data-copied] {
+  color: var(--ok);
+}
+.prose-chat .copy-btn[data-copied]::before {
+  --copy-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+  animation: chat-pop var(--duration-spring) var(--ease-spring);
 }
 
 .prose-chat .hljs-keyword,
@@ -174,4 +301,11 @@
 .prose-chat .ext-image {
   color: var(--text-muted);
   font-size: 0.9em;
+}
+
+@media (forced-colors: active) {
+  .prose-chat .copy-btn::before {
+    forced-color-adjust: none;
+    background: ButtonText;
+  }
 }

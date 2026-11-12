@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 
-// Side panel and Details state (overhaul-control-ui D7, chat spec "Side
-// panel", "Details column").
+// Side panel state (overhaul-control-ui D7, chat spec "Side panel").
 
 export type PanelTabKind = 'tool-output' | 'artifact' | 'thinking'
 
@@ -16,8 +15,6 @@ export const SIDE_PANEL_WIDTH_KEY = 'agentos.ui.sidePanelWidth'
 export const SIDE_PANEL_MIN = 320
 export const SIDE_PANEL_MAX = 900
 export const SIDE_PANEL_DEFAULT = 440
-/** The chat pane is wide enough to dock Details beside the transcript. */
-export const DETAILS_DOCK_MIN = 1040
 
 export function clampPanelWidth(width: number): number {
   if (!Number.isFinite(width)) return SIDE_PANEL_DEFAULT
@@ -39,14 +36,11 @@ interface PanelState {
   width: number
   /** The element that opened the panel, to return focus to on close. */
   opener: HTMLElement | null
-  /** Per-session explicit Details choice: true open, false closed. */
-  details: Record<string, boolean>
   open(tab: PanelTab, opener?: HTMLElement | null): void
   closeTab(id: string): void
   closeAll(): void
   setActive(id: string): void
   setWidth(width: number, persist?: boolean): void
-  setDetails(sessionKey: string, open: boolean): void
 }
 
 export const usePanels = create<PanelState>((set, get) => ({
@@ -54,7 +48,6 @@ export const usePanels = create<PanelState>((set, get) => ({
   activeId: null,
   width: readWidth(),
   opener: null,
-  details: {},
   open(tab, opener) {
     const tabs = get().tabs.some((t) => t.id === tab.id) ? get().tabs : [...get().tabs, tab]
     set({ tabs, activeId: tab.id, opener: opener ?? get().opener })
@@ -80,20 +73,8 @@ export const usePanels = create<PanelState>((set, get) => ({
       /* storage unavailable */
     }
   },
-  setDetails(sessionKey, open) {
-    set({ details: { ...get().details, [sessionKey]: open } })
-  },
 }))
 
-/**
- * Whether Details shows for a session: an explicit choice for that session
- * wins (an explicit close sticks); otherwise it opens by itself only when it
- * can dock.
- */
-export function detailsVisible(explicit: boolean | undefined, canDock: boolean): boolean {
-  return explicit ?? canDock
-}
-
 export function resetPanelsForTests(): void {
-  usePanels.setState({ tabs: [], activeId: null, width: readWidth(), opener: null, details: {} })
+  usePanels.setState({ tabs: [], activeId: null, width: readWidth(), opener: null })
 }

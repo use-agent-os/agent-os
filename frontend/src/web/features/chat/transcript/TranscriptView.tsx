@@ -1,10 +1,14 @@
 import { ArrowDown, Loader2 } from 'lucide-react'
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webChat'
 import { Button } from '@/web/components/ui/button'
-import { EmptyState, ErrorState } from '@/web/components/ui/states'
-import type { TranscriptState } from '../model/types'
+import { ErrorState } from '@/web/components/ui/states'
+import { useAgents } from '@/web/shell/session-data'
+import { agentOfSessionKey } from '@/web/shell/session-url'
+import { EmptyConversation } from '../ChatStage'
+import type { TranscriptState, Turn } from '../model/types'
+import { AgentNameContext, ChatActionsContext } from './context'
 import { useFollowScroll } from './follow'
 import { TurnView } from './TurnView'
 
@@ -29,6 +33,11 @@ export function contentVersion(state: TranscriptState): string {
     settled,
     state.pendingInputs.length,
   ].join(':')
+}
+
+/** A local note (a slash command's output), not a turn of the conversation. */
+function isNoteTurn(turn: Turn): boolean {
+  return !turn.userMessage && turn.items.every((item) => item.kind === 'note')
 }
 
 export interface TranscriptViewProps {
@@ -85,76 +94,119 @@ export function TranscriptView(props: TranscriptViewProps) {
     if (el && el.scrollHeight <= el.clientHeight + 40) maybeLoadOlder()
   }, [loading, state.hasMore, rows, maybeLoadOlder])
 
+  // The newest turn finishing on screen (live → done): its work folds away
+  // instead of snapping shut. Settling swaps the live turn for its history
+  // copy (a new id, and for a moment both are listed), so until the next turn
+  // goes live the newest turn keeps one key: it mounts once, with the fold
+  // starting open. A turn loaded from history is never marked.
+  const lastTurn = state.turns.at(-1)
+  const lastLive = lastTurn?.status === 'live'
+  const [wasLive, setWasLive] = useState(lastLive)
+  const [settleKey, setSettleKey] = useState<string | null>(null)
+  if (wasLive !== lastLive) {
+    setWasLive(lastLive)
+    setSettleKey(!lastLive && lastTurn?.status === 'done' ? `settled:${lastTurn.id}` : null)
+  }
+  const settlingIndex =
+    settleKey && lastTurn?.status === 'done' && !isNoteTurn(lastTurn) ? state.turns.length - 1 : -1
+
   const lastUserIndex = state.turns.reduce((acc, turn, i) => (turn.userMessage ? i : acc), -1)
 
+  const empty = !error && !loading && state.turns.length === 0
+  const agentName = useAgentName()
+
+  // The bottom edge fades into the canvas, so the composer reads as floating.
   return (
-    <div className="relative min-h-0 flex-1">
-      <div
-        ref={attachScroller}
-        onScroll={maybeLoadOlder}
-        // The log scrolls on its own: keyboard users scroll it once it has focus.
-        tabIndex={0}
-        role="log"
-        aria-label={t('webChat.transcriptLabel')}
-        aria-busy={loading || undefined}
-        className="scroll-contained h-full"
-      >
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
-          {state.hasMore ? (
-            <p className="text-center text-small text-text-muted" role="status">
-              <Loader2 className="motion-status mr-1 inline size-3.5 animate-spin" aria-hidden />
-              {t('webChat.loadOlder')}
-            </p>
-          ) : null}
-          {error && state.turns.length === 0 ? (
-            <ErrorState
-              title={t('webChat.historyFailed')}
-              message={error}
-              onRetry={props.onRetryLoad}
-            />
-          ) : !loading && state.turns.length === 0 ? (
-            <EmptyState title={t('webChat.emptyTitle')} description={t('webChat.emptyBody')} />
-          ) : (
-            state.turns.map((turn, i) => (
-              <TurnView
-                key={turn.id}
-                turn={turn}
-                answered={i < lastUserIndex}
-                waitingApproval={waitingApproval}
-                last={i === state.turns.length - 1}
+    <AgentNameContext.Provider value={agentName}>
+      <div className="chat-fade relative min-h-0 flex-1">
+        <div
+          ref={attachScroller}
+          onScroll={maybeLoadOlder}
+          // The log scrolls on its own: keyboard users scroll it once it has focus.
+          tabIndex={0}
+          role="log"
+          aria-label={t('webChat.transcriptLabel')}
+          aria-busy={loading || undefined}
+          className="chat-scroller scroll-contained h-full focus-visible:-outline-offset-2"
+        >
+          <div className="chat-column chat-turns flex min-h-full flex-col">
+            {state.hasMore ? (
+              <p
+                className="flex items-center justify-center gap-1.5 text-small text-text-muted"
+                role="status"
+              >
+                <Loader2 className="motion-status size-3.5 animate-spin" aria-hidden />
+                {t('webChat.loadOlder')}
+              </p>
+            ) : null}
+            {error && state.turns.length === 0 ? (
+              <ErrorState
+                title={t('webChat.historyFailed')}
+                message={error}
+                onRetry={props.onRetryLoad}
               />
-            ))
-          )}
-          {state.pendingInputs.length ? (
-            <section
-              aria-label={t('webChat.gatewayQueued')}
-              className="flex flex-col items-end gap-1"
-            >
-              {state.pendingInputs.map((input, i) => (
-                <p
-                  key={input.task_id ?? i}
-                  className="max-w-[85%] rounded-2xl border border-dashed border-border px-4 py-2 text-text-muted"
-                >
-                  {input.steer
-                    ? t('webChat.gatewayQueuedSteer', { text: input.text ?? '' })
-                    : t('webChat.gatewayQueuedNext', { text: input.text ?? '' })}
-                </p>
-              ))}
-            </section>
-          ) : null}
+            ) : empty ? (
+              <EmptyConversation />
+            ) : (
+              state.turns.map((turn, i) => (
+                <TurnView
+                  key={i === settlingIndex ? settleKey! : turn.id}
+                  turn={turn}
+                  answered={i < lastUserIndex}
+                  waitingApproval={waitingApproval}
+                  last={i === state.turns.length - 1}
+                  settled={i === settlingIndex}
+                />
+              ))
+            )}
+            {state.pendingInputs.length ? (
+              <section
+                aria-label={t('webChat.gatewayQueued')}
+                className="flex flex-col items-end gap-1.5"
+              >
+                {state.pendingInputs.map((input, i) => (
+                  <p
+                    key={input.task_id ?? i}
+                    className="chat-enter chat-user-bubble chat-pending text-text-muted"
+                  >
+                    {input.steer
+                      ? t('webChat.gatewayQueuedSteer', { text: input.text ?? '' })
+                      : t('webChat.gatewayQueuedNext', { text: input.text ?? '' })}
+                  </p>
+                ))}
+              </section>
+            ) : null}
+          </div>
+        </div>
+        {/* Always mounted, so it can leave as smoothly as it arrives; hidden
+          (and out of the tab order) while following. */}
+        <div
+          className="chat-latest pointer-events-none absolute inset-x-0 bottom-3 z-[1] flex justify-center"
+          data-show={follow.showLatest}
+          inert={!follow.showLatest}
+          aria-hidden={!follow.showLatest || undefined}
+        >
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={follow.resume}
+            className="pointer-events-auto rounded-full pr-3.5 pl-3 shadow-overlay"
+          >
+            <ArrowDown />
+            {t('webChat.latest')}
+          </Button>
         </div>
       </div>
-      {follow.showLatest ? (
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={follow.resume}
-          className="absolute bottom-3 left-1/2 -translate-x-1/2 shadow-2"
-        >
-          <ArrowDown />
-          {t('webChat.latest')}
-        </Button>
-      ) : null}
-    </div>
+    </AgentNameContext.Provider>
   )
+}
+
+/** The answering agent's display name, from the session key and the agent list. */
+function useAgentName(): string {
+  const sessionKey = useContext(ChatActionsContext)?.sessionKey ?? ''
+  const agents = useAgents()
+  const id = agentOfSessionKey(sessionKey) ?? ''
+  const name = agents.data?.find((a) => a.id === id)?.name
+  // Until the list answers (or without one), the id, capitalised.
+  return name ?? id.charAt(0).toUpperCase() + id.slice(1)
 }

@@ -43,10 +43,18 @@ function contrast(a: string, b: string): number {
   return (hi! + 0.05) / (lo! + 0.05)
 }
 
-const SURFACES = ['--surface-0', '--surface-1', '--surface-2', '--surface-3']
-// Controls and focus rings sit on the canvas, panes and cards; surface-3 is a
-// hover/selected fill that never hosts a bare input boundary.
-const CONTROL_SURFACES = SURFACES.slice(0, 3)
+const SURFACES = [
+  '--surface-0',
+  '--surface-1',
+  '--surface-2',
+  '--surface-3',
+  '--surface-inset',
+  '--surface-overlay',
+]
+// Controls and focus rings sit on the canvas, panes, cards, input wells and
+// overlays; surface-3 is a hover/selected fill that never hosts a bare input
+// boundary.
+const CONTROL_SURFACES = SURFACES.filter((s) => s !== '--surface-3')
 const TEXT_TOKENS = ['--text', '--text-muted', '--accent', '--ok', '--warn', '--danger', '--info']
 const FILL_PAIRS: [string, string][] = [
   ['--accent-fg', '--accent'],

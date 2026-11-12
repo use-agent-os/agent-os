@@ -1,52 +1,20 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  AlertTriangle,
-  ArrowDown,
-  ArrowUp,
-  CalendarClock,
-  Copy,
-  History,
-  Loader2,
-  Pause,
-  Pencil,
-  Play,
-  Plus,
-  Search,
-  Trash2,
-  Zap,
-} from 'lucide-react'
+import { ArrowUp, Loader2, Plus, Search } from 'lucide-react'
 import { useEffect, useId, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
-import { formatNumber, t, tPlural } from '@/i18n'
+import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webPagesWork'
-import { copyWithFallback } from '@/lib/clipboard'
-import { gate, requireConnection, requireScheduler, type Gate } from '@/lib/disabled-reason'
+import { gate, requireConnection, requireScheduler } from '@/lib/disabled-reason'
 import { useRuntimeSignals } from '@/lib/runtime-signals'
 import { cn } from '@/lib/utils'
 import { RpcError } from '@/lib/ws-rpc'
 import {
   activeChatSessionKey,
-  CONCURRENCY_POLICIES,
-  concurrencyLabel,
-  explainCron,
   filterJobs,
-  humanCountdownPast,
-  isOkStatus,
-  isUpcomingRun,
-  jobConcurrency,
-  jobCreatedFrom,
   jobDotState,
-  jobElevated,
-  jobKindLabel,
   jobRuntimeHealth,
-  jobSchedule,
-  jobTarget,
-  nextRunAbs,
-  nextRunText,
-  shortCronId,
   sortJobs,
-  type ConcurrencyPolicy,
   type DeliveryTargetMap,
   type RawJob,
   type SortCol,
@@ -61,18 +29,29 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/web/components/ui/alert-dialog'
+import { StatusDot } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
+import { Input, Select } from '@/web/components/ui/input'
 import { PageHeader } from '@/web/components/ui/page-header'
 import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
+import { PAGE_CLASS } from '@/web/features/home/overview-ui'
 import { useDocumentVisible } from '@/web/shell/session-data'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
+import '@/web/styles/page-automations.css'
 import { AutomationEditor, type SaveRequest } from './AutomationEditor'
+import { JobRow } from './JobRow'
 import { RunHistory } from './RunHistory'
+import { useArrival } from './schedule'
+import { Upcoming } from './Upcoming'
+import { ZeroState } from './ZeroState'
 
-// `/automations` (task 8.5) on views/cron/logic: job cards with run health,
-// the create / edit sheet, run now, pause and resume, delete, run history, and
-// a live refresh on `cron.run.finished`. With no jobs the page explains what
-// lands here and offers New automation plus the legacy quick-start presets.
+export { runNowStatus, type ManualRunResult } from './JobRow'
+
+// `/automations` (task 8.5) on views/cron/logic, schedule first: what runs
+// next and the next 24 hours as lanes, then one row per job with its schedule
+// in words, run health and actions (run now, pause and resume, history, edit,
+// delete); the create / edit sheet; a live refresh on `cron.run.finished`.
+// With no jobs the page is a zero state with a gallery of templates.
 
 const JOBS_QUERY_KEY = ['cron', 'jobs'] as const
 const TARGETS_QUERY_KEY = ['cron', 'deliveryTargets'] as const
@@ -101,33 +80,6 @@ function readActiveSessionKey(): string {
   } catch {
     return ''
   }
-}
-
-/** The three empty-state quick starts; each seeds the create sheet. */
-function emptyTemplates(): (Partial<RawJob> & { expression: string; hint: string })[] {
-  return [
-    {
-      name: t('webPagesWork.templateStandupName'),
-      expression: '0 9 * * 1-5',
-      payloadKind: 'reminder',
-      message: t('webPagesWork.templateStandupMessage'),
-      hint: t('webPagesWork.templateStandupHint'),
-    },
-    {
-      name: t('webPagesWork.templateHealthName'),
-      expression: '0 * * * *',
-      payloadKind: 'agent_turn',
-      message: t('webPagesWork.templateHealthMessage'),
-      hint: t('webPagesWork.templateHealthHint'),
-    },
-    {
-      name: t('webPagesWork.templateWrapName'),
-      expression: '0 17 * * 5',
-      payloadKind: 'agent_turn',
-      message: t('webPagesWork.templateWrapMessage'),
-      hint: t('webPagesWork.templateWrapHint'),
-    },
-  ]
 }
 
 function sortOptions(): { value: SortCol; label: string }[] {
@@ -165,6 +117,7 @@ export function AutomationsPage() {
   const [pendingDelete, setPendingDelete] = useState<RawJob | null>(null)
   const [deleting, setDeleting] = useState(false)
   const reasonId = useId()
+  const listId = useId()
   const visibleTab = useDocumentVisible()
 
   const jobs = useQuery({
@@ -238,6 +191,8 @@ export function AutomationsPage() {
     () => sortJobs(filterJobs(list, search), sortCol, sortAsc),
     [list, search, sortCol, sortAsc],
   )
+  // Cards rise in once, when the jobs first arrive; never on a poll or a tick.
+  const arriving = useArrival(!jobs.isPending)
 
   const openCreate = (template: Partial<RawJob> | null) => {
     setSaveError(null)
@@ -282,16 +237,23 @@ export function AutomationsPage() {
 
   const total = list.length
   const enabledCount = list.filter((j) => j.enabled).length
-  const upcoming = list.filter((j) => isUpcomingRun(j)).length
-  const degraded = list.filter((j) => jobRuntimeHealth(j)?.degraded).length
+  const failingCount = list.filter(
+    (j) => jobRuntimeHealth(j)?.degraded || jobDotState(j) === 'error',
+  ).length
+  const empty = !jobs.isPending && total === 0 && !jobs.isError
 
   let body
   if (jobs.isPending) {
     body = (
-      <LoadingRegion label={t('webPagesWork.automationsLoading')}>
-        <div className="grid gap-3 md:grid-cols-2">
-          {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-44" />
+      <LoadingRegion label={t('webPagesWork.automationsLoading')} className="flex flex-col gap-5">
+        <div className="am-upcoming">
+          <Skeleton className="h-56 rounded-card" />
+          <Skeleton className="h-56 rounded-card" />
+        </div>
+        <Skeleton className="h-9 w-full" />
+        <div className="flex flex-col gap-px overflow-hidden rounded-card">
+          {Array.from({ length: 3 }, (_, i) => (
+            <Skeleton key={i} className="h-24 rounded-none" />
           ))}
         </div>
       </LoadingRegion>
@@ -300,149 +262,134 @@ export function AutomationsPage() {
     // The error notice above says what failed; there is nothing to show under it.
     body = null
   } else if (total === 0) {
-    body = (
-      <EmptyState
-        icon={<CalendarClock />}
-        title={t('webPagesWork.automationsEmpty')}
-        description={t('webPagesWork.automationsEmptyBody')}
-        action={
-          <div className="flex flex-col items-center gap-4">
-            <Button variant="primary" onClick={() => openCreate(null)}>
-              <Plus />
-              {t('webPagesWork.automationsNew')}
-            </Button>
-            <div className="flex flex-col items-center gap-2">
-              <span className="text-small text-text-muted">{t('webPagesWork.presetsLabel')}</span>
-              <ul role="list" className="flex flex-col gap-2">
-                {emptyTemplates().map((tpl) => (
-                  <li key={tpl.expression}>
-                    <button
-                      type="button"
-                      onClick={() => openCreate(tpl)}
-                      className="target flex w-full flex-col items-start gap-0.5 rounded-md border border-border px-3 py-2 text-left hover:bg-surface-2"
-                    >
-                      <span className="font-medium">{tpl.name}</span>
-                      <span className="text-small text-text-muted">
-                        <code className="font-mono">{tpl.expression}</code> · {tpl.hint}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        }
-      />
-    )
+    body = <ZeroState onCreate={openCreate} disabledReason={control.reason} />
   } else {
     body = (
       <>
-        <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {[
-            { label: t('webPagesWork.statActive'), value: enabledCount },
-            { label: t('webPagesWork.statPaused'), value: total - enabledCount },
-            { label: t('webPagesWork.statUpcoming'), value: upcoming },
-            { label: t('webPagesWork.statDegraded'), value: degraded },
-          ].map((tile) => (
-            <div
-              key={tile.label}
-              className="rounded-lg border border-border bg-surface-1 px-3 py-2"
-            >
-              <dt className="text-small text-text-muted">{tile.label}</dt>
-              <dd className="text-lg font-semibold tabular-nums">{formatNumber(tile.value)}</dd>
+        <Upcoming jobs={list} animate={arriving} />
+        <section aria-labelledby={listId} className="flex flex-col gap-3">
+          <div className="am-toolbar">
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h2 id={listId} className="text-section">
+                {t('webPagesWork.automationsTitle')}
+              </h2>
+              <p className="am-summary">
+                <span>{tPlural('webPagesWork.summaryTotal', total)}</span>
+                <span>
+                  <StatusDot tone="ok" className="size-1.5" />
+                  {t('webPagesWork.summaryActive', { count: enabledCount })}
+                </span>
+                {total - enabledCount > 0 ? (
+                  <span>
+                    <StatusDot tone="neutral" className="size-1.5" />
+                    {t('webPagesWork.summaryPaused', { count: total - enabledCount })}
+                  </span>
+                ) : null}
+                {failingCount > 0 ? (
+                  <span className="text-danger">
+                    <StatusDot tone="danger" className="size-1.5" />
+                    {t('webPagesWork.summaryFailing', { count: failingCount })}
+                  </span>
+                ) : null}
+              </p>
             </div>
-          ))}
-        </dl>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="relative block min-w-0 flex-[1_1_14rem]">
-            <span className="sr-only">{t('webPagesWork.automationsSearch')}</span>
-            <Search
-              className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-muted"
-              aria-hidden
-            />
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t('webPagesWork.automationsSearch')}
-              className="h-9 w-full rounded-md border border-border-control bg-surface-0 pr-2 pl-8 touch:h-11 max-md:text-base"
-            />
-          </label>
-          <label className="flex items-center gap-2">
-            <span className="text-small text-text-muted">{t('webPagesWork.sortBy')}</span>
-            <select
-              className="h-9 rounded-md border border-border-control bg-surface-0 px-2 touch:h-11"
-              value={sortCol}
-              onChange={(e) => setSortCol(e.target.value as SortCol)}
-            >
-              {sortOptions().map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Button
-            size="icon"
-            variant="outline"
-            aria-label={
-              sortAsc ? t('webPagesWork.sortAscending') : t('webPagesWork.sortDescending')
-            }
-            onClick={() => setSortAsc((v) => !v)}
-          >
-            {sortAsc ? <ArrowUp /> : <ArrowDown />}
-          </Button>
-        </div>
-        {visible.length === 0 ? (
-          <EmptyState
-            title={t('webPagesWork.automationsNoMatch')}
-            action={
-              <Button variant="outline" onClick={() => setSearch('')}>
-                {t('webPagesWork.clearFilters')}
-              </Button>
-            }
-          />
-        ) : (
-          <ul role="list" className="grid gap-3 md:grid-cols-2">
-            {visible.map((job, i) => (
-              <li key={String(job.id ?? i)} className="min-w-0">
-                <JobCard
-                  job={job}
-                  control={control}
-                  onSchedulerError={noteSchedulerError}
-                  onChanged={() => void refresh()}
-                  onEdit={() => {
-                    setSaveError(null)
-                    setEditor({ kind: 'edit', job })
-                  }}
-                  onHistory={() => setHistory(job)}
-                  onDelete={() => setPendingDelete(job)}
+            <div className="am-toolbar-controls">
+              <Input
+                type="search"
+                size="sm"
+                aria-label={t('webPagesWork.automationsSearch')}
+                icon={<Search />}
+                wrapperClassName="min-w-0 flex-1 max-sm:basis-full sm:w-56 sm:flex-none"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t('webPagesWork.automationsSearch')}
+              />
+              <Select
+                size="sm"
+                aria-label={t('webPagesWork.sortBy')}
+                className="w-auto max-sm:flex-1"
+                value={sortCol}
+                onChange={(e) => setSortCol(e.target.value as SortCol)}
+              >
+                {sortOptions().map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+              <Button
+                size="icon-sm"
+                variant="outline"
+                aria-label={
+                  sortAsc ? t('webPagesWork.sortAscending') : t('webPagesWork.sortDescending')
+                }
+                onClick={() => setSortAsc((v) => !v)}
+              >
+                <ArrowUp
+                  className={cn(
+                    'transition-[rotate] duration-[var(--duration-base)] ease-[var(--ease-out)]',
+                    !sortAsc && 'rotate-180',
+                  )}
                 />
-              </li>
-            ))}
-          </ul>
-        )}
+              </Button>
+            </div>
+          </div>
+          {visible.length === 0 ? (
+            <EmptyState
+              size="sm"
+              icon={<Search />}
+              title={t('webPagesWork.automationsNoMatch')}
+              action={
+                <Button variant="outline" onClick={() => setSearch('')}>
+                  {t('webPagesWork.clearFilters')}
+                </Button>
+              }
+            />
+          ) : (
+            <ul role="list" className={cn('am-list', arriving && 'anim-stagger')}>
+              {visible.map((job, i) => (
+                <li key={String(job.id ?? i)} className="min-w-0">
+                  <JobRow
+                    job={job}
+                    control={control}
+                    onSchedulerError={noteSchedulerError}
+                    onChanged={() => void refresh()}
+                    onEdit={() => {
+                      setSaveError(null)
+                      setEditor({ kind: 'edit', job })
+                    }}
+                    onHistory={() => setHistory(job)}
+                    onDelete={() => setPendingDelete(job)}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </>
     )
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-6">
+    <div className={PAGE_CLASS}>
       <PageHeader
         title={t('webPagesWork.automationsTitle')}
         description={t('webPagesWork.automationsSubtitle')}
         actions={
-          <Button
-            variant="primary"
-            aria-describedby={control.reason ? reasonId : undefined}
-            onClick={() => openCreate(null)}
-          >
-            <Plus />
-            {t('webPagesWork.automationsNew')}
-          </Button>
+          // The zero state carries its own primary action: one per view.
+          empty ? undefined : (
+            <Button
+              variant="primary"
+              aria-describedby={control.reason ? reasonId : undefined}
+              onClick={() => openCreate(null)}
+            >
+              <Plus />
+              {t('webPagesWork.automationsNew')}
+            </Button>
+          )
         }
         note={
-          control.reason ? (
+          control.reason && !empty ? (
             <span id={reasonId} className="text-small text-text-muted">
               {control.reason}
             </span>
@@ -514,336 +461,5 @@ export function AutomationsPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  )
-}
-
-// ── One job ──────────────────────────────────────────────────────────────────
-
-/** `cron.run`'s answer: the run's outcome, or why it did not start (busy, disabled, …). */
-export interface ManualRunResult {
-  success?: boolean
-  status?: string
-  reply?: string | null
-  error?: string | null
-  reason?: string | null
-}
-
-/**
- * What Run now reports. Failure is decided first: a run that failed or never
- * started can still carry text, and showing that as a reply would read as
- * success.
- */
-export function runNowStatus(res: ManualRunResult | null): {
-  tone: 'ok' | 'danger'
-  text: string
-} {
-  if (res?.error) return { tone: 'danger', text: t('webPagesWork.runError', { error: res.error }) }
-  if (res?.success === false) {
-    const reason = res.reason || res.status || ''
-    return res.status && res.status !== 'accepted'
-      ? { tone: 'danger', text: t('webPagesWork.runRefused', { reason }) }
-      : { tone: 'danger', text: t('webPagesWork.runError', { error: reason || res.reply || '' }) }
-  }
-  if (res?.reply)
-    return { tone: 'ok', text: t('webPagesWork.runReply', { reply: res.reply.slice(0, 160) }) }
-  return { tone: 'ok', text: t('webPagesWork.runTriggered') }
-}
-
-function JobCard({
-  job,
-  control,
-  onSchedulerError,
-  onChanged,
-  onEdit,
-  onHistory,
-  onDelete,
-}: {
-  job: RawJob
-  /** Run, pause and overlap need a connected gateway with a running scheduler. */
-  control: Gate
-  onSchedulerError: (e: unknown) => void
-  onChanged: () => void
-  onEdit: () => void
-  onHistory: () => void
-  onDelete: () => void
-}) {
-  const rpc = useRpc()
-  const reasonId = useId()
-  const [busy, setBusy] = useState<'run' | 'toggle' | 'concurrency' | null>(null)
-  const [status, setStatus] = useState<{ tone: 'ok' | 'warn' | 'danger'; text: string } | null>(
-    null,
-  )
-
-  const id = String(job.id ?? '')
-  const name = String(job.name || job.id || '')
-  const enabled = !!job.enabled
-  const dot = jobDotState(job)
-  const health = jobRuntimeHealth(job)
-  const concurrency = jobConcurrency(job)
-  const elevated = jobElevated(job)
-  const createdFrom = jobCreatedFrom(job)
-  const human = explainCron(job.expression || '')
-  const lastStatus = job.last_status || (job.last_run ? 'ok' : null)
-  const message = String(job.message || job.prompt || '').trim()
-  const failures = health ? tPlural('webPagesWork.failures', health.consecutiveFailures) : ''
-
-  const act = async (
-    kind: 'run' | 'toggle' | 'concurrency',
-    fn: () => Promise<{ tone: 'ok' | 'warn' | 'danger'; text: string } | null>,
-  ) => {
-    setBusy(kind)
-    setStatus(null)
-    try {
-      setStatus(await fn())
-      onChanged()
-    } catch (e) {
-      onSchedulerError(e)
-      setStatus({
-        tone: 'danger',
-        text: t('webPagesWork.actionFailed', { message: errorMessage(e) }),
-      })
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const runNow = () =>
-    act('run', async () => {
-      const res = await rpc.call<ManualRunResult | null>('cron.run', { id })
-      return runNowStatus(res)
-    })
-  const toggle = () =>
-    act('toggle', async () => {
-      await rpc.call('cron.update', { id, enabled: !enabled })
-      return { tone: 'ok', text: enabled ? t('webPagesWork.paused') : t('webPagesWork.resumed') }
-    })
-  const setConcurrency = (policy: ConcurrencyPolicy) =>
-    act('concurrency', async () => {
-      await rpc.call('cron.update', { id, concurrency: policy })
-      return null
-    })
-  const copyId = async () => {
-    try {
-      await copyWithFallback(id)
-      toast.success(t('webPagesWork.copiedId'))
-    } catch (e) {
-      setStatus({ tone: 'warn', text: t('webPagesWork.copyFailed', { message: errorMessage(e) }) })
-    }
-  }
-
-  const dotClass =
-    health?.degraded || dot === 'error' ? 'bg-danger' : dot === 'off' ? 'bg-text-muted' : 'bg-ok'
-  const stateLabel = health?.degraded
-    ? t('webPagesWork.stateDegraded')
-    : dot === 'error'
-      ? t('webPagesWork.stateFailing')
-      : enabled
-        ? t('webPagesWork.stateActive')
-        : t('webPagesWork.statePaused')
-
-  return (
-    <article
-      aria-label={name}
-      data-degraded={health?.degraded ? 'true' : undefined}
-      className={cn(
-        'flex h-full flex-col gap-3 rounded-lg border bg-surface-1 p-4',
-        health?.degraded ? 'border-danger/50' : 'border-border',
-      )}
-    >
-      <header className="flex flex-wrap items-center gap-2">
-        <span
-          role="img"
-          aria-label={stateLabel}
-          className={cn('size-2.5 shrink-0 rounded-full', dotClass)}
-        />
-        <h2 className="min-w-0 flex-1 truncate font-semibold">{name}</h2>
-        <span className="rounded-full bg-surface-3 px-2 text-small">{jobKindLabel(job)}</span>
-        {elevated ? (
-          <span className="rounded-full border border-danger/50 px-2 text-small text-danger">
-            {t('webPagesWork.elevated', { mode: elevated })}
-          </span>
-        ) : null}
-        {health?.degraded ? (
-          <span
-            className="inline-flex items-center gap-1 rounded-full border border-danger/50 px-2 text-small text-danger"
-            title={failures}
-          >
-            <AlertTriangle className="size-3" aria-hidden data-status-icon />
-            {t('webPagesWork.stateDegraded')}
-          </span>
-        ) : null}
-      </header>
-
-      <div className="flex flex-col gap-0.5">
-        <code className="font-mono text-small">{jobSchedule(job)}</code>
-        {human ? <span className="text-small text-text-muted">{human}</span> : null}
-      </div>
-
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-small">
-        <dt className="text-text-muted">{t('webPagesWork.cardNextRun')}</dt>
-        <dd className="min-w-0">
-          {enabled ? (
-            <>
-              {nextRunText(job)}
-              {nextRunAbs(job) ? (
-                <span className="text-text-muted"> · {nextRunAbs(job)}</span>
-              ) : null}
-            </>
-          ) : (
-            <span className="text-text-muted">{t('webPagesWork.statePaused')}</span>
-          )}
-        </dd>
-        <dt className="text-text-muted">{t('webPagesWork.cardLastRun')}</dt>
-        <dd className="min-w-0">
-          {job.last_run
-            ? humanCountdownPast(new Date(job.last_run as string | number))
-            : t('webPagesWork.dash')}
-          {lastStatus ? (
-            <span className={isOkStatus(lastStatus) ? 'text-ok' : 'text-danger'}>
-              {' · '}
-              {lastStatus}
-            </span>
-          ) : null}
-        </dd>
-        {health && (health.degraded || health.consecutiveFailures > 0 || job.last_run) ? (
-          <>
-            <dt className="text-text-muted">{t('webPagesWork.cardHealth')}</dt>
-            <dd className={health.consecutiveFailures ? 'text-danger' : 'text-ok'}>
-              {health.consecutiveFailures ? failures : t('webPagesWork.healthy')}
-            </dd>
-          </>
-        ) : null}
-        {health?.lastError ? (
-          <>
-            <dt className="text-text-muted">{t('webPagesWork.cardLastError')}</dt>
-            <dd className="line-clamp-3 min-w-0 break-words text-danger">{health.lastError}</dd>
-          </>
-        ) : null}
-        <dt className="text-text-muted">{t('webPagesWork.cardTarget')}</dt>
-        <dd className="min-w-0 truncate" title={jobTarget(job)}>
-          {jobTarget(job)}
-        </dd>
-        {createdFrom ? (
-          <>
-            <dt className="text-text-muted">{t('webPagesWork.cardCreatedFrom')}</dt>
-            <dd className="min-w-0 truncate font-mono" title={createdFrom}>
-              {createdFrom}
-            </dd>
-          </>
-        ) : null}
-        {id ? (
-          <>
-            <dt className="text-text-muted">{t('webPagesWork.cardId')}</dt>
-            <dd className="flex min-w-0 items-center gap-1 font-mono" title={id}>
-              {shortCronId(id)}
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label={t('webPagesWork.copyId', { id })}
-                onClick={() => void copyId()}
-              >
-                <Copy />
-              </Button>
-            </dd>
-          </>
-        ) : null}
-        {concurrency ? (
-          <>
-            <dt className="text-text-muted">{t('webPagesWork.cardOverlap')}</dt>
-            <dd>
-              <select
-                aria-label={t('webPagesWork.cardOverlapFor', { name })}
-                className="h-7 rounded-md border border-border-control bg-surface-0 px-1 touch:h-11"
-                value={concurrency}
-                disabled={busy !== null || control.disabled}
-                title={control.reason ?? undefined}
-                onChange={(e) => void setConcurrency(e.target.value as ConcurrencyPolicy)}
-              >
-                {CONCURRENCY_POLICIES.map((policy) => (
-                  <option key={policy} value={policy}>
-                    {concurrencyLabel(policy)}
-                  </option>
-                ))}
-              </select>
-            </dd>
-          </>
-        ) : null}
-      </dl>
-
-      {message ? (
-        <p className="line-clamp-3 rounded-md bg-surface-2 px-2 py-1 text-small">{message}</p>
-      ) : null}
-
-      {status ? (
-        <p
-          role={status.tone === 'danger' ? 'alert' : 'status'}
-          className={cn(
-            'text-small break-words',
-            status.tone === 'danger' ? 'text-danger' : status.tone === 'warn' ? 'text-warn' : '',
-          )}
-        >
-          {status.text}
-        </p>
-      ) : null}
-
-      <footer className="mt-auto flex flex-wrap items-center gap-1.5">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy !== null || control.disabled}
-          aria-describedby={control.reason ? reasonId : undefined}
-          aria-label={t('webPagesWork.runNowFor', { name })}
-          onClick={() => void runNow()}
-        >
-          {busy === 'run' ? <Loader2 className="animate-spin" /> : <Zap />}
-          {t('webPagesWork.runNow')}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy !== null || control.disabled}
-          aria-describedby={control.reason ? reasonId : undefined}
-          aria-label={
-            enabled ? t('webPagesWork.pauseFor', { name }) : t('webPagesWork.resumeFor', { name })
-          }
-          onClick={() => void toggle()}
-        >
-          {enabled ? <Pause /> : <Play />}
-          {enabled ? t('webPagesWork.pause') : t('webPagesWork.resume')}
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          aria-label={t('webPagesWork.historyFor', { name })}
-          onClick={onHistory}
-        >
-          <History />
-          {t('webPagesWork.history')}
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          aria-label={t('webPagesWork.editFor', { name })}
-          onClick={onEdit}
-        >
-          <Pencil />
-          {t('webPagesWork.edit')}
-        </Button>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          className="ml-auto text-danger"
-          aria-label={t('webPagesWork.deleteFor', { name })}
-          onClick={onDelete}
-        >
-          <Trash2 />
-        </Button>
-        {control.reason ? (
-          <span id={reasonId} className="w-full text-small text-text-muted">
-            {control.reason}
-          </span>
-        ) : null}
-      </footer>
-    </article>
   )
 }

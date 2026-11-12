@@ -65,7 +65,9 @@ check is skipped entirely when the Control UI is disabled.
 A real-browser UI audit is opt-in and never part of the default test run. It
 boots two `agentos gateway run` processes on throwaway state directories (the
 default base path and a custom one) and checks every destination at 360, 768
-and 1280 px in light and dark: page-level horizontal scroll, console and
+and 1280 px in light and dark: page-level horizontal scroll, a document
+that scrolls at all (the shell is the viewport; only its panes scroll, and
+wheeling past a pane's end must not move the shell), console and
 network errors, axe-core (serious and critical violations fail), content
 clipped to zero size, interactive controls pushed outside the viewport or cut
 by a clipping box, a page header description squeezed beside its actions on a
@@ -107,6 +109,18 @@ non-root mounts such as `/console/` work without rebuilding. Root, `/api`, and
   `{disabled, code, reason}`); the console renders the reason with its
   `DisabledReason` wrapper. A transient busy state is not a reason; a
   spinner already says that.
+- **Motion has a job and a budget.** Animation shows where something came
+  from, confirms an action, shows live status or guides the eye on arrival;
+  only live-status indicators loop. Interface transitions (hover, press,
+  state changes, overlays and panels) take at most 300 ms; entrance
+  choreography (a page or section arriving, spring-eased pops, a staggered
+  list) at most 450 ms in total, duration plus stagger. Exits are never
+  slower than their entrances. Durations and easings are tokens in
+  `frontend/src/web/styles/tokens.css`, never literals, and
+  `styles/motion.test.tsx` enforces all of this. Under reduced motion
+  everything is instant (no delays either) except a slow opacity pulse on
+  running indicators, and page transitions (the View Transitions API, main
+  area only) are switched off.
 - **Every RPC method the console calls is listed** in
   `frontend/src/lib/required-methods.ts` (the desktop's extra ones in
   `desktop/src/renderer/src/lib/required-methods.ts`). A vitest fails when a
@@ -123,7 +137,11 @@ The console is chat-first. On screens wider than 768 px it has three columns:
   and **Pages** view buttons and **Search**; at the bottom **Home**, **Inbox**
   (with a badge counting approvals, agent questions and runtime issues) and the
   status menu (connection state, theme, keyboard shortcuts, Settings).
-- **List pane**: the Sessions list or the Pages catalog. Activate the selected
+- **List pane**: the Sessions list or the Pages catalog. The catalog is a
+  compact list in two groups (Overview: Home, Usage, Inbox; Work: Sessions,
+  Projects, Automations) with Settings at the foot; Sessions shows the session
+  count (with a live dot while one runs) and Inbox how many items wait. Arrow
+  keys, Home and End move between its links. Activate the selected
   view's button again, or press Ctrl+B (⌘B on macOS), to collapse it. Drag its
   edge (or focus the edge and use the arrow keys) to resize it; the width is
   remembered by the browser. A fresh load always starts with the pane open.
@@ -133,8 +151,9 @@ The Sessions list shows every session from `sessions.list`, grouped **By date**
 (Pinned, Today, Yesterday, Previous 7 days, Older) or **By project** (Pinned,
 one section per project, No project). Each row is a link, so a middle-click or
 Ctrl/⌘-click opens the session in a new tab. A row shows the session's title
-(its name, else its derived title, else a label from its key), its channel and
-when it was last updated, plus a running indicator while a task is queued or
+(its name, else its derived title; an unnamed session reads "New conversation"
+with its short id beside the agent), its channel as an icon, its agent and when
+it was last updated, plus a running indicator while a task is queued or
 running. Child sessions (subagents) are folded under their parent, which shows
 how many it has. The filter box matches titles and keys; the filter menu narrows
 by agent, channel or project; **Clear filters** resets them all. A row's ⋯ menu
@@ -153,7 +172,10 @@ a New session button.
 
 A pending approval from a session other than the one on screen appears in the
 approval tray at the bottom right of every page. It can collapse to a count but
-stays until every request is resolved.
+stays until every request is resolved. It starts collapsed on phones and on
+chat pages (the open session has its own approval card above the composer, and
+the expanded tray would cover the newest lines); once you expand or collapse
+it, that choice holds as you move between pages.
 
 ### Routes
 
@@ -220,12 +242,12 @@ Chat is the center of the console; everything else is a page in the rail's
 | Page | Route | Use it for |
 | --- | --- | --- |
 | Chat | `/chat/…` | Run and resume sessions, follow tool activity, read artifacts and cards, compact. |
-| Home | `/home` | Readiness, provider and route, uptime, sessions, usage (all time, plus how many sessions were active today), the next automation run, and a live event feed. Each figure loads on its own and links to its detail. |
-| Sessions | `/sessions` | Search and filter every session, stat tiles with an open/completed/failed/aborted breakdown and how many are executing now, a lifecycle chip per row, inline rename, a row menu with Open chat and Open in new tab, bulk delete, move to a project, a new-session dialog that can create an agent, orphan flags. |
-| Projects | `/projects` | Group sessions, edit each project's shared knowledge (injected into every member session), and start a new chat inside a project at once, under the project's agent. |
-| Usage | `/usage` | The sessions active in a range with their token and estimated-cost totals, the top sessions charted, a rollup by model, CSV export. |
-| Automations | `/automations` | Scheduled jobs and their run health; create, edit, run now, pause, delete, run history. |
-| Inbox | `/inbox` | Everything waiting on you: approvals, agent questions and runtime issues, answered in place. |
+| Home | `/home` | A dashboard under a greeting and a readiness pill: readiness (checks passing as a ring; when not ready, the findings that need attention, each leading to Health), provider and route, uptime, usage (all time, plus how many sessions were active today) with a chart of tokens per session, sessions by channel and when they were last active over the past day, a countdown to the next automation run, and a live event feed. Each figure loads on its own and links to its detail. |
+| Sessions | `/sessions` | Every session in one list: a summary line (the total, an open/completed/failed/aborted breakdown and how many are executing now), search and filter menus for agent, project and status, a lifecycle chip per row, inline rename, a row menu with Open chat and Open in new tab, bulk delete, move to a project, a new-session dialog that can create an agent, orphan flags. |
+| Projects | `/projects` | A gallery of projects; group sessions, edit each project's shared knowledge (injected into every member session), and start a new chat inside a project at once, under the project's agent. A project's page switches to another project from its breadcrumb. |
+| Usage | `/usage` | Spend for the sessions active in a range as the lead figure, with sessions, the average and the token mix (input, output, cache read, cache write) as one stacked bar; the top sessions charted beside spend by model (a ring and a ranked list); the sessions table; CSV export. The sessions table fits its card: a narrower one drops the cache columns, a phone-width one shows each session as a card of labelled values. |
+| Automations | `/automations` | What runs next and the next 24 hours as lanes, then scheduled jobs and their run health; create (blank or from a template), edit, run now, pause, delete, run history. |
+| Inbox | `/inbox` | Everything waiting on you, grouped into approvals, agent questions and runtime issues, answered in place. |
 
 **Home** sums tokens and estimated spend over every session: the gateway keeps
 per-session lifetime totals only, so there is no per-day spend figure. Next to
@@ -234,7 +256,9 @@ it, Home says how many sessions were active today (since local midnight).
 **Usage** lists the sessions active in the chosen range (All time, the last 7,
 14 or 30 days) with their lifetime totals, charts the top 20 of them by tokens
 or cost, rolls usage up by model, and exports the rows in range as CSV. A range
-picks sessions; it does not split a session's usage by day.
+picks sessions; it does not split a session's usage by day. The page leads with
+the spend in range and where its cost comes from; the model rollup shows each
+model's share of spend as a ring and a ranked list.
 
 **Sessions**, **Home** and **Projects** load the newest 500 sessions. With more
 than that, they say so ("Showing the newest 500 of N"); counts, search and
@@ -382,8 +406,13 @@ Approvals come from the same store as Settings › Approvals, which the gateway
 keeps current with `approval.requested` / `approval.resolved` events (one
 backfill per connect), and the list updates when that store changes; the
 inbox adds no timer and no polling of its own (**Re-check** asks for one
-backfill), and items show when they started waiting ("since 11:32"). An empty inbox says "Nothing
-needs you" only while the console is connected.
+backfill), and items show when they started waiting ("since 11:32"). An empty inbox says "All
+caught up" only while the console is connected.
+
+The inbox groups items by kind, with a count in each group's header. Each item
+is a compact row (its title, a one-line preview and when it started waiting)
+that opens in place to the decision; the first row of each group, and the
+approval a notification points at, start open. A resolved item folds away.
 
 ## Keyboard Shortcuts
 
@@ -394,9 +423,8 @@ shortcut overview, which shows the keys for your platform.
 
 `Mod+K`, or the rail's **Search** button, opens the command palette. Type to
 search, in labelled groups, across **Sessions** (titles and keys), **Pages**,
-**Settings** sections and **Actions**: New session, Toggle sidebar, Toggle
-Details, Switch to system / light / dark theme, Open keyboard shortcuts, Retry
-connection, Open Inbox, Compact current session and Export current session. An
+**Settings** sections and **Actions**: New session, Toggle sidebar, Switch to
+system / light / dark theme, Open keyboard shortcuts, Retry connection, Open Inbox, Compact current session and Export current session. An
 action that cannot run right now is listed as disabled with its reason (for
 example, Compact while a turn is running). Arrow keys move, `Enter` runs,
 `Escape` closes and returns focus to where it was. If sessions cannot be
@@ -529,7 +557,8 @@ and **Overwrite** reapplies your edits on top of it; when a refetch shows the
 configuration moved while edits are unsaved, that choice is shown straight
 away. A validation error is shown at the field it names and every edit stays in
 place. While the gateway reports a pending restart (`config.snapshot`'s
-`pendingRestart` / `restartReasons`), a notice names the reasons and offers
+`pendingRestart` / `restartReasons`), a notice docked at the bottom of the
+section (where the save bar was, so the page does not move) names the reasons and offers
 **Restart gateway** or **Later**; it appears for restarts caused by any client
 and survives a reload, and **Later** hides it until another change needs a
 restart. A one-time secret (a provider, search, media or Jev key) is cleared
@@ -701,15 +730,14 @@ state, session state, and user-visible errors.
 ### Layout
 
 The chat workspace is one centered column. Your messages are right-aligned
-bubbles; replies are full-width prose. Hover or focus a message to copy it as
-Markdown or see when it was sent. The header shows the session title (activate
-it to rename in place), the agent, channel and project, a **Details** toggle, a
-**Panels** toggle and a ⋯ menu (Rename, Compact, Reset session (confirmed
-first), Export as Markdown, Copy session key). It stays visible while the transcript scrolls.
-The Details column lists the session's agent, model route, channel, project,
-when it was created and last updated, its token usage and estimated cost
-(refreshed when each turn ends), the active task, subagents, plan mode,
-artifacts and queued messages.
+bubbles; each reply opens with the agent's name (and the model, when known),
+then full-width prose. Tool calls and reasoning gather in an activity block
+that folds into one line (**Worked for …**) when the turn ends. Hover or focus
+a message to copy it as Markdown or see when it was sent. The header shows the session title (its
+name, else its first message, else **New conversation**; activate it to rename
+in place), the agent, channel and project, the session ID (activate it to copy
+the full key), a **Panels** toggle and a ⋯ menu (Rename, Compact, Reset
+session (confirmed first), Export as Markdown, Copy session key). It stays visible while the transcript scrolls.
 
 Opening, reloading or switching to a session lands on its latest message.
 While you are at the end of the transcript, new content keeps the latest in
@@ -742,6 +770,8 @@ query or path), its state (running, done or **Failed**, always with an icon and
 the word as well as the colour) and its duration once it finishes. Activate the
 row (click, Enter or Space) to see its arguments and result. A long result shows
 a preview and **Open in side panel**.
+Consecutive tool calls and reasoning read as one activity thread, and content
+that arrives while a turn runs eases into place; history does not animate.
 
 Markdown in messages is sanitized: scripts, event handlers, `javascript:` links,
 HTML classes written by the model and anything outside an allowlist are
@@ -789,9 +819,9 @@ not kept in history.
 After a turn ends the composer may show a suggested next prompt as its
 placeholder; press Tab on an empty composer to use it.
 
-The main button follows the session: **Send** when idle, **Stop** while a turn
-runs (calls `chat.abort`), and **Queue** next to Stop once you have typed
-something. After Stop the turn shows **Stopping…** while the gateway winds it
+The main button follows the session: **Send** when idle, turning into **Stop**
+while a turn runs (calls `chat.abort`), with **Queue** next to it once you have
+typed something. After Stop the turn shows **Stopping…** while the gateway winds it
 down, and the button reads **Stop now**: pressing it (or Escape) again sends a
 second `chat.abort`, which ends the turn at once. A refused stop is reported. Messages sent while a turn runs
 wait in a queue kept per session for the life of the tab (switching sessions
@@ -810,13 +840,7 @@ last event seen. If live updates were missed, a toast says so and the
 conversation is reloaded, and a running turn with no events for 210 seconds is
 checked against the gateway again. Long replies are drawn once per frame.
 
-### Details, side panel and approvals
-
-**Details** shows the session's agent, model route, channel, project, created
-and updated times, usage and estimated cost, the active task and subagents,
-plan mode, artifacts and the number of messages in the composer's queue. On a wide chat pane it
-docks beside the transcript; on a narrow one it opens as an overlay (a sheet on
-phones). Closing it keeps it closed for that session until you reopen it.
+### Side panel and approvals
 
 The side panel opens beside the transcript for full tool output, artifacts and
 reasoning, one tab per item. Drag its edge to resize it (the width is
@@ -828,9 +852,14 @@ approval**. Requests from other sessions appear in the approval tray.
 
 ### New session
 
-`/new` (rail **New session**, `Mod+Shift+O`) picks the agent (preset to the
-active one) and, optionally, a project, and takes the first message with
-attachments. **Start** creates the session, sends the message and opens it.
+`/new` (rail **New session**, `Mod+Shift+O`) greets you with one large
+composer. Its toolbar holds the **Agent** chip (preset to the active one) and
+the **Project** chip (optional); each opens a menu with a check on the current
+choice. Attach files with the paperclip, by pasting, or by dropping them
+anywhere on the page. The starter suggestions under the composer fill it in
+(they do not send). **Start** (the round button, or the send key from
+Settings › Appearance) creates the session, sends the message and opens it;
+while it cannot run, its tooltip and description say why.
 If creation fails, the page keeps your message and attachments and shows the
 error; if the first message fails, **Start** again sends into the same new
 session instead of creating another. A link may preset the choices:
@@ -941,15 +970,21 @@ the same approvals next to agent questions and runtime issues.
 
 ## Automations
 
-**Automations** (`/automations`, `g r`) is the former Cron view. Each job is a
-card with its schedule (and a plain-language explanation with the next runs,
-worked out in the job's timezone, UTC when it has none, and shown in local time),
-delivery target, payload and run health. **New automation** opens the editor,
-which also sets the failure destination; an empty page explains that scheduled
-jobs appear there and offers **New automation** with presets. Cards offer
-**Run now**, **Pause**/**Resume**, **Delete** (confirmed first) and the run
-history with each run's output. **Run now** reports a run that failed, or that
-did not start (busy, disabled, blocked), as a failure. Cards refresh live when
+**Automations** (`/automations`, `g r`) is the former Cron view. It opens with
+**Up next** (the job that runs soonest, with a countdown that ticks every
+second, and the next few jobs after it) beside **Next 24 hours**, one lane per
+enabled job with a mark for every run. Each job is a row led by its schedule in
+words (the editor adds a plain-language explanation with the next runs, worked
+out in the job's timezone, UTC when it has none, and shown in local time), with
+the cron expression, the next-run countdown, the last run, delivery target,
+payload and run health. **New automation** opens the editor, which also sets the
+failure destination; an empty page explains that scheduled jobs appear there
+and offers **New automation** and three templates, each opening the editor
+filled in. Rows offer **Run now**, **Pause**/**Resume**, the run history with a
+summary of the last runs and each run's output, **Edit**, and in the row menu
+**Copy ID**, the overlap policy and **Delete** (confirmed first). **Run now**
+reports a run that failed, or that did not start (busy, disabled, blocked), as
+a failure. Rows refresh live when
 a run finishes (`cron.run.finished`) and the page subscribes again after a
 reconnect; the job list is also re-read every 60 seconds while the page is
 visible. Automations covers scheduled jobs only: DCA mandates, price triggers,
@@ -958,12 +993,12 @@ brackets and missions are not shown there (see
 
 ### Run health
 
-A job that keeps failing is marked on its card: a **Degraded** badge, the
+A job that keeps failing is marked on its row: a **Degraded** badge, the
 consecutive failure count and the last error. They come from the `health`
 block on `cron.list` (the engine calls a job degraded at 3 failures in a
 row); a gateway older than that is read from the job's `consecutive_errors`
 and last error with the same threshold. When the job carries an overlap
-policy (`concurrency`), an **Overlap** picker sets it (`forbid` skips a run while one is going,
+policy (`concurrency`), the **Overlap** choice in the row menu sets it (`forbid` skips a run while one is going,
 `replace` stops the running one, `allow` runs them side by side) through
 `cron.update`; it does not appear when the job has no `concurrency`. **Run**
 and **Pause** are disabled, with the reason, while the gateway is offline or

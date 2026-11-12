@@ -2,6 +2,8 @@ import { t } from '@/i18n'
 import '@/i18n/en/webPalette'
 import { comboParts } from '@/components/shortcut-combo'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/web/components/ui/dialog'
+import { Kbd } from '@/web/components/ui/kbd'
+import { SectionHeader } from '@/web/components/ui/section-header'
 import { COMPOSER_BINDINGS, GLOBAL_BINDINGS, NAVIGATION_CHORDS, type Binding } from './bindings'
 
 function Keys({ combo }: { combo: string }) {
@@ -14,12 +16,9 @@ function Keys({ combo }: { combo: string }) {
             <span className="text-small text-text-muted">{t('webPalette.keyThen')}</span>
           ) : null}
           {comboParts(step).map((part, j) => (
-            <kbd
-              key={j}
-              className="min-w-6 rounded border border-border-control bg-surface-0 px-1.5 py-0.5 text-center text-small"
-            >
+            <Kbd key={j} className="min-w-6">
               {part}
-            </kbd>
+            </Kbd>
           ))}
         </span>
       ))}
@@ -30,12 +29,16 @@ function Keys({ combo }: { combo: string }) {
 function Section({ title, bindings }: { title: string; bindings: readonly Binding[] }) {
   return (
     <section aria-label={title}>
-      <h3 className="mb-1 text-small font-semibold tracking-wide text-text-muted uppercase">
-        {title}
-      </h3>
-      <ul role="list" className="flex flex-col">
+      <SectionHeader as="h3" size="sm" title={title} className="mb-2" />
+      <ul
+        role="list"
+        className="flex flex-col rounded-card border border-border bg-surface-2/50 px-3 shadow-highlight"
+      >
         {bindings.map((b) => (
-          <li key={b.combo} className="flex items-center justify-between gap-4 py-1">
+          <li
+            key={b.combo}
+            className="flex items-center justify-between gap-4 border-b border-border py-2 last:border-b-0"
+          >
             <span>{t(b.descriptionKey)}</span>
             <Keys combo={b.combo} />
           </li>
@@ -49,7 +52,7 @@ function Section({ title, bindings }: { title: string; bindings: readonly Bindin
 export function ShortcutOverview({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : onClose())}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-3xl">
         <DialogTitle>{t('webPalette.shortcutsTitle')}</DialogTitle>
         <DialogDescription className="sr-only">{t('webPalette.bindOverview')}</DialogDescription>
         <div className="grid gap-6 md:grid-cols-2">

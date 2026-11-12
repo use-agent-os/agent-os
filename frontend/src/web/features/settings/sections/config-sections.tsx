@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { KeyRound, Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useRpc } from '@/app/providers'
 import { t } from '@/i18n'
@@ -15,8 +16,11 @@ import {
   type XaiLoginPoll,
   type XaiPendingLogin,
 } from '@/views/setup/logic'
+import { Badge } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
+import { LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import { useRegisterFields } from '../fields'
+import { Notice, SettingsCard } from '../ui'
 import {
   audioAdapter,
   imageAdapter,
@@ -53,34 +57,43 @@ function Logins() {
       return [name, { signedIn: Boolean(value.loggedIn ?? value.logged_in) }] as const
     })
   return (
-    <section aria-label={t('webSetConfig.logins')} className="rounded-lg border border-border p-4">
-      <h2 className="mb-2 font-semibold">{t('webSetConfig.logins')}</h2>
-      {entries.length === 0 ? (
-        <p className="text-text-muted">{t('webSetConfig.loginsNone')}</p>
+    <SettingsCard
+      aria-label={t('webSetConfig.logins')}
+      title={t('webSetConfig.logins')}
+      icon={<KeyRound />}
+    >
+      {auth.isPending ? (
+        <LoadingRegion className="mt-3 flex flex-col gap-2">
+          <Skeleton className="h-10 rounded-card" />
+        </LoadingRegion>
+      ) : entries.length === 0 ? (
+        <p className="mt-2 text-small text-text-muted">{t('webSetConfig.loginsNone')}</p>
       ) : (
-        <ul className="flex flex-col gap-1">
+        <ul className="set-list mt-3 shadow-none">
           {entries.map(([name, value]) => (
-            <li key={name} className="flex justify-between">
-              <span>{name}</span>
-              <span className="text-text-muted">
+            <li key={name} className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+              <span className="font-mono text-small">{name}</span>
+              <Badge tone={value.signedIn ? 'ok' : 'neutral'} dot>
                 {value.signedIn
                   ? t('webSetConfig.loginSignedIn')
                   : t('webSetConfig.loginSignedOut')}
-              </span>
+              </Badge>
             </li>
           ))}
         </ul>
       )}
-    </section>
+    </SettingsCard>
   )
 }
 
 /** The badge next to a provider: can the Pilot Router route it, or direct only. */
 function RouterSupport({ supported }: { supported: string }) {
   return (
-    <p className="text-small">
+    <p className="flex flex-wrap items-center gap-2">
       <span className="text-text-muted">{t('webSetConfig.routerSupport')}</span>{' '}
-      <strong>{supported}</strong>
+      <Badge tone="accent" className="font-medium">
+        {supported}
+      </Badge>
     </p>
   )
 }
@@ -97,9 +110,9 @@ function ProviderForm({ snapshot }: { snapshot: SettingsSnapshot }) {
       aside={(spec) => <RouterSupport supported={providerRouterSupportText(spec)} />}
     >
       {status.llmSource === 'missing_env' ? (
-        <p role="status" className="mb-2 rounded-md border border-warn/50 bg-warn/10 px-3 py-2">
+        <Notice role="status" tone="warn" className="mb-1">
           {t('webSetConfig.providerEnvMissing', { key: envKey || t('webSetConfig.envUnnamed') })}
-        </p>
+        </Notice>
       ) : null}
     </SpecForm>
   )
@@ -193,13 +206,14 @@ function XaiLogin({ snapshot }: { snapshot: SettingsSnapshot }) {
       .catch((e: unknown) => setError(errorMessage(e)))
   }
   return (
-    <div className="mb-2 flex flex-col gap-2">
+    <div className="mb-1 flex flex-col gap-2.5 rounded-control bg-surface-2 px-3 py-2.5">
       <p className="text-small text-text-muted" data-testid="x-search-credential">
         {xSearchCredentialText(auth.data ?? {}, snapshot.config ?? {})}
       </p>
       <div className="flex flex-wrap items-center gap-2">
         {pending ? (
           <>
+            <Loader2 className="size-3.5 animate-spin text-text-muted" aria-hidden />
             <span className="text-small">
               {t('webSetConfig.xaiCode', { url: pending.verificationUri, code: pending.userCode })}
             </span>
@@ -224,7 +238,7 @@ function XaiLogin({ snapshot }: { snapshot: SettingsSnapshot }) {
           </Button>
         )}
         {error ? (
-          <span role="alert" className="text-small text-danger">
+          <span role="alert" className="anim-fade-in text-small text-danger">
             {error}
           </span>
         ) : null}

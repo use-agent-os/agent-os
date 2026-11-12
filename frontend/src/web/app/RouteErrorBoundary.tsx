@@ -14,13 +14,16 @@ export function RouteErrorBoundary() {
       ? error.message
       : String(error)
   return (
-    <div role="alert" className="flex h-full items-center justify-center">
+    <div
+      role="alert"
+      className="bg-atmosphere flex h-full min-h-dvh items-center justify-center p-4"
+    >
       <EmptyState
-        icon={<AlertTriangle />}
+        icon={<AlertTriangle className="text-danger" data-status-icon />}
         title={t('webShell.routeErrorTitle')}
         description={detail}
         action={
-          <Button variant="outline" onClick={() => window.location.reload()}>
+          <Button variant="primary" onClick={() => window.location.reload()}>
             {t('webShell.routeErrorReload')}
           </Button>
         }

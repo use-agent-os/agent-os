@@ -1,0 +1,143 @@
+/* The overview pages (Home, Usage, Inbox): icon tiles, animated meters and
+ * bars and the Usage table. Home's bento and Inbox's triage list live in
+ * page-home.css and page-inbox.css. Durations and easings come from tokens.css; the global
+ * reduced-motion rule in base.css makes all of it instant, and every element
+ * rests in its final state, so nothing waits on an animation to be visible. */
+
+@layer components {
+  /* ---- Tones ------------------------------------------------------------ */
+
+  /* One knob for tiles, meters, Home's lead and rings and Inbox's rows. */
+  [data-ov-tone] {
+    --ov-tone: var(--text-muted);
+  }
+  [data-ov-tone='accent'] {
+    --ov-tone: var(--accent);
+  }
+  [data-ov-tone='ok'] {
+    --ov-tone: var(--ok);
+  }
+  [data-ov-tone='warn'] {
+    --ov-tone: var(--warn);
+  }
+  [data-ov-tone='danger'] {
+    --ov-tone: var(--danger);
+  }
+  [data-ov-tone='info'] {
+    --ov-tone: var(--info);
+  }
+
+  /* ---- Icon in a soft tile ---------------------------------------------- */
+
+  .ov-tile {
+    display: inline-grid;
+    flex-shrink: 0;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--radius-control);
+    color: var(--ov-tone, var(--text-muted));
+    background: color-mix(in oklab, var(--ov-tone, var(--text-muted)) 12%, transparent);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklab, var(--ov-tone, var(--text-muted)) 22%, transparent),
+      var(--highlight);
+  }
+  .ov-tile > svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .ov-tile[data-size='lg'] {
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: var(--radius-card);
+  }
+  .ov-tile[data-size='lg'] > svg {
+    width: 1.375rem;
+    height: 1.375rem;
+  }
+
+  /* ---- Entrance --------------------------------------------------------- */
+
+  /* A rise with an explicit stagger index (style="--stagger-i: n"), for a
+     page whose sections are not siblings of one list. Cap n at 5. */
+  .ov-rise {
+    animation: agentos-rise var(--duration-enter) var(--ease-enter) both;
+    animation-delay: calc(var(--stagger-i, 0) * var(--stagger-step));
+  }
+
+  /* ---- Meters and bars -------------------------------------------------- */
+
+  /* A rounded track; fills are full-width layers clipped to their share, so
+     a changed value glides (clip-path) and the rounded ends stay round. */
+  .ov-track {
+    position: relative;
+    display: block;
+    overflow: hidden;
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: var(--surface-3);
+    box-shadow: var(--inset-shadow);
+  }
+  /* Wraps a track's fills: reveals them left to right on mount, with the
+     row's stagger index. */
+  .ov-reveal {
+    position: absolute;
+    inset: 0;
+    animation: ov-reveal var(--duration-enter) var(--ease-enter) both;
+    animation-delay: calc(var(--stagger-i, 0) * var(--stagger-step));
+  }
+  /* style="--from: <0-100>; --to: <0-100>" (percent of the track). */
+  .ov-fill {
+    position: absolute;
+    inset: 0;
+    background: var(--ov-fill, var(--accent));
+    clip-path: inset(0 calc(100% - var(--to, 0) * 1%) 0 calc(var(--from, 0) * 1%) round 9999px);
+    transition: clip-path var(--duration-slow) var(--ease-out);
+  }
+  .ov-fill[data-series='input'] {
+    --ov-fill: var(--accent);
+  }
+  .ov-fill[data-series='output'] {
+    --ov-fill: var(--info);
+  }
+  /* Legend swatch (Home's usage chart). */
+  .ov-swatch {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 0.625rem;
+    height: 0.625rem;
+    border-radius: 3px;
+    background: var(--ov-fill, var(--accent));
+  }
+  .ov-swatch[data-series='output'] {
+    --ov-fill: var(--info);
+  }
+}
+
+@keyframes ov-reveal {
+  from {
+    clip-path: inset(0 100% 0 0 round 9999px);
+  }
+  to {
+    clip-path: inset(0 0 0 0 round 9999px);
+  }
+}
+
+/* Forced colors: fills and tiles keep a visible system colour. */
+@media (forced-colors: active) {
+  .ov-fill,
+  .ov-swatch {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  .ov-fill[data-series='output'],
+  .ov-swatch[data-series='output'] {
+    background: GrayText;
+  }
+  .ov-track {
+    border: 1px solid CanvasText;
+  }
+  .ov-tile {
+    border: 1px solid CanvasText;
+  }
+}

@@ -10,19 +10,19 @@ import { gate, requireConnection } from '@/lib/disabled-reason'
 import { useApprovals } from '@/services/approval-monitor'
 import { readPromptFromUrl } from '@/views/chat/logic'
 import { computeHasPendingForSession } from '@/views/chat/useApprovalPending'
-import { Sheet, SheetContent, SheetTitle } from '@/web/components/ui/sheet'
 import { SESSIONS_QUERY_KEY, useSessionsList } from '@/web/shell/session-data'
 import { pathToSessionKey, sessionKeyToPath, defaultSessionKey } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { PHONE_QUERY, useMediaQuery } from '@/web/shell/use-media-query'
+import '@/web/styles/chat.css'
+import '@/web/styles/chat-stage.css'
 import { ApprovalDock } from './ApprovalDock'
 import { ChatHeader } from './ChatHeader'
 import { Composer } from './composer/Composer'
 import { enqueueMessage } from './composer/queue'
 import { isRunning } from './model/reducer'
 import type { Turn } from './model/types'
-import { DetailsPanel } from './panels/DetailsPanel'
-import { DETAILS_DOCK_MIN, detailsVisible, usePanels } from './panels/panel-store'
+import { usePanels } from './panels/panel-store'
 import { SidePanel } from './panels/SidePanel'
 import { ChatActionsContext, type ChatActions } from './transcript/context'
 import { TranscriptView } from './transcript/TranscriptView'
@@ -59,25 +59,6 @@ function lastTurnStatus(turns: readonly Turn[]): Turn['status'] | undefined {
   return undefined
 }
 
-/** Width of an element, live (ResizeObserver). */
-function useWidth(): [(el: HTMLElement | null) => void, number] {
-  const [width, setWidth] = useState(() =>
-    typeof window === 'undefined' ? 1280 : window.innerWidth,
-  )
-  const observer = useRef<ResizeObserver | null>(null)
-  const ref = useCallback((el: HTMLElement | null) => {
-    observer.current?.disconnect()
-    if (!el) return
-    setWidth(el.getBoundingClientRect().width || window.innerWidth)
-    observer.current = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width
-      if (w) setWidth(w)
-    })
-    observer.current.observe(el)
-  }, [])
-  return [ref, width]
-}
-
 /** `/chat/<agent>/<rest>`: one session's workspace. */
 export function ChatPage() {
   const { pathname } = useLocation()
@@ -97,14 +78,9 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
   const pending = useApprovals((s) => s.pending)
   const waitingApproval = computeHasPendingForSession(pending, sessionKey)
   const running = isRunning(session.state)
-  const [paneRef, paneWidth] = useWidth()
-  const canDock = !phone && paneWidth >= DETAILS_DOCK_MIN
-  const explicit = usePanels((s) => s.details[sessionKey])
-  const setDetails = usePanels((s) => s.setDetails)
   const openPanel = usePanels((s) => s.open)
   const panelTabs = usePanels((s) => s.tabs.length)
   const closeAllPanels = usePanels((s) => s.closeAll)
-  const showDetails = detailsVisible(explicit, canDock)
   const [followSignal, setFollowSignal] = useState(0)
   const navigate = useNavigate()
   const { search } = useLocation()
@@ -210,30 +186,19 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
   )
   const onSent = useCallback(() => setFollowSignal((n) => n + 1), [])
 
-  const toggleDetails = () => setDetails(sessionKey, !showDetails)
-  const details = (
-    <DetailsPanel
-      sessionKey={sessionKey}
-      row={row}
-      transcript={session.state}
-      onClose={() => setDetails(sessionKey, false)}
-    />
-  )
-
   return (
     <ChatActionsContext.Provider value={actions}>
       <div className="flex h-full min-h-0">
-        <div ref={paneRef} className="flex min-w-0 flex-1 flex-col">
+        <div className="chat-pane bg-atmosphere flex min-w-0 flex-1 flex-col">
           <ChatHeader
             sessionKey={sessionKey}
             row={row}
             running={running}
             phone={phone}
-            detailsOpen={showDetails}
-            onToggleDetails={toggleDetails}
             onTogglePanels={() => (panelTabs ? closeAllPanels() : undefined)}
             onCompact={compact}
             onReset={() => void reset()}
+            firstMessage={session.state.turns.find((turn) => turn.userMessage)?.userMessage?.text}
           />
           <div className="flex min-h-0 flex-1">
             <div className="flex min-w-0 flex-1 flex-col">
@@ -265,21 +230,10 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
                 onSent={onSent}
               />
             </div>
-            {showDetails && canDock ? (
-              <div className="w-80 shrink-0 border-l border-border">{details}</div>
-            ) : null}
           </div>
         </div>
         <SidePanel transcript={session.state} phone={phone} />
       </div>
-      {showDetails && !canDock ? (
-        <Sheet open onOpenChange={(open) => !open && setDetails(sessionKey, false)}>
-          <SheetContent side={phone ? 'bottom' : 'right'} aria-describedby={undefined}>
-            <SheetTitle className="sr-only">{t('webChat.detailsTitle')}</SheetTitle>
-            {details}
-          </SheetContent>
-        </Sheet>
-      ) : null}
     </ChatActionsContext.Provider>
   )
 }

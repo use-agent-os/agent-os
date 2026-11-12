@@ -1,11 +1,24 @@
-import { MoreHorizontal, PanelRight, PanelRightOpen, RotateCcw, Scissors } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
+import {
+  Copy,
+  Download,
+  FolderOpen,
+  MoreHorizontal,
+  PanelRight,
+  Pencil,
+  RotateCcw,
+  Scissors,
+} from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useState, type FormEvent } from 'react'
+import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
 import { useRpc } from '@/app/providers'
 import { t } from '@/i18n'
 import '@/i18n/en/webChat'
 import '@/i18n/en/webShell'
 import { Button } from '@/web/components/ui/button'
+import { fieldVariants } from '@/web/components/ui/input'
+import { SimpleTooltip } from '@/web/components/ui/tooltip'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,12 +34,35 @@ import {
   sessionAgent,
   sessionChannel,
   sessionProject,
-  sessionTitle,
   type SessionRow,
 } from '@/web/shell/session-list'
+import '@/web/styles/chat-stage.css'
+import { AgentAvatar } from './AgentAvatar'
+
+const ICON_BUTTON =
+  'rounded-full text-text-muted hover:text-text aria-pressed:bg-surface-3 aria-pressed:text-text'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** The first line of a message, as a title. */
+function titleFrom(text: string): string {
+  const line = text.trim().split('\n', 1)[0] ?? ''
+  return line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line
+}
+
+/**
+ * The headline: the session's name, else its derived title, else the first
+ * thing the user asked, else "New conversation" — never a raw session id.
+ */
+export function headerTitle(row: SessionRow | undefined, firstMessage?: string | null): string {
+  const named = String(row?.display_name || row?.displayName || '').trim()
+  if (named) return named
+  const derived = String(row?.derived_title || row?.derivedTitle || '').trim()
+  if (derived) return derived
+  const asked = firstMessage ? titleFrom(firstMessage) : ''
+  return asked || t('webChat.headerUntitled')
 }
 
 export interface ChatHeaderProps {
@@ -34,11 +70,11 @@ export interface ChatHeaderProps {
   row: SessionRow | undefined
   running: boolean
   phone: boolean
-  detailsOpen: boolean
-  onToggleDetails(): void
   onTogglePanels(): void
   onCompact(): void
   onReset(): void
+  /** The first user message, for a title when the session has no name. */
+  firstMessage?: string | null
 }
 
 /** The conversation header: title (rename in place), chips, toggles and ⋯ menu. */
@@ -47,7 +83,8 @@ export function ChatHeader(props: ChatHeaderProps) {
   const rpc = useRpc()
   const queryClient = useQueryClient()
   const projects = useProjectNames()
-  const title = row ? sessionTitle(row) : sessionKey
+  const title = headerTitle(row, props.firstMessage)
+  const shortId = sessionKey.split(':').at(-1) || sessionKey
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(title)
   const [error, setError] = useState<string | null>(null)
@@ -73,7 +110,7 @@ export function ChatHeader(props: ChatHeaderProps) {
   }
 
   return (
-    <header className="sticky top-0 z-[var(--z-sticky)] flex min-h-12 items-center gap-2 border-b border-border bg-surface-0/95 px-3 py-1.5 backdrop-blur">
+    <header className="chat-header sticky top-0 z-[var(--z-sticky)] flex min-h-14 items-center gap-1 px-3 py-2 sm:px-4">
       {/* Phones open navigation from the shell's top bar; a second ☰ here duplicated it. */}
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {editing ? (
@@ -91,7 +128,7 @@ export function ChatHeader(props: ChatHeaderProps) {
                 }
               }}
               aria-invalid={error ? true : undefined}
-              className="h-8 min-w-0 rounded-md border border-border-control bg-surface-1 px-2 font-medium touch:text-base"
+              className={cn(fieldVariants({ size: 'sm' }), 'max-w-md font-medium')}
             />
             {error ? (
               <span role="alert" className="text-small text-danger">
@@ -103,88 +140,124 @@ export function ChatHeader(props: ChatHeaderProps) {
           <button
             type="button"
             onClick={() => {
-              if (phone) props.onToggleDetails()
-              else {
-                setValue(title)
-                setEditing(true)
-              }
+              setValue(title)
+              setEditing(true)
             }}
-            title={phone ? undefined : t('webChat.headerRename')}
-            className="target min-w-0 truncate rounded px-1 text-left font-semibold hover:bg-surface-2"
+            title={t('webChat.headerRename')}
+            className="chat-title-button target"
           >
             <h1 className="truncate">{title}</h1>
           </button>
         )}
-        {!phone && row ? (
-          <div className="hidden min-w-0 items-center gap-1 md:flex">
-            <span
-              className="rounded-full bg-surface-2 px-2 text-small"
-              aria-label={t('webChat.chipAgent', { value: sessionAgent(row) })}
-            >
-              {sessionAgent(row)}
-            </span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 text-small">
-              <ChannelIcon channel={sessionChannel(row)} />
-            </span>
-            {project ? (
-              <span
-                className="truncate rounded-full bg-surface-2 px-2 text-small"
-                aria-label={t('webChat.chipProject', {
-                  value: projects.data?.get(project) ?? project,
-                })}
-              >
-                {projects.data?.get(project) ?? project}
-              </span>
+        {!phone && !editing ? (
+          <div className="hidden min-w-0 shrink items-center gap-1.5 md:flex">
+            {row ? (
+              <>
+                <span
+                  className="chat-meta-chip"
+                  aria-label={t('webChat.chipAgent', { value: sessionAgent(row) })}
+                >
+                  <AgentAvatar size={16} />
+                  <span className="truncate">{sessionAgent(row)}</span>
+                </span>
+                {project ? (
+                  <span
+                    className="chat-meta-chip"
+                    aria-label={t('webChat.chipProject', {
+                      value: projects.data?.get(project) ?? project,
+                    })}
+                  >
+                    <FolderOpen aria-hidden className="ml-1" />
+                    <span className="truncate">{projects.data?.get(project) ?? project}</span>
+                  </span>
+                ) : null}
+                <span className="chat-meta-chip" data-plain>
+                  <ChannelIcon channel={sessionChannel(row)} className="inline-flex" />
+                </span>
+              </>
             ) : null}
+            <SimpleTooltip side="bottom" label={t('webChat.headerCopyId')}>
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard
+                    ?.writeText(sessionKey)
+                    .then(() => toast.success(t('webChat.headerIdCopied')))
+                }}
+                className="chat-meta-chip chat-id-chip target max-w-32"
+              >
+                <span className="sr-only">{`${t('webChat.headerCopyId')}: `}</span>
+                <span className="truncate">{shortId}</span>
+                <Copy aria-hidden />
+              </button>
+            </SimpleTooltip>
           </div>
         ) : null}
       </div>
-      <Button
-        size="icon"
-        variant="ghost"
-        aria-label={t('webChat.headerDetails')}
-        aria-pressed={props.detailsOpen}
-        onClick={props.onToggleDetails}
-        className={phone ? 'hidden' : undefined}
-      >
-        <PanelRightOpen />
-      </Button>
-      <Button
-        size="icon"
-        variant="ghost"
-        aria-label={t('webChat.headerPanels')}
-        onClick={props.onTogglePanels}
-      >
-        <PanelRight />
-      </Button>
+      <SimpleTooltip side="bottom" label={t('webChat.headerPanels')}>
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label={t('webChat.headerPanels')}
+          onClick={props.onTogglePanels}
+          className={ICON_BUTTON}
+        >
+          <PanelRight />
+        </Button>
+      </SimpleTooltip>
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button size="icon" variant="ghost" aria-label={t('webChat.headerMenu')}>
-            <MoreHorizontal />
-          </Button>
-        </DropdownMenuTrigger>
+        <SimpleTooltip side="bottom" label={t('webChat.headerMenu')}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label={t('webChat.headerMenu')}
+              className={ICON_BUTTON}
+            >
+              <MoreHorizontal />
+            </Button>
+          </DropdownMenuTrigger>
+        </SimpleTooltip>
         <DropdownMenuContent align="end">
           <DropdownMenuItem
+            className="chat-menu-item"
             onSelect={() => {
               setValue(title)
               setEditing(true)
             }}
           >
+            <Pencil aria-hidden />
             {t('webShell.actionRename')}
           </DropdownMenuItem>
-          <DropdownMenuItem disabled={props.running} onSelect={props.onCompact}>
+          <DropdownMenuItem
+            className="chat-menu-item"
+            disabled={props.running}
+            onSelect={props.onCompact}
+          >
             <Scissors aria-hidden />
             {t('webChat.headerCompact')}
           </DropdownMenuItem>
-          <DropdownMenuItem disabled={props.running} onSelect={() => setConfirmReset(true)}>
+          <DropdownMenuItem
+            className="chat-menu-item"
+            disabled={props.running}
+            onSelect={() => setConfirmReset(true)}
+          >
             <RotateCcw aria-hidden />
             {t('webChat.headerReset')}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void exportSessionMarkdown(rpc, sessionKey)}>
+          <DropdownMenuItem
+            className="chat-menu-item"
+            onSelect={() => void exportSessionMarkdown(rpc, sessionKey)}
+          >
+            <Download aria-hidden />
             {t('webShell.actionExport')}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => void navigator.clipboard?.writeText(sessionKey)}>
+          <DropdownMenuItem
+            className="chat-menu-item"
+            onSelect={() => void navigator.clipboard?.writeText(sessionKey)}
+          >
+            <Copy aria-hidden />
             {t('webShell.actionCopyKey')}
           </DropdownMenuItem>
         </DropdownMenuContent>

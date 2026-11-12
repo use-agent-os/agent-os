@@ -27,19 +27,19 @@ export function SheetContent({
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay
         data-slot="sheet-overlay"
-        className="anim-overlay-in fixed inset-0 z-[var(--z-drawer)] bg-scrim"
+        className="anim-overlay-in fixed inset-0 z-[var(--z-drawer)] bg-scrim backdrop-blur-[2px]"
       />
       <DialogPrimitive.Content
         data-slot="sheet-content"
         data-side={side}
         className={cn(
-          'fixed z-[var(--z-drawer)] flex flex-col bg-surface-1 shadow-3 outline-none',
+          'fixed z-[var(--z-drawer)] flex flex-col bg-surface-1 shadow-overlay outline-none',
           side === 'left' &&
             'anim-drawer-in inset-y-0 left-0 w-[min(85vw,320px)] border-r border-border',
           side === 'right' &&
-            'inset-y-0 right-0 w-[min(92vw,420px)] border-l border-border anim-overlay-in',
+            'anim-sheet-right inset-y-0 right-0 w-[min(92vw,420px)] border-l border-border',
           side === 'bottom' &&
-            'inset-x-0 bottom-0 max-h-[85dvh] rounded-t-xl border-t border-border anim-overlay-in',
+            'anim-sheet-bottom inset-x-0 bottom-0 max-h-[85dvh] rounded-t-2xl border-t border-border',
           'pb-[env(safe-area-inset-bottom)]',
           className,
         )}

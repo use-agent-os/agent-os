@@ -6,11 +6,12 @@ import { t } from '@/i18n'
 import '@/i18n/en/webShell'
 import { listenForPushNavigation } from '@/services/web-push-navigation'
 import { Button } from '@/web/components/ui/button'
-import { Toaster } from '@/web/components/ui/toaster'
 import { PaletteHost } from '@/web/features/palette/PaletteHost'
+import '@/web/styles/shell.css'
 import { useConnectGate } from './connection-gate'
 import { useEdgeSwipe } from './edge-swipe'
 import { Rail } from './Rail'
+import { ShellToaster } from './ShellToaster'
 import { useShell } from './shell-store'
 import { useDocumentTitle } from './use-document-title'
 import { useGatewayCacheSync } from './use-gateway-cache-sync'
@@ -75,7 +76,7 @@ export function Shell() {
           <ConnectScreen reason={gate} />
         </Suspense>
         <GatewayUrlConfirm />
-        <Toaster />
+        <ShellToaster />
       </>
     )
   }
@@ -105,7 +106,8 @@ function Workspace() {
   useEdgeSwipe(phone, openDrawer)
 
   return (
-    <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-surface-0 text-text">
+    // `.app-shell` (shell.css): the viewport; only its panes scroll.
+    <div className="app-shell flex h-dvh min-h-0 bg-surface-0 text-text">
       {phone ? null : (
         <>
           <Rail />
@@ -118,22 +120,26 @@ function Workspace() {
       )}
       <div className="flex min-w-0 flex-1 flex-col">
         {phone ? (
-          <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-surface-1 px-2 pt-[env(safe-area-inset-top)]">
+          <header className="phone-bar">
             <Button
               variant="ghost"
               size="icon"
               aria-label={t('webShell.drawerOpen')}
               onClick={openDrawer}
+              className="text-text-muted hover:text-text"
             >
               <Menu />
             </Button>
-            <span className="min-w-0 flex-1 truncate font-medium">
+            <span aria-hidden className="shell-brand-mark size-4 shrink-0" />
+            <span className="min-w-0 flex-1 truncate text-section">
               {handle ? t(handle.titleKey) : t('webShell.appName')}
             </span>
+            {/* Quiet on purpose: the page's own primary action leads. */}
             <Button
               variant="ghost"
               size="icon"
               aria-label={t('webShell.railNewSession')}
+              className="text-accent hover:bg-accent-tint"
               onClick={() =>
                 navigate(activeAgent ? `/new?agent=${encodeURIComponent(activeAgent)}` : '/new')
               }
@@ -165,9 +171,10 @@ function Workspace() {
       <Suspense fallback={null}>
         <ApprovalTray />
       </Suspense>
+      {/* Toasts stack above the docked bar and the tray (shell.css). */}
+      <ShellToaster />
       <PaletteHost />
       <GatewayUrlConfirm />
-      <Toaster />
     </div>
   )
 }

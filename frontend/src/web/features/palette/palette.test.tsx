@@ -1,10 +1,13 @@
 import '@/test/web'
+import { readFileSync } from 'node:fs'
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTheme } from '@/stores/theme'
 import { renderShell, resetShellState, sessionRow, shellRpc } from '@/test/web-shell'
 import { buildActions, type ActionContext } from './actions'
+
+const shellCss = readFileSync('src/web/styles/shell.css', 'utf8')
 
 beforeEach(resetShellState)
 afterEach(() => {
@@ -37,7 +40,22 @@ describe('command palette', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
-  it('marks the highlighted option with the ring (3:1), not only the surface-3 fill', async () => {
+  it('scrolls the list back to the selected first result when the query changes', async () => {
+    const user = userEvent.setup()
+    renderShell('/home', shellRpc(rows))
+    await screen.findByText('Weekly DCA')
+    const dialog = await openPalette(user)
+    const list = dialog.querySelector<HTMLElement>('[cmdk-list]')!
+    // As if the user had arrowed far down a long list.
+    list.scrollTop = 300
+    await user.type(within(dialog).getByRole('combobox'), 'gro')
+    await waitFor(() =>
+      expect(within(dialog).getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true'),
+    )
+    await waitFor(() => expect(list.scrollTop).toBe(0))
+  })
+
+  it('marks the highlighted option with a 3:1 accent bar over a soft fill, not an outline', async () => {
     const user = userEvent.setup()
     renderShell('/home', shellRpc(rows))
     await screen.findByText('Weekly DCA')
@@ -49,7 +67,11 @@ describe('command palette', () => {
       expect(option).toBeDefined()
       return option as HTMLElement
     })
-    expect(selected.className).toMatch(/data-\[selected=true\]:outline-ring/)
+    expect(selected).toHaveClass('palette-item')
+    expect(selected.className).not.toMatch(/outline-ring/)
+    // shell.css draws the selected row's leading bar in the ring colour (3:1).
+    expect(shellCss).toMatch(/\.palette-item\[data-selected='true'\]::before \{\s*opacity: 1;/)
+    expect(shellCss).toMatch(/\.palette-item::before \{[^}]*background: var\(--ring\);/)
     expect(within(dialog).getByRole('combobox').className).toMatch(/focus:border-ring/)
   })
 
@@ -128,7 +150,6 @@ describe('actions registry', () => {
     sessionRunning: false,
     newSession: vi.fn(),
     toggleSidebar: vi.fn(),
-    toggleDetails: vi.fn(),
     setTheme: vi.fn(),
     openShortcuts: vi.fn(),
     retryConnection: vi.fn(),
@@ -142,7 +163,6 @@ describe('actions registry', () => {
     expect(buildActions(ctx()).map((a) => a.id)).toEqual([
       'new-session',
       'toggle-sidebar',
-      'toggle-details',
       'theme-system',
       'theme-light',
       'theme-dark',

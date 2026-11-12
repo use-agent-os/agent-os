@@ -6,15 +6,18 @@ import {
   EyeOff,
   KeyRound,
   Link2,
+  Loader2,
   LogOut,
   Pencil,
+  Plug,
   Plus,
+  Power,
   RefreshCw,
   Server,
   Terminal,
   Trash2,
-  TriangleAlert,
   Unplug,
+  Wrench,
   XCircle,
 } from 'lucide-react'
 import { useId, useState } from 'react'
@@ -63,7 +66,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/web/components/ui/alert-dialog'
+import { Badge, StatusDot } from '@/web/components/ui/badge'
 import { Button, buttonVariants } from '@/web/components/ui/button'
+import { StatCard } from '@/web/components/ui/card'
+import { IconTile, STAT_CARD_DENSE, StatWord } from '@/web/features/home/overview-ui'
 import {
   Dialog,
   DialogContent,
@@ -72,6 +78,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/web/components/ui/dialog'
+import { Input, Select, Textarea } from '@/web/components/ui/input'
+import { SectionHeader } from '@/web/components/ui/section-header'
 import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import { Switch } from '@/web/components/ui/switch'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
@@ -79,6 +87,7 @@ import { useConfigEditor, useConfigSnapshot, type ConfigEditor } from '../config
 import { ConfigField, useRegisterFields, useReveal } from '../fields'
 import { SaveBar } from '../SaveBar'
 import type { McpOAuthOutcome } from '../McpOAuthCallback'
+import { Notice } from '../ui'
 
 // Settings › MCP (control-ui-settings "MCP"). The runtime switch and the server
 // list are configuration (`mcp.enabled`, `mcp.servers`) and go through the
@@ -101,16 +110,23 @@ interface ConnectResponse {
 
 const STATUS_KEY = ['mcp', 'status'] as const
 
-const TONE_CLASS: Record<McpServerTone, string> = {
-  connected: 'border-ok/40 text-ok',
-  authorization: 'border-warn/50 text-warn',
-  paused: 'border-border text-text-muted',
-  offline: 'border-border text-text-muted',
-  unavailable: 'border-danger/40 text-danger',
+type BadgeTone = 'ok' | 'warn' | 'neutral' | 'danger' | 'accent'
+
+const TONE_BADGE: Record<McpServerTone, BadgeTone> = {
+  connected: 'ok',
+  authorization: 'warn',
+  paused: 'neutral',
+  offline: 'neutral',
+  unavailable: 'danger',
 }
 
-const inputClass =
-  'h-9 w-full rounded-md border border-border-control bg-surface-0 px-3 aria-[invalid=true]:border-danger touch:h-11 touch:text-base'
+const PARTNER_BADGE: Record<string, BadgeTone> = {
+  connected: 'ok',
+  authorization: 'warn',
+  paused: 'neutral',
+  ready: 'accent',
+  unavailable: 'danger',
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -302,8 +318,15 @@ export function McpSection() {
   }
   if (!editor.ready) {
     return (
-      <LoadingRegion>
-        <Skeleton className="h-40" />
+      <LoadingRegion className="flex flex-col gap-4">
+        <Skeleton className="h-20 rounded-card" />
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-24 rounded-card" />
+          ))}
+        </div>
+        <Skeleton className="h-36 rounded-card" />
+        <Skeleton className="h-32 rounded-card" />
       </LoadingRegion>
     )
   }
@@ -313,47 +336,38 @@ export function McpSection() {
   return (
     <div className="flex flex-col gap-4">
       {outcome && !outcomeDismissed ? (
-        <div
+        <Notice
           role={outcome.ok ? 'status' : 'alert'}
-          className={cn(
-            'flex items-start gap-2 rounded-lg border px-3 py-2',
-            outcome.ok ? 'border-ok/40 bg-ok/10' : 'border-danger/40 bg-danger/10',
-          )}
+          tone={outcome.ok ? 'ok' : 'danger'}
+          className="anim-enter"
+          icon={outcome.ok ? <CheckCircle2 data-status-icon /> : <XCircle data-status-icon />}
+          actions={
+            <Button size="sm" variant="ghost" onClick={() => setOutcomeDismissed(true)}>
+              {t('webSetCapabilities.dismiss')}
+            </Button>
+          }
         >
-          {outcome.ok ? (
-            <CheckCircle2 className="mt-0.5 size-4 text-ok" aria-hidden data-status-icon />
-          ) : (
-            <XCircle className="mt-0.5 size-4 text-danger" aria-hidden data-status-icon />
-          )}
-          <span className="min-w-0 flex-1">
-            {outcome.ok
-              ? t('webSetCapabilities.mcpOAuthDone')
-              : t('webSetCapabilities.mcpOAuthError', { message: outcome.message })}
-          </span>
-          <Button size="sm" variant="ghost" onClick={() => setOutcomeDismissed(true)}>
-            {t('webSetCapabilities.dismiss')}
-          </Button>
-        </div>
+          {outcome.ok
+            ? t('webSetCapabilities.mcpOAuthDone')
+            : t('webSetCapabilities.mcpOAuthError', { message: outcome.message })}
+        </Notice>
       ) : null}
 
       {online.reason ? (
-        <p
-          id={reasonId}
-          role="status"
-          className="flex items-center gap-2 rounded-md border border-warn/50 bg-warn/10 px-3 py-2 text-small"
-        >
-          <TriangleAlert className="size-4 shrink-0 text-warn" aria-hidden data-status-icon />
+        <Notice id={reasonId} role="status" tone="warn" className="text-small">
           {online.reason}
-        </p>
+        </Notice>
       ) : null}
 
-      <ConfigField
-        editor={editor}
-        path="mcp.enabled"
-        label={t('webSetCapabilities.mcpRuntime')}
-        help={t('webSetCapabilities.mcpRuntimeHelp')}
-        type={{ kind: 'boolean' }}
-      />
+      <div className="set-card py-1">
+        <ConfigField
+          editor={editor}
+          path="mcp.enabled"
+          label={t('webSetCapabilities.mcpRuntime')}
+          help={t('webSetCapabilities.mcpRuntimeHelp')}
+          type={{ kind: 'boolean' }}
+        />
+      </div>
 
       {status.isError ? (
         <ErrorState
@@ -363,58 +377,101 @@ export function McpSection() {
         />
       ) : null}
 
-      <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Tile label={t('webSetCapabilities.mcpTileConfigured')} value={String(saved.length)} />
-        <Tile
+      <div className="anim-stagger grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard
+          className={STAT_CARD_DENSE}
+          headingAs="p"
+          icon={
+            <IconTile>
+              <Server />
+            </IconTile>
+          }
+          label={t('webSetCapabilities.mcpTileConfigured')}
+          value={saved.length}
+        />
+        <StatCard
+          className={STAT_CARD_DENSE}
+          headingAs="p"
+          icon={
+            <IconTile>
+              <Link2 />
+            </IconTile>
+          }
           label={t('webSetCapabilities.mcpTileConnected')}
-          value={statusAvailable ? String(connected) : t('webSetCapabilities.dash')}
+          value={statusAvailable ? connected : t('webSetCapabilities.dash')}
+          tone={statusAvailable && connected > 0 ? 'ok' : 'default'}
         />
-        <Tile
+        <StatCard
+          className={STAT_CARD_DENSE}
+          headingAs="p"
+          icon={
+            <IconTile>
+              <Wrench />
+            </IconTile>
+          }
           label={t('webSetCapabilities.mcpTileTools')}
-          value={statusAvailable ? String(tools) : t('webSetCapabilities.dash')}
+          value={statusAvailable ? tools : t('webSetCapabilities.dash')}
         />
-        <Tile
+        <StatCard
+          className={STAT_CARD_DENSE}
+          headingAs="p"
+          icon={
+            <IconTile>
+              <Power />
+            </IconTile>
+          }
           label={t('webSetCapabilities.mcpTileRuntime')}
+          tone={statusAvailable && savedEnabled ? 'accent' : 'default'}
           value={
-            !statusAvailable
-              ? t('webSetCapabilities.mcpRuntimeUnknown')
-              : savedEnabled
-                ? t('webSetCapabilities.mcpRuntimeOn')
-                : t('webSetCapabilities.mcpRuntimeOff')
+            <StatWord>
+              {!statusAvailable
+                ? t('webSetCapabilities.mcpRuntimeUnknown')
+                : savedEnabled
+                  ? t('webSetCapabilities.mcpRuntimeOn')
+                  : t('webSetCapabilities.mcpRuntimeOff')}
+            </StatWord>
           }
         />
-      </dl>
+      </div>
 
       <section
         aria-label={t('webSetCapabilities.mcpPartner')}
-        className="flex flex-col gap-2 rounded-lg border border-border bg-surface-1 p-3"
+        className="set-card relative flex flex-col gap-3 overflow-hidden"
       >
-        <div className="flex items-start gap-3">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(50%_100%_at_0%_0%,var(--accent-tint),transparent_70%)]"
+        />
+        <div className="relative flex items-start gap-3.5">
           <img
             src={robinhoodSymbolUrl}
             alt={t('webSetCapabilities.mcpRobinhoodLogo')}
-            width={40}
-            height={40}
-            className="size-10 shrink-0 rounded-md"
+            width={44}
+            height={44}
+            className="size-11 shrink-0 rounded-card shadow-card"
           />
           <div className="min-w-0 flex-1">
-            <h2 className="flex flex-wrap items-center gap-2 font-semibold">
+            <h2 className="set-card-title flex flex-wrap items-center gap-2">
               {t('webSetCapabilities.mcpRobinhoodTitle')}
-              <span className="rounded-full border border-border px-2 py-0.5 text-small font-normal">
+              <Badge
+                tone={PARTNER_BADGE[robinhood.tone] ?? 'neutral'}
+                dot
+                live={robinhood.tone === 'connected'}
+                className="font-normal"
+              >
                 {robinhood.label}
-              </span>
+              </Badge>
             </h2>
-            <p className="text-text-muted">{t('webSetCapabilities.mcpRobinhoodBody')}</p>
-            <p className="text-small text-text-muted">
+            <p className="mt-0.5 text-text-muted">{t('webSetCapabilities.mcpRobinhoodBody')}</p>
+            <p className="mt-1 text-small text-text-muted tabular-nums">
               {robinhood.detail} · {robinhood.tools}
             </p>
           </div>
         </div>
-        <p role="note" className="flex items-start gap-1.5 text-small">
-          <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warn" aria-hidden />
+        <Notice role="note" tone="warn" className="relative py-2 text-small">
           {t('webSetCapabilities.mcpRobinhoodNotice')}
-        </p>
-        <div className="flex flex-wrap gap-2">
+        </Notice>
+        <div className="relative flex flex-wrap gap-2">
           <Button size="sm" variant="primary" onClick={openRobinhood}>
             <Link2 aria-hidden />
             {robinhood.action}
@@ -434,31 +491,40 @@ export function McpSection() {
       <section
         aria-labelledby="mcp-servers-title"
         data-field-id="mcp-servers"
-        className="flex flex-col gap-2"
+        className="flex flex-col gap-3 pt-2"
       >
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 id="mcp-servers-title" className="font-semibold">
-            {t('webSetCapabilities.mcpServers')}
-          </h2>
-          <span className="flex-1" />
-          <Button size="sm" variant="ghost" onClick={() => void refresh()}>
-            <RefreshCw aria-hidden />
-            {t('webSetCapabilities.refresh')}
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setDraft(createServerDraft())}>
-            <Plus aria-hidden />
-            {t('webSetCapabilities.mcpAdd')}
-          </Button>
-        </div>
+        <SectionHeader
+          id="mcp-servers-title"
+          title={t('webSetCapabilities.mcpServers')}
+          actions={
+            <>
+              <Button size="sm" variant="ghost" onClick={() => void refresh()}>
+                <RefreshCw aria-hidden className={cn(status.isFetching && 'animate-spin')} />
+                {t('webSetCapabilities.refresh')}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setDraft(createServerDraft())}>
+                <Plus aria-hidden />
+                {t('webSetCapabilities.mcpAdd')}
+              </Button>
+            </>
+          }
+        />
 
         {servers.length === 0 ? (
           <EmptyState
+            icon={<Plug />}
             title={t('webSetCapabilities.mcpEmpty')}
             description={t('webSetCapabilities.mcpEmptyBody')}
-            className="py-8"
+            action={
+              <Button size="sm" variant="primary" onClick={() => setDraft(createServerDraft())}>
+                <Plus aria-hidden />
+                {t('webSetCapabilities.mcpAdd')}
+              </Button>
+            }
+            className="set-card border-dashed py-10 shadow-none"
           />
         ) : (
-          <ul role="list" className="divide-y divide-border rounded-lg border border-border">
+          <ul role="list" className="set-list anim-stagger">
             {servers.map((server) => (
               <li key={server.name}>
                 <ServerRow
@@ -491,7 +557,10 @@ export function McpSection() {
           </ul>
         )}
         {!same(enabled, savedEnabled) || !same(servers, saved) ? (
-          <p className="text-small text-text-muted">{t('webSetCapabilities.mcpApplyOnSave')}</p>
+          <p className="flex items-center gap-2 text-small text-text-muted">
+            <StatusDot tone="accent" className="size-1.5" />
+            {t('webSetCapabilities.mcpApplyOnSave')}
+          </p>
         ) : null}
       </section>
 
@@ -532,15 +601,6 @@ export function McpSection() {
       </AlertDialog>
 
       <SaveBar editor={editor} />
-    </div>
-  )
-}
-
-function Tile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border px-3 py-2">
-      <dt className="text-small text-text-muted">{label}</dt>
-      <dd className="text-lg font-semibold">{value}</dd>
     </div>
   )
 }
@@ -589,36 +649,59 @@ function ServerRow({
   const rowBusy = busy?.endsWith(`:${server.name}`) ?? false
 
   return (
-    <div className="flex flex-col gap-1 px-3 py-2">
+    <div className="flex flex-col gap-2 px-4 py-3.5 transition-colors duration-[var(--duration-fast)] hover:bg-surface-2/50">
       <div className="flex flex-wrap items-start gap-3">
-        <span className="mt-0.5 text-text-muted" aria-hidden>
+        <span
+          className={cn(
+            'relative grid size-9 shrink-0 place-items-center rounded-control bg-surface-2 text-text-muted shadow-highlight',
+            state.tone === 'connected' && 'text-ok',
+          )}
+          aria-hidden
+        >
           {server.transport === 'stdio' ? (
             <Terminal className="size-4" />
           ) : (
             <Server className="size-4" />
           )}
+          {state.tone === 'connected' ? (
+            <StatusDot
+              tone="ok"
+              live
+              className="absolute -top-0.5 -right-0.5 size-2.5 ring-2 ring-surface-1"
+            />
+          ) : null}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium">{server.name}</span>
-            <span
-              title={state.detail}
-              className={cn('rounded-full border px-2 py-0.5 text-small', TONE_CLASS[state.tone])}
-            >
+            <Badge title={state.detail} tone={TONE_BADGE[state.tone]} dot live={rowBusy}>
               {state.label}
-            </span>
+            </Badge>
             {unsaved ? (
-              <span className="rounded-full border border-warn/50 px-2 py-0.5 text-small text-warn">
+              <Badge tone="warn" variant="outline">
                 {t('webSetCapabilities.mcpUnsaved')}
-              </span>
+              </Badge>
             ) : null}
           </div>
-          <p className="text-small text-text-muted">
-            {transportLabel(server.transport)}
-            {server.oauth ? ` · ${t('webSetCapabilities.mcpOAuth')}` : ''}
-            {state.toolCount ? ` · ${tPlural('webSetCapabilities.mcpTools', state.toolCount)}` : ''}
+          <p className="mt-1 flex flex-wrap items-center gap-1.5 text-small text-text-muted">
+            <span className="set-key">{transportLabel(server.transport)}</span>
+            {server.oauth ? (
+              <span className="inline-flex items-center gap-1">
+                <KeyRound className="size-3.5" aria-hidden />
+                {t('webSetCapabilities.mcpOAuth')}
+              </span>
+            ) : null}
+            {state.toolCount ? (
+              <span className="inline-flex items-center gap-1 tabular-nums">
+                <Wrench className="size-3.5" aria-hidden />
+                {tPlural('webSetCapabilities.mcpTools', state.toolCount)}
+              </span>
+            ) : null}
           </p>
-          <code className="block truncate text-small text-text-muted" title={serverDetail(server)}>
+          <code
+            className="mt-1 block truncate font-mono text-small text-text-muted"
+            title={serverDetail(server)}
+          >
             {serverDetail(server)}
           </code>
         </div>
@@ -631,7 +714,13 @@ function ServerRow({
               aria-describedby={describedBy}
               onClick={needsAuth ? onAuthorize : onConnect}
             >
-              {needsAuth ? <KeyRound aria-hidden /> : <Link2 aria-hidden />}
+              {rowBusy ? (
+                <Loader2 aria-hidden className="animate-spin" />
+              ) : needsAuth ? (
+                <KeyRound aria-hidden />
+              ) : (
+                <Link2 aria-hidden />
+              )}
               {rowBusy
                 ? t('webSetCapabilities.mcpConnecting')
                 : needsAuth
@@ -682,12 +771,13 @@ function ServerRow({
         </div>
       </div>
       {run.reason && !online.disabled && statusAvailable && runtimeOn && !status?.connected ? (
-        <p id={rowReasonId} className="text-small text-text-muted">
+        <p id={rowReasonId} className="pl-12 text-small text-text-muted">
           {run.reason}
         </p>
       ) : null}
       {error ? (
-        <p role="alert" className="text-small text-danger">
+        <p role="alert" className="set-row-error ml-12 mt-0">
+          <XCircle className="size-3.5 shrink-0" aria-hidden data-status-icon />
           {error}
         </p>
       ) : null}
@@ -739,18 +829,19 @@ function Field({
   id: string
 }) {
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1.5">
       <label htmlFor={id} className="font-medium">
         {label}
       </label>
       {children}
       {help ? (
-        <p id={`${id}-help`} className="text-small text-text-muted">
+        <p id={`${id}-help`} className="set-row-help">
           {help}
         </p>
       ) : null}
       {error ? (
-        <p id={`${id}-error`} role="alert" className="text-small text-danger">
+        <p id={`${id}-error`} role="alert" className="set-row-error mt-0">
+          <XCircle className="size-3.5 shrink-0" aria-hidden data-status-icon />
           {error}
         </p>
       ) : null}
@@ -788,7 +879,7 @@ function ServerForm({
   return (
     <form
       noValidate
-      className="flex flex-col gap-3"
+      className="flex flex-col gap-4"
       onSubmit={(e) => {
         e.preventDefault()
         const next = validateServerDraft(draft, servers)
@@ -812,9 +903,8 @@ function ServerForm({
         help={t('webSetCapabilities.mcpFieldNameHelp')}
         error={errors.name}
       >
-        <input
+        <Input
           id={`${id}-name`}
-          className={inputClass}
           value={draft.name}
           maxLength={64}
           autoComplete="off"
@@ -825,9 +915,8 @@ function ServerForm({
       </Field>
 
       <Field id={`${id}-transport`} label={t('webSetCapabilities.mcpFieldTransport')}>
-        <select
+        <Select
           id={`${id}-transport`}
-          className={inputClass}
           value={draft.transport}
           onChange={(e) => {
             const transport = e.target.value as McpTransport
@@ -843,16 +932,15 @@ function ServerForm({
               {transportLabel(value)}
             </option>
           ))}
-        </select>
+        </Select>
       </Field>
 
       {http ? (
         <>
           <Field id={`${id}-url`} label={t('webSetCapabilities.mcpFieldUrl')} error={errors.url}>
-            <input
+            <Input
               id={`${id}-url`}
               type="url"
-              className={inputClass}
               value={draft.url}
               autoComplete="url"
               placeholder={t('webSetCapabilities.mcpFieldUrlPlaceholder')}
@@ -862,21 +950,21 @@ function ServerForm({
             />
           </Field>
           {draft.transport === 'streamable_http' ? (
-            <div className="flex items-start gap-3">
+            <div className="flex items-start justify-between gap-4 rounded-control border border-border bg-surface-2/60 px-3 py-2.5">
+              <div className="min-w-0">
+                <label htmlFor={`${id}-oauth`} className="font-medium">
+                  {t('webSetCapabilities.mcpFieldOAuth')}
+                </label>
+                <p id={`${id}-oauth-help`} className="set-row-help">
+                  {t('webSetCapabilities.mcpFieldOAuthHelp')}
+                </p>
+              </div>
               <Switch
                 id={`${id}-oauth`}
                 checked={draft.oauth}
                 aria-describedby={`${id}-oauth-help`}
                 onCheckedChange={(v) => update('oauth', v)}
               />
-              <div>
-                <label htmlFor={`${id}-oauth`} className="font-medium">
-                  {t('webSetCapabilities.mcpFieldOAuth')}
-                </label>
-                <p id={`${id}-oauth-help`} className="text-small text-text-muted">
-                  {t('webSetCapabilities.mcpFieldOAuthHelp')}
-                </p>
-              </div>
             </div>
           ) : null}
           <Field
@@ -885,15 +973,14 @@ function ServerForm({
             help={t('webSetCapabilities.mcpFieldHeadersHelp')}
             error={errors.headers}
           >
-            <div className="flex items-start gap-2">
+            <div className="relative">
               {/* Headers usually carry credentials, so they stay masked until revealed. */}
-              <textarea
+              <Textarea
                 id={`${id}-headers`}
                 rows={4}
                 spellCheck={false}
                 className={cn(
-                  inputClass,
-                  'h-auto py-2 font-mono text-small',
+                  'pr-10 font-mono text-small',
                   !headersShown && '[-webkit-text-security:disc]',
                 )}
                 value={draft.headers}
@@ -904,9 +991,11 @@ function ServerForm({
               <Button
                 size="icon-sm"
                 variant="ghost"
+                className="absolute top-1.5 right-1.5 text-text-muted hover:text-text"
                 aria-label={
                   headersShown ? t('webSetCapabilities.hide') : t('webSetCapabilities.reveal')
                 }
+                aria-pressed={headersShown}
                 onClick={toggleHeaders}
               >
                 {headersShown ? <EyeOff /> : <Eye />}
@@ -921,9 +1010,9 @@ function ServerForm({
             label={t('webSetCapabilities.mcpFieldCommand')}
             error={errors.command}
           >
-            <input
+            <Input
               id={`${id}-command`}
-              className={inputClass}
+              className="font-mono"
               value={draft.command}
               autoComplete="off"
               placeholder={t('webSetCapabilities.mcpFieldCommandPlaceholder')}
@@ -937,9 +1026,9 @@ function ServerForm({
             label={t('webSetCapabilities.mcpFieldArgs')}
             help={t('webSetCapabilities.mcpFieldArgsHelp')}
           >
-            <input
+            <Input
               id={`${id}-args`}
-              className={inputClass}
+              className="font-mono"
               value={draft.args}
               autoComplete="off"
               aria-describedby={`${id}-args-help`}
@@ -954,12 +1043,12 @@ function ServerForm({
         label={t('webSetCapabilities.mcpFieldTimeout')}
         error={errors.timeout}
       >
-        <input
+        <Input
           id={`${id}-timeout`}
           type="number"
           min={1}
           max={600}
-          className={cn(inputClass, 'max-w-32')}
+          className="max-w-32 tabular-nums"
           value={draft.timeout}
           aria-invalid={errors.timeout ? true : undefined}
           aria-describedby={described('timeout', false, errors.timeout)}

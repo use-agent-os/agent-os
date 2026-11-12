@@ -1,6 +1,7 @@
 import '@/test/web'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useApprovals } from '@/services/approval-monitor'
 import { usePreferences } from '@/stores/preferences'
@@ -52,6 +53,11 @@ describe('transcript layout', () => {
       'data-role',
       'assistant',
     )
+    // The reply opens with the agent's identity line.
+    const reply = within(log()).getByText('Hi! How can I help?').closest('[data-role]')!
+    expect(reply.querySelector('.chat-ident')).toHaveTextContent(/main/i)
+    // No source comment leaks into the page as text (a `//` line once sat in JSX).
+    expect(log().parentElement!.parentElement!.textContent).not.toMatch(/\/\/|\/\*/)
   })
 
   it('copies a reply as Markdown with a confirmation', async () => {
@@ -245,12 +251,51 @@ describe('header', () => {
   })
 })
 
+describe('session actions menu', () => {
+  it('gives every action an icon, so the labels line up', async () => {
+    const user = userEvent.setup()
+    await openChat(chatRpc())
+    await user.click(screen.getByRole('button', { name: 'Session actions' }))
+    const items = await screen.findAllByRole('menuitem')
+    expect(items.map((item) => item.textContent)).toEqual([
+      'Rename',
+      'Compact',
+      'Reset session',
+      'Export as Markdown',
+      'Copy session key',
+    ])
+    for (const item of items) expect(item.querySelector('svg')).not.toBeNull()
+  })
+})
+
 describe('composer', () => {
   it('marks focus with a ring as well as the border (the border alone is ~1.6:1 in light)', async () => {
     const { composer } = await openChat(chatRpc())
-    const frame = composer.closest('.rounded-2xl')
-    expect(frame?.className).toMatch(/focus-within:border-accent/)
-    expect(frame?.className).toMatch(/focus-within:ring-ring/)
+    expect(composer.closest('.chat-composer')).not.toBeNull()
+    // The focus chrome lives in chat-stage.css: the accent border plus a 1px ring.
+    const css = readFileSync('src/web/styles/chat-stage.css', 'utf8')
+    const rule = /\.chat-composer:focus-within\s*\{([^}]*)\}/.exec(css)?.[1] ?? ''
+    expect(rule).toMatch(/border-color:\s*var\(--ring\)/)
+    expect(rule).toMatch(/0 0 0 1px var\(--ring\)/)
+    expect(rule).toMatch(/var\(--focus-glow\)/)
+    // No resting composer shadow (a theme override, say) may out-rank the
+    // focus rule: that is how light once lost its ring and glow.
+    const specificity = (selector: string) =>
+      (selector.replace(/:where\([^)]*\)/g, '').match(/\.[\w-]+|\[[^\]]+\]|:(?!:)[\w-]+/g) ?? [])
+        .length
+    const focus = specificity('.chat-composer:focus-within')
+    const resting = [
+      ...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g),
+    ].filter(
+      ([, selector, body]) =>
+        /\.chat-composer(?![\w-])/.test(selector!) &&
+        !/:focus-within|:hover|data-dragging/.test(selector!) &&
+        /box-shadow/.test(body!),
+    )
+    expect(resting.length).toBeGreaterThan(0)
+    for (const [, selector] of resting) {
+      expect(specificity(selector!.trim()), selector).toBeLessThanOrEqual(focus)
+    }
   })
 
   it('Enter mode: Shift+Enter adds a line and nothing is sent', async () => {
@@ -348,6 +393,127 @@ describe('composer', () => {
     expect(screen.getByText('Waiting for attachments to finish uploading')).toBeInTheDocument()
     void finish
     vi.unstubAllGlobals()
+  })
+
+  it('keeps a reader at the end of a settled transcript there while the draft grows', async () => {
+    // The browser defect: sizing the input sets `height: auto` and reads
+    // scrollHeight, a forced layout in which the input is one row tall. If the
+    // composer box shrinks with it, the transcript gets taller for that
+    // layout and clamps its scrollTop; the restored height then leaves the
+    // reader above the end, the scroll up reads as the reader and pauses
+    // following. A small layout model: the transcript fills what the
+    // composer leaves, scrollTop is clamped at every layout.
+    const observers: Array<{ cb: ResizeObserverCallback; targets: Element[] }> = []
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        targets: Element[] = []
+        constructor(public cb: ResizeObserverCallback) {
+          observers.push(this)
+        }
+        observe(target: Element) {
+          this.targets.push(target)
+        }
+        unobserve() {}
+        disconnect() {
+          this.targets = []
+        }
+      },
+    )
+    const { composer } = await openChat(chatRpc())
+    const scroller = log()
+    const box = composer.parentElement!
+    const ROW = 24
+    const VIEW = 700
+    const CONTENT = 2000
+    const inputHeight = () => {
+      const h = parseFloat(composer.style.height)
+      return Number.isNaN(h) ? ROW : h
+    }
+    const boxHeight = () => Math.max(parseFloat(box.style.minHeight) || 0, inputHeight() + 60)
+    const viewHeight = () => VIEW - boxHeight()
+    let top = 0
+    let scrolled = false
+    const layout = () => {
+      const clamped = Math.max(0, Math.min(top, CONTENT - viewHeight()))
+      if (clamped !== top) scrolled = true
+      top = clamped
+    }
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, get: () => CONTENT },
+      clientHeight: { configurable: true, get: () => viewHeight() },
+      scrollTop: {
+        configurable: true,
+        get: () => top,
+        set: (v: number) => {
+          top = v
+          layout()
+          scrolled = true
+        },
+      },
+    })
+    scroller.scrollTo = ((opts: ScrollToOptions) => {
+      scroller.scrollTop = opts.top ?? 0
+    }) as typeof scroller.scrollTo
+    Object.defineProperty(box, 'offsetHeight', { configurable: true, get: boxHeight })
+    Object.defineProperty(composer, 'scrollHeight', {
+      configurable: true,
+      get: () => {
+        layout()
+        return (composer as HTMLTextAreaElement).value.split('\n').length * ROW
+      },
+    })
+    // A rendering step: scroll events first, then resize observations.
+    let lastView = viewHeight()
+    const frame = () =>
+      act(() => {
+        layout()
+        if (scrolled) {
+          scrolled = false
+          scroller.dispatchEvent(new Event('scroll'))
+        }
+        if (viewHeight() !== lastView) {
+          lastView = viewHeight()
+          for (const o of observers)
+            if (o.targets.includes(scroller)) o.cb([], o as unknown as ResizeObserver)
+        }
+      })
+    const distance = () => CONTENT - top - viewHeight()
+    act(() => scroller.scrollTo({ top: CONTENT }))
+    frame()
+    expect(distance()).toBe(0)
+    let draft = ''
+    for (let i = 0; i < 8; i++) {
+      draft += `${i ? '\n' : ''}line ${i}`
+      fireEvent.change(composer, { target: { value: draft } })
+      frame()
+      expect(distance(), `after line ${i + 1}`).toBe(0)
+    }
+    expect(viewHeight()).toBe(VIEW - 8 * ROW - 60)
+    expect(document.querySelector('.chat-latest')).toHaveAttribute('data-show', 'false')
+    vi.unstubAllGlobals()
+  })
+
+  it('publishes its height for the approval tray, and takes it back on leaving', async () => {
+    const { unmount } = await openChat(chatRpc())
+    const root = document.documentElement
+    await waitFor(() => expect(root.style.getPropertyValue('--tray-clearance')).toMatch(/^\d+px$/))
+    unmount()
+    expect(root.style.getPropertyValue('--tray-clearance')).toBe('')
+  })
+
+  it('checks the current route in the route picker', async () => {
+    const user = userEvent.setup()
+    await openChat(chatRpc())
+    await user.click(screen.getByRole('button', { name: /^Model route:/ }))
+    const items = await screen.findAllByRole('menuitemcheckbox')
+    const checked = items.filter((item) => item.getAttribute('aria-checked') === 'true')
+    expect(checked).toHaveLength(1)
+    // The state is visible, not only announced: a check mark on that row alone.
+    expect(checked[0]!.querySelector('svg')).not.toBeNull()
+    for (const item of items.filter((i) => i !== checked[0])) {
+      expect(item.querySelector('svg')).toBeNull()
+    }
   })
 
   it('pins a named model in the route picker', async () => {
@@ -451,35 +617,6 @@ describe('approvals in the open session', () => {
     expect(
       screen.queryByRole('complementary', { name: 'Pending approvals' }),
     ).not.toBeInTheDocument()
-  })
-})
-
-describe('Details', () => {
-  it('docks on a wide pane with the session context, and an explicit close sticks', async () => {
-    const user = userEvent.setup()
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1600 })
-    const rpc = chatRpc([userRow('u1', 'a'), assistantRow('a1', 'b')], { project_id: 'p1' })
-    await openChat(rpc)
-    const details = await screen.findByRole('complementary', { name: 'Session details' })
-    expect(within(details).getByText('Agent').nextSibling).toHaveTextContent('main')
-    expect(within(details).getByText('Project').nextSibling).toHaveTextContent('Alpha')
-    expect(within(details).getByText('Queued messages')).toBeInTheDocument()
-    await user.click(within(details).getByRole('button', { name: 'Close details' }))
-    expect(screen.queryByRole('complementary', { name: 'Session details' })).not.toBeInTheDocument()
-    emit(rpc, 'text_delta', { text: 'new message' })
-    expect(screen.queryByRole('complementary', { name: 'Session details' })).not.toBeInTheDocument()
-  })
-
-  it('opens as an overlay on a narrow pane', async () => {
-    const user = userEvent.setup()
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 900 })
-    await openChat()
-    expect(screen.queryByRole('complementary', { name: 'Session details' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Details' }))
-    const sheet = await screen.findByRole('dialog', { name: 'Session details' })
-    expect(
-      within(sheet).getByRole('complementary', { name: 'Session details' }),
-    ).toBeInTheDocument()
   })
 })
 

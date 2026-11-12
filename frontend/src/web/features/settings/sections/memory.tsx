@@ -2,16 +2,21 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   BookOpen,
   Brain,
+  Cpu,
   Database,
   FileText,
   FolderPlus,
+  Layers,
+  Link2,
+  Loader2,
   Pencil,
   Plus,
   RefreshCw,
   Search,
+  SearchX,
   Settings2,
+  Sparkles,
   Trash2,
-  TriangleAlert,
   Upload,
   User,
 } from 'lucide-react'
@@ -47,7 +52,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/web/components/ui/alert-dialog'
+import { Badge } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
+import { StatCard } from '@/web/components/ui/card'
+import { IconTile, STAT_CARD_DENSE, StatWord } from '@/web/features/home/overview-ui'
 import {
   Dialog,
   DialogContent,
@@ -56,12 +64,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/web/components/ui/dialog'
+import { Input, Textarea } from '@/web/components/ui/input'
+import { SegmentedControl } from '@/web/components/ui/segmented-control'
 import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/web/components/ui/tabs'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { useConfigEditor } from '../config-editor'
 import { ConfigField, useRegisterFields } from '../fields'
 import { SaveBar } from '../SaveBar'
+import { Notice, SettingsCard } from '../ui'
 
 // Settings › Memory (control-ui-settings "Memory"): curated MEMORY.md / USER.md
 // entries, the knowledge base, the raw indexed sources, search, reindexing,
@@ -82,9 +93,6 @@ const EMBEDDING_PROVIDERS = [
 
 type Tab = MemoryTab | 'settings'
 type Target = CuratedMemoryData['target']
-
-const inputClass =
-  'h-9 w-full rounded-md border border-border-control bg-surface-0 px-3 touch:h-11 touch:text-base'
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
@@ -177,21 +185,29 @@ export function MemorySection() {
   return (
     <div className="flex flex-col gap-4">
       {blocked.reason ? (
-        <p
-          id={reasonId}
-          role="status"
-          className="flex items-center gap-2 rounded-md border border-warn/50 bg-warn/10 px-3 py-2 text-small"
-        >
-          <TriangleAlert className="size-4 shrink-0 text-warn" aria-hidden data-status-icon />
+        <Notice id={reasonId} role="status" tone="warn" className="text-small">
           {blocked.reason}
-        </p>
+        </Notice>
       ) : null}
 
-      <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Tile label={t('webSetCapabilities.memStatCurated')} value={curatedCount} />
-        <Tile label={t('webSetCapabilities.memStatDocuments')} value={kb.data?.length} />
-        <Tile label={t('webSetCapabilities.memStatChunks')} value={status.data?.chunkCount} />
+      <div className="anim-stagger grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Tile
+          icon={<Brain />}
+          label={t('webSetCapabilities.memStatCurated')}
+          value={curatedCount}
+        />
+        <Tile
+          icon={<BookOpen />}
+          label={t('webSetCapabilities.memStatDocuments')}
+          value={kb.data?.length}
+        />
+        <Tile
+          icon={<Layers />}
+          label={t('webSetCapabilities.memStatChunks')}
+          value={status.data?.chunkCount}
+        />
+        <Tile
+          icon={<Cpu />}
           label={t('webSetCapabilities.memStatEngine')}
           value={
             status.data
@@ -201,9 +217,9 @@ export function MemorySection() {
               : undefined
           }
         />
-      </dl>
+      </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button
           size="sm"
           variant="outline"
@@ -211,7 +227,10 @@ export function MemorySection() {
           aria-describedby={describedBy}
           onClick={() => void reindex(false)}
         >
-          <RefreshCw aria-hidden />
+          <RefreshCw
+            aria-hidden
+            className={action.busy === 'reindex' ? 'animate-spin' : undefined}
+          />
           {action.busy === 'reindex'
             ? t('webSetCapabilities.memReindexing')
             : t('webSetCapabilities.memReindex')}
@@ -223,7 +242,11 @@ export function MemorySection() {
           aria-describedby={describedBy}
           onClick={() => void reindex(true)}
         >
-          <Database aria-hidden />
+          {action.busy === 'rebuild' ? (
+            <Loader2 aria-hidden className="animate-spin" />
+          ) : (
+            <Database aria-hidden />
+          )}
           {action.busy === 'rebuild'
             ? t('webSetCapabilities.memRebuilding')
             : t('webSetCapabilities.memRebuild')}
@@ -253,19 +276,19 @@ export function MemorySection() {
             {t('webSetCapabilities.memTabSettings')}
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="curated" className="mt-4">
+        <TabsContent value="curated" className="anim-fade-in mt-5">
           <CuratedTab action={action} blocked={blocked} describedBy={describedBy} />
         </TabsContent>
-        <TabsContent value="knowledge_base" className="mt-4">
+        <TabsContent value="knowledge_base" className="anim-fade-in mt-5">
           <KnowledgeBaseTab action={action} blocked={blocked} describedBy={describedBy} />
         </TabsContent>
-        <TabsContent value="raw_sources" className="mt-4">
+        <TabsContent value="raw_sources" className="anim-fade-in mt-5">
           <SourcesTab blocked={blocked} describedBy={describedBy} />
         </TabsContent>
-        <TabsContent value="search" className="mt-4">
+        <TabsContent value="search" className="anim-fade-in mt-5">
           <SearchTab />
         </TabsContent>
-        <TabsContent value="settings" className="mt-4">
+        <TabsContent value="settings" className="anim-fade-in mt-5">
           <EmbeddingSettings />
         </TabsContent>
       </Tabs>
@@ -273,12 +296,29 @@ export function MemorySection() {
   )
 }
 
-function Tile({ label, value }: { label: string; value?: number | string }) {
+function Tile({
+  label,
+  value,
+  icon,
+}: {
+  label: string
+  value?: number | string
+  icon: React.ReactNode
+}) {
   return (
-    <div className="rounded-lg border border-border px-3 py-2">
-      <dt className="text-small text-text-muted">{label}</dt>
-      <dd className="text-lg font-semibold">{value ?? t('webSetCapabilities.dash')}</dd>
-    </div>
+    <StatCard
+      className={STAT_CARD_DENSE}
+      headingAs="p"
+      icon={<IconTile>{icon}</IconTile>}
+      label={label}
+      value={
+        typeof value === 'string' && value !== t('webSetCapabilities.dash') ? (
+          <StatWord>{value}</StatWord>
+        ) : (
+          (value ?? t('webSetCapabilities.dash'))
+        )
+      }
+    />
   )
 }
 
@@ -389,10 +429,9 @@ function CuratedTab({
             <label htmlFor={textId} className="font-medium">
               {t('webSetCapabilities.memEntryContent')}
             </label>
-            <textarea
+            <Textarea
               id={textId}
               rows={6}
-              className={cn(inputClass, 'h-auto py-2')}
               value={edit?.text ?? ''}
               onChange={(e) => setEdit((prev) => (prev ? { ...prev, text: e.target.value } : prev))}
             />
@@ -406,6 +445,7 @@ function CuratedTab({
                 disabled={blocked.disabled || !edit?.text.trim() || action.busy === 'curated'}
                 aria-describedby={describedBy}
               >
+                {action.busy === 'curated' ? <Loader2 className="animate-spin" /> : null}
                 {t('webSetCapabilities.save')}
               </Button>
             </DialogFooter>
@@ -466,15 +506,16 @@ function CuratedPanel({
   const percent = data ? formatUsagePercent(data.charCount, data.charLimit) : 0
 
   return (
-    <section aria-label={title} className="flex flex-col gap-2 rounded-lg border border-border p-3">
-      <div className="flex items-start gap-2">
-        {target === 'memory' ? (
-          <Brain className="mt-0.5 size-4 text-text-muted" aria-hidden />
-        ) : (
-          <User className="mt-0.5 size-4 text-text-muted" aria-hidden />
-        )}
+    <section aria-label={title} className="set-card flex flex-col gap-3">
+      <div className="flex items-start gap-3">
+        <span
+          aria-hidden
+          className="grid size-8 shrink-0 place-items-center rounded-control bg-surface-2 text-text-muted shadow-highlight [&_svg]:size-4"
+        >
+          {target === 'memory' ? <Brain /> : <User />}
+        </span>
         <div className="min-w-0 flex-1">
-          <h2 className="font-semibold">{title}</h2>
+          <h2 className="set-card-title">{title}</h2>
           <p className="text-small text-text-muted">
             {target === 'memory'
               ? t('webSetCapabilities.memAgentBody')
@@ -493,8 +534,8 @@ function CuratedPanel({
         </Button>
       </div>
       {data ? (
-        <div className="flex flex-col gap-1">
-          <p className="text-small text-text-muted">
+        <div className="flex flex-col gap-1.5">
+          <p className="text-small text-text-muted tabular-nums">
             {t('webSetCapabilities.memUsage', {
               used: data.charCount,
               limit: data.charLimit,
@@ -507,21 +548,24 @@ function CuratedPanel({
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={percent}
-            className="h-1.5 overflow-hidden rounded-full bg-surface-3"
+            className="h-1.5 overflow-hidden rounded-full bg-surface-inset shadow-inset"
           >
             <div
               className={cn(
-                'h-full rounded-full',
-                isNearBudget(data.charCount, data.charLimit) ? 'bg-warn' : 'bg-accent',
+                'h-full origin-left rounded-full transition-[scale] duration-[var(--duration-slow)] ease-[var(--ease-out)]',
+                isNearBudget(data.charCount, data.charLimit)
+                  ? 'bg-warn'
+                  : 'bg-accent [background-image:var(--accent-gradient)]',
               )}
-              style={{ width: `${percent}%` }}
+              style={{ scale: `${Math.min(percent, 100) / 100} 1` }}
             />
           </div>
         </div>
       ) : null}
       {query.isPending ? (
-        <LoadingRegion>
-          <Skeleton className="h-20" />
+        <LoadingRegion className="flex flex-col gap-2">
+          <Skeleton className="h-10 rounded-control" />
+          <Skeleton className="h-10 rounded-control" />
         </LoadingRegion>
       ) : query.isError ? (
         <ErrorState
@@ -530,10 +574,15 @@ function CuratedPanel({
           onRetry={() => void query.refetch()}
         />
       ) : data && data.entries.length ? (
-        <ul role="list" className="flex flex-col divide-y divide-border">
+        <ul role="list" className="set-list flex flex-col shadow-none">
           {data.entries.map((entry, i) => (
-            <li key={`${i}:${entry}`} className="flex items-start gap-2 py-2">
-              <p className="min-w-0 flex-1 text-small break-words whitespace-pre-wrap">{entry}</p>
+            <li
+              key={`${i}:${entry}`}
+              className="group flex items-start gap-2 bg-surface-1 py-2 pr-1.5 pl-3 transition-colors duration-[var(--duration-fast)] hover:bg-surface-2"
+            >
+              <p className="min-w-0 flex-1 py-0.5 text-small break-words whitespace-pre-wrap">
+                {entry}
+              </p>
               <Button
                 size="icon-sm"
                 variant="ghost"
@@ -548,6 +597,7 @@ function CuratedPanel({
                 size="icon-sm"
                 variant="ghost"
                 aria-label={t('webSetCapabilities.memRemoveEntry')}
+                className="hover:bg-danger/10 hover:text-danger"
                 disabled={blocked.disabled}
                 aria-describedby={describedBy}
                 onClick={() => onRemove(entry)}
@@ -558,9 +608,12 @@ function CuratedPanel({
           ))}
         </ul>
       ) : (
-        <p className="py-4 text-center text-small text-text-muted">
-          {t('webSetCapabilities.memCuratedEmpty')}
-        </p>
+        <EmptyState
+          size="sm"
+          className="rounded-card border border-dashed border-border py-6"
+          icon={target === 'memory' ? <Brain /> : <User />}
+          title={t('webSetCapabilities.memCuratedEmpty')}
+        />
       )}
     </section>
   )
@@ -644,20 +697,21 @@ function KnowledgeBaseTab({
   return (
     <div className="flex flex-col gap-4">
       <form
-        className="flex flex-col gap-2 rounded-lg border border-border p-3"
+        className="set-card flex flex-col gap-2"
         onSubmit={(e) => {
           e.preventDefault()
           void ingestPath()
         }}
       >
-        <label htmlFor={pathId} className="font-medium">
+        <label htmlFor={pathId} className="set-card-title">
           {t('webSetCapabilities.memIngestLabel')}
         </label>
         <p className="text-small text-text-muted">{t('webSetCapabilities.memIngestHelp')}</p>
-        <div className="flex flex-wrap gap-2">
-          <input
+        <div className="mt-1 flex flex-wrap gap-2">
+          <Input
             id={pathId}
-            className={cn(inputClass, 'min-w-48 flex-1')}
+            icon={<Link2 />}
+            wrapperClassName="min-w-48 flex-1"
             value={path}
             autoComplete="off"
             placeholder={t('webSetCapabilities.memIngestPlaceholder')}
@@ -669,7 +723,11 @@ function KnowledgeBaseTab({
             disabled={blocked.disabled || ingesting || !path.trim()}
             aria-describedby={describedBy}
           >
-            <FolderPlus aria-hidden />
+            {ingesting ? (
+              <Loader2 aria-hidden className="animate-spin" />
+            ) : (
+              <FolderPlus aria-hidden />
+            )}
             {ingesting ? t('webSetCapabilities.memIngesting') : t('webSetCapabilities.memIngest')}
           </Button>
           <Button
@@ -693,8 +751,16 @@ function KnowledgeBaseTab({
       </form>
 
       {docs.isPending ? (
-        <LoadingRegion>
-          <Skeleton className="h-24" />
+        <LoadingRegion className="set-list flex flex-col">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center gap-3 px-4 py-3">
+              <Skeleton className="size-8 rounded-control" />
+              <div className="flex flex-1 flex-col gap-1.5">
+                <Skeleton className="h-3.5 w-1/2" />
+                <Skeleton className="h-3 w-1/3" />
+              </div>
+            </div>
+          ))}
         </LoadingRegion>
       ) : docs.isError ? (
         <ErrorState
@@ -706,7 +772,7 @@ function KnowledgeBaseTab({
         <EmptyState
           icon={<BookOpen />}
           title={t('webSetCapabilities.memKbEmpty')}
-          className="py-8"
+          className="set-card py-8"
         />
       ) : (
         <FileList
@@ -717,6 +783,7 @@ function KnowledgeBaseTab({
               size="icon-sm"
               variant="ghost"
               aria-label={t('webSetCapabilities.memRemoveDoc', { path: doc.path })}
+              className="hover:bg-danger/10 hover:text-danger"
               disabled={blocked.disabled}
               aria-describedby={describedBy}
               onClick={() => setRemoving(doc.path)}
@@ -771,19 +838,23 @@ function FileList({
   action: (file: MemoryFileRow) => React.ReactNode
 }) {
   return (
-    <ul
-      role="list"
-      aria-label={label}
-      className="divide-y divide-border rounded-lg border border-border"
-    >
+    <ul role="list" aria-label={label} className="set-list anim-stagger flex flex-col">
       {files.map((file) => (
-        <li key={file.path} className="flex items-center gap-3 px-3 py-2">
-          <FileText className="size-4 shrink-0 text-text-muted" aria-hidden />
+        <li
+          key={file.path}
+          className="flex items-center gap-3 px-4 py-2.5 transition-colors duration-[var(--duration-fast)] hover:bg-surface-2"
+        >
+          <span
+            aria-hidden
+            className="grid size-8 shrink-0 place-items-center rounded-control bg-surface-2 text-text-muted"
+          >
+            <FileText className="size-4" />
+          </span>
           <div className="min-w-0 flex-1">
             <p className="truncate font-mono text-small" title={file.path}>
               {file.path}
             </p>
-            <p className="text-small text-text-muted">
+            <p className="text-small text-text-muted tabular-nums">
               {showSource ? `${fileSourceLabel(file.source)} · ` : ''}
               {t('webSetCapabilities.memFileMeta', {
                 lines: file.lineCount ?? t('webSetCapabilities.dash'),
@@ -837,10 +908,11 @@ function SourcesTab({ blocked, describedBy }: { blocked: Gate; describedBy?: str
         <label htmlFor={filterId} className="sr-only">
           {t('webSetCapabilities.memFilterLabel')}
         </label>
-        <input
+        <Input
           id={filterId}
           type="search"
-          className={cn(inputClass, 'min-w-48 flex-1')}
+          icon={<Search />}
+          wrapperClassName="min-w-48 flex-1"
           value={filter}
           placeholder={t('webSetCapabilities.memFilterLabel')}
           onChange={(e) => setFilter(e.target.value)}
@@ -848,8 +920,16 @@ function SourcesTab({ blocked, describedBy }: { blocked: Gate; describedBy?: str
         <SourceFilter value={source} onChange={setSource} />
       </div>
       {files.isPending ? (
-        <LoadingRegion>
-          <Skeleton className="h-24" />
+        <LoadingRegion className="set-list flex flex-col">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center gap-3 px-4 py-3">
+              <Skeleton className="size-8 rounded-control" />
+              <div className="flex flex-1 flex-col gap-1.5">
+                <Skeleton className="h-3.5 w-1/2" />
+                <Skeleton className="h-3 w-1/3" />
+              </div>
+            </div>
+          ))}
         </LoadingRegion>
       ) : files.isError ? (
         <ErrorState
@@ -861,7 +941,7 @@ function SourcesTab({ blocked, describedBy }: { blocked: Gate; describedBy?: str
         <EmptyState
           icon={<Database />}
           title={t('webSetCapabilities.memSourcesEmpty')}
-          className="py-8"
+          className="set-card py-8"
         />
       ) : (
         <FileList
@@ -905,7 +985,7 @@ function SourcesTab({ blocked, describedBy }: { blocked: Gate; describedBy?: str
           ) : (
             <pre
               tabIndex={0}
-              className="max-h-[60vh] overflow-auto rounded-md bg-surface-0 p-3 font-mono text-small whitespace-pre-wrap"
+              className="max-h-[60vh] overflow-auto rounded-control border border-border bg-surface-inset p-3 font-mono text-small whitespace-pre-wrap shadow-inset"
             >
               {content.data}
             </pre>
@@ -924,23 +1004,14 @@ function SourceFilter({
   onChange: (source: MemorySourceFilter) => void
 }) {
   return (
-    <div
-      role="group"
+    <SegmentedControl
+      kind="toggle"
+      size="sm"
       aria-label={t('webSetCapabilities.memSourceFilter')}
-      className="flex flex-wrap gap-1"
-    >
-      {SOURCES.map((source) => (
-        <Button
-          key={source}
-          size="sm"
-          variant={value === source ? 'secondary' : 'ghost'}
-          aria-pressed={value === source}
-          onClick={() => onChange(source)}
-        >
-          {sourceLabel(source)}
-        </Button>
-      ))}
-    </div>
+      value={value}
+      onChange={onChange}
+      options={SOURCES.map((source) => ({ value: source, label: sourceLabel(source) }))}
+    />
   )
 }
 
@@ -981,10 +1052,11 @@ function SearchTab() {
       <label htmlFor={queryId} className="sr-only">
         {t('webSetCapabilities.memSearchLabel')}
       </label>
-      <input
+      <Input
         id={queryId}
         type="search"
-        className={inputClass}
+        size="lg"
+        icon={<Search />}
         value={text}
         placeholder={t('webSetCapabilities.memSearchPlaceholder')}
         onChange={(e) => setText(e.target.value)}
@@ -992,7 +1064,7 @@ function SearchTab() {
       <div className="flex flex-wrap items-center gap-3">
         <SourceFilter value={source} onChange={setSource} />
         <span className="flex-1" />
-        <label htmlFor={scoreId} className="text-small text-text-muted">
+        <label htmlFor={scoreId} className="text-small text-text-muted tabular-nums">
           {t('webSetCapabilities.memMinScore', { score: formatScore(minScore) })}
         </label>
         <input
@@ -1007,8 +1079,10 @@ function SearchTab() {
         />
       </div>
       {!query ? null : results.isPending ? (
-        <LoadingRegion>
-          <Skeleton className="h-24" />
+        <LoadingRegion className="flex flex-col gap-2">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-20 rounded-card" />
+          ))}
         </LoadingRegion>
       ) : results.isError ? (
         <ErrorState
@@ -1017,30 +1091,34 @@ function SearchTab() {
           onRetry={() => void results.refetch()}
         />
       ) : results.data.length === 0 ? (
-        <EmptyState title={t('webSetCapabilities.memSearchEmpty', { query })} className="py-8" />
+        <EmptyState
+          icon={<SearchX />}
+          title={t('webSetCapabilities.memSearchEmpty', { query })}
+          className="set-card py-8"
+        />
       ) : (
         <ul
           role="list"
           aria-label={t('webSetCapabilities.memSearchResults')}
-          className="flex flex-col gap-2"
+          className="anim-stagger flex flex-col gap-2"
         >
           {results.data.map((r) => (
-            <li
-              key={r.chunkId || `${r.path}:${r.startLine}`}
-              className="rounded-lg border border-border p-3"
-            >
+            <li key={r.chunkId || `${r.path}:${r.startLine}`} className="set-card px-4 py-3">
               <div className="flex flex-wrap items-center gap-2 text-small">
+                <FileText className="size-3.5 shrink-0 text-text-muted" aria-hidden />
                 <span className="min-w-0 flex-1 truncate font-mono">{r.path}</span>
-                <span className="rounded-full border border-border px-2 py-0.5">
+                <Badge tone="accent" className="tabular-nums">
                   {t('webSetCapabilities.memScore', { score: formatScore(r.score) })}
-                </span>
+                </Badge>
                 {r.startLine !== undefined && r.endLine !== undefined ? (
-                  <span className="text-text-muted">
+                  <span className="text-text-muted tabular-nums">
                     {t('webSetCapabilities.memLines', { start: r.startLine, end: r.endLine })}
                   </span>
                 ) : null}
               </div>
-              <p className="mt-1 text-small whitespace-pre-wrap text-text-muted">{r.snippet}</p>
+              <p className="mt-2 border-l-2 border-border-strong pl-3 text-small whitespace-pre-wrap text-text-muted">
+                {r.snippet}
+              </p>
             </li>
           ))}
         </ul>
@@ -1055,8 +1133,9 @@ function EmbeddingSettings() {
   const editor = useConfigEditor()
   if (!editor.ready) {
     return (
-      <LoadingRegion>
-        <Skeleton className="h-40" />
+      <LoadingRegion className="flex flex-col gap-4">
+        <Skeleton className="h-56 rounded-card" />
+        <Skeleton className="h-40 rounded-card" />
       </LoadingRegion>
     )
   }
@@ -1065,95 +1144,105 @@ function EmbeddingSettings() {
   const field = (path: string, label: string, help?: string) => ({ editor, path, label, help })
 
   return (
-    <div className="flex flex-col">
-      <h2 className="font-semibold">{t('webSetCapabilities.memEmbeddingTitle')}</h2>
-      <p className="text-small text-text-muted">{t('webSetCapabilities.memEmbeddingBody')}</p>
-      <ConfigField
-        {...field(
-          'memory.embedding.provider',
-          t('webSetCapabilities.memEmbeddingProvider'),
-          t('webSetCapabilities.memEmbeddingProviderHelp'),
-        )}
-        type={{ kind: 'enum', options: EMBEDDING_PROVIDERS }}
-      />
-      {remote ? (
-        <>
-          <ConfigField
-            {...field('memory.embedding.remote.base_url', t('webSetCapabilities.memRemoteUrl'))}
-            optional
-            type={{ kind: 'string' }}
-          />
-          <ConfigField
-            {...field('memory.embedding.remote.model', t('webSetCapabilities.memModel'))}
-            optional
-            type={{ kind: 'string' }}
-          />
-          <ConfigField
-            {...field(
-              'memory.embedding.remote.api_key',
-              t('webSetCapabilities.memApiKey'),
-              t('webSetCapabilities.memApiKeyHelp'),
-            )}
-            type={{ kind: 'string', secret: true }}
-          />
-          <ConfigField
-            {...field('memory.embedding.remote.api_key_env', t('webSetCapabilities.memApiKeyEnv'))}
-            optional
-            type={{ kind: 'string' }}
-          />
-          <ConfigField
-            {...field('memory.embedding.remote.dimensions', t('webSetCapabilities.memDimensions'))}
-            type={{ kind: 'number' }}
-          />
-        </>
-      ) : null}
-      {provider === 'ollama' ? (
-        <>
-          <ConfigField
-            {...field('memory.embedding.ollama.base_url', t('webSetCapabilities.memOllamaUrl'))}
-            optional
-            type={{ kind: 'string' }}
-          />
-          <ConfigField
-            {...field('memory.embedding.ollama.model', t('webSetCapabilities.memModel'))}
-            optional
-            type={{ kind: 'string' }}
-          />
-        </>
-      ) : null}
-      {provider === 'local' ? (
+    <div className="flex flex-col gap-4">
+      <SettingsCard
+        title={t('webSetCapabilities.memEmbeddingTitle')}
+        description={t('webSetCapabilities.memEmbeddingBody')}
+        icon={<Sparkles />}
+      >
         <ConfigField
-          {...field('memory.embedding.local.model', t('webSetCapabilities.memLocalModel'))}
-          optional
-          type={{ kind: 'string' }}
+          {...field(
+            'memory.embedding.provider',
+            t('webSetCapabilities.memEmbeddingProvider'),
+            t('webSetCapabilities.memEmbeddingProviderHelp'),
+          )}
+          type={{ kind: 'enum', options: EMBEDDING_PROVIDERS }}
         />
-      ) : null}
-
-      <h2 className="mt-4 font-semibold">{t('webSetCapabilities.memRetrievalTitle')}</h2>
-      <ConfigField
-        {...field(
-          'memory.retrieval_mode',
-          t('webSetCapabilities.memRetrievalMode'),
-          t('webSetCapabilities.memRetrievalModeHelp'),
-        )}
-        type={{ kind: 'enum', options: ['hybrid', 'fts_only'] }}
-      />
-      <ConfigField
-        {...field(
-          'memory.inject_limit',
-          t('webSetCapabilities.memInjectLimit'),
-          t('webSetCapabilities.memInjectLimitHelp'),
-        )}
-        type={{ kind: 'number' }}
-      />
-      <ConfigField
-        {...field('memory.curated_memory_char_limit', t('webSetCapabilities.memAgentLimit'))}
-        type={{ kind: 'number' }}
-      />
-      <ConfigField
-        {...field('memory.curated_user_char_limit', t('webSetCapabilities.memUserLimit'))}
-        type={{ kind: 'number' }}
-      />
+        {remote ? (
+          <>
+            <ConfigField
+              {...field('memory.embedding.remote.base_url', t('webSetCapabilities.memRemoteUrl'))}
+              optional
+              type={{ kind: 'string' }}
+            />
+            <ConfigField
+              {...field('memory.embedding.remote.model', t('webSetCapabilities.memModel'))}
+              optional
+              type={{ kind: 'string' }}
+            />
+            <ConfigField
+              {...field(
+                'memory.embedding.remote.api_key',
+                t('webSetCapabilities.memApiKey'),
+                t('webSetCapabilities.memApiKeyHelp'),
+              )}
+              type={{ kind: 'string', secret: true }}
+            />
+            <ConfigField
+              {...field(
+                'memory.embedding.remote.api_key_env',
+                t('webSetCapabilities.memApiKeyEnv'),
+              )}
+              optional
+              type={{ kind: 'string' }}
+            />
+            <ConfigField
+              {...field(
+                'memory.embedding.remote.dimensions',
+                t('webSetCapabilities.memDimensions'),
+              )}
+              type={{ kind: 'number' }}
+            />
+          </>
+        ) : null}
+        {provider === 'ollama' ? (
+          <>
+            <ConfigField
+              {...field('memory.embedding.ollama.base_url', t('webSetCapabilities.memOllamaUrl'))}
+              optional
+              type={{ kind: 'string' }}
+            />
+            <ConfigField
+              {...field('memory.embedding.ollama.model', t('webSetCapabilities.memModel'))}
+              optional
+              type={{ kind: 'string' }}
+            />
+          </>
+        ) : null}
+        {provider === 'local' ? (
+          <ConfigField
+            {...field('memory.embedding.local.model', t('webSetCapabilities.memLocalModel'))}
+            optional
+            type={{ kind: 'string' }}
+          />
+        ) : null}
+      </SettingsCard>
+      <SettingsCard title={t('webSetCapabilities.memRetrievalTitle')} icon={<Search />}>
+        <ConfigField
+          {...field(
+            'memory.retrieval_mode',
+            t('webSetCapabilities.memRetrievalMode'),
+            t('webSetCapabilities.memRetrievalModeHelp'),
+          )}
+          type={{ kind: 'enum', options: ['hybrid', 'fts_only'] }}
+        />
+        <ConfigField
+          {...field(
+            'memory.inject_limit',
+            t('webSetCapabilities.memInjectLimit'),
+            t('webSetCapabilities.memInjectLimitHelp'),
+          )}
+          type={{ kind: 'number' }}
+        />
+        <ConfigField
+          {...field('memory.curated_memory_char_limit', t('webSetCapabilities.memAgentLimit'))}
+          type={{ kind: 'number' }}
+        />
+        <ConfigField
+          {...field('memory.curated_user_char_limit', t('webSetCapabilities.memUserLimit'))}
+          type={{ kind: 'number' }}
+        />
+      </SettingsCard>
       <SaveBar editor={editor} />
     </div>
   )

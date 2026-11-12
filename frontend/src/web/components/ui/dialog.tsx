@@ -19,7 +19,10 @@ export function DialogOverlay({
   return (
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
-      className={cn('anim-overlay-in fixed inset-0 z-[var(--z-overlay)] bg-scrim', className)}
+      className={cn(
+        'anim-overlay-in fixed inset-0 z-[var(--z-overlay)] bg-scrim backdrop-blur-[2px]',
+        className,
+      )}
       {...props}
     />
   )
@@ -41,7 +44,7 @@ export function DialogContent({
         data-slot="dialog-content"
         className={cn(
           'anim-dialog-in fixed top-1/2 left-1/2 z-[var(--z-overlay)] grid w-[calc(100vw-2rem)] max-w-lg',
-          '-translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl border border-border bg-surface-2 p-6 shadow-3',
+          '-translate-x-1/2 -translate-y-1/2 gap-5 rounded-overlay border border-border bg-surface-overlay p-6 shadow-overlay',
           'max-h-[calc(100dvh-2rem)] overflow-y-auto',
           className,
         )}
@@ -52,7 +55,7 @@ export function DialogContent({
         {children}
         {hideClose ? null : (
           <DialogPrimitive.Close
-            className="target absolute top-3 right-3 inline-flex items-center justify-center rounded-md text-text-muted hover:bg-surface-3 hover:text-text"
+            className="press target absolute top-3 right-3 inline-flex size-7 items-center justify-center rounded-md text-text-muted hover:bg-surface-3 hover:text-text touch:size-11"
             aria-label={t('webCommon.close')}
           >
             <X className="size-4" aria-hidden />
@@ -82,7 +85,7 @@ export function DialogTitle({
 }: React.ComponentProps<typeof DialogPrimitive.Title>) {
   return (
     <DialogPrimitive.Title
-      className={cn('text-base leading-tight font-semibold', className)}
+      className={cn('text-[17px] leading-snug font-semibold tracking-[-0.016em]', className)}
       {...props}
     />
   )
@@ -92,5 +95,10 @@ export function DialogDescription({
   className,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Description>) {
-  return <DialogPrimitive.Description className={cn('text-text-muted', className)} {...props} />
+  return (
+    <DialogPrimitive.Description
+      className={cn('text-text-muted text-pretty', className)}
+      {...props}
+    />
+  )
 }

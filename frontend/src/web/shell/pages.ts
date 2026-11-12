@@ -9,6 +9,8 @@ export interface PageEntry {
   titleKey: MessageKey
   descriptionKey: MessageKey
   icon: typeof House
+  /** The Pages pane's group: what the runtime is doing, or the work in it. */
+  group: 'overview' | 'work'
 }
 
 export const PAGES: readonly PageEntry[] = [
@@ -18,6 +20,7 @@ export const PAGES: readonly PageEntry[] = [
     titleKey: 'webShell.pageHome',
     descriptionKey: 'webShell.pageHomeDescription',
     icon: House,
+    group: 'overview',
   },
   {
     id: 'sessions',
@@ -25,6 +28,7 @@ export const PAGES: readonly PageEntry[] = [
     titleKey: 'webShell.pageSessions',
     descriptionKey: 'webShell.pageSessionsDescription',
     icon: MessagesSquare,
+    group: 'work',
   },
   {
     id: 'projects',
@@ -32,6 +36,7 @@ export const PAGES: readonly PageEntry[] = [
     titleKey: 'webShell.pageProjects',
     descriptionKey: 'webShell.pageProjectsDescription',
     icon: FolderKanban,
+    group: 'work',
   },
   {
     id: 'usage',
@@ -39,6 +44,7 @@ export const PAGES: readonly PageEntry[] = [
     titleKey: 'webShell.pageUsage',
     descriptionKey: 'webShell.pageUsageDescription',
     icon: ChartColumn,
+    group: 'overview',
   },
   {
     id: 'automations',
@@ -46,6 +52,7 @@ export const PAGES: readonly PageEntry[] = [
     titleKey: 'webShell.pageAutomations',
     descriptionKey: 'webShell.pageAutomationsDescription',
     icon: CalendarClock,
+    group: 'work',
   },
   {
     id: 'inbox',
@@ -53,5 +60,6 @@ export const PAGES: readonly PageEntry[] = [
     titleKey: 'webShell.pageInbox',
     descriptionKey: 'webShell.pageInboxDescription',
     icon: Bell,
+    group: 'overview',
   },
 ]

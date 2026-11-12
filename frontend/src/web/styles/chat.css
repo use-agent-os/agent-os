@@ -1,0 +1,88 @@
+/* The chat workspace (console redesign): the transcript column and its
+ * rhythm, the jump-to-latest button and the chat's menus. The thread itself
+ * is in chat-thread.css; the stage and the composer in chat-stage.css.
+ * Imported by the chat routes only.
+ *
+ * Motion rules (see the redesign brief): transform/opacity (plus grid rows)
+ * only, token durations only, and nothing here may restart while a reply
+ * streams: entrances are on elements that mount once (a new turn, a new
+ * item), never inside the Markdown, whose DOM is rebuilt on every delta.
+ * Every rule is neutralised by the reduced-motion block in base.css. */
+
+/* Layered, so a utility class on the same element still wins. */
+@layer components {
+  /* ---- Layout ------------------------------------------------------------ */
+
+  /* The reading column the transcript, the dock and the composer share. */
+  .chat-column {
+    width: 100%;
+    max-width: 48rem;
+    margin-inline: auto;
+    padding-inline: 24px;
+  }
+  .chat-turns {
+    gap: 40px;
+    /* The approval tray's collapsed pill floats above the composer (shell
+       publishes its height as --tray-stack): leave it room so it never sits
+       on the last turn's actions. An expanded tray is an overlay the reader
+       opened, so the allowance is capped at the pill's size. */
+    padding-block: 32px calc(40px + min(var(--tray-stack, 0px), 4.5rem));
+  }
+  @media (max-width: 639px) {
+    .chat-column {
+      padding-inline: 12px;
+    }
+    .chat-turns {
+      gap: 32px;
+      padding-top: 20px;
+    }
+  }
+  /* The transcript's bottom edge fades into the canvas: the composer floats. */
+  .chat-fade::after {
+    content: '';
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    height: 24px;
+    pointer-events: none;
+    background: linear-gradient(to top, var(--surface-0), transparent);
+  }
+
+  /* ---- Jump to latest ---------------------------------------------------- */
+
+  .chat-latest > * {
+    transition:
+      opacity var(--duration-base) var(--ease-out),
+      transform var(--duration-spring) var(--ease-spring),
+      visibility var(--duration-base);
+  }
+  .chat-latest[data-show='false'] > * {
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(10px) scale(0.92);
+    transition-duration: var(--duration-exit);
+    transition-timing-function: var(--ease-in);
+  }
+}
+
+/* Unlayered: the chat's menus (model picker, capabilities, slash commands,
+ * session actions), matching the command palette. The highlighted row is a
+ * soft lime-washed fill with a 3px bar in the ring colour on its left edge
+ * (the bar carries the 3:1 the fill alone cannot), never an outline.
+ * Radix moves DOM focus to the highlighted item (pointer and keys alike),
+ * so `:focus` is the highlight; `data-highlighted` only follows it a render
+ * later. The slash menu keeps focus in the composer: its active option is
+ * `aria-selected`. */
+.chat-menu-item:is(:focus, [aria-selected='true']) {
+  outline: none;
+  background: var(--accent-tint);
+  color: var(--text);
+  box-shadow: inset 3px 0 0 var(--ring);
+}
+
+@media (forced-colors: active) {
+  .chat-menu-item:is(:focus, [aria-selected='true']) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+}

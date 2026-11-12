@@ -1,14 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
+  Check,
+  CheckCircle2,
   ChevronRight,
+  CircleAlert,
+  CircleDashed,
   Download,
+  ExternalLink,
   Eye,
   EyeOff,
+  FileText,
+  KeyRound,
+  Layers,
   Loader2,
   Lock,
+  Pencil,
   Plus,
   RefreshCw,
+  Search,
+  SearchX,
   Trash2,
 } from 'lucide-react'
 import { useEffect, useId, useMemo, useState } from 'react'
@@ -43,7 +54,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/web/components/ui/alert-dialog'
+import { Badge } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
+import { StatCard } from '@/web/components/ui/card'
+import { IconTile, STAT_CARD_DENSE } from '@/web/features/home/overview-ui'
 import {
   Dialog,
   DialogContent,
@@ -52,9 +66,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/web/components/ui/dialog'
-import { ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
+import { Input } from '@/web/components/ui/input'
+import { SegmentedControl } from '@/web/components/ui/segmented-control'
+import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
-import { useRegisterFields } from '../fields'
+import { SecretInput, useRegisterFields, useReveal } from '../fields'
+import { Notice } from '../ui'
 
 // Settings › Environment (overhaul-control-ui 7.7, Appendix A "Env"):
 // variables by category with a quiet tail, set, unset, reveal (hidden again
@@ -74,9 +91,6 @@ function useWriteGate(): Gate {
 function GateReason({ gate: g, className }: { gate: Gate; className?: string }) {
   return g.reason ? <p className={cn('text-small text-text-muted', className)}>{g.reason}</p> : null
 }
-
-const inputClass =
-  'h-9 w-full rounded-md border border-border-control bg-surface-0 px-3 aria-[invalid=true]:border-danger touch:h-11 touch:text-base'
 
 function filterOptions(): readonly { id: EnvFilter; label: string }[] {
   return [
@@ -171,47 +185,45 @@ function EnvRow({ row, write }: { row: EnvVarRow; write: Gate }) {
       ? t('webSetAccess.envBadgeMissing')
       : t('webSetAccess.envBadgeUnset')
 
+  const revealing = action.isPending && action.variables === 'reveal'
+
   return (
-    <li className="flex flex-col gap-2 py-3" data-env-row={row.name}>
-      <div className="flex flex-wrap items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <code className="font-mono font-medium">{row.name}</code>
-            {row.writable ? null : (
-              <span
-                className="inline-flex items-center gap-1 text-small text-text-muted"
-                title={t('webSetAccess.envReadOnlyTitle')}
-              >
-                <Lock className="size-3.5" aria-hidden />
-                {t('webSetAccess.envReadOnly')}
-              </span>
-            )}
-            <span
-              className={cn(
-                'rounded-full border px-2 py-0.5 text-small',
-                row.isSet
-                  ? 'border-ok/50 text-ok'
-                  : row.missing
-                    ? 'border-warn/50 text-warn'
-                    : 'border-border text-text-muted',
-              )}
+    <li
+      className="flex flex-col gap-2.5 px-4 py-3 transition-colors duration-[var(--duration-fast)] hover:bg-surface-2/40"
+      data-env-row={row.name}
+    >
+      <div className="grid gap-x-4 gap-y-2 @xl:grid-cols-[minmax(0,1fr)_minmax(0,15rem)] @xl:items-start">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <code className="set-key font-medium">{row.name}</code>
+            <Badge
+              tone={row.isSet ? 'ok' : row.missing ? 'warn' : 'neutral'}
+              dot={row.isSet || row.missing}
             >
               {status}
-            </span>
+            </Badge>
+            {row.writable ? null : (
+              <Badge tone="neutral" variant="outline" title={t('webSetAccess.envReadOnlyTitle')}>
+                <Lock className="size-3" aria-hidden />
+                {t('webSetAccess.envReadOnly')}
+              </Badge>
+            )}
             {row.isSet && sourceLabel(row.source) ? (
               <span className="text-small text-text-muted">
                 {t('webSetAccess.envSource', { source: sourceLabel(row.source) })}
               </span>
             ) : null}
           </div>
-          {row.description ? <p className="text-small text-text-muted">{row.description}</p> : null}
+          {row.description ? (
+            <p className="mt-1 text-small text-pretty text-text-muted">{row.description}</p>
+          ) : null}
           {row.owner ? (
             <p className="text-small text-text-muted">
               {t('webSetAccess.envOwner', { owner: row.owner })}
             </p>
           ) : null}
           {isShadowed(row) ? (
-            <p className="flex items-center gap-1 text-small text-warn">
+            <p className="mt-1 flex items-center gap-1 text-small text-warn">
               <AlertTriangle className="size-3.5" aria-hidden data-status-icon />
               {t('webSetAccess.envShadowed')}
             </p>
@@ -221,21 +233,41 @@ function EnvRow({ row, write }: { row: EnvVarRow; write: Gate }) {
               href={row.url}
               target="_blank"
               rel="noreferrer noopener"
-              className="text-small text-accent underline-offset-2 hover:underline"
+              className="mt-1 inline-flex items-center gap-1 text-small text-accent underline-offset-2 hover:underline"
             >
               {t('webSetAccess.envGetKey')}
+              <ExternalLink className="size-3" aria-hidden />
             </a>
           ) : null}
         </div>
-        <code
-          className={cn(
-            'max-w-full font-mono text-small break-all',
-            shown ? 'text-text' : 'text-text-muted',
-          )}
-          data-testid={`env-value-${row.name}`}
-        >
-          {shown ? revealed : (row.masked ?? '—')}
-        </code>
+        <div className="flex min-w-0 items-center gap-1 rounded-control border border-border bg-surface-inset py-0.5 pr-0.5 pl-2.5 shadow-inset">
+          <code
+            className={cn(
+              'min-w-0 flex-1 py-1 font-mono text-small break-all',
+              shown ? 'text-text' : 'text-text-muted',
+            )}
+            data-testid={`env-value-${row.name}`}
+          >
+            {shown ? revealed : (row.masked ?? '—')}
+          </code>
+          {row.writable && row.isSet && row.secret ? (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              className="text-text-muted hover:text-text"
+              disabled={!shown && (write.disabled || busy)}
+              aria-label={
+                shown
+                  ? t('webSetAccess.envHideLabel', { name: row.name })
+                  : t('webSetAccess.envRevealLabel', { name: row.name })
+              }
+              title={shown ? t('webSetAccess.hide') : t('webSetAccess.reveal')}
+              onClick={() => (shown ? setRevealed(null) : setConfirmReveal(true))}
+            >
+              {revealing ? <Loader2 className="animate-spin" /> : shown ? <EyeOff /> : <Eye />}
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {row.writable ? (
@@ -255,6 +287,7 @@ function EnvRow({ row, write }: { row: EnvVarRow; write: Gate }) {
               setDraft('')
             }}
           >
+            {row.isSet ? <Pencil /> : <Plus />}
             {row.isSet ? t('webSetAccess.envEdit') : t('webSetAccess.envSet')}
           </Button>
           {!row.isSet && row.availableFrom ? (
@@ -268,33 +301,11 @@ function EnvRow({ row, write }: { row: EnvVarRow; write: Gate }) {
               {t('webSetAccess.envImport', { source: row.availableFrom.label })}
             </Button>
           ) : null}
-          {row.isSet && row.secret ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!shown && (write.disabled || busy)}
-              aria-label={
-                shown
-                  ? t('webSetAccess.envHideLabel', { name: row.name })
-                  : t('webSetAccess.envRevealLabel', { name: row.name })
-              }
-              onClick={() => (shown ? setRevealed(null) : setConfirmReveal(true))}
-            >
-              {action.isPending && action.variables === 'reveal' ? (
-                <Loader2 className="animate-spin" />
-              ) : shown ? (
-                <EyeOff />
-              ) : (
-                <Eye />
-              )}
-              {shown ? t('webSetAccess.hide') : t('webSetAccess.reveal')}
-            </Button>
-          ) : null}
           {row.isSet ? (
             <Button
               size="sm"
               variant="ghost"
-              className="text-danger"
+              className="text-danger hover:bg-danger/10"
               disabled={write.disabled || busy}
               aria-label={t('webSetAccess.envRemoveLabel', { name: row.name })}
               onClick={() => setConfirmUnset(true)}
@@ -308,21 +319,24 @@ function EnvRow({ row, write }: { row: EnvVarRow; write: Gate }) {
       ) : null}
 
       {editing ? (
-        <form onSubmit={save} className="flex flex-wrap items-center gap-2">
+        <form onSubmit={save} className="anim-enter flex flex-wrap items-center gap-2">
           <label htmlFor={inputId} className="sr-only">
             {t('webSetAccess.envValueLabel', { name: row.name })}
           </label>
-          <input
+          <Input
             id={inputId}
             type={row.secret ? 'password' : 'text'}
             autoComplete="off"
-            className={cn(inputClass, 'max-w-md flex-1')}
+            size="sm"
+            className="max-w-md flex-1 font-mono"
+            wrapperClassName="max-w-md flex-1"
+            icon={row.secret ? <KeyRound /> : undefined}
             value={draft}
             autoFocus
             onChange={(e) => setDraft(e.target.value)}
           />
           <Button type="submit" size="sm" variant="primary" disabled={write.disabled || busy}>
-            {set.isPending ? <Loader2 className="animate-spin" /> : null}
+            {set.isPending ? <Loader2 className="animate-spin" /> : <Check />}
             {t('webSetAccess.envSave')}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
@@ -332,7 +346,8 @@ function EnvRow({ row, write }: { row: EnvVarRow; write: Gate }) {
       ) : null}
 
       {error ? (
-        <p role="alert" className="text-small text-danger">
+        <p role="alert" className="flex items-center gap-1.5 text-small text-danger">
+          <CircleAlert className="size-3.5 shrink-0" aria-hidden data-status-icon />
           {error}
         </p>
       ) : null}
@@ -390,6 +405,7 @@ function AddVariableDialog({
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [valueShown, toggleValue] = useReveal()
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -414,14 +430,14 @@ function AddVariableDialog({
             <DialogTitle>{t('webSetAccess.envAddTitle')}</DialogTitle>
             <DialogDescription>{t('webSetAccess.envAddBody')}</DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1.5">
             <label htmlFor={nameId} className="font-medium">
               {t('webSetAccess.envAddName')}
             </label>
-            <input
+            <Input
               id={nameId}
               autoComplete="off"
-              className={cn(inputClass, 'font-mono')}
+              className="font-mono uppercase placeholder:normal-case"
               value={name}
               placeholder={t('webSetAccess.envAddNamePlaceholder')}
               aria-invalid={error ? true : undefined}
@@ -429,21 +445,26 @@ function AddVariableDialog({
               onChange={(e) => setName(e.target.value)}
             />
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1.5">
             <label htmlFor={valueId} className="font-medium">
               {t('webSetAccess.envAddValue')}
             </label>
-            <input
+            <SecretInput
               id={valueId}
-              type="password"
-              autoComplete="off"
-              className={inputClass}
+              shown={valueShown}
+              onToggle={toggleValue}
+              className="font-mono"
               value={value}
               onChange={(e) => setValue(e.target.value)}
             />
           </div>
           {error ? (
-            <p id={`${nameId}-error`} role="alert" className="text-small text-danger">
+            <p
+              id={`${nameId}-error`}
+              role="alert"
+              className="flex items-center gap-1.5 text-small text-danger"
+            >
+              <CircleAlert className="size-3.5 shrink-0" aria-hidden data-status-icon />
               {error}
             </p>
           ) : null}
@@ -453,6 +474,7 @@ function AddVariableDialog({
               {t('webCommon.cancel')}
             </Button>
             <Button type="submit" variant="primary" disabled={write.disabled || set.isPending}>
+              {set.isPending ? <Loader2 className="animate-spin" /> : null}
               {t('webSetAccess.envSave')}
             </Button>
           </DialogFooter>
@@ -503,8 +525,18 @@ export function EnvironmentSection() {
 
   if (listQuery.isPending) {
     return (
-      <LoadingRegion>
-        <Skeleton className="h-48" />
+      <LoadingRegion className="flex flex-col gap-5">
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-36" />
+          <Skeleton className="h-9 w-24" />
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-24 rounded-card" />
+          ))}
+        </div>
+        <Skeleton className="h-9 w-full max-w-md" />
+        <Skeleton className="h-64 rounded-card" />
       </LoadingRegion>
     )
   }
@@ -536,95 +568,105 @@ export function EnvironmentSection() {
         <GateReason gate={write} className="w-full" />
       </div>
 
-      <dl className="grid grid-cols-3 gap-2">
-        <div className="rounded-lg border border-border p-3">
-          <dt className="text-small text-text-muted">{t('webSetAccess.envStatSet')}</dt>
-          <dd className="font-mono text-xl font-semibold">
-            {t('webSetAccess.envStatSetValue', {
-              set: summary.setCount,
-              total: summary.totalCount,
-            })}
-          </dd>
-        </div>
-        <div
-          className={cn(
-            'rounded-lg border p-3',
-            summary.missingCount ? 'border-warn/50' : 'border-border',
-          )}
-        >
-          <dt className="text-small text-text-muted">{t('webSetAccess.envStatMissing')}</dt>
-          <dd className="font-mono text-xl font-semibold">{summary.missingCount}</dd>
-        </div>
-        <div
-          className={cn(
-            'rounded-lg border p-3',
-            summary.shadowedCount ? 'border-warn/50' : 'border-border',
-          )}
-        >
-          <dt className="text-small text-text-muted">{t('webSetAccess.envStatShadowed')}</dt>
-          <dd className="font-mono text-xl font-semibold">{summary.shadowedCount}</dd>
-        </div>
-      </dl>
+      <div className="anim-stagger grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <StatCard
+          className={STAT_CARD_DENSE}
+          headingAs="p"
+          icon={
+            <IconTile>
+              <CheckCircle2 />
+            </IconTile>
+          }
+          label={t('webSetAccess.envStatSet')}
+          value={t('webSetAccess.envStatSetValue', {
+            set: summary.setCount,
+            total: summary.totalCount,
+          })}
+        />
+        <StatCard
+          className={STAT_CARD_DENSE}
+          headingAs="p"
+          icon={
+            <IconTile>
+              <CircleDashed />
+            </IconTile>
+          }
+          label={t('webSetAccess.envStatMissing')}
+          value={summary.missingCount}
+          tone={summary.missingCount ? 'warn' : 'default'}
+        />
+        <StatCard
+          className={STAT_CARD_DENSE}
+          headingAs="p"
+          icon={
+            <IconTile>
+              <Layers />
+            </IconTile>
+          }
+          label={t('webSetAccess.envStatShadowed')}
+          value={summary.shadowedCount}
+          tone={summary.shadowedCount ? 'warn' : 'default'}
+        />
+      </div>
       {listQuery.data?.envFilePath ? (
-        <p className="text-small text-text-muted">
+        <p className="-mt-2 flex flex-wrap items-center gap-1.5 text-small text-text-muted">
+          <FileText className="size-3.5" aria-hidden />
           {t('webSetAccess.envFile')}{' '}
-          <code className="font-mono" title={listQuery.data.envFilePath}>
+          <code className="set-key" title={listQuery.data.envFilePath}>
             {shortPath(listQuery.data.envFilePath)}
           </code>
         </p>
       ) : null}
 
       {summary.shadowedCount > 0 ? (
-        <div
-          role="status"
-          className="flex items-start gap-2 rounded-lg border border-warn/50 bg-warn/10 px-3 py-2"
-        >
-          <AlertTriangle className="mt-0.5 size-4 text-warn" aria-hidden data-status-icon />
-          <div>
-            <p className="font-medium">
-              {t('webSetAccess.envShadowTitle', { count: summary.shadowedCount })}
-            </p>
-            <p className="text-small text-text-muted">{t('webSetAccess.envShadowBody')}</p>
-          </div>
-        </div>
+        <Notice role="status" tone="warn">
+          <p className="font-medium">
+            {t('webSetAccess.envShadowTitle', { count: summary.shadowedCount })}
+          </p>
+          <p className="text-small text-text-muted">{t('webSetAccess.envShadowBody')}</p>
+        </Notice>
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2" data-field-id="env.search">
-        <input
+        <Input
           type="search"
+          icon={<Search />}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t('webSetAccess.envSearch')}
           aria-label={t('webSetAccess.envSearch')}
-          className={cn(inputClass, 'max-w-xs')}
+          wrapperClassName="w-full max-w-xs"
         />
-        <div role="group" aria-label={t('webSetAccess.envFilter')} className="flex gap-1">
-          {filterOptions().map((option) => (
-            <Button
-              key={option.id}
-              size="sm"
-              variant={option.id === filter ? 'secondary' : 'ghost'}
-              aria-pressed={option.id === filter}
-              onClick={() => setFilter(option.id)}
-            >
-              {option.label}
-            </Button>
-          ))}
-        </div>
+        <SegmentedControl
+          kind="toggle"
+          aria-label={t('webSetAccess.envFilter')}
+          value={filter}
+          onChange={setFilter}
+          options={filterOptions().map((o) => ({ value: o.id, label: o.label }))}
+        />
       </div>
 
       {groups.length === 0 ? (
-        <p className="py-6 text-center text-text-muted">{t('webSetAccess.envEmptyFiltered')}</p>
+        <EmptyState
+          size="sm"
+          className="set-card py-8"
+          icon={<SearchX />}
+          title={t('webSetAccess.envEmptyFiltered')}
+        />
       ) : (
         groups.map((group) => {
           const { primary, rest } = splitGroupRows(group)
           const tailOpen = openTails.has(group.category)
           const visible = tailOpen ? [...primary, ...rest] : primary
           return (
-            <section key={group.category} aria-label={group.label} className="flex flex-col">
-              <h2 className="flex items-baseline gap-2 border-b border-border pb-1 font-semibold">
+            <section
+              key={group.category}
+              aria-label={group.label}
+              className="set-list @container flex flex-col"
+            >
+              <h2 className="flex items-center gap-2 bg-surface-2/60 px-4 py-2.5 set-card-title">
                 {group.label}
-                <span className="text-small font-normal text-text-muted">
+                <span className="ml-auto text-small font-normal text-text-muted tabular-nums">
                   {t('webSetAccess.envGroupCount', {
                     set: group.setCount,
                     total: group.rows.length,
@@ -632,7 +674,7 @@ export function EnvironmentSection() {
                 </span>
               </h2>
               {visible.length ? (
-                <ul role="list" className="divide-y divide-border">
+                <ul role="list" className="flex flex-col divide-y divide-border">
                   {visible.map((row) => (
                     <EnvRow key={row.name} row={row} write={write} />
                   ))}
@@ -642,12 +684,15 @@ export function EnvironmentSection() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="self-start text-text-muted"
+                  className="m-1.5 self-start text-text-muted"
                   aria-expanded={tailOpen}
                   onClick={() => toggleTail(group.category)}
                 >
                   <ChevronRight
-                    className={cn('transition-transform', tailOpen && 'rotate-90')}
+                    className={cn(
+                      'transition-transform duration-[var(--duration-base)] ease-[var(--ease-out)]',
+                      tailOpen && 'rotate-90',
+                    )}
                     aria-hidden
                   />
                   {tailOpen

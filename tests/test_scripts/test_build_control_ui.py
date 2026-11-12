@@ -33,8 +33,8 @@ def write_frontend_fixture(root: Path) -> tuple[Path, bytes]:
     package_dir.mkdir(parents=True)
     font_dir = frontend / "src" / "assets" / "fonts"
     font_dir.mkdir(parents=True)
-    (font_dir / "Inter-LICENSE.txt").write_text(
-        "Inter font license fixture.\n",
+    (font_dir / "Geist-LICENSE.txt").write_text(
+        "Geist font license fixture.\n",
         encoding="utf-8",
     )
     (font_dir / "JetBrainsMono-LICENSE.txt").write_text(
@@ -136,7 +136,7 @@ def test_license_bundle_is_deterministic_verbatim_and_runtime_only(tmp_path: Pat
     assert b"@types/runtime-package" not in first
     assert b"csstype" not in first
     assert b"dev-package" not in first
-    assert b"Inter font license fixture." in first
+    assert b"Geist font license fixture." in first
     assert b"JetBrains Mono font license fixture." in first
 
 

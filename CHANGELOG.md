@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- The web console has a new look. Every screen was re-composed rather than
+  restyled, with CSS-only motion that honours reduced-motion, in both the dark
+  and the light theme:
+  - **Chat.** Starting a session is one composer on a centred stage: the agent
+    and the project are chips inside it, with starter prompts underneath,
+    instead of a form. In a conversation, replies carry the agent's identity
+    line, tool activity folds into one summary line once it settles, a failed
+    turn is a calm card with "Try again", and the header shows a readable
+    title instead of a raw session id.
+  - **Pages.** Home is a dashboard (readiness ring with the findings that need
+    action, usage chart, sessions by channel, next-automation countdown, live
+    events). Sessions is a list with summary chips and filter menus. Projects
+    is a card gallery. Usage leads with spend and a stacked token bar.
+    Automations shows upcoming runs first and offers a template gallery when
+    empty. Inbox groups approvals, questions and issues, answered in place.
+  - **Shell.** Page headers share the chat's backdrop, empty states are no
+    longer boxed, and the Pages list is one compact line per page.
+- The console's interface font is now Geist (SIL Open Font License) instead of
+  Inter. JetBrains Mono stays for code.
+
+### Removed
+- The chat's "Session details" panel. Token and cost figures remain in the
+  composer and on the Usage page.
+
 ## [2026.11.12.post1] - 2026-11-12
 
 ### Fixed

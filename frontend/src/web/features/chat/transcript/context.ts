@@ -15,6 +15,9 @@ export interface ChatActions {
 
 export const ChatActionsContext = createContext<ChatActions | null>(null)
 
+/** Who answers in this transcript: the name on each reply's identity line. */
+export const AgentNameContext = createContext('')
+
 export function useChatActions(): ChatActions {
   const actions = useContext(ChatActionsContext)
   if (!actions) throw new Error('useChatActions outside a chat pane')

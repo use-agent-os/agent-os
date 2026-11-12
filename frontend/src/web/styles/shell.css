@@ -1,0 +1,724 @@
+/* Shell-specific styling (rail, list pane, top bars, floating layers).
+ * Imported by web/shell/Shell.tsx. Everything generic (surfaces, focus,
+ * entrances, the gliding pill) lives in base.css; this file only adds what the
+ * frame around every page needs. Durations and easings are tokens; the global
+ * reduced-motion rule in base.css neutralises every animation here. */
+
+/* ---- Brand mark --------------------------------------------------------- */
+
+/* The AgentOS node mark, painted in the accent through a mask so it follows
+   the theme (lime on dark, olive on light) without an image request. */
+.shell-brand-mark {
+  display: block;
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 13.5V5M12 13.5 4 19M12 13.5 20 19' stroke='black' stroke-width='1.7' stroke-linecap='round'/%3E%3Ccircle cx='12' cy='13.5' r='3.7'/%3E%3Ccircle cx='12' cy='4.4' r='2.2'/%3E%3Ccircle cx='3.8' cy='19.4' r='2.2'/%3E%3Ccircle cx='20.2' cy='19.4' r='2.2'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+/* ---- Rail ------------------------------------------------------------- */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  align-items: center;
+  width: var(--rail-width);
+  height: 100%;
+  padding-block: 12px 8px;
+  border-right: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+/* Rail chrome lives here rather than in class strings: the rail is in the
+   entry chunk. Unlayered, so it outranks the ghost button's utilities. */
+.rail-brand {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 32px;
+  height: 28px;
+  margin-bottom: 8px;
+}
+/* In the rail the mark is ink, not lime: the New session button is the one
+   bright thing in the rail. */
+.rail-brand > .shell-brand-mark {
+  width: 20px;
+  height: 20px;
+  background: var(--text);
+  opacity: 0.92;
+}
+.rail-sep {
+  flex-shrink: 0;
+  width: 24px;
+  height: 1px;
+  margin-block: 12px;
+  background: var(--border);
+}
+.rail-new {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+}
+@media (pointer: coarse) {
+  .rail-new {
+    width: 44px;
+    height: 44px;
+  }
+}
+.rail-new svg {
+  width: 18px;
+  height: 18px;
+  transition: rotate var(--duration-base) var(--ease-out);
+}
+.rail-new:hover svg {
+  rotate: 90deg;
+}
+/* The agent switcher's avatar: a soft disc with a hairline that warms on
+   hover and takes a ring while its menu is open. */
+.rail-avatar {
+  background: linear-gradient(
+    160deg,
+    color-mix(in oklab, var(--surface-3), var(--text) 6%),
+    var(--surface-2)
+  );
+  box-shadow:
+    var(--highlight),
+    0 0 0 1px var(--border-strong);
+  transition: box-shadow var(--duration-fast) var(--ease-out);
+}
+.group\/avatar:hover .rail-avatar {
+  box-shadow:
+    var(--highlight),
+    0 0 0 1px color-mix(in oklab, var(--text) 30%, transparent);
+}
+.group\/avatar[data-state='open'] .rail-avatar {
+  box-shadow:
+    0 0 0 1px var(--border-strong),
+    0 0 0 3px var(--surface-1),
+    0 0 0 4px var(--ring);
+}
+/* Icon items: muted at rest, a quiet hover step, the accent when active. The
+   active background is the track's gliding pill, so an active item paints
+   none of its own, even on hover. */
+.rail-item {
+  color: var(--text-muted);
+}
+.rail-item:hover {
+  color: var(--text);
+  background-color: transparent;
+}
+.rail-item:not([aria-pressed='true'], [aria-current='page']):hover {
+  background-color: var(--surface-2);
+}
+.rail-item:is([aria-pressed='true'], [aria-current='page']) {
+  color: var(--text);
+}
+.rail-item {
+  border-radius: 10px;
+}
+.rail-item svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* A rail group (Rail.tsx track()): one pill behind the active item and a
+   short accent bar on the rail's left edge, both gliding between items.
+   Items are a fixed size on a fixed step, so the position is the active
+   index (--rail-i) times the step; nothing is measured. */
+.rail-track {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  --rail-size: 36px;
+  --rail-step: calc(var(--rail-size) + 4px);
+  position: relative;
+  isolation: isolate;
+}
+@media (pointer: coarse) {
+  .rail-track {
+    --rail-size: 44px;
+  }
+}
+.rail-track[data-bottom] {
+  margin-top: auto;
+}
+.rail-track::before,
+.rail-track::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    transform var(--duration-spring) var(--ease-spring),
+    opacity var(--duration-fast) var(--ease-out);
+}
+.rail-track::before {
+  left: calc(50% - var(--rail-size) / 2);
+  z-index: -1;
+  width: var(--rail-size);
+  height: var(--rail-size);
+  border-radius: 10px;
+  background: var(--surface-3);
+  box-shadow: var(--highlight);
+  transform: translateY(calc(var(--rail-i, 0) * var(--rail-step)));
+}
+.rail-track::after {
+  left: 0;
+  width: 2px;
+  height: 14px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+  transform: translateY(calc(var(--rail-i, 0) * var(--rail-step) + var(--rail-size) / 2 - 7px));
+}
+.rail-track[data-active]::before,
+.rail-track[data-active]::after {
+  opacity: 1;
+}
+/* The pane toggles (Sessions, Pages) are not destinations: the open pane
+   keeps the pill and a full-strength icon, but the accent (colour and edge
+   bar) stays with the one current destination. */
+.rail-track[data-toggle]::after {
+  display: none;
+}
+.rail-track[data-toggle]::before {
+  background: color-mix(in oklab, var(--surface-3) 75%, transparent);
+}
+
+/* ---- Route fallback ----------------------------------------------------- */
+
+/* The route-loading skeleton (app/fallbacks.tsx), drawn by one element: a
+   title, a subtitle, three cards and a panel. It appears after the skeleton
+   delay so fast loads never flash it, and shimmers while shown. */
+.route-skeleton {
+  --sk: var(--surface-3);
+  max-width: 72rem;
+  height: 520px;
+  margin-inline: auto;
+  background:
+    linear-gradient(var(--sk), var(--sk)) 0 0 / 160px 24px,
+    linear-gradient(var(--sk), var(--sk)) 0 36px / min(300px, 100%) 14px,
+    linear-gradient(var(--sk), var(--sk)) 0 80px / calc((100% - 24px) / 3) 112px,
+    linear-gradient(var(--sk), var(--sk)) 50% 80px / calc((100% - 24px) / 3) 112px,
+    linear-gradient(var(--sk), var(--sk)) 100% 80px / calc((100% - 24px) / 3) 112px,
+    linear-gradient(var(--sk), var(--sk)) 0 216px / 100% 256px;
+  background-repeat: no-repeat;
+  border-radius: 8px;
+  animation:
+    agentos-fade-in var(--duration-base) var(--ease-out) var(--duration-slow) both,
+    route-skeleton-pulse var(--pulse-period) var(--ease-in-out) var(--duration-slow) infinite;
+}
+@keyframes route-skeleton-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* ---- List pane ---------------------------------------------------------- */
+
+/* The resize handle: an invisible 8px grip whose hairline lights up on hover,
+   while dragging and on keyboard focus. */
+.pane-resizer::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 2px;
+  translate: -50% 0;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.pane-resizer:hover::after,
+.pane-resizer:active::after {
+  opacity: 0.6;
+}
+.pane-resizer:focus-visible::after {
+  opacity: 1;
+}
+
+/* A small group label inside the list pane (Pages groups, session dates). */
+.pane-group-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding-inline: 10px;
+  margin-bottom: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--text-muted);
+}
+
+/* A Pages link: one compact line (icon, label, optional count). The current
+   page sits on the track's gliding pill with a short accent bar; nothing
+   else in the pane is lime. */
+.page-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding-inline: 10px 8px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-weight: 450;
+}
+@media (pointer: coarse) {
+  .page-link {
+    height: 44px;
+  }
+}
+.page-link:hover {
+  color: var(--text);
+}
+.page-link:not([aria-current='page']):hover {
+  background: color-mix(in oklab, var(--surface-3) 60%, transparent);
+}
+.page-link[aria-current='page'] {
+  color: var(--text);
+  font-weight: 500;
+}
+.page-link-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  color: inherit;
+  opacity: 0.85;
+}
+.page-link-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.page-link[aria-current='page'] .page-link-icon {
+  opacity: 1;
+}
+.page-link::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 2px;
+  height: 14px;
+  translate: 0 -50%;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0;
+  scale: 1 0.4;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    scale var(--duration-base) var(--ease-spring);
+}
+.page-link[aria-current='page']::before {
+  opacity: 1;
+  scale: 1 1;
+}
+/* A live figure at the row's end: quiet tabular text; attention (the
+   inbox) gets the danger tint the rail badge uses. */
+.page-count {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-width: 20px;
+  height: 20px;
+  justify-content: flex-end;
+  padding-inline: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.page-count[data-tone='attention'] {
+  justify-content: center;
+  padding-inline: 6px;
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+/* A session row. The selected row gets a quiet surface step and a short
+   accent bar on its leading edge. */
+.session-row::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 2px;
+  height: 18px;
+  translate: 0 -50%;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0;
+  scale: 1 0.4;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    scale var(--duration-base) var(--ease-spring);
+}
+.session-row[data-current]::before {
+  opacity: 1;
+  scale: 1 1;
+}
+/* The channel tile: a soft well with the channel's icon; the current row's
+   tile takes the accent tint. */
+.session-tile {
+  color: var(--text-muted);
+  background: color-mix(in oklab, var(--surface-3) 70%, transparent);
+  box-shadow: inset 0 0 0 1px var(--border);
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+.session-row:hover .session-tile {
+  color: var(--text);
+}
+.session-tile-current {
+  color: var(--accent);
+  background: var(--accent-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 28%, transparent);
+}
+.session-title {
+  font-size: 13.5px;
+  line-height: 18px;
+  letter-spacing: -0.006em;
+}
+
+/* ---- Top bars ----------------------------------------------------------- */
+
+/* The phone header: menu, mark, the page's name, New session. */
+.phone-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  height: calc(48px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 6px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+  box-shadow: var(--highlight);
+}
+
+/* A slim notice bar under the phone header / above the page. It opens by
+   growing its row (no measured heights) and fades its content in; dismissal
+   is instant. Tone comes from --bar-tone. */
+.shell-bar {
+  display: grid;
+  grid-template-rows: 1fr;
+  background-color: var(--surface-1);
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--bar-tone, var(--accent)) 7%, transparent) 0%,
+    color-mix(in oklab, var(--bar-tone, var(--accent)) 2%, transparent) 40%,
+    transparent 75%
+  );
+  border-bottom: 1px solid var(--border);
+  animation: shell-bar-open var(--duration-slow) var(--ease-enter) both;
+}
+/* The bar's icon in its tone, on a soft halo of the same tone. */
+.shell-bar-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  color: var(--bar-tone);
+  background: color-mix(in oklab, var(--bar-tone) 12%, transparent);
+}
+.shell-bar-icon svg {
+  width: 13px;
+  height: 13px;
+}
+.shell-bar > * {
+  min-height: 0;
+  overflow: hidden;
+  animation: agentos-fade-in var(--duration-slow) var(--ease-out) both;
+}
+@keyframes shell-bar-open {
+  from {
+    grid-template-rows: 0fr;
+  }
+}
+
+/* ---- The shell ----------------------------------------------------------- */
+
+/* The shell is the viewport: only its panes scroll, never the document
+   (base.css also stops the document while the shell is mounted). It is the
+   containing block for anything absolutely positioned with no positioned
+   ancestor (an sr-only caption or label), and clips it with `overflow: clip`
+   rather than `hidden`, which would leave a scroller that focus or
+   scrollIntoView could still move. The main pane is positioned too, so such
+   an element scrolls with the page it belongs to. */
+.app-shell {
+  position: relative;
+  overflow: clip;
+}
+#main-content {
+  position: relative;
+}
+
+/* ---- Floating layers ---------------------------------------------------- */
+
+/* Everything that floats over the bottom of the page stacks in one column
+   instead of overlapping, at any width:
+
+     1. the page's own docked bar (the chat composer, the settings save bar)
+        publishes the height it occupies above the viewport's bottom edge as
+        --tray-clearance on :root while it is shown (a sticky bar: its height
+        plus its CSS `bottom`), and removes it when it goes;
+     2. the approval tray sits above that (--float-bottom + clearance) and
+        publishes its own height as --tray-stack (ApprovalTray.tsx);
+     3. toasts sit above both, at the same right edge as the tray.
+
+   The tray never grows into the top --toast-slot of the viewport, and the
+   toast offset is capped to that slot's bottom edge: when the docked bar
+   and the tray leave no room above them, the toast sits in the slot (just
+   below the top bars), still clear of the tray and of the composer.
+   Nothing else floats at the top, so no toast covers a page title, a header
+   action or the phone menu button. Toasts stay below any open sheet (the
+   phone drawer) and its scrim. */
+:root {
+  --float-inset: 1rem;
+  --float-gap: 0.5rem;
+  --float-bottom: max(var(--float-inset), env(safe-area-inset-bottom));
+  /* Top bars (~3.5rem, plus the setup banner) and one two-line toast. */
+  --toast-slot: 12rem;
+}
+@media (max-width: 639.98px) {
+  :root {
+    --float-inset: 0.5rem;
+  }
+}
+/* Narrower, the top bar, the wrapped setup banner and the chat header stack
+   taller. */
+@media (max-width: 1023.98px) {
+  :root {
+    --toast-slot: 15rem;
+  }
+}
+
+.approval-tray {
+  right: var(--float-inset);
+  bottom: calc(var(--float-bottom) + var(--tray-clearance, 0px));
+  /* Never taller than the room above the docked bar, leaving the top of the
+     page (title, header actions) and a toast's slot clear. */
+  max-height: min(
+    560px,
+    70dvh,
+    calc(100dvh - var(--float-bottom) - var(--tray-clearance, 0px) - var(--toast-slot))
+  );
+}
+/* The tray body scrolls inside the capped height; an edge that hides cards
+   fades out (ApprovalTray.tsx sets data-scroll-fade), so a card cut by the
+   cap reads as "more below" rather than as a broken card. */
+.tray-body[data-scroll-fade] {
+  --fade-start: 0px;
+  --fade-end: 0px;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 var(--fade-start),
+    #000 calc(100% - var(--fade-end)),
+    transparent
+  );
+}
+.tray-body:is([data-scroll-fade='start'], [data-scroll-fade='both']) {
+  --fade-start: 1.25rem;
+}
+.tray-body:is([data-scroll-fade='end'], [data-scroll-fade='both']) {
+  --fade-end: 2.5rem;
+}
+@media (max-width: 639.98px) {
+  .approval-tray:not([data-collapsed]) {
+    left: var(--float-inset);
+  }
+}
+
+/* Sonner sets its offsets and z-index inline / in its own sheet; the
+   !important outranks both. */
+[data-sonner-toaster] {
+  --toast-bottom: min(
+    calc(
+      var(--float-bottom) + var(--tray-clearance, 0px) +
+        var(--tray-stack, calc(0px - var(--float-gap))) + var(--float-gap)
+    ),
+    calc(100dvh - var(--toast-slot) + var(--float-gap))
+  );
+  --offset-right: var(--float-inset) !important;
+  --offset-bottom: var(--toast-bottom) !important;
+  --mobile-offset-left: var(--float-inset) !important;
+  --mobile-offset-right: var(--float-inset) !important;
+  --mobile-offset-bottom: var(--toast-bottom) !important;
+  z-index: var(--z-toast) !important;
+}
+:root:has([data-slot='sheet-overlay'][data-state='open']) [data-sonner-toaster] {
+  z-index: calc(var(--z-drawer) - 1) !important;
+}
+/* Sonner's close button is 20px: give it more than the 24px minimum target
+   (the toast is scaled slightly while it settles, so 24px measures under). */
+[data-sonner-toaster] [data-sonner-toast][data-styled] [data-close-button] {
+  width: 28px;
+  height: 28px;
+}
+/* Sonner's own focus marker is a faint grey shadow: use the console ring. */
+[data-sonner-toaster] :is([data-sonner-toast], [data-close-button], [data-button]):focus-visible {
+  outline: 2px solid var(--ring) !important;
+  outline-offset: 2px;
+}
+
+/* The approval tray arrives from below with a spring and a warn glow that
+   settles once: an approval is a high-attention moment. */
+.approval-tray {
+  animation: approval-tray-in var(--duration-spring) var(--ease-spring) both;
+  box-shadow:
+    var(--elevation-overlay),
+    0 0 0 1px color-mix(in oklab, var(--warn) 32%, transparent);
+}
+.approval-tray::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--warn) 22%, transparent);
+  opacity: 0;
+  animation: approval-tray-flare var(--duration-enter) var(--ease-out) var(--duration-base) both;
+}
+@keyframes approval-tray-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+}
+@keyframes approval-tray-flare {
+  0% {
+    opacity: 0;
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---- Command palette ---------------------------------------------------- */
+
+/* A deeper blur behind the palette than behind ordinary dialogs. */
+[data-slot='dialog-overlay']:has(+ [data-palette]) {
+  backdrop-filter: blur(6px) saturate(1.1);
+}
+/* The highlighted result reads as a soft filled row: the gliding pill is an
+   accent wash over the raised step, and the row adds a short accent bar on
+   its leading edge (the 3:1 indicator; focus itself stays in the input). */
+.palette-track {
+  --glide-bg: color-mix(in oklab, var(--accent) 9%, var(--surface-3));
+}
+/* Until the pill has measured (or if it cannot), the row paints the same
+   fill itself, so a keyboard user always sees which result Enter opens. */
+.palette-track:not([data-glide]) .palette-item[data-selected='true'] {
+  background: var(--glide-bg);
+}
+.palette-item::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--ring);
+  opacity: 0;
+  scale: 1 0.4;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    scale var(--duration-base) var(--ease-spring);
+}
+.palette-item[data-selected='true']::before {
+  opacity: 1;
+  scale: 1 1;
+}
+/* The highlight glides between results at keyboard speed. */
+.palette-track[data-glide='animate']::before {
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-out);
+}
+/* The Enter hint slides in on the highlighted row only. */
+.palette-enter {
+  opacity: 0;
+  translate: -4px 0;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    translate var(--duration-fast) var(--ease-out);
+}
+[cmdk-item][data-selected='true'] .palette-enter {
+  opacity: 1;
+  translate: 0 0;
+}
+/* Groups are separated by a hairline once more than one is shown. */
+[cmdk-group]:not([hidden]) ~ [cmdk-group]:not([hidden]) {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+@media (forced-colors: active) {
+  .shell-brand-mark,
+  .rail-track::after,
+  .session-row::before,
+  .page-link::before,
+  .palette-item::before {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  .page-link[aria-current='page'] {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+  .rail-track::before {
+    background: none;
+  }
+  .palette-item[data-selected='true'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .rail-track > :is([aria-pressed='true'], [aria-current='page']) {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+  .shell-bar {
+    background-image: none;
+  }
+}
+
+/* The inbox count on the rail's Inbox link, in a reserved corner slot. */
+.inbox-badge {
+  top: 1px;
+  right: 1px;
+  min-width: 16px;
+  height: 16px;
+  padding-inline: 4px;
+  border-radius: 9999px;
+  background: var(--danger);
+  color: var(--danger-fg);
+  box-shadow: 0 0 0 2px var(--surface-1);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+/* The inbox badge pops in when the first item arrives. */
+.inbox-badge.visible {
+  transform-origin: 70% 30%;
+  animation: agentos-scale-in var(--duration-spring) var(--ease-spring) both;
+}

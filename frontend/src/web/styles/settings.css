@@ -1,0 +1,620 @@
+/* Settings hub: the frame (nav, header, pane), the field-row anatomy, the
+ * designed disclosure, the save bar and the dense building blocks sections
+ * share (notices, data grids, the log viewer). Imported by the settings
+ * feature only, so it ships with the settings chunk. Everything sits in the
+ * components layer, so Tailwind utilities on an element still win.
+ *
+ * Motion uses the duration/easing tokens only; the global reduced-motion rule
+ * in base.css zeroes all of it, and nothing here waits at opacity 0. */
+
+@layer components {
+  /* ---- Frame ------------------------------------------------------------ */
+
+  .set-aside {
+    background: var(--surface-0);
+  }
+  @media (min-width: 768px) {
+    .set-aside {
+      background: color-mix(in oklab, var(--surface-1) 55%, var(--surface-0));
+    }
+  }
+
+  /* The nav: one accent-tinted pill glides between links across groups
+     (.glide-track + useGlide). The lime bar on its leading edge is painted
+     into the pill itself (a 2px layer at the track's start edge, which the
+     pill's rounded clip trims to a bar), so pill and bar move as one piece
+     instead of a bar per link growing and shrinking under the glide. */
+  .set-nav {
+    --glide-bg: linear-gradient(to right, var(--accent) 0 2px, transparent 2px), var(--accent-tint);
+    --glide-radius: 8px;
+  }
+  .set-nav-link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    border-radius: 8px;
+    padding: 0.375rem 0.625rem;
+    color: var(--text-muted);
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out);
+  }
+  .set-nav-link svg {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    opacity: 0.8;
+    transition: color var(--duration-fast) var(--ease-out);
+  }
+  @media (hover: hover) {
+    .set-nav-link:hover {
+      color: var(--text);
+      background: color-mix(in oklab, var(--surface-3) 55%, transparent);
+    }
+  }
+  .set-nav-link[aria-current='page'] {
+    color: var(--text);
+    font-weight: 500;
+    background: transparent;
+  }
+  .set-nav-link[aria-current='page'] svg {
+    color: var(--accent);
+    opacity: 1;
+  }
+  /* Until useGlide has measured (or without JS) the active link paints its
+     own tint: the links are not direct children of the track. */
+  .set-nav:not([data-glide]) .set-nav-link[aria-current='page'] {
+    background: var(--glide-bg);
+  }
+
+  /* Search results: a dropdown-like list under the field. */
+  .set-search-results {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--surface-overlay);
+    box-shadow: var(--shadow-overlay);
+    padding: 0.25rem;
+    transform-origin: top center;
+    animation: agentos-scale-in var(--duration-base) var(--ease-out) both;
+  }
+  .set-search-results mark {
+    background: var(--accent-tint);
+    color: inherit;
+    border-radius: 3px;
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 35%, transparent);
+  }
+
+  /* The scrolling section pane: a container so rows can switch layout by
+     the pane's own width, not the viewport's. */
+  .set-pane {
+    container: set-pane / inline-size;
+  }
+
+  /* Focus is never hidden under a docked bar (WCAG 2.4.11): the settings
+     scroller keeps the room the bottom bar takes (the save bar, "Saved", the
+     restart notice: each publishes it as --tray-clearance, tray-clearance.tsx)
+     and the approval tray stacked above it (--tray-stack) clear when focus
+     scrolls a field into view, and on sections with a sticky filter, the
+     filter's height at the top. Phones scroll <main>, wider windows the
+     pane itself. */
+  main:has(.set-pane),
+  .set-pane {
+    scroll-padding-bottom: calc(
+      var(--tray-clearance, 0px) + var(--tray-stack, 0px) + var(--float-gap, 0.5rem) + 0.5rem
+    );
+  }
+  main:has(.set-sticky-filter),
+  .set-pane:has(.set-sticky-filter) {
+    scroll-padding-top: 4.75rem;
+  }
+
+  .set-title {
+    font-size: var(--text-title);
+    line-height: var(--text-title--line-height);
+    font-weight: var(--text-title--font-weight);
+    letter-spacing: var(--text-title--letter-spacing);
+  }
+
+  /* ---- Cards and groups -------------------------------------------------- */
+
+  .set-card {
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--surface-1);
+    box-shadow: var(--shadow-card);
+    padding: 1rem 1.25rem;
+  }
+  .set-card-title {
+    font-size: var(--text-section);
+    line-height: var(--text-section--line-height);
+    font-weight: var(--text-section--font-weight);
+    letter-spacing: var(--text-section--letter-spacing);
+  }
+  /* A list of things inside a card or on the page: hairline separators. */
+  .set-list {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--surface-1);
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+  }
+  .set-list > * + * {
+    border-top: 1px solid var(--border);
+  }
+
+  /* ---- Field rows --------------------------------------------------------
+     label + help on the left, the control on the right once the pane is wide
+     enough; stacked on narrow panes. Consecutive rows get hairlines. */
+
+  .set-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'label' 'help' 'control' 'error';
+    row-gap: 0.25rem;
+    padding-block: 0.875rem;
+  }
+  .set-row + .set-row {
+    border-top: 1px solid var(--border);
+  }
+  .set-row-label {
+    grid-area: label;
+    font-weight: 500;
+  }
+  .set-row-help {
+    grid-area: help;
+    font-size: var(--text-small);
+    line-height: var(--text-small--line-height);
+    color: var(--text-muted);
+    text-wrap: pretty;
+  }
+  .set-row-control {
+    grid-area: control;
+    min-width: 0;
+    margin-top: 0.375rem;
+  }
+  .set-row-error {
+    grid-area: error;
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin-top: 0.25rem;
+    font-size: var(--text-small);
+    color: var(--danger);
+  }
+  @container set-pane (min-width: 40rem) {
+    .set-row:not([data-layout='stacked']) {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 18rem);
+      grid-template-areas:
+        'label control'
+        'help control'
+        '. error';
+      column-gap: 2rem;
+      align-items: start;
+    }
+    .set-row:not([data-layout='stacked']) > .set-row-control {
+      margin-top: 0;
+      align-self: center;
+    }
+    /* A lone switch needs no column of its own: the help text keeps the width. */
+    .set-row:not([data-layout='stacked']):has(> .set-row-control > [role='switch']:only-child) {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .set-row:not([data-layout='stacked']) > .set-row-help {
+      max-width: 34rem;
+    }
+  }
+  /* An edited, unsaved value: a small accent mark beside the label. */
+  .set-row[data-dirty='true'] > .set-row-label::after {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-inline-start: 0.5rem;
+    border-radius: 50%;
+    vertical-align: middle;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-tint);
+    animation: agentos-scale-in var(--duration-spring) var(--ease-spring) both;
+  }
+  .set-row[data-dirty='true']::before {
+    content: '';
+    position: absolute;
+    inset-block: 0.875rem;
+    inset-inline-start: -0.75rem;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--accent);
+    animation: agentos-fade-in var(--duration-base) var(--ease-out) both;
+  }
+  .set-row[data-saved='true'] {
+    animation: agentos-flash var(--duration-enter) var(--ease-out);
+    border-radius: var(--radius-control);
+  }
+
+  /* ---- Disclosure (designed <details>) ---------------------------------- */
+
+  .set-disclosure > summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2.25rem;
+    padding: 0.375rem 0.5rem;
+    margin-inline: -0.5rem;
+    border-radius: var(--radius-control);
+    cursor: pointer;
+    list-style: none;
+    font-weight: 500;
+    color: var(--text-muted);
+    user-select: none;
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out);
+  }
+  .set-disclosure > summary::-webkit-details-marker {
+    display: none;
+  }
+  .set-disclosure > summary::marker {
+    content: '';
+  }
+  @media (hover: hover) {
+    .set-disclosure > summary:hover {
+      color: var(--text);
+      background: color-mix(in oklab, var(--surface-3) 55%, transparent);
+    }
+  }
+  .set-disclosure[open] > summary {
+    color: var(--text);
+  }
+  .set-disclosure-chevron {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    transition: rotate var(--duration-base) var(--ease-out);
+  }
+  .set-disclosure[open] > summary .set-disclosure-chevron {
+    rotate: 90deg;
+  }
+  .set-disclosure[open] > .set-disclosure-body {
+    animation: agentos-rise var(--duration-base) var(--ease-out) both;
+  }
+  /* Boxed variant: the disclosure is its own card. */
+  .set-disclosure[data-variant='card'] {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--surface-1);
+    box-shadow: var(--shadow-card);
+    padding: 0.375rem 1.25rem;
+  }
+  .set-disclosure[data-variant='card'][open] {
+    padding-bottom: 1rem;
+  }
+
+  /* ---- Save bar ---------------------------------------------------------- */
+
+  .set-savebar {
+    view-transition-name: agentos-settings-savebar;
+    animation: set-savebar-in var(--duration-slow) var(--ease-enter) both;
+  }
+  .set-savebar-inner {
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-overlay);
+    /* Opaque: the page scrolls underneath, and nothing may read through. */
+    background: var(--surface-overlay);
+    box-shadow: var(--shadow-overlay);
+  }
+  .set-savebar[data-tone='error'] .set-savebar-inner {
+    border-color: color-mix(in oklab, var(--danger) 45%, transparent);
+  }
+  .set-savebar[data-tone='conflict'] .set-savebar-inner {
+    border-color: color-mix(in oklab, var(--warn) 45%, transparent);
+  }
+  /* Its display lives here, not in a utility class, so the one-slot rule
+     below (same layer, more specific) can hide it. */
+  .set-saved {
+    display: flex;
+    justify-content: center;
+    view-transition-name: agentos-settings-saved;
+    animation: set-savebar-in var(--duration-slow) var(--ease-spring) both;
+  }
+
+  /* The restart notice docks at the bottom of the pane, rising into the
+     save bar's place instead of pushing the page down. One bottom slot:
+     pending edits (the save bar) come first, and the restart notice stands
+     in for the brief "Saved" confirmation (it implies it). */
+  .set-restart-dock {
+    view-transition-name: agentos-settings-restart;
+    animation: set-savebar-in var(--duration-slow) var(--ease-enter) both;
+  }
+  .set-restart-dock > .set-notice {
+    border-radius: var(--radius-overlay);
+    background: color-mix(in oklab, var(--tone) 9%, var(--surface-overlay));
+    box-shadow: var(--shadow-overlay);
+  }
+  .set-pane:has(.set-savebar) .set-restart-dock,
+  .set-pane:has(.set-restart-dock) .set-saved {
+    display: none;
+  }
+
+  /* ---- Notices ----------------------------------------------------------- */
+
+  .set-mark {
+    --tone: var(--info);
+  }
+  .set-notice {
+    --tone: var(--info);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    border: 1px solid color-mix(in oklab, var(--tone) 32%, transparent);
+    border-radius: var(--radius-card);
+    background: color-mix(in oklab, var(--tone) 9%, var(--surface-1));
+    padding: 0.625rem 0.875rem;
+  }
+  :is(.set-notice, .set-mark)[data-tone='warn'] {
+    --tone: var(--warn);
+  }
+  :is(.set-notice, .set-mark)[data-tone='danger'] {
+    --tone: var(--danger);
+  }
+  :is(.set-notice, .set-mark)[data-tone='ok'] {
+    --tone: var(--ok);
+  }
+  :is(.set-notice, .set-mark)[data-tone='accent'] {
+    --tone: var(--accent);
+  }
+  .set-notice-icon {
+    display: grid;
+    place-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    flex-shrink: 0;
+    border-radius: 8px;
+    background: color-mix(in oklab, var(--tone) 16%, transparent);
+    color: var(--tone);
+  }
+  .set-notice-icon svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  /* ---- Data grids (tier rows, variables, findings) ---------------------- */
+
+  .set-grid {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+    background: var(--surface-1);
+  }
+  .set-grid-head {
+    background: var(--surface-2);
+    font-size: var(--text-label);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .set-grid > * + * {
+    border-top: 1px solid var(--border);
+  }
+
+  /* Mono key chip: tier ids, env names, tool names. */
+  .set-key {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-inset);
+    padding: 0.0625rem 0.375rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    line-height: 1.4;
+  }
+
+  /* ---- Log viewer -------------------------------------------------------- */
+
+  .set-log {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--surface-inset);
+    box-shadow: var(--shadow-inset);
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    line-height: 1.55;
+  }
+  .set-log-line {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    gap: 0.75rem;
+    padding: 0.125rem 0.75rem;
+  }
+  .set-log-line:hover {
+    background: color-mix(in oklab, var(--surface-3) 50%, transparent);
+  }
+  .set-log-level {
+    min-width: 3.5rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .set-log-level:is([data-level='error' i], [data-level='critical' i]) {
+    color: var(--danger);
+  }
+  .set-log-level:is([data-level='warning' i], [data-level='warn' i]) {
+    color: var(--warn);
+  }
+  .set-log-level[data-level='info' i] {
+    color: var(--info);
+  }
+  .set-log-level:is([data-level='debug' i], [data-level='trace' i]) {
+    color: var(--text-muted);
+  }
+
+  /* F1: Pilot Router tier grid and the guided-setup stepper. ------------- */
+
+  /* Tier rows: tier chip + images switch on top, model and thinking below on
+     narrow panes; one aligned line with a header row once the pane is wide. */
+  .set-tiers-head {
+    display: none;
+  }
+  .set-tiers-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'tier image' 'model model' 'thinking thinking';
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    padding: 0.75rem 1rem;
+    transition: background-color var(--duration-fast) var(--ease-out);
+  }
+  .set-tiers-row:hover,
+  .set-tiers-row:focus-within {
+    background: color-mix(in oklab, var(--surface-2) 60%, transparent);
+  }
+  .set-tiers-row > [data-col='tier'] {
+    grid-area: tier;
+  }
+  .set-tiers-row > [data-col='model'] {
+    grid-area: model;
+  }
+  .set-tiers-row > [data-col='thinking'] {
+    grid-area: thinking;
+  }
+  .set-tiers-row > [data-col='image'] {
+    grid-area: image;
+    justify-self: end;
+  }
+  @container set-pane (min-width: 40rem) {
+    .set-tiers-head,
+    .set-tiers-row {
+      display: grid;
+      grid-template-columns: 6.5rem minmax(0, 1fr) 7.5rem 4rem;
+      grid-template-areas: 'tier model thinking image';
+      column-gap: 0.75rem;
+      align-items: center;
+    }
+    .set-tiers-head {
+      padding: 0.5rem 1rem;
+    }
+    .set-tiers-row {
+      padding-block: 0.625rem;
+    }
+    .set-tiers-image-label {
+      display: none;
+    }
+  }
+
+  /* Guided setup: numbered steps joined by a line that fills as you go. */
+  .set-stepper {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .set-stepper > li {
+    display: flex;
+    flex: 1 1 0;
+    align-items: center;
+    min-width: 0;
+  }
+  .set-stepper > li:last-child {
+    flex: 0 0 auto;
+  }
+  .set-stepper > li:not(:last-child)::after {
+    content: '';
+    flex: 1 1 auto;
+    min-width: 0.75rem;
+    height: 2px;
+    margin-inline: 0.375rem;
+    border-radius: 2px;
+    background: var(--border-strong);
+    transition: background-color var(--duration-slow) var(--ease-out);
+  }
+  .set-stepper > li[data-done='true']::after {
+    background: var(--accent);
+  }
+  .set-stepper-dot {
+    display: grid;
+    place-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    flex-shrink: 0;
+    border-radius: 50%;
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2);
+    font-size: var(--text-small);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+    transition:
+      background-color var(--duration-base) var(--ease-out),
+      border-color var(--duration-base) var(--ease-out),
+      color var(--duration-base) var(--ease-out),
+      box-shadow var(--duration-base) var(--ease-out);
+  }
+  .set-stepper-dot svg {
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+  li[data-done='true'] .set-stepper-dot {
+    border-color: transparent;
+    background: var(--accent);
+    background-image: var(--accent-gradient);
+    color: var(--accent-fg);
+  }
+  [aria-current='step'] .set-stepper-dot {
+    border-color: var(--accent);
+    background: var(--accent-tint);
+    color: var(--text);
+    box-shadow: 0 0 0 4px var(--accent-tint);
+  }
+  @container set-pane (max-width: 32rem) {
+    .set-stepper button:not([aria-current='step']) .set-stepper-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+  }
+}
+
+/* Unlayered on purpose: it must beat a utility the primitive sets
+   (EmptyState's max-w-md). An EmptyState drawn as a card fills the column.
+   (Stat tiles need no override: STAT_CARD wraps their labels and word
+   values use StatWord, so nothing wraps mid-word.) */
+.set-card[data-slot='empty-state'] {
+  max-width: none;
+  width: 100%;
+}
+
+@keyframes set-savebar-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+}
+
+@media (forced-colors: active) {
+  .set-nav-link[aria-current='page'] {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+  .set-row::before,
+  .set-row-label::after {
+    background: CanvasText;
+  }
+  /* F1: the current/done step dot keeps a visible boundary. */
+  .set-stepper-dot {
+    forced-color-adjust: none;
+    background: Canvas;
+    color: CanvasText;
+    border-color: CanvasText;
+  }
+  [aria-current='step'] .set-stepper-dot {
+    background: Highlight;
+    color: HighlightText;
+  }
+}

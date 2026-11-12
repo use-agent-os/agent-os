@@ -3,14 +3,16 @@ import {
   Filter,
   GripVertical,
   Layers,
-  Loader2,
+  MessagesSquare,
   MoreHorizontal,
   Search,
+  SearchX,
   X,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -56,6 +58,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/web/components/ui/dropdown-menu'
+import { Input } from '@/web/components/ui/input'
 import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import { ChannelIcon } from './channel-icon'
 import { exportSessionMarkdown } from './session-actions'
@@ -71,8 +74,10 @@ import {
   nestSessions,
   parsePins,
   reorderPins,
+  sessionAgent,
   sessionChannel,
   sessionIsRunning,
+  keyLabel,
   sessionTitle,
   togglePin,
   type SessionFilters,
@@ -83,6 +88,31 @@ import {
 } from './session-list'
 import { pathToSessionKey, sessionKeyToPath } from './session-url'
 import { useShell } from './shell-store'
+
+// ── Row titles ──────────────────────────────────────────────────────────────
+
+/**
+ * The gateway's fallback "derived title" for an unnamed session is the short
+ * opaque session id (8 hex characters): an identifier, not a title.
+ */
+function isOpaqueTitle(title: string): boolean {
+  return /^[0-9a-f]{8}$/i.test(title.trim())
+}
+
+/**
+ * How a list row names a session. A real name or derived title is the
+ * headline; an unnamed session reads as untitled (the caller shows "New
+ * conversation", as the chat header does) with its short id as a secondary
+ * identifier, never the id as the headline.
+ */
+export function sessionHeadline(row: SessionRow): { title: string | null; id: string } {
+  const display = String(row.display_name || row.displayName || '').trim()
+  const derived = String(row.derived_title || row.derivedTitle || '').trim()
+  const key = keyLabel(row.key)
+  if (display) return { title: display, id: key }
+  if (derived && !isOpaqueTitle(derived) && derived !== key) return { title: derived, id: key }
+  return { title: null, id: derived && isOpaqueTitle(derived) ? derived : key }
+}
 
 // ── Browser-stored list preferences ─────────────────────────────────────────
 
@@ -144,6 +174,35 @@ function errorMessage(error: unknown): string {
 
 // ── The list ────────────────────────────────────────────────────────────────
 
+// Rows rise in once, on the first load of this page only: re-opening the pane
+// or switching back from Pages shows the list as it is.
+let listEntered = false
+
+/** Whether this mount should stagger its first rows in. */
+function useFirstLoadStagger(ready: boolean): boolean {
+  const [stagger, setStagger] = useState(() => !listEntered)
+  useEffect(() => {
+    if (!ready || !stagger) return
+    listEntered = true
+    // Past the longest entrance (300 ms + 5 steps of 30 ms); later rows just appear.
+    const id = window.setTimeout(() => setStagger(false), 600)
+    return () => window.clearTimeout(id)
+  }, [ready, stagger])
+  return stagger
+}
+
+function RowSkeleton({ wide }: { wide: boolean }) {
+  return (
+    <div className="flex items-center gap-2.5 px-2 py-1.5">
+      <Skeleton className="size-7 shrink-0 rounded-md" />
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <Skeleton className={wide ? 'h-3 w-4/5' : 'h-3 w-3/5'} />
+        <Skeleton className="h-2.5 w-1/3" />
+      </div>
+    </div>
+  )
+}
+
 export function SessionList({ onNavigate }: { onNavigate?: () => void }) {
   const sessions = useSessionsList()
   const projects = useProjectNames()
@@ -174,14 +233,22 @@ export function SessionList({ onNavigate }: { onNavigate?: () => void }) {
 
   const projectName = (id: string) => projects.data?.get(id) ?? id
   const active = hasActiveFilters(filters)
+  const stagger = useFirstLoadStagger(!sessions.isPending && sections.length > 0)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-col gap-2 px-3 pt-3 pb-2">
-        <div className="flex items-center gap-1">
-          <h2 className="flex-1 text-small font-semibold tracking-wide text-text-muted uppercase">
-            {t('webShell.sessionsHeading')}
-          </h2>
+      <div className="flex flex-col gap-2.5 px-3 pt-3 pb-2">
+        <div className="flex h-7 items-center gap-0.5 pl-1">
+          <h2 className="text-section">{t('webShell.sessionsHeading')}</h2>
+          {rows.length > 0 ? (
+            <span
+              aria-hidden
+              className="ml-2 rounded-full bg-surface-3 px-1.5 text-small leading-5 font-medium text-text-muted tabular-nums"
+            >
+              {rows.length}
+            </span>
+          ) : null}
+          <span className="flex-1" />
           <GroupingMenu grouping={grouping} onChange={setGrouping} />
           <FilterMenu
             filters={filters}
@@ -190,18 +257,16 @@ export function SessionList({ onNavigate }: { onNavigate?: () => void }) {
             onChange={setFilters}
           />
         </div>
-        <label className="relative block">
+        <label className="block">
           <span className="sr-only">{t('webShell.sessionsFilter')}</span>
-          <Search
-            className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-muted"
-            aria-hidden
-          />
-          <input
+          <Input
             type="search"
+            size="sm"
+            icon={<Search />}
             value={filters.text}
             onChange={(e) => setFilters({ text: e.target.value })}
             placeholder={t('webShell.sessionsFilter')}
-            className="h-8 w-full rounded-md border border-border-control bg-surface-0 pr-2 pl-8 text-ui placeholder:text-text-muted touch:h-11"
+            className="touch:h-11"
           />
         </label>
         {active ? (
@@ -211,9 +276,9 @@ export function SessionList({ onNavigate }: { onNavigate?: () => void }) {
 
       <div className="scroll-contained min-h-0 flex-1 px-2 pb-3">
         {sessions.isPending ? (
-          <LoadingRegion>
-            {Array.from({ length: 6 }, (_, i) => (
-              <Skeleton key={i} className="mx-1 my-1.5 h-7" />
+          <LoadingRegion className="pt-2">
+            {Array.from({ length: 7 }, (_, i) => (
+              <RowSkeleton key={i} wide={i % 3 !== 1} />
             ))}
           </LoadingRegion>
         ) : sessions.isError && rows.length === 0 ? (
@@ -225,6 +290,8 @@ export function SessionList({ onNavigate }: { onNavigate?: () => void }) {
         ) : sections.length === 0 ? (
           active ? (
             <EmptyState
+              size="sm"
+              icon={<SearchX />}
               title={t('webShell.sessionsNoMatch')}
               description={<FilterSummary filters={filters} projectName={projectName} />}
               action={
@@ -235,17 +302,24 @@ export function SessionList({ onNavigate }: { onNavigate?: () => void }) {
             />
           ) : (
             <EmptyState
+              size="sm"
+              icon={<MessagesSquare />}
               title={t('webShell.sessionsEmpty')}
               description={t('webShell.sessionsEmptyBody')}
             />
           )
         ) : (
           sections.map((section) => (
-            <section key={section.id} aria-label={sectionTitle(section)} className="mt-2">
-              <h3 className="px-2 py-1 text-small font-medium text-text-muted">
-                {sectionTitle(section)}
-              </h3>
-              <ul role="list" className="flex flex-col">
+            <section
+              key={section.id}
+              aria-label={sectionTitle(section)}
+              className="mt-4 first:mt-1"
+            >
+              <h3 className="pane-group-label">{sectionTitle(section)}</h3>
+              <ul
+                role="list"
+                className={stagger ? 'anim-stagger flex flex-col gap-px' : 'flex flex-col gap-px'}
+              >
                 {section.nodes.map((node, index) => (
                   <SessionItem
                     key={node.row.key}
@@ -330,7 +404,7 @@ function ActiveFilters({
           key={chip.key}
           type="button"
           onClick={() => setFilters({ [chip.key]: chip.key === 'text' ? '' : null })}
-          className="target inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 text-small text-text"
+          className="press target inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent-tint px-2 text-small text-text hover:border-accent/60"
         >
           {chip.label}
           <X className="size-3" aria-hidden />
@@ -646,20 +720,29 @@ function SessionItem(props: ItemProps) {
   )
 
   const current = currentKey === row.key
+  // An unnamed session reads "New conversation" with its short id beside the
+  // agent, as the chat header does; the id is never the headline.
+  const headline = sessionHeadline(row)
+  const channel = sessionChannel(row)
+  const agent = sessionAgent(row)
   return (
     <li data-session-key={row.key} {...dragProps}>
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
+            data-current={current || undefined}
             className={cn(
-              'group relative flex items-center gap-1 rounded-md pr-1',
-              current ? 'bg-surface-3' : 'hover:bg-surface-2',
+              'session-row group relative flex items-center rounded-[10px] transition-colors duration-[var(--duration-fast)]',
+              current ? 'bg-surface-3 shadow-highlight' : 'hover:bg-surface-2',
             )}
             style={{ paddingLeft: depth * 14 }}
             onKeyDown={onRowKeyDown}
           >
             {pinnedIndex >= 0 ? (
-              <GripVertical className="size-3.5 shrink-0 cursor-grab text-text-muted" aria-hidden />
+              <GripVertical
+                className="-mr-1 ml-0.5 size-3.5 shrink-0 cursor-grab text-text-muted opacity-60 group-hover:opacity-100"
+                aria-hidden
+              />
             ) : null}
             {node.children.length > 0 ? (
               <button
@@ -667,17 +750,20 @@ function SessionItem(props: ItemProps) {
                 onClick={() => setExpanded((v) => !v)}
                 aria-expanded={expanded}
                 aria-label={expanded ? t('webShell.sessionCollapse') : t('webShell.sessionExpand')}
-                className="target inline-flex shrink-0 items-center justify-center rounded text-text-muted hover:text-text"
+                className="target -mr-1 inline-flex shrink-0 items-center justify-center rounded text-text-muted hover:text-text"
               >
                 <ChevronRight
-                  className={cn('size-3.5 transition-transform', expanded && 'rotate-90')}
+                  className={cn(
+                    'size-3.5 transition-transform duration-[var(--duration-base)] ease-[var(--ease-out)]',
+                    expanded && 'rotate-90',
+                  )}
                   aria-hidden
                 />
               </button>
             ) : null}
             {renaming ? (
               <form
-                className="flex min-w-0 flex-1 items-center gap-1 py-1"
+                className="flex min-w-0 flex-1 items-center gap-1 px-1.5 py-1.5"
                 onSubmit={(e) => {
                   e.preventDefault()
                   void submitRename()
@@ -698,61 +784,94 @@ function SessionItem(props: ItemProps) {
                   disabled={busy}
                   aria-invalid={error ? true : undefined}
                   aria-describedby={error ? `${row.key}-error` : undefined}
-                  className="h-7 min-w-0 flex-1 rounded border border-border-control bg-surface-0 px-2 text-ui"
+                  className="h-8 min-w-0 flex-1 rounded-md border border-border-control bg-surface-inset px-2 text-ui"
                 />
-                <Button size="sm" type="submit" disabled={busy}>
+                <Button size="sm" variant="primary" type="submit" disabled={busy}>
                   {t('webShell.renameSave')}
                 </Button>
               </form>
             ) : (
               <Link
                 to={href}
+                viewTransition
                 onClick={(e) => {
                   if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
                   onNavigate?.()
                 }}
                 aria-current={current ? 'page' : undefined}
-                className="target flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-ui"
+                className="target flex min-w-0 flex-1 items-center gap-2.5 rounded-[10px] py-[7px] pr-2.5 pl-2 text-ui"
               >
-                <ChannelIcon channel={sessionChannel(row)} className="shrink-0 text-text-muted" />
-                <span className="min-w-0 flex-1 truncate">{title}</span>
-                {row.provisional ? (
-                  <span className="text-small text-text-muted">
-                    {t('webShell.sessionProvisional')}
-                  </span>
-                ) : null}
-                {running ? (
-                  <span
-                    role="img"
-                    aria-label={t('webShell.sessionRunning')}
-                    className="inline-flex shrink-0"
-                  >
-                    <Loader2
-                      className="motion-status size-3.5 animate-spin text-accent"
-                      aria-hidden
-                      data-status-icon
-                    />
-                  </span>
-                ) : null}
-                {!expanded && node.childCount > 0 ? (
-                  <span
-                    className="shrink-0 rounded-full bg-surface-3 px-1.5 text-small text-text-muted"
-                    title={tPlural('webShell.sessionChildren', node.childCount)}
-                  >
-                    <span className="sr-only">
-                      {tPlural('webShell.sessionChildren', node.childCount)}
-                      {node.childRunning ? `, ${t('webShell.sessionChildrenRunning')}` : ''}
+                <span
+                  className={cn(
+                    'session-tile relative grid size-7 shrink-0 place-items-center rounded-[9px]',
+                    current && 'session-tile-current',
+                  )}
+                >
+                  <ChannelIcon channel={channel} className="flex" />
+                  {running ? (
+                    <span
+                      role="img"
+                      aria-label={t('webShell.sessionRunning')}
+                      className="absolute -top-0.5 -right-0.5 flex rounded-full bg-surface-1 p-[3px] text-accent"
+                    >
+                      <span
+                        data-live
+                        data-status-icon
+                        className="status-dot motion-status size-1.5"
+                      />
                     </span>
-                    <span aria-hidden>{node.childCount}</span>
-                    {node.childRunning ? (
-                      <span aria-hidden className="ml-0.5 text-accent">
-                        •
+                  ) : null}
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col gap-px">
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span
+                      className={cn(
+                        'session-title min-w-0 flex-1 truncate',
+                        headline.title === null && 'text-text-muted',
+                        current && 'font-medium',
+                      )}
+                    >
+                      {headline.title ?? t('webShell.sessionUntitled')}
+                    </span>
+                    <span className="shrink-0 text-small text-text-muted tabular-nums group-focus-within:invisible group-hover:invisible">
+                      {relTimeLabel(row.updated_at ?? row.updatedAt ?? '')}
+                    </span>
+                  </span>
+                  <span className="flex min-w-0 items-center gap-1.5 text-small leading-4 text-text-muted">
+                    <span className="min-w-0 truncate">
+                      {headline.title === null ? (
+                        <span className="font-mono text-[11.5px] tracking-tight">
+                          {headline.id}
+                          <span aria-hidden>{' · '}</span>
+                        </span>
+                      ) : null}
+                      {agent}
+                      <span className="sr-only">
+                        {' · '}
+                        {channel}
+                      </span>
+                    </span>
+                    {row.provisional ? (
+                      <span className="shrink-0 text-accent">
+                        {t('webShell.sessionProvisional')}
+                      </span>
+                    ) : null}
+                    {!expanded && node.childCount > 0 ? (
+                      <span
+                        className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-3 px-1.5 leading-4 tabular-nums"
+                        title={tPlural('webShell.sessionChildren', node.childCount)}
+                      >
+                        <span className="sr-only">
+                          {tPlural('webShell.sessionChildren', node.childCount)}
+                          {node.childRunning ? `, ${t('webShell.sessionChildrenRunning')}` : ''}
+                        </span>
+                        <span aria-hidden>{node.childCount}</span>
+                        {node.childRunning ? (
+                          <span aria-hidden className="status-dot size-1.5 text-accent" />
+                        ) : null}
                       </span>
                     ) : null}
                   </span>
-                ) : null}
-                <span className="shrink-0 text-small text-text-muted group-hover:hidden group-focus-within:hidden">
-                  {relTimeLabel(row.updated_at ?? row.updatedAt ?? '')}
                 </span>
               </Link>
             )}
@@ -765,7 +884,7 @@ function SessionItem(props: ItemProps) {
                     variant="ghost"
                     aria-label={t('webShell.rowActions', { title })}
                     disabled={busy}
-                    className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 touch:opacity-100"
+                    className="absolute top-1/2 right-1 -translate-y-1/2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-surface-overlay focus-visible:opacity-100 data-[state=open]:bg-surface-overlay data-[state=open]:opacity-100 touch:static touch:translate-y-0 touch:opacity-100"
                   >
                     <MoreHorizontal />
                   </Button>
@@ -788,7 +907,11 @@ function SessionItem(props: ItemProps) {
         )}
       </ContextMenu>
       {error ? (
-        <p id={`${row.key}-error`} role="alert" className="px-2 pb-1 text-small text-danger">
+        <p
+          id={`${row.key}-error`}
+          role="alert"
+          className="anim-fade-in px-2.5 pt-0.5 pb-1.5 text-small text-danger"
+        >
           {error}
         </p>
       ) : null}

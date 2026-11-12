@@ -3,6 +3,7 @@ import * as React from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webCommon'
 import { cn } from '@/lib/utils'
+import { Badge } from './badge'
 import { Button } from './button'
 
 // The standard view states (design-system spec "Standard view states"):
@@ -39,7 +40,7 @@ export function Skeleton({
       data-visible={visible || undefined}
       aria-hidden
       className={cn(
-        'rounded-md bg-surface-3 transition-opacity',
+        'skeleton-shimmer rounded-md bg-[color-mix(in_oklab,var(--text)_8%,transparent)] transition-opacity duration-[var(--duration-base)]',
         visible ? 'opacity-100' : 'opacity-0',
         className,
       )}
@@ -70,42 +71,54 @@ export function LoadingRegion({
   )
 }
 
+/**
+ * A designed empty state, composed on the canvas rather than framed: the icon
+ * in a soft round mark with faint halo rings, a clear title, one line of help
+ * and the primary action. Never a bordered box around emptiness. `size="sm"`
+ * for a panel or list body.
+ */
 export function EmptyState({
   icon,
   title,
   description,
   action,
+  size = 'md',
   className,
 }: {
   icon?: React.ReactNode
   title: string
   description?: React.ReactNode
   action?: React.ReactNode
+  size?: 'sm' | 'md'
   className?: string
 }) {
   return (
     <div
       data-slot="empty-state"
+      data-size={size}
       className={cn(
-        'mx-auto flex max-w-md flex-col items-center gap-3 px-6 py-12 text-center',
+        'empty-state anim-enter mx-auto flex max-w-md flex-col items-center text-center',
+        size === 'sm' ? 'px-4 py-8' : 'px-6 py-16',
         className,
       )}
     >
       {icon ? (
-        <div className="text-text-muted [&_svg]:size-8" aria-hidden>
+        <div className="empty-mark" aria-hidden>
           {icon}
         </div>
       ) : null}
-      <h2 className="text-base font-semibold">{title}</h2>
-      {description ? <p className="text-text-muted">{description}</p> : null}
-      {action ? <div className="mt-1">{action}</div> : null}
+      <h2 className="empty-title">{title}</h2>
+      {description ? <p className="empty-description">{description}</p> : null}
+      {action ? <div className="mt-5 flex flex-wrap justify-center gap-2">{action}</div> : null}
     </div>
   )
 }
 
 /**
- * An error notice with Retry. Children (data already loaded) stay rendered
- * beneath it: a failed refresh never blanks what the user was reading.
+ * An error notice with Retry: a soft danger-tinted strip (no outlined box),
+ * the icon in a small round mark. Children (data already loaded) stay
+ * rendered beneath it: a failed refresh never blanks what the user was
+ * reading.
  */
 export function ErrorState({
   title,
@@ -126,16 +139,14 @@ export function ErrorState({
     <div data-slot="error-state" className={className}>
       <div
         role="alert"
-        className="flex items-start gap-3 rounded-lg border border-danger/40 bg-danger/10 px-4 py-3"
+        className="error-strip anim-fade-in flex items-center gap-3 rounded-card py-2.5 pr-2.5 pl-3"
       >
-        <AlertTriangle
-          className="mt-0.5 size-4 shrink-0 text-danger"
-          aria-hidden
-          data-status-icon
-        />
-        <div className="min-w-0 flex-1">
+        <span className="grid size-7 shrink-0 place-items-center self-start rounded-full bg-danger/12 text-danger">
+          <AlertTriangle className="size-3.5" aria-hidden data-status-icon />
+        </span>
+        <div className="min-w-0 flex-1 self-center">
           <p className="font-medium">{title ?? t('webCommon.errorTitle')}</p>
-          {message ? <p className="break-words text-text-muted">{message}</p> : null}
+          {message ? <p className="text-small break-words text-text-muted">{message}</p> : null}
         </div>
         {onRetry ? (
           <Button size="sm" variant="outline" onClick={onRetry} disabled={retrying}>
@@ -152,16 +163,14 @@ export function ErrorState({
 export function StaleBadge({ since, className }: { since?: string; className?: string }) {
   const label = since ? t('webCommon.staleSince', { time: since }) : t('webCommon.stale')
   return (
-    <span
+    <Badge
+      tone="warn"
       data-slot="stale-badge"
       title={t('webCommon.staleTitle')}
-      className={cn(
-        'inline-flex items-center gap-1 rounded-full border border-warn/50 px-2 py-0.5 text-small text-warn',
-        className,
-      )}
+      className={cn('[&_svg]:size-3.5', className)}
     >
-      <History className="size-3.5" aria-hidden data-status-icon />
+      <History aria-hidden data-status-icon />
       {label}
-    </span>
+    </Badge>
   )
 }

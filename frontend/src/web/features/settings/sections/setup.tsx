@@ -1,4 +1,12 @@
-import { Check, Copy } from 'lucide-react'
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  CircleDot,
+  ListChecks,
+  MessageSquare,
+  PartyPopper,
+} from 'lucide-react'
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { t } from '@/i18n'
@@ -24,7 +32,8 @@ import {
   providerAdapter,
   searchAdapter,
 } from './onboarding-adapters'
-import { RouterForm, SnapshotGate, SpecForm } from './onboarding-forms'
+import { SettingsCard } from '../ui'
+import { CommandLine, RouterForm, SnapshotGate, SpecForm } from './onboarding-forms'
 
 type Step = 'provider' | 'router' | 'extras' | 'finish'
 const ORDER: Step[] = ['provider', 'router', 'extras', 'finish']
@@ -48,6 +57,19 @@ function initialStep(snapshot: SettingsSnapshot, requested: string | null): Step
   return fromStatus === 'channels' ? 'finish' : (fromStatus as Step)
 }
 
+function stepHelp(step: Step): string {
+  switch (step) {
+    case 'provider':
+      return t('webSetConfig.stepProviderHelp')
+    case 'router':
+      return t('webSetConfig.stepRouterHelp')
+    case 'extras':
+      return t('webSetConfig.stepExtrasHelp')
+    default:
+      return t('webSetConfig.stepFinishHelp')
+  }
+}
+
 function Stepper({ snapshot }: { snapshot: SettingsSnapshot }) {
   const [params] = useSearchParams()
   const [step, setStep] = useState<Step>(() => initialStep(snapshot, params.get('step')))
@@ -60,135 +82,163 @@ function Stepper({ snapshot }: { snapshot: SettingsSnapshot }) {
   const configArg = configCliArg(snapshot.configPath)
 
   return (
-    <div className="flex flex-col gap-4">
-      <ol
-        aria-label={t('webSetConfig.stepOf', {
-          current: index + 1,
-          total: ORDER.length,
-          name: stepLabel(step),
-        })}
-        className="flex flex-wrap gap-2"
-      >
-        {ORDER.map((s, i) => (
-          <li key={s}>
-            <button
-              type="button"
-              aria-current={s === step ? 'step' : undefined}
-              onClick={() => setStep(s)}
-              className={cn(
-                'target flex items-center gap-1.5 rounded-full border px-3 py-1 text-ui',
-                s === step
-                  ? 'border-accent bg-accent-soft font-medium'
-                  : 'border-border text-text-muted',
-              )}
-            >
-              {i < index ? (
-                <Check className="size-3.5" aria-hidden />
-              ) : (
-                <span aria-hidden>{i + 1}</span>
-              )}
-              {stepLabel(s)}
-            </button>
-          </li>
-        ))}
-      </ol>
-
-      {step === 'provider' ? (
-        <SpecForm
-          title={t('webSetConfig.provider')}
-          adapter={providerAdapter}
-          snapshot={snapshot}
-          recovery="llm"
-        />
-      ) : null}
-      {step === 'router' ? <RouterForm snapshot={snapshot} /> : null}
-      {step === 'extras' ? (
-        <div className="flex flex-col gap-4">
-          <SpecForm
-            title={t('webSetConfig.webSearch')}
-            adapter={searchAdapter}
-            snapshot={snapshot}
-            status={searchStatusText(status, config)}
-            recovery="search"
-          />
-          <SpecForm
-            title={t('webSetConfig.embedding')}
-            adapter={memoryEmbeddingAdapter}
-            snapshot={snapshot}
-            status={memoryEmbeddingStatusText(status, config)}
-            recovery="memory_embedding"
-          />
-          <SpecForm
-            title={t('webSetConfig.image')}
-            adapter={imageAdapter}
-            snapshot={snapshot}
-            status={imageGenerationStatusText(status)}
-            recovery="image_generation"
-          />
-          <SpecForm
-            title={t('webSetConfig.audio')}
-            adapter={audioAdapter}
-            snapshot={snapshot}
-            status={audioStatusText(status)}
-            recovery="audio"
-          />
-        </div>
-      ) : null}
-      {step === 'finish' ? (
-        <section
-          aria-label={t('webSetConfig.finishTitle')}
-          className="rounded-lg border border-border p-4"
+    <div className="flex flex-col gap-5">
+      <div className="set-card flex flex-col gap-4">
+        <ol
+          aria-label={t('webSetConfig.stepOf', {
+            current: index + 1,
+            total: ORDER.length,
+            name: stepLabel(step),
+          })}
+          className="set-stepper"
         >
-          <h2 className="mb-2 font-semibold">{t('webSetConfig.finishTitle')}</h2>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-            {Object.entries(summary).map(([k, v]) => (
-              <div key={k} className="contents">
-                <dt className="text-text-muted">{k}</dt>
-                <dd>{v || '—'}</dd>
-              </div>
-            ))}
-          </dl>
-          {reasons.length ? (
-            <div className="mt-3">
-              <p className="font-medium">{t('webSetConfig.finishActions')}</p>
-              <ul className="ml-4 list-disc">
-                {reasons.map((r, i) => (
-                  <li key={i}>{r.text ?? String(r)}</li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <p className="mt-3">{t('webSetConfig.finishReady')}</p>
-          )}
-          {commands.map((c, i) => (
-            <div key={i} className="mt-2 flex items-center gap-2">
-              <code className="min-w-0 flex-1 truncate rounded bg-code-bg px-2 py-1 text-small">{`${c.command}${configArg}`}</code>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label={t('webSetConfig.copyCommand')}
-                onClick={() => void navigator.clipboard?.writeText(`${c.command}${configArg}`)}
+          {ORDER.map((s, i) => (
+            <li key={s} data-done={i < index || undefined}>
+              <button
+                type="button"
+                aria-current={s === step ? 'step' : undefined}
+                onClick={() => setStep(s)}
+                className={cn(
+                  'press target relative flex items-center gap-2 rounded-full py-1 pr-2.5 pl-1 text-ui hover:bg-surface-3',
+                  s === step ? 'font-medium text-text' : 'text-text-muted',
+                )}
               >
-                <Copy />
-              </Button>
-            </div>
+                <span className="set-stepper-dot" aria-hidden>
+                  {i < index ? <Check /> : i + 1}
+                </span>
+                <span className="set-stepper-label">{stepLabel(s)}</span>
+              </button>
+            </li>
           ))}
-          <Link to="/chat" className={cn(buttonVariants({ variant: 'primary' }), 'mt-4')}>
-            {t('webSetConfig.openChat')}
-          </Link>
-        </section>
-      ) : null}
+        </ol>
+        <div key={`${step}-head`} className="anim-fade-in border-t border-border pt-3.5">
+          <p className="text-label text-text-muted">
+            {t('webSetConfig.stepCount', { current: index + 1, total: ORDER.length })}
+          </p>
+          <h2 className="set-card-title mt-0.5">{stepLabel(step)}</h2>
+          <p className="mt-0.5 text-small text-pretty text-text-muted">{stepHelp(step)}</p>
+        </div>
+      </div>
 
-      <div className="flex gap-2">
-        <Button variant="outline" disabled={index === 0} onClick={() => setStep(ORDER[index - 1]!)}>
+      <div key={`${step}-body`} className="anim-enter flex flex-col gap-4">
+        {step === 'provider' ? (
+          <SpecForm
+            title={t('webSetConfig.provider')}
+            adapter={providerAdapter}
+            snapshot={snapshot}
+            recovery="llm"
+          />
+        ) : null}
+        {step === 'router' ? <RouterForm snapshot={snapshot} /> : null}
+        {step === 'extras' ? (
+          <>
+            <SpecForm
+              title={t('webSetConfig.webSearch')}
+              adapter={searchAdapter}
+              snapshot={snapshot}
+              status={searchStatusText(status, config)}
+              recovery="search"
+            />
+            <SpecForm
+              title={t('webSetConfig.embedding')}
+              adapter={memoryEmbeddingAdapter}
+              snapshot={snapshot}
+              status={memoryEmbeddingStatusText(status, config)}
+              recovery="memory_embedding"
+            />
+            <SpecForm
+              title={t('webSetConfig.image')}
+              adapter={imageAdapter}
+              snapshot={snapshot}
+              status={imageGenerationStatusText(status)}
+              recovery="image_generation"
+            />
+            <SpecForm
+              title={t('webSetConfig.audio')}
+              adapter={audioAdapter}
+              snapshot={snapshot}
+              status={audioStatusText(status)}
+              recovery="audio"
+            />
+          </>
+        ) : null}
+        {step === 'finish' ? (
+          <SettingsCard
+            aria-label={t('webSetConfig.finishTitle')}
+            title={t('webSetConfig.finishTitle')}
+            icon={reasons.length ? <ListChecks /> : <PartyPopper />}
+            className="relative overflow-hidden"
+          >
+            {reasons.length ? null : (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0 bg-[radial-gradient(70%_100%_at_100%_0%,var(--accent-tint),transparent_70%)]"
+              />
+            )}
+            <dl className="set-list relative mt-3 shadow-none">
+              {Object.entries(summary).map(([k, v]) => (
+                <div
+                  key={k}
+                  className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-x-4 px-3.5 py-2"
+                >
+                  <dt className="text-small text-text-muted">{k}</dt>
+                  <dd className="min-w-0 text-small break-words">{v || '—'}</dd>
+                </div>
+              ))}
+            </dl>
+            {reasons.length ? (
+              <div className="relative mt-4">
+                <p className="text-label text-text-muted">{t('webSetConfig.finishActions')}</p>
+                <ul className="mt-1.5 flex flex-col gap-1.5">
+                  {reasons.map((r, i) => (
+                    <li key={i} className="flex items-start gap-2 text-small">
+                      <CircleDot className="mt-0.5 size-3.5 shrink-0 text-warn" aria-hidden />
+                      {r.text ?? String(r)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="relative mt-4 flex items-center gap-2 font-medium">
+                <span className="grid size-5 place-items-center rounded-full bg-ok/15 text-ok">
+                  <Check className="size-3.5" aria-hidden data-status-icon />
+                </span>
+                {t('webSetConfig.finishReady')}
+              </p>
+            )}
+            {commands.length ? (
+              <div className="relative mt-3 flex flex-col gap-2">
+                {commands.map((c, i) => (
+                  <CommandLine
+                    key={i}
+                    command={`${c.command}${configArg}`}
+                    onCopy={(text) => void navigator.clipboard?.writeText(text)}
+                  />
+                ))}
+              </div>
+            ) : null}
+            <div className="relative mt-5 flex justify-end border-t border-border pt-3.5">
+              <Link to="/chat" className={buttonVariants({ variant: 'primary' })}>
+                <MessageSquare aria-hidden />
+                {t('webSetConfig.openChat')}
+              </Link>
+            </div>
+          </SettingsCard>
+        ) : null}
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <Button variant="ghost" disabled={index === 0} onClick={() => setStep(ORDER[index - 1]!)}>
+          <ArrowLeft />
           {t('webSetConfig.back')}
         </Button>
         <Button
-          variant="secondary"
+          variant="outline"
           disabled={index === ORDER.length - 1}
           onClick={() => setStep(ORDER[index + 1]!)}
         >
           {t('webSetConfig.next')}
+          <ArrowRight />
         </Button>
       </div>
     </div>

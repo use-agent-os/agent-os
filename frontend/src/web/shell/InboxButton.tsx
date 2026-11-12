@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from 'react'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webShell'
 import { useAttentionInbox } from '@/lib/useAttentionInbox'
-import { cn } from '@/lib/utils'
 import { SimpleTooltip } from '@/web/components/ui/tooltip'
 import { RailLink } from './RailLink'
 
@@ -33,10 +32,8 @@ export function InboxButton({ onNavigate }: { onNavigate?: () => void }) {
           <span
             data-testid="inbox-badge"
             aria-hidden
-            className={cn(
-              'pointer-events-none absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-danger px-1 text-center text-small leading-4 font-semibold text-danger-fg',
-              count > 0 ? 'visible' : 'invisible',
-            )}
+            // Chrome in shell.css; visibility here so the slot never moves.
+            className={`inbox-badge absolute ${count > 0 ? 'visible' : 'invisible'}`}
           >
             {count > 99 ? '99+' : count}
           </span>

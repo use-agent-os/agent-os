@@ -57,7 +57,6 @@ export const webChat = defineNamespace('webChat', {
 
   // Header
   headerRename: 'Rename session',
-  headerDetails: 'Details',
   headerPanels: 'Panels',
   headerMenu: 'Session actions',
   headerCompact: 'Compact',
@@ -113,26 +112,6 @@ export const webChat = defineNamespace('webChat', {
   // Approval dock
   dockTitle: 'Approval needed: {tool}',
 
-  // Details
-  detailsTitle: 'Session details',
-  detailsClose: 'Close details',
-  detailsAgent: 'Agent',
-  detailsRoute: 'Model route',
-  detailsChannel: 'Channel',
-  detailsProject: 'Project',
-  detailsCreated: 'Created',
-  detailsUpdated: 'Updated',
-  detailsUsage: 'Usage',
-  detailsCost: 'Estimated cost',
-  detailsTask: 'Active task',
-  detailsSubagents: 'Subagents',
-  detailsPlan: 'Plan mode',
-  detailsArtifacts: 'Artifacts',
-  detailsQueued: 'Queued messages',
-  detailsNone: 'None',
-  planOn: 'On',
-  planOff: 'Off',
-
   // Cards
   planTitle: 'Proposed plan',
   planApprove: 'Approve plan',
@@ -171,6 +150,32 @@ export const webChat = defineNamespace('webChat', {
   newNoAgent: 'No agent to start the session with',
   newAgentsFailed: "Couldn't load the agents",
   newProjectsFailed: "Couldn't load the projects",
+  newPlaceholder: 'Ask anything, or describe a task…',
+  newPlaceholderNoAgent: 'Add an agent to start a session',
+  newAgentLoading: 'Loading…',
+  newSuggestions: 'Suggestions',
+  newSuggestSummarise: 'Summarise a document',
+  newSuggestSummarisePrompt: 'Summarise this document in a few clear bullet points:',
+  newSuggestPlan: 'Plan a task',
+  newSuggestPlanPrompt: 'Help me plan this step by step, with risks and a first action:',
+  newSuggestSearch: 'Search the web',
+  newSuggestSearchPrompt: 'Search the web for',
+  newSuggestReview: 'Review my code',
+  newSuggestReviewPrompt: 'Review this code and point out bugs, risks and simplifications:',
+
+  // Chat stage (new session, empty conversation)
+  stageMorning: 'Good morning',
+  stageAfternoon: 'Good afternoon',
+  stageEvening: 'Good evening',
+  stageHeadline: 'What should we work on?',
+  stageHints: 'Keyboard shortcuts',
+  stageHintSend: 'send',
+  stageHintNewline: 'new line',
+  stageHintCommands: 'commands',
+  stageDrop: 'Drop files to attach',
+  headerUntitled: 'New conversation',
+  headerCopyId: 'Copy session ID',
+  headerIdCopied: 'Session ID copied',
 
   // Side panel
   panelTitle: 'Side panel',
@@ -178,4 +183,10 @@ export const webChat = defineNamespace('webChat', {
   panelCloseTab: 'Close {title}',
   panelResize: 'Resize side panel',
   panelEmpty: 'Open tool output, artifacts or reasoning to see them here.',
+
+  // Chat v2: the reply identity line, the side panel
+  agentFallback: 'Agent',
+  panelToolOutput: 'Tool output',
+  panelArtifact: 'Artifact',
+  panelThinking: 'Reasoning',
 } as const)

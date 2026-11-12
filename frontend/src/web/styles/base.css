@@ -1,6 +1,8 @@
-/* Entry stylesheet of the rebuilt web console (overhaul-control-ui, D3/D12).
- * Tailwind utilities, the semantic tokens, bundled fonts and the shared
- * accessibility baselines: focus, target size, motion and forced colors. */
+/* Entry stylesheet of the web console.
+ * Tailwind utilities, the semantic tokens, bundled fonts, the shared
+ * accessibility baselines (focus, target size, motion, forced colors), the
+ * refined native controls and the motion system. Usage notes for every class
+ * below live in the console redesign foundation guide. */
 
 @import 'tailwindcss';
 @import './tokens.css';
@@ -12,8 +14,8 @@
 
 /* Served from the console bundle — never from a third-party font host. */
 @font-face {
-  font-family: 'Inter Variable';
-  src: url('../../assets/fonts/Inter-Variable.woff2') format('woff2');
+  font-family: 'Geist Variable';
+  src: url('../../assets/fonts/Geist-Variable.woff2') format('woff2');
   font-weight: 100 900;
   font-display: swap;
 }
@@ -29,6 +31,10 @@
     background: var(--surface-0);
     color: var(--text);
     font-family: var(--font-sans);
+    /* Geist: ss03 gives l a tail and ss05 gives I serifs, so Il1 stay
+       distinct in ids, keys and model names. Figures stay proportional in
+       prose; tables and stats opt into `tabular-nums` where they need it. */
+    font-feature-settings: 'ss03', 'ss05';
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-size-adjust: 100%;
@@ -45,6 +51,24 @@
     overflow-x: hidden;
   }
 
+  /* While the console shell is mounted the document never scrolls: the
+     shell is the viewport and its panes scroll inside it (Shell.tsx also
+     clips and contains its own content). Without this, anything that
+     escaped the shell let the wheel slide the whole app up. The connect
+     screen has no shell and keeps a scrolling page on short windows. */
+  html:has(> body > #app > .app-shell) {
+    overflow: hidden;
+  }
+  html:has(> body > #app > .app-shell) > body {
+    overflow: clip;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
   code,
   kbd,
   samp,
@@ -56,6 +80,11 @@
   ::selection {
     background: var(--accent-soft);
     color: var(--text);
+  }
+
+  ::placeholder {
+    color: var(--text-muted);
+    opacity: 1;
   }
 
   /* Visible keyboard focus everywhere; pointer clicks may omit it. The offset
@@ -77,8 +106,267 @@
     }
   }
 
+  select option,
+  select optgroup {
+    background-color: var(--surface-overlay);
+    color: var(--text);
+  }
+
   [hidden] {
     display: none !important;
+  }
+}
+
+/* Refined native controls. Unlayered on purpose: they must win over the
+   per-page utility class strings (`border-border-control bg-surface-0 …`) so
+   every hand-rolled field picks up the same chrome. Invalid fields keep the
+   danger border their utilities set. */
+
+/* A styled native <select>: no browser chrome, our own chevron. Zero JS and
+   the platform picker (and its accessibility) stays. */
+select:where(:not([multiple], [size])) {
+  appearance: none;
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right 0.55rem center;
+  background-size: 16px 16px;
+  padding-inline-end: 2rem;
+  text-overflow: ellipsis;
+}
+
+/* Search fields: Chromium's clear button is a fixed blue glyph that ignores
+   the theme. Keep the affordance (zero JS) but draw it as the console's own
+   muted cross, which brightens on hover. */
+input[type='search']::-webkit-search-cancel-button {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-inline-start: 6px;
+  cursor: pointer;
+  background-color: var(--text-muted);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M18 6 6 18M6 6l12 12'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+input[type='search']::-webkit-search-cancel-button:hover {
+  background-color: var(--text);
+}
+input[type='search']::-webkit-search-decoration {
+  appearance: none;
+}
+
+/* Text fields and selects drawn with the control boundary: inner shadow,
+   a hover step and a ring-plus-glow focus. */
+:is(input, textarea, select):where(.border-border-control) {
+  box-shadow: var(--inset-shadow);
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  :is(input, textarea, select):where(.border-border-control):where(
+      :hover:not(:disabled, :focus, [aria-invalid='true'])
+    ) {
+    border-color: color-mix(in oklab, var(--border-control), var(--text) 28%);
+  }
+}
+:is(input, textarea, select):where(.border-border-control):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -1px;
+  box-shadow: var(--inset-shadow), var(--focus-glow);
+}
+:is(input, textarea, select):where(.border-border-control):disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* ---- Page header and page atmosphere ------------------------------------ */
+
+/* The display title of a top-level page (PageHeader): Geist at a tight
+   display size, with a restrained top-to-bottom ink gradient (the chat
+   stage's heading at lower intensity). */
+.page-title {
+  font-size: clamp(1.625rem, 1.25rem + 0.9vw, 2rem);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.032em;
+  color: var(--text);
+}
+@supports (background-clip: text) {
+  .page-title {
+    color: transparent;
+    background-image: linear-gradient(
+      180deg,
+      var(--text) 40%,
+      color-mix(in oklab, var(--text), var(--text-muted) 42%)
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+  }
+}
+.page-description {
+  max-width: 64ch;
+  margin-top: 6px;
+  font-size: 15px;
+  line-height: 1.5;
+  letter-spacing: -0.005em;
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+.page-header {
+  padding-top: 4px;
+}
+@media (min-width: 768px) {
+  .page-header {
+    padding-top: 12px;
+  }
+}
+
+/* The page atmosphere, shared with the chat stage at lower intensity: a
+   faint dot grid and a soft lime wash anchored to the top of the page that
+   holds a PageHeader (and the Settings pane), fading out within ~240px.
+   Painted as backgrounds of the scroller itself (attachment `local`), so it
+   sits under every block of the page, scrolls away with the header and
+   needs no extra element. The fade is a canvas-coloured ellipse over the dot
+   layer; no motion, so reduced motion has nothing to stop. */
+#main-content:has([data-page-header]),
+.set-pane {
+  background-color: var(--surface-0);
+  background-image:
+    radial-gradient(ellipse 52% 230px at 28% -30px, var(--page-wash), transparent 72%),
+    radial-gradient(ellipse 34% 190px at 88% -40px, var(--page-wash-2), transparent 72%),
+    radial-gradient(ellipse 82% 250px at 50% 0, transparent 30%, var(--surface-0) 100%),
+    radial-gradient(circle at center, var(--page-dot) 1px, transparent 1.6px);
+  background-size:
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    22px 22px;
+  background-position: center top;
+  background-repeat: no-repeat, no-repeat, no-repeat, repeat;
+  background-attachment: local;
+}
+/* Below md the Settings pane does not scroll; <main> does. */
+@media (max-width: 767.98px) {
+  .set-pane {
+    background: none;
+  }
+  #main-content:has(.set-pane) {
+    background-color: var(--surface-0);
+    background-image:
+      radial-gradient(ellipse 80% 200px at 30% -30px, var(--page-wash), transparent 72%),
+      radial-gradient(ellipse 82% 250px at 50% 0, transparent 30%, var(--surface-0) 100%),
+      radial-gradient(circle at center, var(--page-dot) 1px, transparent 1.6px);
+    background-size:
+      100% 100%,
+      100% 100%,
+      22px 22px;
+    background-position: center top;
+    background-repeat: no-repeat, no-repeat, repeat;
+    background-attachment: local;
+  }
+}
+/* ---- Empty and error states (components/ui/states.tsx) ------------------ */
+
+/* The empty-state mark: the icon in a round, softly lit disc inside two
+   hairline halo rings that fade outwards, composed on the canvas instead of
+   inside a box. */
+.empty-mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 28px;
+  border-radius: 9999px;
+  color: var(--text-muted);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--surface-3), var(--text) 3%),
+    var(--surface-1)
+  );
+  box-shadow:
+    var(--highlight),
+    0 0 0 1px var(--border-strong),
+    0 8px 24px -10px hsl(var(--shadow-color) / 0.3);
+}
+.empty-mark::before,
+.empty-mark::after {
+  content: '';
+  position: absolute;
+  inset: -10px;
+  border-radius: inherit;
+  border: 1px solid var(--border-strong);
+  pointer-events: none;
+}
+.empty-mark::after {
+  inset: -22px;
+  border-color: var(--border);
+  mask-image: linear-gradient(to bottom, #000 20%, transparent 85%);
+}
+.empty-mark svg {
+  width: 20px;
+  height: 20px;
+}
+.empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+.empty-description {
+  max-width: 42ch;
+  margin-top: 6px;
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+.empty-state[data-size='sm'] .empty-mark {
+  width: 38px;
+  height: 38px;
+  margin-bottom: 18px;
+}
+.empty-state[data-size='sm'] .empty-mark::before {
+  inset: -7px;
+}
+.empty-state[data-size='sm'] .empty-mark::after {
+  display: none;
+}
+.empty-state[data-size='sm'] .empty-mark svg {
+  width: 17px;
+  height: 17px;
+}
+.empty-state[data-size='sm'] .empty-title {
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+.empty-state[data-size='sm'] .empty-description {
+  margin-top: 4px;
+  font-size: 13px;
+}
+/* An error notice: a soft danger tint with an inner hairline, not an
+   outlined slab. */
+.error-strip {
+  background: color-mix(in oklab, var(--danger) 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--danger) 16%, transparent);
+}
+
+/* The page's own older wash would double the lime under the header. */
+#main-content:has([data-page-header]) .bg-atmosphere {
+  background-image: none;
+}
+
+/* The outlined button family (button.tsx secondary and outline): the 3:1
+   control boundary, warming towards the text colour on hover. A component
+   layer, so a caller's utilities still win. */
+@layer components {
+  .btn-outline {
+    border: 1px solid var(--border-control);
+    background-color: transparent;
+    color: var(--text);
+  }
+  .btn-outline:hover {
+    border-color: color-mix(in oklab, var(--border-control), var(--text) 28%);
+    background-color: var(--surface-3);
   }
 }
 
@@ -95,8 +383,25 @@
     }
   }
 
-  /* Motion utilities. Durations never exceed --duration-slow (300ms), and an
-     exit is never slower than its entrance (both use the same duration). */
+  .scroll-contained {
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* ---- Surfaces ------------------------------------------------------- */
+
+  /* The faint lime wash behind a primary page. Put it on the page's scroll
+     container or outermost wrapper; it never carries meaning. */
+  .bg-atmosphere {
+    background-image: var(--canvas-atmosphere);
+    background-repeat: no-repeat;
+    background-attachment: local;
+  }
+
+  /* ---- Motion: transitions -------------------------------------------- */
+
+  /* Durations come from tokens.css; an exit is never slower than its
+     entrance. Every rule here is neutralised by reduced motion below. */
   .motion-fade {
     transition: opacity var(--duration-base) var(--ease-out);
   }
@@ -105,28 +410,265 @@
       transform var(--duration-slow) var(--ease-out),
       opacity var(--duration-slow) var(--ease-out);
   }
+
+  /* Pressed state for anything clickable: a quick shrink that confirms the
+     press. Uses the `scale` property so it composes with transforms. */
+  .press {
+    transition:
+      scale var(--duration-press) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out),
+      box-shadow var(--duration-fast) var(--ease-out);
+  }
+  .press:active:not(:disabled, [aria-disabled='true']) {
+    scale: 0.97;
+  }
+
+  /* An interactive card: lifts 1px and deepens its shadow on hover. */
+  .lift {
+    transition:
+      translate var(--duration-base) var(--ease-out),
+      box-shadow var(--duration-base) var(--ease-out),
+      border-color var(--duration-base) var(--ease-out),
+      background-color var(--duration-base) var(--ease-out);
+  }
+  @media (hover: hover) {
+    .lift:hover {
+      translate: 0 -1px;
+      box-shadow: var(--elevation-card-hover);
+      border-color: var(--border-strong);
+    }
+  }
+  .lift:active {
+    translate: 0 0;
+  }
+
+  /* A collapsible region without measuring heights: grid rows 0fr -> 1fr.
+     Wrap the content in ONE child element. Open with data-open="true",
+     data-state="open" or the `open` attribute. Closed content is hidden from
+     the tab order and assistive technology (visibility). */
+  .collapsible {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--duration-base) var(--ease-out);
+  }
+  .collapsible > * {
+    min-height: 0;
+    overflow: hidden;
+    visibility: hidden;
+    transition: visibility var(--duration-base);
+  }
+  .collapsible:is([data-open='true'], [data-state='open'], [open]) {
+    grid-template-rows: 1fr;
+  }
+  .collapsible:is([data-open='true'], [data-state='open'], [open]) > * {
+    visibility: visible;
+  }
+
+  /* ---- Motion: entrances ---------------------------------------------- */
+
+  /* Arrival: fade plus a small rise. For a page's main column, a section
+     that appears, a newly inserted card. Plays once on mount. */
+  .anim-enter {
+    animation: agentos-rise var(--duration-enter) var(--ease-enter) both;
+  }
+  .anim-fade-in {
+    animation: agentos-fade-in var(--duration-base) var(--ease-out) both;
+  }
+  /* A one-shot scale-in from the element's own transform-origin (set
+     `origin-*` to point it at its trigger). */
+  .anim-scale-in {
+    animation: agentos-scale-in var(--duration-spring) var(--ease-spring) both;
+  }
+
+  /* Staggered children: each direct child rises 30ms after the previous
+     one; the 6th and later arrive together, so the whole sequence ends by
+     enter + 5 * step = 450ms. */
+  .anim-stagger > * {
+    animation: agentos-rise var(--duration-enter) var(--ease-enter) both;
+    animation-delay: calc(var(--stagger-i, 5) * var(--stagger-step));
+  }
+  .anim-stagger > :nth-child(1) {
+    --stagger-i: 0;
+  }
+  .anim-stagger > :nth-child(2) {
+    --stagger-i: 1;
+  }
+  .anim-stagger > :nth-child(3) {
+    --stagger-i: 2;
+  }
+  .anim-stagger > :nth-child(4) {
+    --stagger-i: 3;
+  }
+  .anim-stagger > :nth-child(5) {
+    --stagger-i: 4;
+  }
+
+  /* Confirms a change in place (saved row, updated value): a brief accent
+     wash that fades back to the element's own background. */
+  .anim-flash {
+    animation: agentos-flash var(--duration-enter) var(--ease-out);
+  }
+
+  /* ---- Motion: overlays (Radix data-state) ------------------------------ */
+
   .anim-overlay-in[data-state='open'] {
     animation: agentos-fade-in var(--duration-base) var(--ease-out);
   }
   .anim-overlay-in[data-state='closed'] {
-    animation: agentos-fade-out var(--duration-base) var(--ease-out);
+    animation: agentos-fade-out var(--duration-exit) var(--ease-in) both;
   }
   .anim-dialog-in[data-state='open'] {
-    animation: agentos-pop-in var(--duration-base) var(--ease-out);
+    animation: agentos-dialog-in var(--duration-spring) var(--ease-spring);
   }
   .anim-dialog-in[data-state='closed'] {
-    animation: agentos-fade-out var(--duration-fast) var(--ease-out);
+    animation: agentos-dialog-out var(--duration-exit) var(--ease-in) both;
   }
   .anim-drawer-in[data-state='open'] {
-    animation: agentos-slide-in var(--duration-slow) var(--ease-out);
+    animation: agentos-slide-in var(--duration-slow) var(--ease-enter);
   }
   .anim-drawer-in[data-state='closed'] {
-    animation: agentos-slide-out var(--duration-base) var(--ease-out);
+    animation: agentos-slide-out var(--duration-base) var(--ease-in) both;
+  }
+  .anim-sheet-right[data-state='open'] {
+    animation: agentos-slide-in-right var(--duration-slow) var(--ease-enter);
+  }
+  .anim-sheet-right[data-state='closed'] {
+    animation: agentos-slide-out-right var(--duration-base) var(--ease-in) both;
+  }
+  .anim-sheet-bottom[data-state='open'] {
+    animation: agentos-slide-in-bottom var(--duration-slow) var(--ease-enter);
+  }
+  .anim-sheet-bottom[data-state='closed'] {
+    animation: agentos-slide-out-bottom var(--duration-base) var(--ease-in) both;
   }
 
-  .scroll-contained {
-    overflow: auto;
-    overscroll-behavior: contain;
+  /* Menus, popovers and tooltips grow out of their trigger: the origin comes
+     from Radix's per-component transform-origin variable, and the content
+     drifts in from the side it opened on. */
+  .anim-pop {
+    transform-origin: var(
+      --radix-dropdown-menu-content-transform-origin,
+      var(
+        --radix-context-menu-content-transform-origin,
+        var(
+          --radix-tooltip-content-transform-origin,
+          var(--radix-popover-content-transform-origin, center)
+        )
+      )
+    );
+  }
+  .anim-pop[data-side='bottom'] {
+    --pop-y: -4px;
+  }
+  .anim-pop[data-side='top'] {
+    --pop-y: 4px;
+  }
+  .anim-pop[data-side='right'] {
+    --pop-x: -4px;
+  }
+  .anim-pop[data-side='left'] {
+    --pop-x: 4px;
+  }
+  .anim-pop:is([data-state='open'], [data-state='delayed-open'], [data-state='instant-open']) {
+    animation: agentos-pop-in var(--duration-slow) var(--ease-enter);
+  }
+  .anim-pop[data-state='closed'] {
+    animation: agentos-pop-out var(--duration-exit) var(--ease-in) both;
+  }
+
+  /* ---- Motion: status and loading -------------------------------------- */
+
+  /* Shimmer for skeleton blocks (loading is status, so it loops while
+     shown). A moving highlight band over the block's own fill. */
+  .skeleton-shimmer {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in oklab, var(--text) 7%, transparent) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    background-repeat: no-repeat;
+    animation: agentos-shimmer var(--pulse-period) var(--ease-in-out) infinite;
+  }
+
+  /* A status dot painted in currentColor (`text-ok`, `text-accent`, …).
+     With data-live it also sends out a soft ping: live status only. Add
+     `motion-status` alongside data-live so reduced motion keeps a slow
+     opacity pulse instead (and the UI audit treats it as status). */
+  .status-dot {
+    position: relative;
+    display: inline-block;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    background: currentColor;
+  }
+  .status-dot[data-live]::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: currentColor;
+    opacity: 0;
+    animation: agentos-ping var(--pulse-period) var(--ease-out) infinite;
+  }
+
+  /* The caret after streaming text. Put it on the element that receives the
+     text; remove the class when the stream ends. */
+  .stream-caret::after {
+    content: '';
+    display: inline-block;
+    width: 0.5em;
+    height: 1.05em;
+    margin-inline-start: 2px;
+    vertical-align: text-bottom;
+    border-radius: 2px;
+    background: var(--accent);
+    animation: agentos-caret var(--caret-period) steps(2, jump-none) infinite;
+  }
+
+  /* ---- Gliding active indicator ---------------------------------------- */
+
+  /* A track (tabs, segmented control, nav list) whose active item is marked
+     by one pill that glides between items. The `useGlide()` hook measures the
+     active item into --glide-x/y/w/h and sets data-glide; until it has (or
+     without JS) the active item paints its own background, so nothing is
+     ever missing. Pill colour: --glide-bg; radius: --glide-radius. */
+  .glide-track {
+    position: relative;
+    isolation: isolate;
+  }
+  .glide-track::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: var(--glide-bg, var(--surface-overlay));
+    clip-path: inset(
+      var(--glide-y, 0px) calc(100% - var(--glide-x, 0px) - var(--glide-w, 0px))
+        calc(100% - var(--glide-y, 0px) - var(--glide-h, 0px)) var(--glide-x, 0px) round
+        var(--glide-radius, 6px)
+    );
+    opacity: 0;
+  }
+  .glide-track[data-glide]::before {
+    opacity: 1;
+  }
+  .glide-track[data-glide='animate']::before {
+    transition: clip-path var(--duration-spring) var(--ease-spring);
+  }
+  .glide-track:not([data-glide])
+    > :is(
+      [data-state='active'],
+      [aria-pressed='true'],
+      [aria-current='page'],
+      [aria-selected='true'],
+      [data-active='true']
+    ) {
+    background: var(--glide-bg, var(--surface-overlay));
   }
 }
 
@@ -140,10 +682,40 @@
     opacity: 0;
   }
 }
+@keyframes agentos-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes agentos-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+@keyframes agentos-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+}
+@keyframes agentos-dialog-out {
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
 @keyframes agentos-pop-in {
   from {
     opacity: 0;
-    transform: scale(0.98);
+    transform: translate(var(--pop-x, 0), var(--pop-y, 0)) scale(0.96);
+  }
+}
+@keyframes agentos-pop-out {
+  to {
+    opacity: 0;
+    transform: scale(0.97);
   }
 }
 @keyframes agentos-slide-in {
@@ -156,22 +728,129 @@
     transform: translateX(-100%);
   }
 }
+@keyframes agentos-slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes agentos-slide-out-right {
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes agentos-slide-in-bottom {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes agentos-slide-out-bottom {
+  to {
+    transform: translateY(100%);
+  }
+}
+@keyframes agentos-flash {
+  from {
+    background-color: var(--accent-tint);
+  }
+}
+@keyframes agentos-shimmer {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+@keyframes agentos-ping {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+@keyframes agentos-breathe {
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes agentos-caret {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes agentos-vt-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes agentos-vt-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
 
-/* Reduced motion: dialogs, the drawer, panels, smooth scrolling and message
-   entry become instant. A running indicator is status, not decoration, so it
-   keeps a (slow, opacity-only) pulse via .motion-status. */
+/* Page transitions (View Transitions API, opted into per link with
+   react-router's `viewTransition`). Only the main content area moves: the
+   rail, list pane and everything else are captured in the root snapshot,
+   which swaps without animation. */
+#main-content {
+  view-transition-name: agentos-main;
+}
+/* Floating layers that overlap the main area need their own name, or the
+   main area's snapshot paints over them while it animates: the toaster here,
+   the approval tray through its `[view-transition-name:agentos-tray]` class. */
+[data-sonner-toaster] {
+  view-transition-name: agentos-toasts;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+::view-transition-old(agentos-main) {
+  animation: agentos-vt-out var(--duration-exit) var(--ease-in) both;
+}
+::view-transition-new(agentos-main) {
+  animation: agentos-vt-in var(--duration-enter) var(--ease-enter) both;
+}
+
+/* Reduced motion: dialogs, the drawer, panels, entrances, page transitions,
+   smooth scrolling and message entry become instant, and nothing waits on a
+   delay. A running indicator is status, not decoration, so it keeps a (slow,
+   opacity-only) pulse via .motion-status. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0s !important;
+    animation-delay: 0s !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0s !important;
+    transition-delay: 0s !important;
     scroll-behavior: auto !important;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
   }
   .motion-status {
     animation-duration: 2s !important;
     animation-iteration-count: infinite !important;
+  }
+  .status-dot[data-live].motion-status {
+    animation-name: agentos-breathe !important;
+    animation-timing-function: ease-in-out !important;
+  }
+  .status-dot::after {
+    display: none;
+  }
+  .skeleton-shimmer {
+    background-image: none;
   }
 }
 
@@ -194,6 +873,48 @@
   .motion-status {
     forced-color-adjust: none;
     color: CanvasText;
+  }
+  .status-dot,
+  .stream-caret::after,
+  input[type='search']::-webkit-search-cancel-button {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  .glide-track:not([data-glide])
+    > :is(
+      [data-state='active'],
+      [aria-pressed='true'],
+      [aria-current='page'],
+      [aria-selected='true'],
+      [data-active='true']
+    ),
+  .glide-track
+    > :is(
+      [data-state='active'],
+      [aria-pressed='true'],
+      [aria-current='page'],
+      [aria-selected='true'],
+      [data-active='true']
+    ) {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+  .glide-track::before,
+  .bg-atmosphere,
+  #main-content:has([data-page-header]),
+  #main-content:has(.set-pane),
+  .set-pane {
+    background: none;
+  }
+  .empty-mark::before,
+  .empty-mark::after {
+    display: none;
+  }
+  .page-title {
+    forced-color-adjust: none;
+    color: CanvasText;
+    background: none;
   }
   [data-decorative] {
     display: none;
