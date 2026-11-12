@@ -468,16 +468,18 @@ export function SessionsPage() {
               <thead>
                 <tr>
                   <th scope="col" data-col="check">
-                    <input
-                      type="checkbox"
-                      aria-label={t('webPagesWork.selectAll')}
-                      checked={allVisibleSelected}
-                      ref={(el) => {
-                        if (el) el.indeterminate = someVisibleSelected
-                      }}
-                      onChange={(e) => toggleAll(e.target.checked)}
-                      className="sx-check"
-                    />
+                    <label className="sx-check-hit">
+                      <input
+                        type="checkbox"
+                        aria-label={t('webPagesWork.selectAll')}
+                        checked={allVisibleSelected}
+                        ref={(el) => {
+                          if (el) el.indeterminate = someVisibleSelected
+                        }}
+                        onChange={(e) => toggleAll(e.target.checked)}
+                        className="sx-check"
+                      />
+                    </label>
                   </th>
                   <SortHeader
                     col="key"
@@ -727,16 +729,17 @@ function SessionsSummary({
     <ul aria-label={t('webPagesWork.summaryLabel')} className="sx-summary">
       <li className="sx-summary-total">
         {tPlural('webPagesWork.summarySessions', count, { count: sessionsCountText(totals) })}
+
+        {parts.some((p) => p.n > 0) ? (
+          <span aria-hidden className="sx-meter" title={t('webPagesWork.summaryMeter')}>
+            {parts
+              .filter((p) => p.n > 0)
+              .map((p) => (
+                <span key={p.key} className={p.tone} style={{ flexGrow: p.n }} />
+              ))}
+          </span>
+        ) : null}
       </li>
-      {parts.some((p) => p.n > 0) ? (
-        <li aria-hidden className="sx-meter" title={t('webPagesWork.summaryMeter')}>
-          {parts
-            .filter((p) => p.n > 0)
-            .map((p) => (
-              <span key={p.key} className={p.tone} style={{ flexGrow: p.n }} />
-            ))}
-        </li>
-      ) : null}
       {parts.map((p) => (
         <li
           key={p.key}
@@ -748,11 +751,13 @@ function SessionsSummary({
           {p.text(formatNumber(p.n))}
         </li>
       ))}
-      <li role="status" className="sx-summary-chip" data-live={live || undefined}>
+      <li className="sx-summary-chip" data-live={live || undefined}>
         <StatusDot tone={live ? 'accent' : 'neutral'} live={live} className="size-1.5" />
-        {live
-          ? tPlural('webPagesWork.executingNow', stats.activeRuns)
-          : t('webPagesWork.executingNone')}
+        <span role="status">
+          {live
+            ? tPlural('webPagesWork.executingNow', stats.activeRuns)
+            : t('webPagesWork.executingNone')}
+        </span>
       </li>
     </ul>
   )
@@ -1007,13 +1012,15 @@ function SessionTableRow({
     >
       <td data-col="check">
         {row.provisional ? null : (
-          <input
-            type="checkbox"
-            aria-label={t('webPagesWork.selectRow', { title })}
-            checked={selected}
-            onChange={(e) => onSelect(e.target.checked)}
-            className="sx-check"
-          />
+          <label className="sx-check-hit">
+            <input
+              type="checkbox"
+              aria-label={t('webPagesWork.selectRow', { title })}
+              checked={selected}
+              onChange={(e) => onSelect(e.target.checked)}
+              className="sx-check"
+            />
+          </label>
         )}
       </td>
       <td data-col="session">

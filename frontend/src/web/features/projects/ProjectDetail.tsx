@@ -392,7 +392,7 @@ export function ProjectDetail({
           <Card asChild padding="none">
             <section aria-label={t('webPagesWork.projectSessions')} className="flex flex-col">
               <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-2">
-                <h2 className="flex flex-1 items-center gap-2 text-section [&_svg]:size-4 [&_svg]:text-text-muted">
+                <h2 className="flex min-w-0 flex-[1_1_14rem] items-center gap-2 text-section [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-text-muted">
                   <MessagesSquare aria-hidden />
                   {t('webPagesWork.projectSessions')}
                   <span className="text-small font-normal text-text-muted tabular-nums">
