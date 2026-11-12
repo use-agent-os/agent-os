@@ -1,6 +1,6 @@
 {
   "name": "agentos-desktop",
-  "version": "2026.11.12.post1",
+  "version": "2026.11.12.post2",
   "private": true,
   "description": "macOS desktop shell for AgentOS (Electron + React)",
   "repository": {
