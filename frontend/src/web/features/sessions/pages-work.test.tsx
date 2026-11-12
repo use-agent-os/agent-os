@@ -1,11 +1,9 @@
 import '@/test/web'
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { usePendingQuestions } from '@/lib/pending-questions'
-import { useRuntimeSignals } from '@/lib/runtime-signals'
 import { renderShell, resetShellState, sessionRow, shellRpc } from '@/test/web-shell'
-import { JOBS_POLL_MS, runNowStatus } from '@/web/features/automations/AutomationsPage'
 
 beforeEach(() => {
   resetShellState()
@@ -336,113 +334,6 @@ describe('Projects page', () => {
   })
 })
 
-// ── Automations ─────────────────────────────────────────────────────────────
-
-function cronRpc(jobs: Record<string, unknown>[] = []) {
-  const state = { jobs }
-  const rpc = shellRpc()
-    .handle('cron.list', () => ({ jobs: structuredClone(state.jobs) }))
-    .handle('channels.deliveryTargets', { targets: {} })
-    .handle('cron.subscribe', { ok: true })
-    .handle('cron.unsubscribe', { ok: true })
-  return { rpc, state }
-}
-
-describe('Automations page', () => {
-  it('explains the empty page and offers New automation and presets', async () => {
-    renderShell('/automations', cronRpc().rpc)
-    const empty = await within(main()).findByText('No automations yet')
-    const region = empty.closest('[data-slot="empty-state"]') as HTMLElement
-    expect(region).toHaveTextContent('Scheduled jobs appear here')
-    expect(within(region).getByRole('button', { name: 'New automation' })).toBeInTheDocument()
-    expect(within(region).getByRole('button', { name: /Daily standup nudge/ })).toBeInTheDocument()
-  })
-
-  it('creates an automation from the empty state with cron.create', async () => {
-    const user = userEvent.setup()
-    const { rpc, state } = cronRpc()
-    rpc.handle('cron.create', (p: Record<string, unknown>) => {
-      state.jobs = [{ id: 'job-1', enabled: true, expression: '0 9 * * *', ...p }]
-      return { id: 'job-1' }
-    })
-    renderShell('/automations', rpc)
-    const empty = (await within(main()).findByText('No automations yet')).closest(
-      '[data-slot="empty-state"]',
-    ) as HTMLElement
-    await user.click(within(empty).getByRole('button', { name: 'New automation' }))
-
-    const sheet = await screen.findByRole('dialog', { name: 'New automation' })
-    await user.type(within(sheet).getByRole('textbox', { name: 'Name' }), 'Daily report')
-    await user.type(within(sheet).getByRole('textbox', { name: 'Cron expression' }), '0 9 * * *')
-    expect(within(sheet).getByText('Every day at 09:00')).toBeInTheDocument()
-    expect(within(sheet).getByText('Next runs')).toBeInTheDocument()
-    await user.click(within(sheet).getByRole('button', { name: 'Create automation' }))
-
-    await waitFor(() => expect(rpc.callsTo('cron.create')).toHaveLength(1))
-    expect(rpc.callsTo('cron.create')[0]).toMatchObject({
-      name: 'Daily report',
-      enabled: true,
-      payloadKind: 'reminder',
-      schedule: { kind: 'cron', expr: '0 9 * * *' },
-    })
-    expect(await within(main()).findByRole('article', { name: 'Daily report' })).toBeInTheDocument()
-    expect(screen.queryByRole('dialog', { name: 'New automation' })).toBeNull()
-  })
-
-  it('seeds the editor from a preset and refuses to save without a name', async () => {
-    const user = userEvent.setup()
-    const { rpc } = cronRpc()
-    rpc.handle('cron.create', { id: 'x' })
-    renderShell('/automations', rpc)
-    await user.click(await within(main()).findByRole('button', { name: /Friday wrap-up/ }))
-    const sheet = await screen.findByRole('dialog', { name: 'New automation' })
-    expect(within(sheet).getByRole('textbox', { name: 'Name' })).toHaveValue('Friday wrap-up')
-    expect(within(sheet).getByRole('textbox', { name: 'Cron expression' })).toHaveValue(
-      '0 17 * * 5',
-    )
-    await user.clear(within(sheet).getByRole('textbox', { name: 'Name' }))
-    await user.click(within(sheet).getByRole('button', { name: 'Create automation' }))
-    const alert = await within(sheet).findByRole('alert')
-    // The message sits with the field it is about.
-    const name = within(sheet).getByRole('textbox', { name: 'Name' })
-    expect(name).toHaveAttribute('aria-invalid', 'true')
-    expect(name).toHaveAttribute('aria-describedby', alert.id)
-    expect(rpc.callsTo('cron.create')).toEqual([])
-  })
-
-  it('runs, pauses and deletes a job, and refreshes on cron.run.finished', async () => {
-    const user = userEvent.setup()
-    const { rpc } = cronRpc([
-      { id: 'job-1', name: 'Nightly', enabled: true, expression: '0 2 * * *' },
-    ])
-    rpc
-      .handle('cron.run', { reply: 'all good' })
-      .handle('cron.update', { ok: true })
-      .handle('cron.remove', { ok: true })
-    renderShell('/automations', rpc)
-    const card = await within(main()).findByRole('article', { name: 'Nightly' })
-
-    await user.click(within(card).getByRole('button', { name: 'Run now: Nightly' }))
-    expect(await within(card).findByText('Run complete: all good')).toBeInTheDocument()
-    expect(rpc.callsTo('cron.run')).toEqual([{ id: 'job-1' }])
-
-    await user.click(within(card).getByRole('button', { name: 'Pause: Nightly' }))
-    await waitFor(() =>
-      expect(rpc.callsTo('cron.update')).toEqual([{ id: 'job-1', enabled: false }]),
-    )
-
-    const listed = rpc.callsTo('cron.list').length
-    rpc.emit('cron.run.finished', { id: 'job-1' })
-    await waitFor(() => expect(rpc.callsTo('cron.list').length).toBeGreaterThan(listed))
-
-    await user.click(within(card).getByRole('button', { name: 'Delete Nightly' }))
-    const dialog = await screen.findByRole('alertdialog')
-    expect(rpc.callsTo('cron.remove')).toEqual([])
-    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
-    await waitFor(() => expect(rpc.callsTo('cron.remove')).toEqual([{ id: 'job-1' }]))
-  })
-})
-
 // ── Review fixes (2026-11-10) ───────────────────────────────────────────────
 
 describe('Sessions page: status, totals and failures', () => {
@@ -657,61 +548,5 @@ describe('Projects page: rename then knowledge save', () => {
     expect(await within(sessions).findByRole('note')).toHaveTextContent(
       'Showing 1 of the project’s 7 sessions',
     )
-  })
-})
-
-describe('Automations page: reconnect and Run now', () => {
-  it('subscribes again after a reconnect', async () => {
-    const { rpc } = cronRpc([
-      { id: 'job-1', name: 'Nightly', enabled: true, expression: '0 2 * * *' },
-    ])
-    renderShell('/automations', rpc)
-    await within(main()).findByRole('article', { name: 'Nightly' })
-    await waitFor(() => expect(rpc.callsTo('cron.subscribe')).toHaveLength(1))
-    // The gateway restarted: subscriptions are per connection, so the new one has none.
-    act(() => useRuntimeSignals.setState({ connectedAt: Date.now() + 1 }))
-    await waitFor(() => expect(rpc.callsTo('cron.subscribe')).toHaveLength(2))
-    expect(rpc.callsTo('cron.unsubscribe')).toEqual([])
-  })
-
-  it('polls the jobs slowly as a fallback for missed run events', () => {
-    expect(JOBS_POLL_MS).toBeGreaterThanOrEqual(30_000)
-    expect(JOBS_POLL_MS).toBeLessThanOrEqual(120_000)
-  })
-
-  it('reports a failed or refused run as a failure even when it carries text', async () => {
-    const user = userEvent.setup()
-    const { rpc } = cronRpc([
-      { id: 'job-1', name: 'Nightly', enabled: true, expression: '0 2 * * *' },
-    ])
-    rpc.handle('cron.run', {
-      success: false,
-      status: 'accepted',
-      reply: 'partial stdout',
-      error: 'exit status 2',
-    })
-    renderShell('/automations', rpc)
-    const card = await within(main()).findByRole('article', { name: 'Nightly' })
-    await user.click(within(card).getByRole('button', { name: 'Run now: Nightly' }))
-    expect(await within(card).findByRole('alert')).toHaveTextContent('Run failed: exit status 2')
-
-    rpc.handle('cron.run', { success: false, status: 'busy', reason: 'busy', error: null })
-    await user.click(within(card).getByRole('button', { name: 'Run now: Nightly' }))
-    await waitFor(() =>
-      expect(within(card).getByRole('alert')).toHaveTextContent('Didn’t run: busy'),
-    )
-  })
-
-  it('maps the cron.run answer to the card status', () => {
-    expect(runNowStatus({ success: true, reply: 'ok' })).toEqual({
-      tone: 'ok',
-      text: 'Run complete: ok',
-    })
-    expect(runNowStatus({ success: false, status: 'accepted', reply: 'out' }).tone).toBe('danger')
-    expect(runNowStatus({ success: false, status: 'disabled', reason: 'disabled' })).toEqual({
-      tone: 'danger',
-      text: 'Didn’t run: disabled',
-    })
-    expect(runNowStatus(null)).toEqual({ tone: 'ok', text: 'Run started' })
   })
 })

@@ -14,7 +14,6 @@ import { useId, useMemo, useState, type ReactNode } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webPagesWork'
 import type { Gate } from '@/lib/disabled-reason'
-import { cn } from '@/lib/utils'
 import {
   buildDelivery,
   buildSavePayload,
@@ -44,7 +43,7 @@ import { SectionHeader } from '@/web/components/ui/section-header'
 import { SegmentedControl } from '@/web/components/ui/segmented-control'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/web/components/ui/sheet'
 import { Switch } from '@/web/components/ui/switch'
-import '@/web/styles/work.css'
+import '@/web/styles/page-automations.css'
 
 // The create / edit panel for one automation (task 8.5). All validation and
 // payload assembly is views/cron/logic (seedForm, resolveTarget,
@@ -206,33 +205,23 @@ export function CronExplain({ expr, timeZone = '' }: { expr: string; timeZone?: 
     )
   }
   return (
-    <div
-      role="status"
-      className="anim-fade-in rounded-card border border-border bg-surface-2 px-3.5 py-3 shadow-highlight"
-    >
+    <div role="status" className="am-explain anim-fade-in flex flex-col gap-3">
       <p className="flex items-center gap-2 font-medium [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-accent">
         <CalendarClock aria-hidden />
         {explainCron(trimmed) || t('webPagesWork.explainCustom')}
       </p>
       {upcoming.length ? (
-        <>
-          <p className="mt-2.5 text-label text-text-muted">{t('webPagesWork.nextRuns')}</p>
-          <ul role="list" className="mt-1.5 flex flex-col gap-1 text-small tabular-nums">
-            {upcoming.map((d, i) => (
-              <li key={d.getTime()} className="flex items-center gap-2">
-                <span
-                  aria-hidden
-                  className={cn(
-                    'size-1.5 shrink-0 rounded-full',
-                    i === 0 ? 'bg-accent' : 'bg-border-strong',
-                  )}
-                />
+        <div className="flex flex-col gap-1.5">
+          <p className="text-label text-text-muted">{t('webPagesWork.nextRuns')}</p>
+          <ul role="list" className="am-explain-runs">
+            {upcoming.map((d) => (
+              <li key={d.getTime()}>
                 <span className="font-medium">{humanCountdown(d)}</span>
                 <span className="text-text-muted">{humanTime(d)}</span>
               </li>
             ))}
           </ul>
-        </>
+        </div>
       ) : null}
     </div>
   )
@@ -683,7 +672,7 @@ export function AutomationEditor({
                   <label className="flex items-center gap-2 font-medium">
                     <input
                       type="checkbox"
-                      className="work-check"
+                      className="am-check"
                       checked={form.elevated}
                       onChange={(e) => set('elevated', e.target.checked)}
                       {...invalidProps('elevated')}
@@ -698,11 +687,11 @@ export function AutomationEditor({
               ) : null}
             </FormSection>
 
-            <details className="work-details group rounded-card border border-border bg-surface-1 shadow-card">
+            <details className="am-details group rounded-card border border-border bg-surface-1 shadow-card">
               <summary className="press target flex cursor-pointer items-center gap-2 rounded-card px-4 py-3 font-medium hover:bg-surface-2">
                 <Send className="size-4 shrink-0 text-text-muted" aria-hidden />
                 <span className="flex-1">{t('webPagesWork.deliverySection')}</span>
-                <ChevronRight className="work-chevron size-4 text-text-muted" aria-hidden />
+                <ChevronRight className="am-chevron size-4 text-text-muted" aria-hidden />
               </summary>
               <div className="flex flex-col gap-4 border-t border-border px-4 pt-4 pb-4">
                 <Field id={ids.wake} label={t('webPagesWork.fieldWake')}>
@@ -787,7 +776,7 @@ export function AutomationEditor({
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
-                      className="work-check"
+                      className="am-check"
                       checked={form.deliveryBestEffort}
                       onChange={(e) => set('deliveryBestEffort', e.target.checked)}
                     />
