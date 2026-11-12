@@ -37,8 +37,6 @@ interface ShellState {
   paletteOpen: boolean
   /** Where focus was when the palette opened, to return it on close. */
   paletteReturnFocus: HTMLElement | null
-  /** Explicit Details visibility; null lets the chat pane decide by width. */
-  detailsOpen: boolean | null
   /** Re-selecting the open view collapses the pane; otherwise open that view. */
   selectView(view: ListView): void
   togglePane(): void
@@ -48,8 +46,6 @@ interface ShellState {
   clearFilters(): void
   setDrawerOpen(open: boolean): void
   setPaletteOpen(open: boolean): void
-  toggleDetails(): void
-  setDetailsOpen(open: boolean | null): void
 }
 
 export const useShell = create<ShellState>((set, get) => ({
@@ -61,7 +57,6 @@ export const useShell = create<ShellState>((set, get) => ({
   drawerOpen: false,
   paletteOpen: false,
   paletteReturnFocus: null,
-  detailsOpen: null,
   selectView(view) {
     const { view: current, paneOpen } = get()
     if (paneOpen && current === view) set({ paneOpen: false })
@@ -104,12 +99,6 @@ export const useShell = create<ShellState>((set, get) => ({
     }
     set({ paletteOpen })
   },
-  toggleDetails() {
-    set({ detailsOpen: !(get().detailsOpen ?? false) })
-  },
-  setDetailsOpen(detailsOpen) {
-    set({ detailsOpen })
-  },
 }))
 
 /** Test seam: back to a fresh load. */
@@ -123,6 +112,5 @@ export function resetShellForTests(): void {
     drawerOpen: false,
     paletteOpen: false,
     paletteReturnFocus: null,
-    detailsOpen: null,
   })
 }

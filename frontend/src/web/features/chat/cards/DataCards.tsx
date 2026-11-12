@@ -148,7 +148,7 @@ function FlowRunView({ initial, name }: { initial: FlowRunCard; name: string }) 
   const done = card.progress.total > 0 ? `${card.progress.done}/${card.progress.total}` : ''
   return (
     <Shell icon={<Workflow />} title={t('webChat.flowRunTitle', { name: card.flowName || name })}>
-      <p className="text-small" data-testid="flow-status">
+      <p className="text-small text-text-muted tabular-nums" data-testid="flow-status">
         {flowRunStatusLabel(card.status)}
         {done ? ` · ${done}` : ''}
         {card.costUsd !== null ? ` · ${formatFlowUsd(card.costUsd)}` : ''}
@@ -159,7 +159,7 @@ function FlowRunView({ initial, name }: { initial: FlowRunCard; name: string }) 
         </p>
       ) : null}
       {card.images.length ? (
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap gap-2">
           {card.images
             .slice(0, 8)
             .map((img) =>
@@ -223,11 +223,15 @@ export function DataCard({ category, artifact }: { category: string; artifact: A
       <Shell icon={<LayoutGrid />} title={payload.title || name}>
         <ul role="list" className="grid gap-2 sm:grid-cols-2">
           {payload.cards.map((card, i) => (
-            <li key={i} className="rounded-control border border-border bg-surface-2/50 p-3">
-              <p className="font-medium">{card.title}</p>
+            <li key={i} className="chat-subcard">
+              <div className="flex items-start justify-between gap-2">
+                <p className="min-w-0 font-medium">{card.title}</p>
+                {card.badge ? (
+                  <span className="chat-mono-chip shrink-0 font-sans">{card.badge}</span>
+                ) : null}
+              </div>
               {card.subtitle ? <p className="text-small text-text-muted">{card.subtitle}</p> : null}
-              {card.badge ? <span className="text-small text-text-muted">{card.badge}</span> : null}
-              <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-small">
+              <dl className="chat-kv mt-2.5">
                 {card.fields.map((f, j) => (
                   <div key={j} className="contents">
                     <dt className="text-text-muted">{f.label}</dt>

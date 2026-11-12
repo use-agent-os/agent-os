@@ -121,7 +121,6 @@ export function CommandPalette({
       if (phone) shell.setDrawerOpen(!shell.drawerOpen)
       else shell.togglePane()
     },
-    toggleDetails: () => useShell.getState().toggleDetails(),
     setTheme: setPreference,
     openShortcuts: overview.open,
     retryConnection: () => rpc.reconnect({ force: true }),

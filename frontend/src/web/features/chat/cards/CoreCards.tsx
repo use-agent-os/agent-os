@@ -39,9 +39,8 @@ const TradingCard = lazy(async () => ({ default: (await import('./TradingCards')
 const TRADING = new Set(['dca', 'lp', 'markets', 'trigger'])
 
 /** The surface every transcript card shares: a raised card, icon in a tile. */
-export const CARD = 'rounded-card border border-border bg-surface-1 p-4 shadow-card'
-export const CARD_PLACEHOLDER =
-  'skeleton-shimmer h-24 rounded-card border border-border bg-surface-1'
+export const CARD = 'chat-card'
+export const CARD_PLACEHOLDER = 'chat-card skeleton-shimmer h-28'
 
 export function CardHeader({
   icon,
@@ -56,14 +55,8 @@ export function CardHeader({
   children?: React.ReactNode
 }) {
   return (
-    <header className="mb-3 flex items-center gap-2.5 text-ui font-semibold">
-      <span
-        className={cn(
-          'chat-tile',
-          tone === 'accent' && 'border-accent/30 bg-accent-tint text-accent',
-        )}
-        aria-hidden
-      >
+    <header className="chat-card-header">
+      <span className="chat-tile" data-tone={tone} aria-hidden>
         {icon}
       </span>
       <h3 className="min-w-0 flex-1 truncate">{title}</h3>
@@ -97,7 +90,7 @@ export function PlanCard({ plan, locked }: { plan: string; locked: boolean }) {
   return (
     <CardShell icon={<ListChecks />} title={t('webChat.planTitle')} tone="accent">
       <Markdown text={plan} />
-      <div className="mt-4 border-t border-border pt-3">
+      <div className="chat-card-footer">
         {done || locked ? (
           <span className="anim-fade-in inline-flex items-center gap-1.5 text-small text-text-muted">
             <CheckCircle2 className="size-4 text-ok" aria-hidden data-status-icon />
@@ -205,22 +198,17 @@ export function ArtifactChip({ item }: { item: Extract<Item, { kind: 'artifact' 
   const kind = artifactKind(artifact)
   const url = artifactDownloadUrl(artifact)
   return (
-    <div className={cn(CARD, 'lift flex items-center gap-3 p-2.5 pr-2')}>
+    <div className="chat-card chat-artifact lift">
       {isImageArtifact(artifact) && url ? (
-        <img
-          src={url}
-          alt=""
-          className="size-11 rounded-lg border border-border object-cover"
-          data-decorative
-        />
+        <img src={url} alt="" className="chat-artifact-thumb object-cover" data-decorative />
       ) : (
-        <span className="chat-tile size-11 rounded-lg" aria-hidden>
+        <span className="chat-artifact-thumb chat-tile" aria-hidden>
           <FileText />
         </span>
       )}
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium">{name}</p>
-        <p className="text-small text-text-muted">
+        <p className="text-small text-text-muted tabular-nums">
           {artifactKindLabel(kind)} · {artifactSizeLabel(artifact.size)}
         </p>
       </div>
@@ -260,9 +248,13 @@ export function AcpCard({ args, result }: { args: unknown; result: unknown }) {
   const [cancelled, setCancelled] = useState(false)
   return (
     <CardShell icon={<Bot />} title={t('webChat.acpTitle', { name })}>
-      {key ? <p className="font-mono text-small text-text-muted">{key}</p> : null}
       {key ? (
-        <div className="mt-2 flex gap-2">
+        <p className="chat-mono-chip max-w-full">
+          <span className="truncate">{key}</span>
+        </p>
+      ) : null}
+      {key ? (
+        <div className="chat-card-footer">
           <Button
             size="sm"
             variant="outline"
@@ -306,7 +298,7 @@ export function CardItem({ item, answered }: { item: Item; answered: boolean }) 
         <div
           role="separator"
           aria-label={t('webChat.compacted')}
-          className="flex items-center gap-3 py-2 text-label text-text-muted"
+          className="flex items-center gap-3 py-1 text-label text-text-muted"
         >
           <span className="chat-rule" />
           <Scissors className="size-3.5" aria-hidden />
@@ -328,15 +320,15 @@ export function CardItem({ item, answered }: { item: Item; answered: boolean }) 
       )
     case 'steering':
       return (
-        <p className="flex items-center gap-1.5 text-small text-text-muted">
-          <Undo2 className="size-3.5" aria-hidden />
+        <p className="chat-notice">
+          <Undo2 aria-hidden />
           {t('webChat.steering', { text: item.text })}
         </p>
       )
     case 'restartRecovery':
       return (
-        <p data-role="notice" className="flex items-center gap-1.5 text-small text-text-muted">
-          <RotateCcw className="size-3.5" aria-hidden />
+        <p data-role="notice" className="chat-notice">
+          <RotateCcw aria-hidden />
           {t('webChat.restartRecovery')}
         </p>
       )
@@ -361,8 +353,12 @@ export function CardItem({ item, answered }: { item: Item; answered: boolean }) 
     case 'warning':
     case 'error':
       return (
-        <p role="alert" className="flex items-center gap-1.5 text-danger">
-          <TriangleAlert className="size-4" aria-hidden data-status-icon />
+        <p
+          role="alert"
+          className="chat-notice"
+          data-tone={item.kind === 'error' ? 'danger' : 'warn'}
+        >
+          <TriangleAlert aria-hidden data-status-icon />
           {item.kind === 'error'
             ? t('webChat.errorItem', { text: item.text })
             : t('webChat.warning', { text: item.text })}
@@ -371,10 +367,7 @@ export function CardItem({ item, answered }: { item: Item; answered: boolean }) 
     case 'note':
       // Local output (`/model`): plain text, shown as written.
       return (
-        <pre
-          data-role="note"
-          className="rounded-card border border-dashed border-border-strong bg-surface-1/60 px-3.5 py-2.5 font-sans text-small whitespace-pre-wrap text-text-muted"
-        >
+        <pre data-role="note" className="chat-note">
           {item.text}
         </pre>
       )

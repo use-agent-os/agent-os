@@ -24,7 +24,6 @@ export interface ActionContext {
   sessionRunning: boolean
   newSession(): void
   toggleSidebar(): void
-  toggleDetails(): void
   setTheme(preference: ThemePreference): void
   openShortcuts(): void
   retryConnection(): void
@@ -58,13 +57,6 @@ export function buildActions(ctx: ActionContext): PaletteAction[] {
       keywords: ['list', 'pane', 'collapse'],
       gate: OPEN,
       run: ctx.toggleSidebar,
-    },
-    {
-      id: 'toggle-details',
-      labelKey: 'webPalette.actionToggleDetails',
-      keywords: ['panel', 'info'],
-      gate: OPEN,
-      run: ctx.toggleDetails,
     },
     {
       id: 'theme-system',

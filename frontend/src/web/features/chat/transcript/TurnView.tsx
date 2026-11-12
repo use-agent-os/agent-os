@@ -1,25 +1,30 @@
 import {
+  Brain,
   ChevronRight,
+  CircleAlert,
   Copy,
   PencilLine,
   RotateCcw,
   ShieldAlert,
   Square,
-  TriangleAlert,
 } from 'lucide-react'
-import { memo, useState } from 'react'
+import { memo, useContext, useState } from 'react'
 import { toast } from 'sonner'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webChat'
 import { cn } from '@/lib/utils'
+import { modelDisplayName } from '@/views/chat/transcript/routerFx'
+import { toolIconName } from '@/views/chat/transcript/tools'
 import { Button } from '@/web/components/ui/button'
+import '@/web/styles/chat-thread.css'
+import { AgentAvatar } from '../AgentAvatar'
 import { CardItem } from '../cards/CoreCards'
 import { Markdown } from '../markdown'
 import type { Item, Turn } from '../model/types'
-import { useChatActions } from './context'
+import { AgentNameContext, useChatActions } from './context'
 import { foldTurn, formatWorkDuration } from './fold'
 import { ThinkingBlock } from './ThinkingBlock'
-import { ToolRow } from './ToolRow'
+import { TOOL_ICONS, ToolRow } from './ToolRow'
 
 function sameDay(a: Date, b: Date): boolean {
   return a.toDateString() === b.toDateString()
@@ -60,28 +65,24 @@ function useArrived(live: boolean): boolean {
   return arrived
 }
 
+/** Copy and time in a small pill that surfaces on hover or focus. */
 function MessageActions({
   text,
   at,
-  align = 'start',
+  side,
 }: {
   text: string
   at: number | null
-  align?: 'start' | 'end'
+  side: 'user' | 'reply'
 }) {
   return (
-    <div
-      className={cn(
-        'chat-actions flex items-center gap-1 text-small text-text-muted',
-        align === 'end' && 'flex-row-reverse',
-      )}
-    >
+    <div className="chat-msg-actions" data-side={side}>
       <Button
         size="icon-sm"
         variant="ghost"
         aria-label={t('webChat.copyMessage')}
         onClick={() => void copy(text)}
-        className="text-text-muted hover:text-text"
+        className="size-7 rounded-full text-text-muted hover:text-text"
       >
         <Copy />
       </Button>
@@ -89,7 +90,7 @@ function MessageActions({
         <time
           dateTime={new Date(at).toISOString()}
           title={new Date(at).toLocaleString()}
-          className="px-1 tabular-nums"
+          className="pr-2.5 pl-0.5 text-small whitespace-nowrap text-text-muted tabular-nums"
         >
           {timeLabel(at)}
         </time>
@@ -102,15 +103,12 @@ export function UserBubble({ turn, live = false }: { turn: Turn; live?: boolean 
   const message = turn.userMessage!
   const arrived = useArrived(live || message.delivery === 'sending')
   return (
-    <div
-      data-role="user"
-      className={cn('group flex flex-col items-end gap-1', arrived && 'chat-enter-user')}
-    >
-      <div className="chat-user-bubble px-4 py-2.5">
+    <div data-role="user" className={cn('chat-user items-end', arrived && 'chat-enter-user')}>
+      <div className="chat-user-bubble">
         <Markdown text={message.text} />
       </div>
       {message.delivery === 'not_sent' ? null : (
-        <MessageActions text={message.text} at={message.timestamp} align="end" />
+        <MessageActions text={message.text} at={message.timestamp} side="user" />
       )}
     </div>
   )
@@ -131,12 +129,8 @@ function ItemView({
   switch (item.kind) {
     case 'text':
       return (
-        <div
-          data-role="assistant"
-          className={cn('group flex flex-col gap-1', streaming && 'chat-streaming')}
-        >
+        <div className={cn('chat-text', streaming && 'chat-streaming')}>
           <Markdown text={item.text} />
-          {live ? null : <MessageActions text={item.text} at={null} />}
         </div>
       )
     case 'toolCall':
@@ -150,7 +144,7 @@ function ItemView({
 
 type Group = { key: string; activity: boolean; items: Item[] }
 
-/** Consecutive reasoning and tool calls read as one activity thread. */
+/** Consecutive reasoning and tool calls read as one activity block. */
 function groupItems(items: Item[]): Group[] {
   const groups: Group[] = []
   for (const item of items) {
@@ -209,6 +203,25 @@ function Items({
   )
 }
 
+/** Up to three distinct icons of the folded work, for the summary line. */
+function workIcons(work: Item[]): React.ComponentType[] {
+  const seen = new Set<string>()
+  const icons: React.ComponentType[] = []
+  for (const item of work) {
+    const name =
+      item.kind === 'toolCall'
+        ? toolIconName(item.name)
+        : item.kind === 'thinkingRef'
+          ? 'brain'
+          : ''
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    icons.push(name === 'brain' ? Brain : TOOL_ICONS[name as keyof typeof TOOL_ICONS])
+    if (icons.length === 3) break
+  }
+  return icons
+}
+
 function WorkedFor({
   work,
   toolCount,
@@ -223,16 +236,17 @@ function WorkedFor({
 }) {
   const [open, setOpen] = useState(false)
   // Mounted on first open, then kept so closing animates too. A turn that
-  // just settled mounts it closed, starting from open (chat.css), so the
-  // work it was showing collapses into the summary line.
+  // just settled mounts it closed, starting from open (chat-thread.css), so
+  // the work it was showing collapses into the summary line.
   const [mounted, setMounted] = useState(settled)
   const duration = formatWorkDuration(durationMs)
   const label =
     toolCount > 0
       ? tPlural('webChat.workedForTools', toolCount, { duration })
       : t('webChat.workedFor', { duration })
+  const icons = workIcons(work)
   return (
-    <div>
+    <div className="chat-fold">
       <button
         type="button"
         aria-expanded={open}
@@ -240,8 +254,17 @@ function WorkedFor({
           setMounted(true)
           setOpen((v) => !v)
         }}
-        className="target -ml-1.5 flex items-center gap-1.5 rounded-control px-1.5 py-1 text-ui text-text-muted transition-colors duration-[var(--duration-fast)] hover:bg-surface-2 hover:text-text"
+        className="chat-fold-summary target"
       >
+        {icons.length ? (
+          <span className="chat-fold-icons" aria-hidden>
+            {icons.map((Icon, i) => (
+              <span key={i} className="chat-node">
+                <Icon />
+              </span>
+            ))}
+          </span>
+        ) : null}
         {label}
         <ChevronRight className="chat-chevron" aria-hidden />
       </button>
@@ -263,28 +286,31 @@ function FailedTurn({ turn }: { turn: Turn }) {
   const notSent = turn.userMessage?.delivery === 'not_sent'
   const reason = turn.failure
   return (
-    <div role="alert" className="chat-failed flex flex-col gap-3 px-3.5 py-3">
-      <p className="flex items-start gap-2.5">
-        <span className="chat-tile border-danger/30 bg-danger/10 text-danger">
-          <TriangleAlert aria-hidden data-status-icon />
-        </span>
-        <span className="min-w-0 pt-1">
-          {notSent
-            ? t('webChat.notSent')
-            : reason
-              ? t('webChat.turnFailed', { reason })
-              : t('webChat.turnFailedUnknown')}
-        </span>
+    <div role="alert" className="chat-turn-error">
+      <span className="chat-turn-error-icon" aria-hidden>
+        <CircleAlert data-status-icon />
+      </span>
+      <p className="min-w-0 flex-1 self-center text-ui text-pretty">
+        {notSent
+          ? t('webChat.notSent')
+          : reason
+            ? t('webChat.turnFailed', { reason })
+            : t('webChat.turnFailedUnknown')}
       </p>
       {turn.userMessage ? (
-        <div className="flex flex-wrap gap-2 pl-10">
-          <Button size="sm" variant="secondary" onClick={() => retry(turn)}>
-            <RotateCcw />
-            {notSent ? t('webChat.retrySend') : t('webChat.tryAgain')}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => edit(turn)}>
+        <div className="chat-turn-error-actions">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => edit(turn)}
+            className="text-text-muted hover:text-text"
+          >
             <PencilLine />
             {t('webChat.editMessage')}
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => retry(turn)} className="chat-retry">
+            <RotateCcw />
+            {notSent ? t('webChat.retrySend') : t('webChat.tryAgain')}
           </Button>
         </div>
       ) : null}
@@ -292,7 +318,10 @@ function FailedTurn({ turn }: { turn: Turn }) {
   )
 }
 
-/** Nothing to show yet but the run is on: say so (send → first output, or a stop pending). */
+/**
+ * Nothing to show yet but the run is on: a thinking indicator (send → first
+ * output), or the stop that is pending.
+ */
 function LiveStatus({ turn, visible }: { turn: Turn; visible: Item[] }) {
   const stopping = Boolean(turn.abortRequested)
   const quiet =
@@ -301,14 +330,61 @@ function LiveStatus({ turn, visible }: { turn: Turn; visible: Item[] }) {
     !visible.some((i) => i.kind === 'thinkingRef')
   if (!stopping && !quiet) return null
   return (
-    <p role="status" className="chat-enter flex items-center gap-2.5 text-ui">
-      <span className="flex size-6 items-center justify-center" aria-hidden>
-        <span className="status-dot motion-status size-2 text-accent" data-live data-status-icon />
+    <p role="status" className="chat-thinking chat-enter">
+      <span className="chat-dots" aria-hidden>
+        <span className="motion-status" />
+        <span className="motion-status" />
+        <span className="motion-status" />
       </span>
       <span className="chat-shimmer">
         {stopping ? t('webChat.stopping') : t('webChat.working')}
       </span>
     </p>
+  )
+}
+
+/** Item kinds that are the agent speaking (they get the identity line). */
+const REPLY_KINDS = new Set<Item['kind']>([
+  'text',
+  'toolCall',
+  'thinkingRef',
+  'plan',
+  'ask',
+  'acp',
+  'artifact',
+  'card',
+  'subagentCompletion',
+  'cronResult',
+])
+
+/** The model that answered: the router's last pick, else the usage record. */
+function turnModel(turn: Turn): { model: string; tier: string | null } | null {
+  const routed = turn.items.filter((i) => i.kind === 'routerDecision').at(-1)
+  if (routed?.kind === 'routerDecision' && routed.model) {
+    return { model: modelDisplayName(routed.model), tier: routed.tier }
+  }
+  return turn.usage?.model ? { model: modelDisplayName(turn.usage.model), tier: null } : null
+}
+
+/** Avatar, agent name and (when known) the model, above the reply. */
+function ReplyIdentity({ turn, live }: { turn: Turn; live: boolean }) {
+  const agent = useContext(AgentNameContext)
+  const arrived = useArrived(live)
+  const model = turnModel(turn)
+  return (
+    <div className={cn('chat-ident', arrived && 'chat-enter')}>
+      <AgentAvatar size={24} />
+      <span className="truncate font-semibold">{agent || t('webChat.agentFallback')}</span>
+      {model ? (
+        <span
+          className="chat-ident-model"
+          title={t('webChat.routerDecision', { model: model.model })}
+        >
+          {model.model}
+          {model.tier ? ` · ${model.tier}` : null}
+        </span>
+      ) : null}
+    </div>
   )
 }
 
@@ -335,20 +411,26 @@ export const TurnView = memo(function TurnView({
 }) {
   const fold = foldTurn(turn)
   const live = turn.status === 'live'
-  const tail = fold.visible.at(-1)
+  // The router's pick shows on the identity line, not as a row of its own.
+  const visible = fold.visible.filter((i) => i.kind !== 'routerDecision')
+  const tail = visible.at(-1)
   const streamingId = live && tail?.kind === 'text' ? tail.id : null
-  return (
-    <article
-      data-turn-status={turn.status}
-      className={cn(
-        'flex flex-col gap-4',
-        !live && !last && '[content-visibility:auto] [contain-intrinsic-size:auto_200px]',
-      )}
-    >
-      {turn.userMessage ? <UserBubble turn={turn} live={live} /> : null}
-      {turn.textTruncated ? (
-        <p className="text-small text-text-muted">{t('webChat.textTruncated')}</p>
-      ) : null}
+  // The agent's side of the turn gets its identity line; a message that was
+  // never delivered, or a turn of local notes, does not.
+  const reply =
+    turn.userMessage?.delivery !== 'not_sent' &&
+    (live ||
+      turn.status === 'failed' ||
+      turn.status === 'aborted' ||
+      turn.items.some((i) => REPLY_KINDS.has(i.kind)))
+  const answer = visible
+    .filter((i): i is Extract<Item, { kind: 'text' }> => i.kind === 'text')
+    .map((i) => i.text)
+    .join('\n\n')
+    .trim()
+
+  const body = (
+    <>
       {fold.folded ? (
         <WorkedFor
           work={fold.work}
@@ -358,30 +440,51 @@ export const TurnView = memo(function TurnView({
         />
       ) : null}
       <Items
-        items={fold.visible}
+        items={visible}
         live={live}
         answered={answered}
         streamingId={waitingApproval ? null : streamingId}
       />
-      {live && (!waitingApproval || turn.abortRequested) ? (
-        <LiveStatus turn={turn} visible={fold.visible} />
+    </>
+  )
+
+  return (
+    <article
+      data-turn-status={turn.status}
+      className={cn(
+        'chat-turn',
+        !live && !last && '[content-visibility:auto] [contain-intrinsic-size:auto_200px]',
+      )}
+    >
+      {turn.userMessage ? <UserBubble turn={turn} live={live} /> : null}
+      {turn.textTruncated ? (
+        <p className="text-small text-text-muted">{t('webChat.textTruncated')}</p>
       ) : null}
-      {live && waitingApproval ? (
-        <p
-          role="status"
-          className="chat-enter inline-flex items-center gap-2 self-start rounded-full border border-warn/30 bg-warn/10 py-1 pr-3 pl-2 text-small font-medium text-warn"
-        >
-          <ShieldAlert className="size-4" aria-hidden data-status-icon />
-          {t('webChat.turnWaitingApproval')}
-        </p>
-      ) : null}
-      {turn.status === 'aborted' ? (
-        <p className="flex items-center gap-2 text-small text-text-muted">
-          <Square className="size-3 fill-current" aria-hidden data-status-icon />
-          {t('webChat.turnAborted')}
-        </p>
-      ) : null}
-      {turn.status === 'failed' ? <FailedTurn turn={turn} /> : null}
+      {reply || turn.status === 'failed' ? (
+        <div data-role="assistant" data-last={last || undefined} className="chat-reply">
+          {reply ? <ReplyIdentity turn={turn} live={live} /> : null}
+          {body}
+          {live && (!waitingApproval || turn.abortRequested) ? (
+            <LiveStatus turn={turn} visible={visible} />
+          ) : null}
+          {live && waitingApproval ? (
+            <p role="status" className="chat-waiting chat-enter">
+              <ShieldAlert className="size-4" aria-hidden data-status-icon />
+              {t('webChat.turnWaitingApproval')}
+            </p>
+          ) : null}
+          {turn.status === 'aborted' ? (
+            <p className="flex items-center gap-2 text-small text-text-muted">
+              <Square className="size-3 fill-current" aria-hidden data-status-icon />
+              {t('webChat.turnAborted')}
+            </p>
+          ) : null}
+          {turn.status === 'failed' ? <FailedTurn turn={turn} /> : null}
+          {!live && answer ? <MessageActions text={answer} at={turn.endedAt} side="reply" /> : null}
+        </div>
+      ) : (
+        body
+      )}
     </article>
   )
 })

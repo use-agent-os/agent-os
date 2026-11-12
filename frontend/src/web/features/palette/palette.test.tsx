@@ -150,7 +150,6 @@ describe('actions registry', () => {
     sessionRunning: false,
     newSession: vi.fn(),
     toggleSidebar: vi.fn(),
-    toggleDetails: vi.fn(),
     setTheme: vi.fn(),
     openShortcuts: vi.fn(),
     retryConnection: vi.fn(),
@@ -164,7 +163,6 @@ describe('actions registry', () => {
     expect(buildActions(ctx()).map((a) => a.id)).toEqual([
       'new-session',
       'toggle-sidebar',
-      'toggle-details',
       'theme-system',
       'theme-light',
       'theme-dark',

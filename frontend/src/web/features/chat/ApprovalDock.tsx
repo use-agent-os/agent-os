@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webChat'
 import { useApprovals } from '@/services/approval-monitor'
+import '@/web/styles/chat-thread.css'
 import { ApprovalCard, approvalTargetsSession } from '@/web/shell/ApprovalTray'
 
 /**
@@ -21,14 +22,13 @@ export function ApprovalDock({ sessionKey }: { sessionKey: string }) {
   })
   return (
     <div className="chat-column mb-3">
-      <section aria-label={title} className="chat-approval anim-enter p-1.5">
-        <p
-          className="flex items-center gap-2 px-2 pt-0.5 pb-1.5 text-small font-medium text-warn"
-          aria-hidden
-        >
+      <section aria-label={title} className="chat-approval anim-enter">
+        <p className="chat-approval-title" aria-hidden>
+          <span className="chat-approval-icon">
+            <ShieldAlert />
+          </span>
+          <span className="min-w-0 flex-1 truncate">{title}</span>
           <span className="status-dot motion-status size-1.5" data-live />
-          <ShieldAlert className="size-3.5" />
-          {title}
         </p>
         <ul role="list" className="flex flex-col gap-1.5">
           {items.map((item) => (
