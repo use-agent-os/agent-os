@@ -42,8 +42,19 @@ async function table() {
   return within(await within(main()).findByRole('region', { name: 'Sessions table' }))
 }
 
+/** The summary line under the title. */
+function summary() {
+  return within(main()).getByRole('list', { name: 'Summary' })
+}
+
+/** Opens a toolbar filter menu and picks an option. */
+async function pickFilter(user: User, label: string, option: RegExp) {
+  await user.click(within(main()).getByRole('button', { name: new RegExp(`^${label}:`) }))
+  await user.click(await screen.findByRole('menuitemradio', { name: option }))
+}
+
 describe('Sessions page', () => {
-  it('lists sessions with stat tiles, chat links and an orphan flag', async () => {
+  it('lists sessions with a summary line, chat links and an orphan flag', async () => {
     renderShell('/sessions', sessionsRpc())
     const rows = await table()
     expect(rows.getByRole('link', { name: 'Alpha chat' })).toHaveAttribute(
@@ -54,22 +65,45 @@ describe('Sessions page', () => {
     await waitFor(() => expect(within(ghost).getByText('Agent missing')).toBeInTheDocument())
     const alpha = rows.getByRole('link', { name: 'Alpha chat' }).closest('tr')!
     expect(within(alpha).queryByText('Agent missing')).toBeNull()
-    expect(within(main()).getByText('Messages', { selector: 'dt' }).nextSibling).toHaveTextContent(
-      '7',
-    )
+    expect(summary()).toHaveTextContent('3 sessions')
+    expect(within(main()).getByText('7 messages')).toBeInTheDocument()
   })
 
-  it('filters by agent and project', async () => {
+  it('filters by agent and project from the filter menus', async () => {
     const user = userEvent.setup()
     renderShell('/sessions', sessionsRpc())
     const rows = await table()
-    await user.selectOptions(within(main()).getByRole('combobox', { name: 'Project' }), 'p1')
+    await pickFilter(user, 'Project', /^Alpha/)
+    expect(within(main()).getByRole('button', { name: 'Project: Alpha' })).toBeInTheDocument()
     expect(rows.queryByRole('link', { name: 'Alpha chat' })).toBeNull()
     expect(rows.getByRole('link', { name: 'Beta chat' })).toBeInTheDocument()
-    await user.selectOptions(within(main()).getByRole('combobox', { name: 'Project' }), 'all')
-    await user.selectOptions(within(main()).getByRole('combobox', { name: 'Agent' }), 'ghost')
+    await pickFilter(user, 'Project', /^All projects/)
+    await pickFilter(user, 'Agent', /^ghost/)
     expect(rows.getByRole('link', { name: 'Ghost chat' })).toBeInTheDocument()
     expect(rows.queryByRole('link', { name: 'Beta chat' })).toBeNull()
+    await user.click(within(main()).getByRole('button', { name: 'Clear filters' }))
+    expect(rows.getByRole('link', { name: 'Alpha chat' })).toBeInTheDocument()
+    expect(within(main()).getByRole('button', { name: 'Agent: All agents' })).toBeInTheDocument()
+  })
+
+  it('filters by status, and each option says how many it matches', async () => {
+    const user = userEvent.setup()
+    renderShell(
+      '/sessions',
+      shellRpc([
+        sessionRow(A, { display_name: 'Open one', status: 'running' }),
+        sessionRow(B, { display_name: 'Done one', status: 'done' }),
+      ]),
+    )
+    const rows = await table()
+    await user.click(within(main()).getByRole('button', { name: /^Status:/ }))
+    const menu = await screen.findByRole('menu')
+    expect(within(menu).getByRole('menuitemradio', { name: /^Completed/ })).toHaveTextContent(
+      'Completed1',
+    )
+    await user.click(within(menu).getByRole('menuitemradio', { name: /^Completed/ }))
+    expect(rows.queryByRole('link', { name: 'Open one' })).toBeNull()
+    expect(rows.getByRole('link', { name: 'Done one' })).toBeInTheDocument()
   })
 
   it('renames a session inline', async () => {
@@ -361,9 +395,11 @@ describe('Sessions page: status, totals and failures', () => {
     expect(row('Finished').querySelector('[data-lifecycle]')).toHaveTextContent('Completed')
     expect(row('Stopped').querySelector('[data-lifecycle]')).toHaveTextContent('Aborted')
     expect(within(main()).getByRole('status')).toHaveTextContent('1 session executing now')
-    expect(
-      within(main()).getByText('Sessions', { selector: 'dt' }).parentElement,
-    ).toHaveTextContent('1 open · 1 completed · 0 failed or timed out · 1 aborted')
+    const line = within(summary())
+    for (const text of ['1 open', '1 completed', '0 failed', '1 aborted']) {
+      expect(line.getByText(text)).toBeInTheDocument()
+    }
+    expect(line.getByText('0 failed')).toHaveAttribute('title', 'Failed or timed out')
   })
 
   it('says the list is the newest 500 of the real total', { timeout: 15_000 }, async () => {
@@ -378,9 +414,7 @@ describe('Sessions page: status, totals and failures', () => {
     expect(await within(main()).findByRole('note', {}, { timeout: 5000 })).toHaveTextContent(
       'Showing the newest 500 of 812 sessions.',
     )
-    expect(within(main()).getByText('Sessions', { selector: 'dt' }).nextSibling).toHaveTextContent(
-      '812',
-    )
+    expect(summary()).toHaveTextContent('812 sessions')
   })
 
   it('reports a single delete the gateway refused, and keeps the row', async () => {
