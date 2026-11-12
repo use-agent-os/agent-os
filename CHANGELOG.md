@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.13] - 2026-11-13
+
 ### Changed
 - The Pilot Router's recommended tiers move to the current model generation.
   Tiers you set yourself are left alone; a config that still carries the old
