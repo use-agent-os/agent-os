@@ -140,3 +140,19 @@ async def test_fetch_openrouter_adds_app_attribution_headers() -> None:
     model = catalog.get("openai/gpt-4o")
     assert model is not None
     assert model.context_window == 128_000
+
+
+@pytest.mark.parametrize("model", ["gpt-6-luna", "gpt-5.6-terra", "gpt-5", "o3"])
+def test_direct_openai_reasoning_families_get_openai_reasoning_caps(model: str) -> None:
+    caps = ModelCatalog().get_capabilities(
+        model, provider_name="openai", base_url="https://api.openai.com/v1"
+    )
+    assert caps.supports_reasoning is True
+    assert caps.reasoning_format == "openai"
+
+
+def test_direct_openai_gpt_4o_is_not_a_reasoning_model() -> None:
+    caps = ModelCatalog().get_capabilities(
+        "gpt-4o-mini", provider_name="openai", base_url="https://api.openai.com/v1"
+    )
+    assert caps.supports_reasoning is False

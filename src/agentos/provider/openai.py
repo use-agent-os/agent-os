@@ -200,6 +200,9 @@ def _should_disable_openrouter_reasoning_by_default(model: str) -> bool:
     }
 
 
+_GPT_VERSION_RE = re.compile(r"gpt-(\d+)(?:\.(\d+))?")
+
+
 def _direct_openai_uses_max_completion_tokens(
     provider_kind: str,
     base_url: str,
@@ -207,8 +210,44 @@ def _direct_openai_uses_max_completion_tokens(
 ) -> bool:
     if provider_kind != "openai" or "api.openai.com" not in base_url.lower():
         return False
+    return is_openai_reasoning_model(model)
+
+
+def is_openai_reasoning_model(model: str) -> bool:
+    """OpenAI's reasoning families: o1 / o3 / o4 and gpt-5 onwards (gpt-6 too).
+
+    On api.openai.com they take ``max_completion_tokens`` (``max_tokens`` is a
+    400), refuse a non-default temperature, and accept ``reasoning_effort``.
+    """
     model_name = model.rsplit("/", 1)[-1].strip().lower()
-    return model_name.startswith(("gpt-5", "o1", "o3", "o4"))
+    if model_name.startswith(("o1", "o3", "o4")):
+        return True
+    match = _GPT_VERSION_RE.match(model_name)
+    return match is not None and int(match.group(1)) >= 5
+
+
+def _direct_openai_tools_require_reasoning_none(
+    provider_kind: str,
+    base_url: str,
+    model: str,
+) -> bool:
+    """True when api.openai.com refuses function tools unless reasoning is off.
+
+    Checked live on 2026-11-12: from gpt-5.4 on (5.4, 5.5, 5.6, 6), a
+    /v1/chat/completions request with ``tools`` 400s ("Function tools with
+    reasoning_effort are not supported ... use /v1/responses or set
+    reasoning_effort to 'none'") for any effort but ``none``. gpt-5.6 and
+    gpt-6 do not default to ``none``, so omitting the field fails as well.
+    gpt-5 / gpt-5-mini reject ``none`` outright, and gpt-5.1 / 5.2 accept
+    effort with tools, so the cut is by version.
+    """
+    if provider_kind != "openai" or "api.openai.com" not in base_url.lower():
+        return False
+    match = _GPT_VERSION_RE.match(model.rsplit("/", 1)[-1].strip().lower())
+    if match is None:
+        return False
+    version = (int(match.group(1)), int(match.group(2) or 0))
+    return version >= (5, 4)
 
 
 def _is_kimi_fixed_sampling_model(provider_kind: str, model: str) -> bool:
@@ -1234,7 +1273,13 @@ class OpenAIProvider:
 
         # Reasoning injection (gated on thinking being enabled)
         direct_deepseek_v4 = _is_direct_deepseek_v4_request(self._provider_kind, self._model)
-        if (caps and caps.supports_reasoning and cfg.thinking) or (
+        if tools and _direct_openai_tools_require_reasoning_none(
+            self._provider_kind, self._base_url, self._model
+        ):
+            # Reasoning with function tools is Responses-API only for these
+            # models; on Chat Completions a tool turn runs without it.
+            payload["reasoning_effort"] = "none"
+        elif (caps and caps.supports_reasoning and cfg.thinking) or (
             direct_deepseek_v4 and cfg.thinking
         ):
             effort = _resolve_reasoning_effort(cfg.thinking_level, cfg.thinking_budget_tokens)

@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Chat on the OpenAI provider works again with GPT-5.4 and later (GPT-5.5,
+  GPT-5.6 Luna / Terra / Sol, GPT-6 Luna). Every agent turn carries tools,
+  and OpenAI's Chat Completions refuses function tools on these models unless
+  `reasoning_effort` is `none`; GPT-5.6 does not default to `none`, so every
+  message failed with "Function tools with reasoning_effort are not
+  supported". Tool turns on direct OpenAI now send `reasoning_effort: none`
+  for these models (reasoning with tools needs the Responses API). GPT-6 is
+  also treated as a reasoning model: it gets `max_completion_tokens` instead
+  of the refused `max_tokens`.
+
 ## [2026.11.12] - 2026-11-12
 
 ### Fixed
