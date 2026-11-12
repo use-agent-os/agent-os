@@ -2,7 +2,7 @@
   "decision_entries": [
     {
       "cache_mode": "auto",
-      "model": "openai/gpt-6-luna",
+      "model": "anthropic/claude-haiku-5.5",
       "pipeline_steps": [
         [
           "resolve_model",
@@ -43,7 +43,7 @@
       ],
       "provider": "_SelectorFallbackProvider",
       "refusal_category": null,
-      "resolved_model": "openai/gpt-6-luna",
+      "resolved_model": "anthropic/claude-haiku-5.5",
       "retrieval_mode": "hybrid",
       "session_key": "agent:main:webchat:decision-snapshot",
       "skill_count": 0,

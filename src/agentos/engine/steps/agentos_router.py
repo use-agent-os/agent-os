@@ -787,6 +787,29 @@ def _shipped_tier_thinking_level(router_cfg: object, tier_name: object) -> str |
     return _normalize_thinking_level(tier.get("thinking_level", tier.get("thinking")))
 
 
+#: Levels the gateway tier tables (OpenRouter, Bankr, OpenCAP, Surplus) shipped
+#: before c0 and c1 moved to ``low`` / ``medium``. Config files persist the
+#: whole tier table, so an install written by an older release still carries
+#: ``high`` on both; that is our level, not the operator's, and effort by tier
+#: has to keep capping it or those installs would start thinking at ``high`` on
+#: every trivial turn the day they upgrade.
+_PRIOR_SHIPPED_TIER_THINKING: dict[str, frozenset[str]] = {
+    "c0": frozenset({"high"}),
+    "c1": frozenset({"high"}),
+}
+_PRIOR_SHIPPED_THINKING_PROFILES: frozenset[str] = frozenset(
+    {"openrouter", "bankr", "opencap", "surplus"}
+)
+
+
+def _is_prior_shipped_tier_thinking(router_cfg: object, tier_name: object, level: str) -> bool:
+    profile = str(getattr(router_cfg, "tier_profile", None) or "openrouter").strip().lower()
+    if profile not in _PRIOR_SHIPPED_THINKING_PROFILES:
+        return False
+    name = normalize_text_tier(tier_name) or str(tier_name or "")
+    return level in _PRIOR_SHIPPED_TIER_THINKING.get(name, frozenset())
+
+
 def _tier_thinking_source(router_cfg: object, tier_name: object, tier_cfg: dict, level: str) -> str:
     """Tag a tier-derived thinking level as shipped or operator-configured.
 
@@ -794,7 +817,8 @@ def _tier_thinking_source(router_cfg: object, tier_name: object, tier_cfg: dict,
     ``supports_thinking`` fallback). ``tier_config``: the operator set a level
     of their own. Only ``tier_default`` is ever capped by effort by tier.
     Config files persist the whole tier table, so a level equal to the shipped
-    one cannot be told apart from a hand-written one and counts as shipped.
+    one cannot be told apart from a hand-written one and counts as shipped; so
+    does a level an earlier release shipped for that tier.
     """
     explicit = _normalize_thinking_level(tier_cfg.get("thinking_level", tier_cfg.get("thinking")))
     if explicit is None:
@@ -802,7 +826,11 @@ def _tier_thinking_source(router_cfg: object, tier_name: object, tier_cfg: dict,
     if tier_name is None:
         return "tier_config"
     shipped = _shipped_tier_thinking_level(router_cfg, tier_name)
-    return "tier_default" if shipped is not None and shipped == level else "tier_config"
+    if shipped is not None and shipped == level:
+        return "tier_default"
+    if _is_prior_shipped_tier_thinking(router_cfg, tier_name, level):
+        return "tier_default"
+    return "tier_config"
 
 
 def _record_thinking_metadata(

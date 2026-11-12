@@ -430,6 +430,56 @@ MODEL_FACTS: tuple[ModelFacts, ...] = (
         price=PriceFacts(4.0, 20.0, cached_input_per_m=0.2),
     ),
     ModelFacts(
+        "claude-sonnet-5.5",
+        max_output_tokens=128_000,
+        context_window=1_000_000,
+        price=PriceFacts(2.0, 10.0, cached_input_per_m=0.1),
+        note=(
+            "Anthropic's published rate, as the Surplus and OpenCAP catalogs list "
+            "it on 2026-11-12; Bankr's catalog needs an API key and was not "
+            "checked. Vision-capable upstream; supports_image stays False because "
+            "it is the gateways' c2 text default (see deepseek-v4.1-flash)."
+        ),
+    ),
+    ModelFacts(
+        "anthropic/claude-sonnet-5.5",
+        max_output_tokens=128_000,
+        context_window=1_000_000,
+        price=PriceFacts(2.0, 10.0, cached_input_per_m=0.1),
+    ),
+    ModelFacts(
+        "claude-haiku-5.5",
+        max_output_tokens=128_000,
+        context_window=1_000_000,
+        price=PriceFacts(0.10, 0.50, cached_input_per_m=0.01),
+        provider_overrides=(
+            ProviderWindowOverride(
+                providers=("surplus",),
+                max_output_tokens=50_000,
+                context_window=100_000,
+                reason=(
+                    "Surplus lists this id at 100K context / 50K output (checked "
+                    "2026-11-12), the band Anthropic bills at the base rate; "
+                    "OpenCAP and OpenRouter publish the full 1M / 128K."
+                ),
+            ),
+        ),
+        note=(
+            "0.10 / 0.50 is Anthropic's rate up to 100K prompt tokens; beyond "
+            "that it bills 0.50 / 2.50, which a flat price cannot express. "
+            "Vision-capable upstream; supports_image stays False because it is "
+            "the gateways' c0 and c1 text default (see deepseek-v4.1-flash). "
+            "The same id is their image_model, where the image_only tier carries "
+            "the flag itself."
+        ),
+    ),
+    ModelFacts(
+        "anthropic/claude-haiku-5.5",
+        max_output_tokens=128_000,
+        context_window=1_000_000,
+        price=PriceFacts(0.10, 0.50, cached_input_per_m=0.01),
+    ),
+    ModelFacts(
         "claude-opus-4.8",
         max_output_tokens=128_000,
         context_window=1_000_000,
@@ -480,6 +530,40 @@ MODEL_FACTS: tuple[ModelFacts, ...] = (
         max_output_tokens=65_536,
         context_window=1_048_576,
         price=PriceFacts(1.25, 10.0),
+    ),
+    ModelFacts(
+        "gemini-3.5-flash-lite",
+        max_output_tokens=65_536,
+        context_window=1_048_576,
+        price=PriceFacts(0.3, 2.5, cached_input_per_m=0.03),
+        note=(
+            "Vision-capable; supports_image stays False because it is the Gemini "
+            "c0 text default (see deepseek-v4.1-flash). It is also that profile's "
+            "image_model, where the image_only tier carries the flag itself."
+        ),
+    ),
+    ModelFacts(
+        "gemini-3.8-flash",
+        max_output_tokens=65_536,
+        context_window=1_048_576,
+        price=PriceFacts(0.825, 4.125, cached_input_per_m=0.0825),
+    ),
+    ModelFacts(
+        "gemini-4-argon",
+        max_output_tokens=65_536,
+        context_window=1_048_576,
+        price=PriceFacts(2.0, 10.0, cached_input_per_m=0.1),
+        note=(
+            "Google's model page gives the output cap as '65K / 1M' and the "
+            "routed catalogs disagree (65K to 943K), so the lower figure stands."
+        ),
+    ),
+    ModelFacts(
+        "gemini-4-carbon",
+        max_output_tokens=65_536,
+        context_window=1_048_576,
+        price=PriceFacts(2.0, 10.0, cached_input_per_m=0.1),
+        note="Same output-cap reading as gemini-4-argon.",
     ),
     ModelFacts(
         "grok-4.3",
@@ -539,6 +623,19 @@ MODEL_FACTS: tuple[ModelFacts, ...] = (
             "is cheaper than the gateways' c0 deepseek-v4.1-flash, so with "
             "cost_aware on, the gateway profiles route c0 turns to it."
         ),
+    ),
+    ModelFacts(
+        "gpt-6.1-terra",
+        max_output_tokens=128_000,
+        context_window=1_050_000,
+        price=PriceFacts(1.0, 5.0, cached_input_per_m=0.05),
+    ),
+    ModelFacts(
+        "gpt-6.1-sol",
+        max_output_tokens=128_000,
+        context_window=1_050_000,
+        price=PriceFacts(2.0, 10.0, cached_input_per_m=0.1),
+        note="Reasoning cannot be turned off: the API takes low and up, not none.",
     ),
     ModelFacts(
         "gpt-5.6-terra",

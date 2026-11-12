@@ -49,7 +49,7 @@ def test_openrouter_sorts_first_in_setup_list() -> None:
 def test_llm_defaults_are_openrouter() -> None:
     cfg = LlmProviderConfig()
     assert cfg.provider == "openrouter"
-    assert cfg.model == "openai/gpt-6-luna"
+    assert cfg.model == "anthropic/claude-haiku-5.5"
     assert cfg.base_url == "https://openrouter.ai/api/v1"
 
 
@@ -57,9 +57,9 @@ def test_default_tiers_route_through_openrouter() -> None:
     tiers = _default_tiers()
     assert tiers == _openrouter_tiers()
     assert tiers["c0"]["provider"] == "openrouter"
-    assert tiers["c0"]["model"] == "deepseek/deepseek-v4-flash"
-    assert tiers["c1"]["model"] == "openai/gpt-6-luna"
-    assert tiers["c2"]["model"] == "z-ai/glm-5.3"
+    assert tiers["c0"]["model"] == "anthropic/claude-haiku-5.5"
+    assert tiers["c1"]["model"] == "anthropic/claude-haiku-5.5"
+    assert tiers["c2"]["model"] == "anthropic/claude-sonnet-5.5"
     assert tiers["c3"]["model"] == "anthropic/claude-opus-5.5"
     assert tiers["image_model"]["supports_image"] is True
 
@@ -75,11 +75,11 @@ def test_bankr_is_a_tier_profile() -> None:
     tiers = _router_tier_profile_defaults("bankr")
     assert tiers == _bankr_tiers()
     assert tiers["c0"]["provider"] == "bankr"
-    assert tiers["c0"]["model"] == "deepseek-v4.1-flash"
-    assert tiers["c1"]["model"] == "gpt-6-luna"
-    assert tiers["c2"]["model"] == "glm-5.3"
+    assert tiers["c0"]["model"] == "claude-haiku-5.5"
+    assert tiers["c1"]["model"] == "claude-haiku-5.5"
+    assert tiers["c2"]["model"] == "claude-sonnet-5.5"
     assert tiers["c3"]["model"] == "claude-opus-5.5"
-    assert tiers["image_model"]["model"] == "minimax-m3"
+    assert tiers["image_model"]["model"] == "claude-haiku-5.5"
     assert tiers["image_model"]["supports_image"] is True
 
 
@@ -134,11 +134,11 @@ def test_legacy_virtuals_model_ids_migrate_to_bare_catalog_ids() -> None:
         }
     )
     assert result.changed is True
-    assert result.payload["llm"]["model"] == "minimax-m3"
+    assert result.payload["llm"]["model"] == "claude-haiku-5.5"
     tiers = result.payload["agentos_router"]["tiers"]
     assert tiers["c0"]["model"] == "deepseek-v4-flash"
     assert tiers["c2"]["model"] == "qwen3.7-max"
-    assert tiers["image_model"]["model"] == "minimax-m3"
+    assert tiers["image_model"]["model"] == "claude-haiku-5.5"
 
 
 def test_legacy_migration_leaves_other_providers_untouched() -> None:

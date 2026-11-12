@@ -14,13 +14,13 @@ from agentos.paths import default_agentos_home
 def _default_model_for_provider(provider: str) -> str:
     normalized = provider.strip().lower()
     if normalized == "bankr":
-        return "gpt-6-luna"
+        return "claude-haiku-5.5"
     if normalized == "opencap":
-        return "gpt-6-luna"
+        return "claude-haiku-5.5"
     if normalized == "surplus":
-        return "gpt-6-luna"
+        return "claude-haiku-5.5"
     if normalized == "openrouter":
-        return "openai/gpt-6-luna"
+        return "anthropic/claude-haiku-5.5"
     if normalized == "deepseek":
         return "deepseek-v4-flash"
     return "openai/gpt-4o-mini"

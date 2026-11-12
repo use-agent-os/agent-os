@@ -56,15 +56,15 @@ def test_agentos_router_defaults_match_runtime_router_config() -> None:
     assert not hasattr(cfg, "v4_use_aux_head")
     assert cfg.require_router_runtime is False
 
-    assert cfg.tiers["c0"]["model"] == "deepseek/deepseek-v4-flash"
-    assert cfg.tiers["c0"]["thinking_level"] == "high"
-    assert cfg.tiers["c1"]["model"] == "openai/gpt-6-luna"
-    assert cfg.tiers["c1"]["thinking_level"] == "high"
-    assert cfg.tiers["c2"]["model"] == "z-ai/glm-5.3"
+    assert cfg.tiers["c0"]["model"] == "anthropic/claude-haiku-5.5"
+    assert cfg.tiers["c0"]["thinking_level"] == "low"
+    assert cfg.tiers["c1"]["model"] == "anthropic/claude-haiku-5.5"
+    assert cfg.tiers["c1"]["thinking_level"] == "medium"
+    assert cfg.tiers["c2"]["model"] == "anthropic/claude-sonnet-5.5"
     assert cfg.tiers["c2"]["thinking_level"] == "high"
     assert cfg.tiers["c3"]["model"] == "anthropic/claude-opus-5.5"
     assert cfg.tiers["c3"]["thinking_level"] == "high"
-    assert cfg.tiers["image_model"]["model"] == "minimax/minimax-m3"
+    assert cfg.tiers["image_model"]["model"] == "anthropic/claude-haiku-5.5"
     assert cfg.tiers["image_model"]["supports_image"] is True
     assert cfg.tiers["image_model"]["image_only"] is True
 
@@ -307,7 +307,7 @@ def test_direct_provider_profiles_have_four_text_tiers_without_default_image_mod
 
 @pytest.mark.parametrize(
     ("profile", "model"),
-    [("openai", "gpt-6-luna"), ("gemini", "gemini-3.1-flash-lite")],
+    [("openai", "gpt-6-luna"), ("gemini", "gemini-3.5-flash-lite")],
 )
 def test_openai_and_gemini_profiles_ship_an_image_tier(profile: str, model: str) -> None:
     """Their text tiers are all ``supports_image=False``, so without an image
@@ -349,10 +349,13 @@ def test_openai_profile_uses_streaming_compatible_models() -> None:
 
     cfg = agentos_router_config_cls(tier_profile="openai")
 
-    assert cfg.tiers["c0"]["model"] == "gpt-5.6-luna"
-    assert cfg.tiers["c1"]["model"] == "gpt-5.6-terra"
-    assert cfg.tiers["c2"]["model"] == "gpt-5.6-sol"
-    assert cfg.tiers["c3"]["model"] == "gpt-5.6-sol"
+    assert cfg.tiers["c0"]["model"] == "gpt-6-luna"
+    assert cfg.tiers["c0"]["thinking_level"] == "low"
+    assert cfg.tiers["c1"]["model"] == "gpt-6-luna"
+    assert cfg.tiers["c1"]["thinking_level"] == "medium"
+    assert cfg.tiers["c2"]["model"] == "gpt-6.1-terra"
+    assert cfg.tiers["c2"]["thinking_level"] == "medium"
+    assert cfg.tiers["c3"]["model"] == "gpt-6.1-sol"
     assert cfg.tiers["c3"]["thinking_level"] == "high"
     assert all(cfg.tiers[tier]["model"] != "gpt-5.6-sol-pro" for tier in ("c0", "c1", "c2", "c3"))
 
@@ -405,7 +408,7 @@ def test_profile_tier_override_merges_keys_inside_tier() -> None:
     )
 
     assert cfg.tiers["c2"]["provider"] == "gemini"
-    assert cfg.tiers["c2"]["model"] == "gemini-2.5-pro"
+    assert cfg.tiers["c2"]["model"] == "gemini-4-argon"
     assert cfg.tiers["c2"]["thinking_level"] == "high"
 
 

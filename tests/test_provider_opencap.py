@@ -65,9 +65,9 @@ def test_opencap_gateway_onboarding_spec() -> None:
     assert spec.deployment == "cloud"
     assert spec.requires_api_key is True
     assert spec.default_base_url == "https://gw.capminal.ai/api/inference/v1"
-    assert spec.default_direct_model == "gpt-6-luna"
+    assert spec.default_direct_model == "claude-haiku-5.5"
     model_field = next(field for field in spec.fields if field.name == "model")
-    assert model_field.default == "gpt-6-luna"
+    assert model_field.default == "claude-haiku-5.5"
     assert any(field.name == "api_key" and field.required for field in spec.fields)
 
 
@@ -95,11 +95,11 @@ def test_opencap_router_profile_contract() -> None:
     tiers = _router_tier_profile_defaults("opencap")
 
     assert {tier["provider"] for tier in tiers.values()} == {"opencap"}
-    assert tiers["c0"]["model"] == "deepseek-v4.1-flash"
-    assert tiers["c1"]["model"] == "gpt-6-luna"
-    assert tiers["c2"]["model"] == "glm-5.3"
+    assert tiers["c0"]["model"] == "claude-haiku-5.5"
+    assert tiers["c1"]["model"] == "claude-haiku-5.5"
+    assert tiers["c2"]["model"] == "claude-sonnet-5.5"
     assert tiers["c3"]["model"] == "claude-opus-5.5"
-    assert tiers["image_model"]["model"] == "minimax-m3"
+    assert tiers["image_model"]["model"] == "claude-haiku-5.5"
     assert tiers["image_model"]["supports_image"] is True
     assert tiers["image_model"]["image_only"] is True
     assert all(tier["model"] != "oc-uncensored-1.0" for tier in tiers.values())
@@ -135,6 +135,8 @@ def test_opencap_tier_models_are_all_served_by_the_live_catalog() -> None:
         "glm-5.3-flash",
         "claude-opus-5",
         "claude-opus-5.5",
+        "claude-sonnet-5.5",
+        "claude-haiku-5.5",
         "minimax-m3",
         "grok-4.6",
         "kimi-k3",

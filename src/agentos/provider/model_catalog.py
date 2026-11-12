@@ -55,6 +55,7 @@ def _catalog_price_per_1k(value: object) -> float:
 # a live fetch always wins.
 _SURPLUS_REASONING_PREFIXES = (
     "claude-haiku-4.5",
+    "claude-haiku-5.5",
     "claude-opus-",
     "claude-sonnet-",
     "deepseek-",
@@ -68,6 +69,9 @@ _SURPLUS_REASONING_PREFIXES = (
 )
 _SURPLUS_VISION_PREFIXES = (
     "claude-haiku-4.5",
+    "claude-haiku-5.5",
+    "claude-opus-5.5",
+    "claude-sonnet-5.5",
     "gemini-",
     "glm-5.3-flash",
     "glm-5v",
@@ -289,7 +293,7 @@ class ModelCatalog:
                 reasoning_format="deepseek",
             )
         if provider_spec and provider_spec.reasoning_shape == "gemini":
-            supports_reasoning = model_l.startswith(("gemini-2.5", "gemini-3"))
+            supports_reasoning = model_l.startswith(("gemini-2.5", "gemini-3", "gemini-4"))
             return ModelCapabilities(
                 supports_reasoning=supports_reasoning,
                 supports_tools=True,
