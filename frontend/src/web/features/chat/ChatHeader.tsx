@@ -185,7 +185,6 @@ export function ChatHeader(props: ChatHeaderProps) {
             <SimpleTooltip side="bottom" label={t('webChat.headerCopyId')}>
               <button
                 type="button"
-                aria-label={`${t('webChat.headerCopyId')} (${sessionKey})`}
                 onClick={() => {
                   void navigator.clipboard
                     ?.writeText(sessionKey)
@@ -193,6 +192,7 @@ export function ChatHeader(props: ChatHeaderProps) {
                 }}
                 className="chat-meta-chip chat-id-chip target max-w-32"
               >
+                <span className="sr-only">{`${t('webChat.headerCopyId')}: `}</span>
                 <span className="truncate">{shortId}</span>
                 <Copy aria-hidden />
               </button>

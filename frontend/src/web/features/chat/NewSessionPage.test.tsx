@@ -21,11 +21,13 @@ describe('New session page', () => {
     const user = userEvent.setup()
     const rpc = newRpc(() => ({ key: 'agent:main:webchat:n1' }))
     const { router } = renderShell('/new', rpc)
-    const agent = await screen.findByRole('button', { name: 'Agent' })
+    const agent = await within(await screen.findByRole('main')).findByRole('button', {
+      name: /^Agent:/,
+    })
     await waitFor(() => expect(agent).toBeEnabled())
     await user.click(agent)
     await user.click(await screen.findByRole('menuitemradio', { name: 'main' }))
-    const project = screen.getByRole('button', { name: 'Project' })
+    const project = within(screen.getByRole('main')).getByRole('button', { name: /^Project:/ })
     await user.click(project)
     const menu = await screen.findByRole('menu')
     // The current choice carries the check; the others are offered unchecked.
@@ -34,7 +36,7 @@ describe('New session page', () => {
       'true',
     )
     await user.click(within(menu).getByRole('menuitemradio', { name: 'Trading' }))
-    expect(project).toHaveAccessibleDescription('Trading')
+    expect(project).toHaveAccessibleName('Project: Trading')
     await user.type(screen.getByRole('textbox', { name: 'First message' }), 'Plan a BTC DCA')
     await user.click(screen.getByRole('button', { name: 'Start' }))
     await waitFor(() => expect(router.state.location.pathname).toBe('/chat/main/webchat/n1'))
@@ -59,7 +61,11 @@ describe('New session page', () => {
     })
     const { router } = renderShell('/new', rpc)
     const prompt = await screen.findByRole('textbox', { name: 'First message' })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Agent' })).not.toBeDisabled())
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('main')).getByRole('button', { name: /^Agent:/ }),
+      ).not.toBeDisabled(),
+    )
     await user.type(prompt, 'Hello there')
     const file = new File([new Uint8Array([137, 80, 78, 71])], 'pic.png', { type: 'image/png' })
     fireEvent.paste(prompt, { clipboardData: { files: [file], types: ['Files'] } })
@@ -83,7 +89,11 @@ describe('New session page', () => {
     })
     const { router } = renderShell('/new', rpc)
     const prompt = await screen.findByRole('textbox', { name: 'First message' })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Agent' })).toBeEnabled())
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('main')).getByRole('button', { name: /^Agent:/ }),
+      ).toBeEnabled(),
+    )
     await user.type(prompt, 'Hello')
     await user.click(screen.getByRole('button', { name: 'Start' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('provider down')
@@ -117,9 +127,11 @@ describe('New session page', () => {
     const user = userEvent.setup()
     const rpc = newRpc(() => ({ key: 'agent:main:webchat:n2' }))
     renderShell('/new?agent=ghost&project=deleted', rpc)
-    const project = await screen.findByRole('button', { name: 'Project' })
+    const project = await within(await screen.findByRole('main')).findByRole('button', {
+      name: /^Project:/,
+    })
     await waitFor(() => expect(project).not.toBeDisabled())
-    expect(project).toHaveAccessibleDescription('No project')
+    expect(project).toHaveAccessibleName('Project: No project')
     await user.type(screen.getByRole('textbox', { name: 'First message' }), 'Hi')
     await user.click(screen.getByRole('button', { name: 'Start' }))
     await waitFor(() => expect(rpc.callsTo('sessions.create')).toHaveLength(1))
@@ -132,8 +144,10 @@ describe('New session page', () => {
       projects: [{ project_id: 'p-trading', name: 'Trading', agent_id: 'research' }],
     })
     renderShell('/new?project=p-trading', rpc)
-    const agent = await screen.findByRole('button', { name: 'Agent' })
-    await waitFor(() => expect(agent).toHaveAccessibleDescription('research'))
+    const agent = await within(await screen.findByRole('main')).findByRole('button', {
+      name: /^Agent:/,
+    })
+    await waitFor(() => expect(agent).toHaveAccessibleName('Agent: research'))
     await user.click(agent)
     expect(await screen.findByRole('menuitemradio', { name: 'research' })).toHaveAttribute(
       'aria-checked',
@@ -177,7 +191,11 @@ describe('New session page', () => {
     const rpc = newRpc(() => ({ key: 'agent:main:webchat:n4' }))
     const { router } = renderShell('/new', rpc)
     const prompt = await screen.findByRole('textbox', { name: 'First message' })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Agent' })).toBeEnabled())
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('main')).getByRole('button', { name: /^Agent:/ }),
+      ).toBeEnabled(),
+    )
     const start = screen.getByRole('button', { name: 'Start' })
     expect(start).toBeDisabled()
     expect(start).toHaveAccessibleDescription('Type a message first')
