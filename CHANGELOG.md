@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.12.post1] - 2026-11-12
+
 ### Fixed
 - Chat on the OpenAI provider works again with GPT-5.4 and later (GPT-5.5,
   GPT-5.6 Luna / Terra / Sol, GPT-6 Luna). Every agent turn carries tools,
