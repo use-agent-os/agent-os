@@ -117,6 +117,16 @@ class ModelCatalog:
             if not provider or model.provider.strip().lower() == provider
         ]
 
+    def replace(self, models: list[ModelInfo]) -> None:
+        """Swap the whole cache for ``models`` in one assignment.
+
+        Used when the active provider changes at runtime: the boot fetch filled
+        this cache with the previous provider's catalog, and entries are keyed
+        by bare model id, so merging would let one provider's limits shadow
+        another's for a shared id.
+        """
+        self._models = {m.model_id: m for m in models if m.model_id}
+
     def _populate_from_data(
         self,
         models: list[dict],
