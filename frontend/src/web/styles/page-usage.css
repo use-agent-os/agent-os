@@ -1,0 +1,552 @@
+/* Usage: the lead figure, bars, the model ring, the sessions table and the
+ * zero state. Imported by the Usage feature only, so it ships with its lazy
+ * chunk. Colours, durations and easings come from the tokens; the global
+ * reduced-motion rule in base.css makes all of it instant, and every element
+ * rests in its final state, so nothing waits on an animation to be visible. */
+
+@layer components {
+  /* ---- Series colours ---------------------------------------------------- */
+
+  /* The page's categorical palette, from tokens that hold contrast in both
+     themes: input, output, cache read, cache write, then more models. */
+  [data-series] {
+    --us-c: var(--accent);
+  }
+  [data-series='s2'] {
+    --us-c: var(--info);
+  }
+  [data-series='s3'] {
+    --us-c: var(--hl-builtin);
+  }
+  [data-series='s4'] {
+    --us-c: var(--hl-attr);
+  }
+  [data-series='s5'] {
+    --us-c: var(--hl-number);
+  }
+  [data-series='s6'] {
+    --us-c: var(--hl-keyword);
+  }
+
+  .us-swatch {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 0.625rem;
+    height: 0.625rem;
+    border-radius: 3px;
+    background: var(--us-c);
+  }
+
+  .us-eyebrow {
+    color: var(--text-muted);
+    font-size: var(--text-small);
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  /* ---- Bars ------------------------------------------------------------- */
+
+  /* A rounded track; fills are full-width layers clipped to their share, so
+     a changed value glides (clip-path) and the rounded ends stay round. */
+  .us-bar {
+    position: relative;
+    display: block;
+    overflow: hidden;
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: var(--surface-3);
+    box-shadow: var(--inset-shadow);
+  }
+  /* Reveals the fills left to right on mount, staggered by the bar's index. */
+  .us-bar-reveal {
+    position: absolute;
+    inset: 0;
+    animation: us-reveal var(--duration-slow) var(--ease-enter) both;
+    animation-delay: calc(60ms + var(--bar-i, 0) * var(--stagger-step));
+  }
+  /* style="--from: <0-100>; --to: <0-100>" (percent of the track). */
+  .us-fill {
+    position: absolute;
+    inset: 0;
+    background: var(--us-c);
+    clip-path: inset(0 calc(100% - var(--to, 0) * 1%) 0 calc(var(--from, 0) * 1%));
+    transition: clip-path var(--duration-slow) var(--ease-out);
+  }
+
+  /* ---- Lead ------------------------------------------------------------- */
+
+  .us-lead {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    overflow: hidden;
+    padding: 1.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--surface-1);
+    box-shadow: var(--elevation-card);
+    animation: agentos-rise var(--duration-enter) var(--ease-enter) both;
+  }
+  /* A faint lime wash from the figure's corner. */
+  .us-lead::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(
+      70% 120% at 0% 0%,
+      color-mix(in oklab, var(--accent) 9%, transparent),
+      transparent 60%
+    );
+  }
+  .us-lead-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem 2rem;
+  }
+  .us-lead-figure {
+    font-size: 3rem;
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    line-height: 1.05;
+  }
+  .us-lead-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 2.5rem;
+  }
+  .us-lead-stats > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+  .us-lead-stats dt {
+    color: var(--text-muted);
+    font-size: var(--text-small);
+  }
+  .us-lead-stats dd {
+    font-size: 1.375rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .us-mix {
+    height: 0.75rem;
+  }
+  .us-mix-key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem 1.75rem;
+    font-size: var(--text-small);
+  }
+  .us-mix-key > div {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .us-mix-key dt {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    color: var(--text-muted);
+  }
+  .us-mix-key dd {
+    font-weight: 500;
+  }
+
+  /* ---- Panels ----------------------------------------------------------- */
+
+  .us-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  @media (min-width: 1100px) {
+    .us-grid {
+      grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    }
+  }
+  .us-panel {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--surface-1);
+    box-shadow: var(--elevation-card);
+    animation: agentos-rise var(--duration-enter) var(--ease-enter) both;
+    animation-delay: calc(1 * var(--stagger-step));
+  }
+  .us-panel + .us-panel {
+    animation-delay: calc(2 * var(--stagger-step));
+  }
+  .us-rise {
+    animation: agentos-rise var(--duration-enter) var(--ease-enter) both;
+    animation-delay: calc(3 * var(--stagger-step));
+  }
+
+  /* Top sessions: key and value on one line, the bar beneath. */
+  .us-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+  }
+  .us-bar-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.25rem 0.75rem;
+  }
+
+  /* By model: the ring beside a ranked list (stacked when narrow). */
+  .us-models {
+    container: us-models / inline-size;
+  }
+  .us-models-body {
+    display: grid;
+    align-items: start;
+    gap: 1.25rem;
+    grid-template-columns: 8.5rem minmax(0, 1fr);
+  }
+  @container us-models (max-width: 22rem) {
+    .us-models-body {
+      grid-template-columns: minmax(0, 1fr);
+      justify-items: center;
+    }
+    .us-models-list {
+      width: 100%;
+    }
+  }
+  .us-models-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+  }
+  .us-model {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+
+  .us-donut {
+    position: relative;
+    width: 8.5rem;
+    aspect-ratio: 1;
+  }
+  .us-donut > svg {
+    width: 100%;
+    height: 100%;
+    rotate: -90deg;
+  }
+  .us-donut-track,
+  .us-donut-arc {
+    fill: none;
+    stroke-width: 12;
+  }
+  .us-donut-track {
+    stroke: var(--surface-3);
+  }
+  .us-donut-arc {
+    stroke: var(--us-c);
+    stroke-linecap: butt;
+    animation: us-arc var(--duration-slow) var(--ease-enter) both;
+    animation-delay: calc(80ms + var(--arc-i, 0) * 60ms);
+    transition: stroke-dasharray var(--duration-slow) var(--ease-out);
+  }
+  .us-donut-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  /* ---- No sessions in range --------------------------------------------- */
+
+  .us-range-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 2.5rem 1rem;
+    text-align: center;
+  }
+
+  /* ---- Zero state ------------------------------------------------------- */
+
+  /* Copy and the primary action on the canvas, beside a ghosted preview. */
+  .us-zero {
+    display: grid;
+    align-items: center;
+    gap: 2rem;
+    padding-top: 1.5rem;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  @media (min-width: 1100px) {
+    .us-zero {
+      grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    }
+  }
+  .us-zero-copy {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+  .us-zero-mark {
+    display: grid;
+    width: 3rem;
+    height: 3rem;
+    margin-bottom: 0.25rem;
+    place-items: center;
+    border-radius: var(--radius-card);
+    color: var(--accent);
+    background: var(--accent-tint);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklab, var(--accent) 26%, transparent),
+      0 0 0 6px color-mix(in oklab, var(--accent) 5%, transparent),
+      0 8px 28px -8px var(--accent-glow);
+  }
+  .us-zero-mark > svg {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+  .us-zero-title {
+    font-size: 2rem;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+  }
+  .us-zero-preview {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1.25rem;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-card);
+    background: color-mix(in oklab, var(--surface-1) 55%, transparent);
+  }
+  /* The shapes are muted: a preview, not data. */
+  .us-zero-preview .us-bar,
+  .us-zero-preview .us-donut {
+    opacity: 0.55;
+  }
+  .us-ghost-figure,
+  .us-ghost-line {
+    display: block;
+    border-radius: 6px;
+    background: var(--surface-3);
+  }
+  .us-ghost-figure {
+    width: 9rem;
+    height: 2.25rem;
+  }
+  .us-ghost-line {
+    height: 0.5rem;
+  }
+  .us-zero-preview-row {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    padding-top: 0.25rem;
+  }
+  .us-zero-donut {
+    width: 6rem;
+    flex-shrink: 0;
+  }
+
+  /* ---- Sessions table --------------------------------------------------- */
+
+  /* Sized by its card, not the viewport: the columns fit a desktop card
+     (session key and model truncate, with the full text in a title); a
+     narrower card drops the cache columns (their totals are in the lead); a
+     phone-width card turns every row into a small card of labelled values.
+     Every cell is rendered once; only the layout changes. */
+  .us-table-wrap {
+    container: us-table / inline-size;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--surface-1);
+    box-shadow: var(--elevation-card);
+  }
+  .us-table {
+    width: 100%;
+    text-align: left;
+  }
+  .us-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface-2);
+    box-shadow: inset 0 -1px 0 var(--border);
+  }
+  .us-table td:is([data-col='session'], [data-col='model']) {
+    max-width: 9.5rem;
+  }
+
+  @container us-table (max-width: 54rem) {
+    .us-table [data-col='cache'] {
+      display: none;
+    }
+  }
+
+  .us-sort {
+    transition:
+      rotate var(--duration-base) var(--ease-spring),
+      opacity var(--duration-fast) var(--ease-out);
+  }
+}
+
+/* Overrides of utility classes on primitives, so they sit in the same
+   layer as the utilities they replace. */
+@layer utilities {
+  /* On a phone the range takes the full width as four equal segments, and
+     the lead loses some padding, so it never wraps into two rows. */
+  @media (max-width: 639px) {
+    .us-lead {
+      padding: 1.25rem 1rem;
+    }
+    .us-lead-figure {
+      font-size: 2.5rem;
+    }
+    .us-range {
+      width: 100%;
+      flex-wrap: nowrap;
+    }
+    .us-range > * {
+      min-width: 0;
+      flex: 1 1 0;
+      padding-inline: 0.25rem;
+    }
+    .us-lead-stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      align-items: end;
+      gap: 0.75rem;
+    }
+    .us-lead-stats dd {
+      font-size: 1.125rem;
+    }
+  }
+
+  /* The table's phone layout (see .us-table above): it replaces the cells'
+     padding and alignment utilities, so it sits in their layer. */
+  @container us-table (max-width: 34rem) {
+    .us-table,
+    .us-table thead,
+    .us-table tbody,
+    .us-table tr[data-breakdown],
+    .us-table tr[data-breakdown] > td {
+      display: block;
+    }
+    /* The header row becomes a row of sort buttons. */
+    .us-table thead {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--surface-2);
+      box-shadow: inset 0 -1px 0 var(--border);
+    }
+    .us-table thead tr {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0 1rem;
+      padding: 0.25rem 1rem;
+    }
+    .us-table thead th:nth-child(n) {
+      position: static;
+      padding: 0;
+      background: none;
+      box-shadow: none;
+    }
+    .us-table thead th:not([data-sortable]) {
+      display: none;
+    }
+    /* A row: the session on top, then labelled values in three columns. */
+    .us-table tbody tr:not([data-breakdown]) {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.375rem 0.75rem;
+      padding: 0.625rem 1rem 0.75rem;
+    }
+    .us-table tbody td:nth-child(n) {
+      min-width: 0;
+      max-width: none;
+      padding: 0;
+      text-align: start;
+    }
+    .us-table tbody td[data-col='cache'] {
+      display: block;
+    }
+    .us-table tbody td[data-label]:not([data-col='session'])::before {
+      content: attr(data-label);
+      display: block;
+      margin-bottom: 0.125rem;
+      color: var(--text-muted);
+      font-size: var(--text-small);
+      font-weight: 400;
+    }
+    .us-table tbody td[data-col='session'] {
+      grid-column: 1 / -1;
+    }
+    .us-table tbody td[data-col='model'] {
+      grid-column: span 2;
+    }
+    /* The page scrolls the cards; no nested scroller on a phone. */
+    .us-table-wrap > .scroll-contained {
+      max-height: none;
+    }
+  }
+}
+
+@keyframes us-reveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes us-arc {
+  from {
+    stroke-dasharray: 0 340;
+  }
+}
+
+/* Forced colors: fills keep a visible system colour; the wash goes. */
+@media (forced-colors: active) {
+  .us-fill,
+  .us-swatch {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  .us-fill:is([data-series='s2'], [data-series='s4'], [data-series='s6']),
+  .us-swatch:is([data-series='s2'], [data-series='s4'], [data-series='s6']) {
+    background: GrayText;
+  }
+  .us-donut-arc {
+    stroke: CanvasText;
+  }
+  .us-bar,
+  .us-lead,
+  .us-panel,
+  .us-table-wrap {
+    border: 1px solid CanvasText;
+  }
+  .us-lead::before {
+    display: none;
+  }
+}

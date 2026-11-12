@@ -240,8 +240,8 @@ Chat is the center of the console; everything else is a page in the rail's
 | Home | `/home` | Readiness (when not ready, the findings that need attention), provider and route, uptime, sessions, usage (all time, plus how many sessions were active today), the next automation run, and a live event feed. Each figure loads on its own and links to its detail. |
 | Sessions | `/sessions` | Search and filter every session, stat tiles with an open/completed/failed/aborted breakdown and how many are executing now, a lifecycle chip per row, inline rename, a row menu with Open chat and Open in new tab, bulk delete, move to a project, a new-session dialog that can create an agent, orphan flags. |
 | Projects | `/projects` | Group sessions, edit each project's shared knowledge (injected into every member session), and start a new chat inside a project at once, under the project's agent. |
-| Usage | `/usage` | The sessions active in a range with their token and estimated-cost totals, the top sessions charted, a rollup by model, CSV export. The sessions table fits its card: a narrower one drops the cache columns, a phone-width one shows each session as a card of labelled values. |
-| Automations | `/automations` | Scheduled jobs and their run health; create, edit, run now, pause, delete, run history. |
+| Usage | `/usage` | Spend for the sessions active in a range as the lead figure, with sessions, the average and the token mix (input, output, cache read, cache write) as one stacked bar; the top sessions charted beside spend by model (a ring and a ranked list); the sessions table; CSV export. The sessions table fits its card: a narrower one drops the cache columns, a phone-width one shows each session as a card of labelled values. |
+| Automations | `/automations` | What runs next and the next 24 hours as lanes, then scheduled jobs and their run health; create (blank or from a template), edit, run now, pause, delete, run history. |
 | Inbox | `/inbox` | Everything waiting on you: approvals, agent questions and runtime issues, answered in place. |
 
 **Home** sums tokens and estimated spend over every session: the gateway keeps
@@ -251,7 +251,9 @@ it, Home says how many sessions were active today (since local midnight).
 **Usage** lists the sessions active in the chosen range (All time, the last 7,
 14 or 30 days) with their lifetime totals, charts the top 20 of them by tokens
 or cost, rolls usage up by model, and exports the rows in range as CSV. A range
-picks sessions; it does not split a session's usage by day.
+picks sessions; it does not split a session's usage by day. The page leads with
+the spend in range and where its cost comes from; the model rollup shows each
+model's share of spend as a ring and a ranked list.
 
 **Sessions**, **Home** and **Projects** load the newest 500 sessions. With more
 than that, they say so ("Showing the newest 500 of N"); counts, search and
@@ -958,16 +960,21 @@ the same approvals next to agent questions and runtime issues.
 
 ## Automations
 
-**Automations** (`/automations`, `g r`) is the former Cron view. Each job is a
-card with its schedule (and a plain-language explanation with the next runs,
-worked out in the job's timezone, UTC when it has none, and shown in local time),
-a next-run countdown that ticks every second, delivery target, payload and run
-health. **New automation** opens the editor,
-which also sets the failure destination; an empty page explains that scheduled
-jobs appear there and offers **New automation** with presets. Cards offer
-**Run now**, **Pause**/**Resume**, **Delete** (confirmed first) and the run
-history with each run's output. **Run now** reports a run that failed, or that
-did not start (busy, disabled, blocked), as a failure. Cards refresh live when
+**Automations** (`/automations`, `g r`) is the former Cron view. It opens with
+**Up next** (the job that runs soonest, with a countdown that ticks every
+second, and the next few jobs after it) beside **Next 24 hours**, one lane per
+enabled job with a mark for every run. Each job is a row led by its schedule in
+words (the editor adds a plain-language explanation with the next runs, worked
+out in the job's timezone, UTC when it has none, and shown in local time), with
+the cron expression, the next-run countdown, the last run, delivery target,
+payload and run health. **New automation** opens the editor, which also sets the
+failure destination; an empty page explains that scheduled jobs appear there
+and offers **New automation** and three templates, each opening the editor
+filled in. Rows offer **Run now**, **Pause**/**Resume**, the run history with a
+summary of the last runs and each run's output, **Edit**, and in the row menu
+**Copy ID**, the overlap policy and **Delete** (confirmed first). **Run now**
+reports a run that failed, or that did not start (busy, disabled, blocked), as
+a failure. Rows refresh live when
 a run finishes (`cron.run.finished`) and the page subscribes again after a
 reconnect; the job list is also re-read every 60 seconds while the page is
 visible. Automations covers scheduled jobs only: DCA mandates, price triggers,
@@ -976,12 +983,12 @@ brackets and missions are not shown there (see
 
 ### Run health
 
-A job that keeps failing is marked on its card: a **Degraded** badge, the
+A job that keeps failing is marked on its row: a **Degraded** badge, the
 consecutive failure count and the last error. They come from the `health`
 block on `cron.list` (the engine calls a job degraded at 3 failures in a
 row); a gateway older than that is read from the job's `consecutive_errors`
 and last error with the same threshold. When the job carries an overlap
-policy (`concurrency`), an **Overlap** picker sets it (`forbid` skips a run while one is going,
+policy (`concurrency`), the **Overlap** choice in the row menu sets it (`forbid` skips a run while one is going,
 `replace` stops the running one, `allow` runs them side by side) through
 `cron.update`; it does not appear when the job has no `concurrency`. **Run**
 and **Pause** are disabled, with the reason, while the gateway is offline or

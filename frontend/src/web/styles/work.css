@@ -202,33 +202,3 @@
     display: inline-block;
   }
 }
-
-/* ---- Run history timeline ------------------------------------------------ */
-
-/* The rail behind the status marks; it stops at the last mark. */
-.work-timeline > li {
-  position: relative;
-}
-.work-timeline > li:not(:last-child)::before {
-  content: '';
-  position: absolute;
-  inset-block: 1.5rem -0.25rem;
-  inset-inline-start: 0.6875rem;
-  width: 1px;
-  background: var(--border-strong);
-}
-
-/* ---- Disclosure chevrons ------------------------------------------------- */
-
-.work-details > summary {
-  list-style: none;
-}
-.work-details > summary::-webkit-details-marker {
-  display: none;
-}
-.work-details > summary .work-chevron {
-  transition: rotate var(--duration-base) var(--ease-out);
-}
-.work-details[open] > summary .work-chevron {
-  rotate: 90deg;
-}

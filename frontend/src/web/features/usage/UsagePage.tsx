@@ -2,17 +2,13 @@ import { useQuery } from '@tanstack/react-query'
 import {
   ArrowUp,
   BarChart3,
-  Calculator,
   ChevronDown,
-  Coins,
   Download,
   Info,
-  MessageSquare,
   MessageSquarePlus,
   RefreshCw,
-  Wallet,
 } from 'lucide-react'
-import { Fragment, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useId, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useRpc } from '@/app/providers'
 import { formatNumber, t, tPlural } from '@/i18n'
@@ -45,29 +41,26 @@ import {
 } from '@/views/usage/logic'
 import { Badge } from '@/web/components/ui/badge'
 import { Button } from '@/web/components/ui/button'
-import { Card, StatCard } from '@/web/components/ui/card'
 import { PageHeader } from '@/web/components/ui/page-header'
 import { SegmentedControl } from '@/web/components/ui/segmented-control'
-import {
-  EmptyState,
-  ErrorState,
-  LoadingRegion,
-  Skeleton,
-  StaleBadge,
-} from '@/web/components/ui/states'
+import { ErrorState, LoadingRegion, Skeleton, StaleBadge } from '@/web/components/ui/states'
 import { useCountUp } from '@/web/components/ui/use-count-up'
-import { IconTile, Meter, PAGE_CLASS, STAT_CARD } from '@/web/features/home/overview-ui'
+import { PAGE_CLASS } from '@/web/features/home/overview-ui'
 import { useDocumentVisible } from '@/web/shell/session-data'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
+import '@/web/styles/page-usage.css'
+import { Bar, Donut, seriesAt, Swatch } from './charts'
 
-// Usage: spend and tokens from `usage.status` for the sessions active in a
-// range (each row is a session's lifetime total, so the range selects
-// sessions, it does not slice usage by day), the top sessions as a bar chart
-// by tokens or cost, a by-model rollup, a sortable sessions table whose
-// multi-model rows expand into their per-model breakdown, and CSV export of
-// the rows in range. Polls every 60 s while the tab is visible; a failed
-// refresh keeps the loaded figures under its error notice.
+// Usage, as an analytics view over `usage.status` for the sessions active in
+// a range (each row is a session's lifetime total, so the range selects
+// sessions, it does not slice usage by day): one lead figure (spend) with the
+// range beside it and the token mix as one stacked bar; the top sessions as
+// bars by tokens or cost beside the spend by model as a ring and a ranked
+// list; then a sortable sessions table whose multi-model rows expand into
+// their per-model breakdown, and CSV export of the rows in range. Polls every
+// 60 s while the tab is visible; a failed refresh keeps the loaded figures
+// under its error notice.
 
 const USAGE_QUERY_KEY = ['usage', 'status'] as const
 const USAGE_POLL_MS = 60_000
@@ -123,6 +116,19 @@ function rangeLabel(range: UsageRange): string {
   return range === 'all'
     ? t('webPagesOverview.usageRangeAll')
     : t('webPagesOverview.usageRangeDays', { days: Number(range) })
+}
+
+/** The range as a segment label: "Last 7 days", shortened to "7 days" on a phone. */
+function rangeOption(range: UsageRange): ReactNode {
+  if (range === 'all') return rangeLabel(range)
+  return (
+    <>
+      <span className="max-sm:hidden">{rangeLabel(range)}</span>
+      <span className="sm:hidden">
+        {t('webPagesOverview.usageRangeDaysShort', { days: Number(range) })}
+      </span>
+    </>
+  )
 }
 
 function readRange(): UsageRange {
@@ -212,7 +218,7 @@ function ModelBreakdown({ row }: { row: UsageRow }) {
               {m.name}
             </span>
             <span className="flex items-center gap-2">
-              <Meter className="h-1.5 w-20" segments={[{ pct: m.sharePct }]} />
+              <Bar className="h-1.5 w-20" segments={[{ pct: m.sharePct, series: 's1' }]} />
               <span className="text-small tabular-nums">
                 {t('webPagesOverview.usageShare', { share: m.sharePct.toFixed(1) })}
               </span>
@@ -229,7 +235,7 @@ function ModelBreakdown({ row }: { row: UsageRow }) {
   )
 }
 
-// Cells carry data-col (the layout hooks in overview.css) and, for the
+// Cells carry data-col (the layout hooks in page-usage.css) and, for the
 // narrow card layout, data-label (the column name shown above the value).
 const CELL = 'px-2 py-2.5 first:pl-4 last:pr-4'
 
@@ -245,7 +251,7 @@ const COL_ID: Record<Column['key'], string> = {
   model: 'model',
 }
 
-/** The layout hooks of one cell (see `.ov-table` in overview.css). */
+/** The layout hooks of one cell (see `.us-table` in page-usage.css). */
 function cellProps(key: Column['key']) {
   return { 'data-col': COL_ID[key], 'data-label': columnLabel(key) }
 }
@@ -272,12 +278,12 @@ function SessionsTable({ rows }: { rows: UsageRow[] }) {
     })
 
   return (
-    <Card variant="plain" padding="none" className="ov-table-wrap overflow-hidden shadow-card">
+    <div className="us-table-wrap">
       {/* Scrolls on its own, so the header can stick while the rows move.
           The columns fit the card at desktop widths; a narrower card drops
           the cache columns, and a phone-width one turns rows into cards. */}
       <div className="scroll-contained relative max-h-[36rem] overflow-auto">
-        <table className="ov-table">
+        <table className="us-table">
           <caption className="sr-only">{t('webPagesOverview.usageTable')}</caption>
           <thead className="text-small text-text-muted">
             <tr>
@@ -311,7 +317,7 @@ function SessionsTable({ rows }: { rows: UsageRow[] }) {
                         <ArrowUp
                           aria-hidden
                           className={cn(
-                            'ov-sort size-3.5',
+                            'us-sort size-3.5',
                             active
                               ? 'text-accent opacity-100'
                               : 'opacity-0 group-hover:opacity-50 group-focus-visible:opacity-50',
@@ -438,7 +444,7 @@ function SessionsTable({ rows }: { rows: UsageRow[] }) {
           </tbody>
         </table>
       </div>
-    </Card>
+    </div>
   )
 }
 
@@ -446,9 +452,9 @@ const CHART_MODES: readonly ChartMode[] = ['tokens', 'cost']
 
 /** The colour key of the chart: what each fill colour stands for. */
 function ChartLegend({ mode }: { mode: ChartMode }) {
-  const item = (series: 'input' | 'output', label: string) => (
+  const item = (series: 's1' | 's2', label: string) => (
     <span className="inline-flex items-center gap-1.5">
-      <span className="ov-swatch" data-series={series} />
+      <Swatch series={series} />
       {label}
     </span>
   )
@@ -456,11 +462,11 @@ function ChartLegend({ mode }: { mode: ChartMode }) {
     <p className="flex items-center gap-4 text-small text-text-muted" aria-hidden>
       {mode === 'tokens' ? (
         <>
-          {item('input', t('webPagesOverview.usageChartInput'))}
-          {item('output', t('webPagesOverview.usageChartOutput'))}
+          {item('s1', t('webPagesOverview.usageChartInput'))}
+          {item('s2', t('webPagesOverview.usageChartOutput'))}
         </>
       ) : (
-        item('input', t('webPagesOverview.usageChartCost'))
+        item('s1', t('webPagesOverview.usageChartCost'))
       )}
     </p>
   )
@@ -488,287 +494,384 @@ function TopSessionsChart({ rows }: { rows: UsageRow[] }) {
   const chart = useMemo(() => chartRows(rows, mode), [rows, mode])
   if (chart.poolSize === 0) return null
   return (
-    <Card asChild padding="none">
-      <section aria-labelledby="usage-chart-title" className="flex flex-col gap-4 p-5">
-        <header className="flex flex-wrap items-center gap-x-4 gap-y-3">
-          <div className="min-w-0">
-            <h2 id="usage-chart-title" className="text-section">
-              {t('webPagesOverview.usageChartTitle')}
-            </h2>
-            <p className="mt-0.5 text-small text-text-muted">
-              {t('webPagesOverview.usageChartShown', { shown: chart.shown, total: chart.poolSize })}
-            </p>
-          </div>
-          <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2">
-            <ChartLegend mode={mode} />
-            <SegmentedControl
-              kind="toggle"
-              size="sm"
-              aria-label={t('webPagesOverview.usageChartMeasure')}
-              value={mode}
-              onChange={setMode}
-              options={CHART_MODES.map((value) => ({
-                value,
-                label:
-                  value === 'tokens'
-                    ? t('webPagesOverview.usageChartTokens')
-                    : t('webPagesOverview.usageChartCost'),
-              }))}
-            />
-          </div>
-        </header>
-        <ol role="list" className="flex flex-col gap-1">
-          {chart.bars.map((bar, i) => (
-            <li
-              key={bar.key}
-              aria-label={t('webPagesOverview.usageChartBar', {
-                session: bar.key,
-                value: bar.valueLabel,
-              })}
-              className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 rounded-control sm:grid-cols-[minmax(7rem,13rem)_minmax(0,1fr)_4.5rem]"
+    <section aria-labelledby="usage-chart-title" className="us-panel us-top">
+      <header className="flex flex-wrap items-start gap-x-4 gap-y-3">
+        <div className="min-w-0 flex-1">
+          <h2 id="usage-chart-title" className="text-section">
+            {t('webPagesOverview.usageChartTitle')}
+          </h2>
+          <p className="mt-0.5 text-small text-text-muted">
+            {t('webPagesOverview.usageChartShown', { shown: chart.shown, total: chart.poolSize })}
+          </p>
+        </div>
+        <SegmentedControl
+          kind="toggle"
+          size="sm"
+          aria-label={t('webPagesOverview.usageChartMeasure')}
+          value={mode}
+          onChange={setMode}
+          options={CHART_MODES.map((value) => ({
+            value,
+            label:
+              value === 'tokens'
+                ? t('webPagesOverview.usageChartTokens')
+                : t('webPagesOverview.usageChartCost'),
+          }))}
+        />
+      </header>
+      <ChartLegend mode={mode} />
+      <ol role="list" className="us-bars">
+        {chart.bars.map((bar, i) => (
+          <li
+            key={bar.key}
+            aria-label={t('webPagesOverview.usageChartBar', {
+              session: bar.key,
+              value: bar.valueLabel,
+            })}
+            className="us-bar-row"
+          >
+            <Link
+              to={sessionKeyToPath(bar.key)}
+              title={bar.key}
+              className="target inline-flex min-w-0 items-center font-mono text-small text-text underline-offset-2 transition-colors duration-[var(--duration-fast)] hover:text-accent hover:underline"
             >
-              {/* A full-height row target (24 px; 44 px on touch). */}
-              <Link
-                to={sessionKeyToPath(bar.key)}
-                title={bar.key}
-                className="target inline-flex min-w-0 items-center font-mono text-small text-text underline-offset-2 transition-colors duration-[var(--duration-fast)] hover:text-accent hover:underline"
-              >
-                <KeyLabel value={bar.key} />
-              </Link>
-              <Meter
-                index={i}
-                className="col-span-2 row-start-2 h-2.5 sm:col-span-1 sm:row-start-auto"
-                segments={[
-                  { pct: bar.inputPct, series: 'input' },
-                  { pct: bar.outputPct, series: 'output' },
-                ]}
-              />
-              <span className="text-right text-small font-medium tabular-nums">
-                {bar.valueLabel}
-              </span>
-            </li>
-          ))}
-        </ol>
-      </section>
-    </Card>
-  )
-}
-
-/** A figure that counts up on arrival and on change. */
-function CountedCost({ value }: { value: number }) {
-  return <>{formatCost(useCountUp(value))}</>
-}
-
-/** Usage summed per model across the sessions in range. */
-function ModelGrid({ rows }: { rows: UsageRow[] }) {
-  const grid = useMemo(() => modelBreakdownGrid(rows), [rows])
-  if (grid.models.length === 0) return null
-  return (
-    <section aria-labelledby="usage-models-title" className="flex flex-col gap-3">
-      <h2 id="usage-models-title" className="text-section">
-        {t('webPagesOverview.usageModelsTitle')}
-      </h2>
-      <ul role="list" className="anim-stagger grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {grid.models.map((m, i) => (
-          <Card asChild key={m.model} padding="none">
-            <li aria-label={m.model} className="flex min-w-0 flex-col gap-3 p-5">
-              <p className="truncate font-mono text-small" title={m.model}>
-                {m.provider && m.name !== m.model ? (
-                  <span className="text-text-muted">{m.provider}/</span>
-                ) : null}
-                {m.name}
-              </p>
-              <div className="flex flex-col gap-2">
-                <p className="text-stat tabular-nums">
-                  <CountedCost value={m.costUsd} />
-                </p>
-                <span className="flex items-center gap-2.5">
-                  <Meter index={i} className="flex-1" segments={[{ pct: m.sharePct }]} />
-                  <span className="shrink-0 text-small font-medium tabular-nums">
-                    {t('webPagesOverview.usageShare', { share: m.sharePct.toFixed(1) })}
-                  </span>
-                </span>
-              </div>
-              <div className="flex flex-col gap-0.5 border-t border-border pt-3 text-small text-text-muted">
-                <p className="tabular-nums">
-                  {t('webPagesOverview.usageModelTokens', {
-                    tokens: formatNumber(m.totalTokens),
-                    input: formatNumber(m.inputTokens),
-                    output: formatNumber(m.outputTokens),
-                  })}
-                </p>
-                <p>{tPlural('webPagesOverview.usageModelSessions', m.sessions)}</p>
-              </div>
-            </li>
-          </Card>
+              <KeyLabel value={bar.key} />
+            </Link>
+            <span className="text-right text-small font-medium tabular-nums">{bar.valueLabel}</span>
+            <Bar
+              index={i}
+              className="col-span-2 h-2"
+              segments={[
+                { pct: bar.inputPct, series: 's1' },
+                { pct: bar.outputPct, series: 's2' },
+              ]}
+            />
+          </li>
         ))}
-      </ul>
+      </ol>
     </section>
   )
 }
 
-// The tokens card is wider: it carries the input/output/cache breakdown.
-const STAT_GRID =
-  'grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)]'
+/** A figure that counts up on arrival and on change. */
+function Counted({ value, format }: { value: number; format: (n: number) => string }) {
+  return <>{format(useCountUp(value))}</>
+}
 
-function UsageBody({ all, range }: { all: UsageRow[]; range: UsageRange }) {
-  const visible = useMemo(() => visibleSessions(all, range), [all, range])
-  const metrics = useMemo(() => usageMetrics(visible), [visible])
-  const composition = useMemo(() => spendSourceHint(visible), [visible])
-  const hidden = rangeHiddenHint(all, range)
-  const ioTotal = metrics.input + metrics.output
+/** Spend summed per model across the sessions in range: a ring and a ranked list. */
+function ModelsPanel({ rows }: { rows: UsageRow[] }) {
+  const grid = useMemo(() => modelBreakdownGrid(rows), [rows])
+  if (grid.models.length === 0) return null
+  const top = grid.models[0]!
+  return (
+    <section aria-labelledby="usage-models-title" className="us-panel us-models">
+      <header>
+        <h2 id="usage-models-title" className="text-section">
+          {t('webPagesOverview.usageModelsTitle')}
+        </h2>
+        <p className="mt-0.5 text-small text-text-muted">{t('webPagesOverview.usageModelsHint')}</p>
+      </header>
+      <div className="us-models-body">
+        <Donut shares={grid.models.map((m, i) => ({ pct: m.sharePct, series: seriesAt(i) }))}>
+          <span className="text-section tabular-nums">
+            {grid.totalCost > 0 ? `${Math.round(top.sharePct)}%` : '—'}
+          </span>
+          <span className="max-w-[5.5rem] truncate text-small text-text-muted" title={top.model}>
+            {top.name}
+          </span>
+        </Donut>
+        <ol role="list" className="us-models-list">
+          {grid.models.map((m, i) => (
+            <li key={m.model} aria-label={m.model} className="us-model">
+              <span className="flex min-w-0 items-center gap-2">
+                <Swatch series={seriesAt(i)} />
+                <span className="min-w-0 truncate font-mono text-small" title={m.model}>
+                  {m.provider && m.name !== m.model ? (
+                    <span className="text-text-muted">{m.provider}/</span>
+                  ) : null}
+                  {m.name}
+                </span>
+                <span className="ml-auto shrink-0 font-medium tabular-nums">
+                  <Counted value={m.costUsd} format={formatCost} />
+                </span>
+              </span>
+              <Bar
+                index={i}
+                className="h-1"
+                segments={[{ pct: m.sharePct, series: seriesAt(i) }]}
+              />
+              <span className="flex flex-wrap gap-x-2 text-small text-text-muted tabular-nums">
+                <span>{t('webPagesOverview.usageShare', { share: m.sharePct.toFixed(1) })}</span>
+                <span aria-hidden>·</span>
+                <span>{tPlural('webPagesOverview.usageModelSessions', m.sessions)}</span>
+                <span aria-hidden>·</span>
+                <span>
+                  {t('webPagesOverview.usageTokens', { tokens: formatNumber(m.totalTokens) })}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </section>
+  )
+}
+
+/**
+ * The lead: spend, large, with the range beside it; the sessions and the
+ * average as secondary figures; the token mix as one stacked bar and its key.
+ */
+function Lead({
+  rows,
+  range,
+  onRange,
+}: {
+  rows: UsageRow[]
+  range: UsageRange
+  onRange: (range: UsageRange) => void
+}) {
+  const titleId = useId()
+  const metrics = useMemo(() => usageMetrics(rows), [rows])
+  const composition = useMemo(() => spendSourceHint(rows), [rows])
+  const mix = [
+    ['s1', t('webPagesOverview.usageInput'), metrics.input],
+    ['s2', t('webPagesOverview.usageOutput'), metrics.output],
+    ['s3', t('webPagesOverview.usageCacheRead'), metrics.cacheRead],
+    ['s4', t('webPagesOverview.usageCacheWrite'), metrics.cacheWrite],
+  ] as const
+  const mixTotal = mix.reduce((sum, [, , value]) => sum + value, 0)
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className={cn('anim-stagger', STAT_GRID)}>
-        <StatCard
-          className={STAT_CARD}
-          label={t('webPagesOverview.usageSpend')}
-          icon={
-            <IconTile tone="accent">
-              <Wallet />
-            </IconTile>
-          }
-          value={metrics.cost}
-          format={formatCost}
-          hint={composition || t('webPagesOverview.usageNoCostSource')}
-        />
-        <StatCard
-          className={STAT_CARD}
-          label={t('webPagesOverview.usageTokensTitle')}
-          icon={
-            <IconTile>
-              <Coins />
-            </IconTile>
-          }
-          value={metrics.totalTokens}
-          format={formatNumber}
-        >
-          <Meter
-            className="mt-1 h-1.5"
-            segments={[
-              { pct: ioTotal ? (metrics.input / ioTotal) * 100 : 0, series: 'input' },
-              { pct: ioTotal ? (metrics.output / ioTotal) * 100 : 0, series: 'output' },
-            ]}
-          />
-          <dl className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 text-small">
-            {(
-              [
-                ['input', t('webPagesOverview.usageInput'), metrics.input],
-                ['output', t('webPagesOverview.usageOutput'), metrics.output],
-                [null, t('webPagesOverview.usageCacheRead'), metrics.cacheRead],
-                [null, t('webPagesOverview.usageCacheWrite'), metrics.cacheWrite],
-              ] as const
-            ).map(([series, label, value]) => (
-              <div key={label} className="flex min-w-0 items-center justify-between gap-2">
-                <dt className="inline-flex min-w-0 items-center gap-1.5 truncate text-text-muted">
-                  {series ? (
-                    <span className="ov-swatch size-2" data-series={series} aria-hidden />
-                  ) : (
-                    <span className="size-2 shrink-0" aria-hidden />
-                  )}
-                  {label}
-                </dt>
-                <dd className="tabular-nums">{formatNumber(value)}</dd>
-              </div>
-            ))}
-          </dl>
-        </StatCard>
-        <StatCard
-          className={STAT_CARD}
-          label={t('webPagesOverview.usageSessions')}
-          icon={
-            <IconTile>
-              <MessageSquare />
-            </IconTile>
-          }
-          value={metrics.sessions}
-          format={formatNumber}
-          hint={t('webPagesOverview.usageSessionsHint')}
-        />
-        <StatCard
-          className={STAT_CARD}
-          label={t('webPagesOverview.usageAverage')}
-          icon={
-            <IconTile>
-              <Calculator />
-            </IconTile>
-          }
-          value={metrics.avgCost != null ? metrics.avgCost : '—'}
-          format={formatCost}
-          hint={t('webPagesOverview.usageAverageHint')}
+    <section aria-labelledby={titleId} className="us-lead">
+      <div className="us-lead-top">
+        <div className="flex min-w-0 flex-col gap-1">
+          <h2 id={titleId} className="us-eyebrow">
+            {t('webPagesOverview.usageSpend')}
+          </h2>
+          <p className="us-lead-figure tabular-nums">
+            <Counted value={metrics.cost} format={formatCost} />
+          </p>
+          <p className="text-small text-text-muted">
+            {composition || t('webPagesOverview.usageNoCostSource')}
+          </p>
+        </div>
+        <SegmentedControl
+          kind="toggle"
+          tone="accent"
+          size="sm"
+          className="us-range"
+          aria-label={t('webPagesOverview.usageRange')}
+          value={range}
+          onChange={onRange}
+          options={RANGES.map((value) => ({ value, label: rangeOption(value) }))}
         />
       </div>
 
-      <TopSessionsChart rows={visible} />
-      <ModelGrid rows={visible} />
+      <dl className="us-lead-stats">
+        <div>
+          <dt>{t('webPagesOverview.usageTokensTitle')}</dt>
+          <dd className="tabular-nums">
+            <Counted value={metrics.totalTokens} format={formatNumber} />
+          </dd>
+        </div>
+        <div>
+          <dt>{t('webPagesOverview.usageSessions')}</dt>
+          <dd className="tabular-nums">
+            <Counted value={metrics.sessions} format={formatNumber} />
+          </dd>
+        </div>
+        <div>
+          <dt>{t('webPagesOverview.usageAverage')}</dt>
+          <dd className="tabular-nums">
+            {metrics.avgCost != null ? (
+              <Counted value={metrics.avgCost} format={formatCost} />
+            ) : (
+              '—'
+            )}
+          </dd>
+        </div>
+      </dl>
 
-      <section
-        aria-labelledby="usage-sessions-title usage-sessions-count"
-        className="flex flex-col gap-3"
-      >
-        <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h2 id="usage-sessions-title" className="text-section">
-            {t('webPagesOverview.usageTable')}
-          </h2>
-          <span id="usage-sessions-count" className="text-small text-text-muted tabular-nums">
-            {tPlural('webPagesOverview.usageSessionCount', visible.length)}
-          </span>
-          {hidden ? <span className="text-small text-text-muted">{hidden}</span> : null}
-        </header>
-        {visible.length === 0 ? (
-          <Card variant="plain" padding="none">
-            <EmptyState
-              icon={<BarChart3 />}
-              title={t('webPagesOverview.usageRangeEmpty')}
-              description={t('webPagesOverview.usageRangeEmptyHint')}
-            />
-          </Card>
-        ) : (
-          <SessionsTable rows={visible} />
-        )}
-      </section>
+      <div className="flex flex-col gap-2.5">
+        <Bar
+          className="us-mix"
+          segments={mix.map(([series, , value]) => ({
+            series,
+            pct: mixTotal ? (value / mixTotal) * 100 : 0,
+          }))}
+        />
+        <dl className="us-mix-key">
+          {mix.map(([series, label, value]) => (
+            <div key={series}>
+              <dt>
+                <Swatch series={series} />
+                {label}
+              </dt>
+              <dd className="tabular-nums">{formatNumber(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </section>
+  )
+}
+
+function UsageBody({
+  all,
+  range,
+  onRange,
+}: {
+  all: UsageRow[]
+  range: UsageRange
+  onRange: (range: UsageRange) => void
+}) {
+  const visible = useMemo(() => visibleSessions(all, range), [all, range])
+  const hidden = rangeHiddenHint(all, range)
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-2">
+        <Lead rows={visible} range={range} onRange={onRange} />
+        <p className="flex items-start gap-1.5 px-1 text-small text-text-muted">
+          <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          {t('webPagesOverview.usageRangeNote')}
+        </p>
+      </div>
+
+      {visible.length === 0 ? (
+        <div className="us-range-empty anim-enter">
+          <p className="text-section">{t('webPagesOverview.usageRangeEmpty')}</p>
+          <p className="text-text-muted">{t('webPagesOverview.usageRangeEmptyHint')}</p>
+          {range !== 'all' ? (
+            <Button variant="outline" size="sm" className="mt-2" onClick={() => onRange('all')}>
+              {t('webPagesOverview.usageShowAll')}
+            </Button>
+          ) : null}
+        </div>
+      ) : (
+        <>
+          <div className="us-grid">
+            <TopSessionsChart rows={visible} />
+            <ModelsPanel rows={visible} />
+          </div>
+
+          <section
+            aria-labelledby="usage-sessions-title usage-sessions-count"
+            className="us-rise flex flex-col gap-3"
+          >
+            <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h2 id="usage-sessions-title" className="text-section">
+                {t('webPagesOverview.usageTable')}
+              </h2>
+              <span id="usage-sessions-count" className="text-small text-text-muted tabular-nums">
+                {tPlural('webPagesOverview.usageSessionCount', visible.length)}
+              </span>
+              {hidden ? <span className="text-small text-text-muted">{hidden}</span> : null}
+            </header>
+            <SessionsTable rows={visible} />
+          </section>
+        </>
+      )}
     </div>
   )
 }
 
-/** The loading layout: the same cards in the same places, so nothing shifts. */
+/** The loading layout: the same blocks in the same places, so nothing shifts. */
 function UsageSkeleton() {
-  const statLines = (
-    <>
-      <span className="flex items-center gap-2">
-        <Skeleton className="size-8 rounded-control" />
-        <Skeleton className="h-3.5 w-20" />
-      </span>
-      <Skeleton className="mt-1 h-8 w-28" />
-      <Skeleton className="h-4 w-36" />
-    </>
-  )
   return (
-    <LoadingRegion label={t('webPagesOverview.usageLoading')} className="flex flex-col gap-6">
-      <div className={STAT_GRID}>
-        {[0, 1, 2, 3].map((i) => (
-          <Card key={i} className="flex h-36 flex-col gap-1.5">
-            {statLines}
-          </Card>
+    <LoadingRegion label={t('webPagesOverview.usageLoading')} className="flex flex-col gap-5">
+      <div className="us-lead">
+        <div className="us-lead-top">
+          <span className="flex flex-col gap-2">
+            <Skeleton className="h-3.5 w-16" />
+            <Skeleton className="h-12 w-48" />
+            <Skeleton className="h-3.5 w-40" />
+          </span>
+          <Skeleton className="h-8 w-80 max-w-full" />
+        </div>
+        <Skeleton className="h-3 w-full rounded-full" />
+      </div>
+      <div className="us-grid">
+        {[0, 1].map((i) => (
+          <div key={i} className="us-panel">
+            <Skeleton className="h-4 w-28" />
+            {[92, 64, 40, 22].map((w) => (
+              <Skeleton key={w} className="h-2 rounded-full" style={{ width: `${w}%` }} />
+            ))}
+          </div>
         ))}
       </div>
-      <Card padding="none" className="flex flex-col gap-4 p-5">
-        <span className="flex flex-col gap-1.5">
-          <Skeleton className="h-4 w-28" />
-          <Skeleton className="h-3.5 w-40" />
-        </span>
-        {[92, 64, 40, 22].map((w) => (
-          <span
-            key={w}
-            className="grid grid-cols-[minmax(7rem,13rem)_minmax(0,1fr)] items-center gap-3"
-          >
-            <Skeleton className="h-3.5 w-28" />
-            <Skeleton className="h-2.5 rounded-full" style={{ width: `${w}%` }} />
-          </span>
-        ))}
-      </Card>
     </LoadingRegion>
+  )
+}
+
+/**
+ * No usage at all yet: heading, one line and the primary action on the
+ * canvas, beside a ghosted preview of what the page shows once sessions run
+ * (the shapes only, no figures).
+ */
+function UsageZero() {
+  const titleId = useId()
+  return (
+    <section data-slot="empty-state" aria-labelledby={titleId} className="us-zero">
+      <div className="us-zero-copy anim-enter">
+        <span aria-hidden className="us-zero-mark">
+          <BarChart3 />
+        </span>
+        <h2 id={titleId} className="us-zero-title">
+          {t('webPagesOverview.usageEmpty')}
+        </h2>
+        <p className="max-w-[30rem] text-pretty text-text-muted">
+          {t('webPagesOverview.usageEmptyHint')}
+        </p>
+        <Button variant="primary" size="lg" className="mt-2" asChild>
+          <Link to="/new">
+            <MessageSquarePlus aria-hidden />
+            {t('webPagesOverview.usageStartSession')}
+          </Link>
+        </Button>
+      </div>
+      <figure aria-hidden className="us-zero-preview anim-fade-in">
+        <figcaption className="text-small text-text-muted">
+          {t('webPagesOverview.usageEmptyPreview')}
+        </figcaption>
+        <span className="us-ghost-figure" />
+        <Bar
+          className="us-mix"
+          segments={[
+            { pct: 58, series: 's1' },
+            { pct: 14, series: 's2' },
+            { pct: 22, series: 's3' },
+            { pct: 6, series: 's4' },
+          ]}
+        />
+        <span className="us-zero-preview-row">
+          <span className="flex flex-1 flex-col gap-3">
+            {[92, 64, 45, 28].map((w, i) => (
+              <span key={w} className="flex flex-col gap-1.5">
+                <span className="us-ghost-line" style={{ width: `${30 + i * 6}%` }} />
+                <Bar
+                  index={i + 1}
+                  className="h-1.5"
+                  segments={[
+                    { pct: w * 0.8, series: 's1' },
+                    { pct: w * 0.2, series: 's2' },
+                  ]}
+                />
+              </span>
+            ))}
+          </span>
+          <Donut
+            className="us-zero-donut"
+            shares={[
+              { pct: 64, series: 's1' },
+              { pct: 26, series: 's2' },
+              { pct: 10, series: 's3' },
+            ]}
+          />
+        </span>
+      </figure>
+    </section>
   )
 }
 
@@ -791,6 +894,7 @@ export function UsagePage() {
   })
 
   const all = query.data
+  const nothing = !!all && all.length === 0
   const inRange = useMemo(() => (all ? visibleSessions(all, range) : []), [all, range])
   const refresh = gate(requireConnection(connection))
   const exportGate = gate(
@@ -819,26 +923,10 @@ export function UsagePage() {
   let content: ReactNode
   if (query.isPending) {
     content = <UsageSkeleton />
-  } else if (all && all.length === 0) {
-    content = (
-      <Card variant="plain" padding="none">
-        <EmptyState
-          icon={<BarChart3 />}
-          title={t('webPagesOverview.usageEmpty')}
-          description={t('webPagesOverview.usageEmptyHint')}
-          action={
-            <Button variant="primary" asChild>
-              <Link to="/new">
-                <MessageSquarePlus aria-hidden />
-                {t('webPagesOverview.usageStartSession')}
-              </Link>
-            </Button>
-          }
-        />
-      </Card>
-    )
+  } else if (nothing) {
+    content = <UsageZero />
   } else if (all) {
-    content = <UsageBody all={all} range={range} />
+    content = <UsageBody all={all} range={range} onRange={pickRange} />
   }
 
   return (
@@ -870,26 +958,11 @@ export function UsagePage() {
           </>
         }
         footer={
-          refresh.reason || (all && exportGate.reason) ? (
+          refresh.reason || (all && !nothing && exportGate.reason) ? (
             <p className="text-small text-text-muted">{refresh.reason ?? exportGate.reason}</p>
           ) : null
         }
       />
-
-      <div className="flex flex-col gap-2">
-        <SegmentedControl
-          kind="toggle"
-          tone="accent"
-          aria-label={t('webPagesOverview.usageRange')}
-          value={range}
-          onChange={pickRange}
-          options={RANGES.map((value) => ({ value, label: rangeLabel(value) }))}
-        />
-        <p className="flex items-start gap-1.5 text-small text-text-muted">
-          <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-          {t('webPagesOverview.usageRangeNote')}
-        </p>
-      </div>
 
       {query.isError ? (
         <ErrorState
