@@ -237,12 +237,12 @@ Chat is the center of the console; everything else is a page in the rail's
 | Page | Route | Use it for |
 | --- | --- | --- |
 | Chat | `/chat/…` | Run and resume sessions, follow tool activity, read artifacts and cards, compact. |
-| Home | `/home` | Readiness (when not ready, the findings that need attention), provider and route, uptime, sessions, usage (all time, plus how many sessions were active today), the next automation run, and a live event feed. Each figure loads on its own and links to its detail. |
+| Home | `/home` | A dashboard under a greeting and a readiness pill: readiness (checks passing as a ring; when not ready, the findings that need attention, each leading to Health), provider and route, uptime, usage (all time, plus how many sessions were active today) with a chart of tokens per session, sessions by channel and when they were last active over the past day, a countdown to the next automation run, and a live event feed. Each figure loads on its own and links to its detail. |
 | Sessions | `/sessions` | Every session in one list: a summary line (the total, an open/completed/failed/aborted breakdown and how many are executing now), search and filter menus for agent, project and status, a lifecycle chip per row, inline rename, a row menu with Open chat and Open in new tab, bulk delete, move to a project, a new-session dialog that can create an agent, orphan flags. |
 | Projects | `/projects` | A gallery of projects; group sessions, edit each project's shared knowledge (injected into every member session), and start a new chat inside a project at once, under the project's agent. A project's page switches to another project from its breadcrumb. |
 | Usage | `/usage` | Spend for the sessions active in a range as the lead figure, with sessions, the average and the token mix (input, output, cache read, cache write) as one stacked bar; the top sessions charted beside spend by model (a ring and a ranked list); the sessions table; CSV export. The sessions table fits its card: a narrower one drops the cache columns, a phone-width one shows each session as a card of labelled values. |
 | Automations | `/automations` | What runs next and the next 24 hours as lanes, then scheduled jobs and their run health; create (blank or from a template), edit, run now, pause, delete, run history. |
-| Inbox | `/inbox` | Everything waiting on you: approvals, agent questions and runtime issues, answered in place. |
+| Inbox | `/inbox` | Everything waiting on you, grouped into approvals, agent questions and runtime issues, answered in place. |
 
 **Home** sums tokens and estimated spend over every session: the gateway keeps
 per-session lifetime totals only, so there is no per-day spend figure. Next to
@@ -401,8 +401,13 @@ Approvals come from the same store as Settings › Approvals, which the gateway
 keeps current with `approval.requested` / `approval.resolved` events (one
 backfill per connect), and the list updates when that store changes; the
 inbox adds no timer and no polling of its own (**Re-check** asks for one
-backfill), and items show when they started waiting ("since 11:32"). An empty inbox says "Nothing
-needs you" only while the console is connected.
+backfill), and items show when they started waiting ("since 11:32"). An empty inbox says "All
+caught up" only while the console is connected.
+
+The inbox groups items by kind, with a count in each group's header. Each item
+is a compact row (its title, a one-line preview and when it started waiting)
+that opens in place to the decision; the first row of each group, and the
+approval a notification points at, start open. A resolved item folds away.
 
 ## Keyboard Shortcuts
 
