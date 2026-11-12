@@ -146,7 +146,10 @@ export function NewSessionPage() {
   const attachments = useAttachments()
   const fileInput = useRef<HTMLInputElement>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
+  // A chip's name is "<label>: <value>": the visible value is part of it.
+  const agentLabelId = useId()
   const agentValueId = useId()
+  const projectLabelId = useId()
   const projectValueId = useId()
   const reasonId = useId()
 
@@ -349,8 +352,7 @@ export function NewSessionPage() {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild disabled={loading}>
                   <ToolbarChip
-                    aria-label={t('webChat.newAgent')}
-                    aria-describedby={agentValueId}
+                    aria-labelledby={`${agentLabelId} ${agentValueId}`}
                     icon={
                       loading ? (
                         <Loader2 className="motion-status animate-spin" aria-hidden />
@@ -359,10 +361,15 @@ export function NewSessionPage() {
                       )
                     }
                     label={
-                      <span id={agentValueId}>
-                        {loading
-                          ? t('webChat.newAgentLoading')
-                          : (agentName ?? t('webChat.newAgent'))}
+                      <span>
+                        <span id={agentLabelId} className="sr-only">
+                          {`${t('webChat.newAgent')}:`}
+                        </span>
+                        <span id={agentValueId}>
+                          {loading
+                            ? t('webChat.newAgentLoading')
+                            : (agentName ?? t('webChat.newAgent'))}
+                        </span>
                       </span>
                     }
                   />
@@ -382,11 +389,17 @@ export function NewSessionPage() {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild disabled={loading}>
                   <ToolbarChip
-                    aria-label={t('webChat.newProject')}
-                    aria-describedby={projectValueId}
+                    aria-labelledby={`${projectLabelId} ${projectValueId}`}
                     data-empty={chosenProject ? undefined : true}
                     icon={chosenProject ? <FolderOpen aria-hidden /> : <Folder aria-hidden />}
-                    label={<span id={projectValueId}>{projectName}</span>}
+                    label={
+                      <span>
+                        <span id={projectLabelId} className="sr-only">
+                          {`${t('webChat.newProject')}:`}
+                        </span>
+                        <span id={projectValueId}>{projectName}</span>
+                      </span>
+                    }
                   />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="max-h-80 min-w-56 overflow-y-auto">
