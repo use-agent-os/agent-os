@@ -762,6 +762,41 @@ async def test_image_attachment_without_image_tier_fails_locally(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("profile", "model"),
+    [("openai", "gpt-6-luna"), ("gemini", "gemini-3.1-flash-lite")],
+)
+async def test_image_attachment_routes_on_direct_provider_profile(
+    monkeypatch: pytest.MonkeyPatch, profile: str, model: str
+) -> None:
+    monkeypatch.setattr(
+        agentos_router_step,
+        "_get_strategy",
+        lambda _config, _llm_cfg=None: pytest.fail("image routing should not invoke text strategy"),
+    )
+    config = GatewayConfig(
+        llm={"provider": profile, "model": "placeholder"},
+        agentos_router={"tier_profile": profile},
+    )
+    ctx = TurnContext(
+        message="What is in this screenshot?",
+        session_key="test-session",
+        config=config,
+        provider=None,
+        model=config.llm.model,
+        tool_defs=[],
+        system_prompt="system",
+        attachments=[{"type": "image", "mime_type": "image/png"}],
+    )
+
+    routed = await apply_agentos_router(ctx)
+
+    assert routed.metadata["routed_tier"] == "image_model"
+    assert routed.metadata["routing_source"] == "image_route"
+    assert routed.model == model
+
+
+@pytest.mark.asyncio
 async def test_non_image_attachment_does_not_force_vision_route(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

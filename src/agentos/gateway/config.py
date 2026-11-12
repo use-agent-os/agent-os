@@ -843,6 +843,14 @@ def _tier(
     the same model is deliberately c2 at ``medium`` and c3 at ``high`` inside
     one profile.
 
+    The one exception is an ``image_only`` tier, which always carries
+    ``supports_image``: that is the tier's role, the same invariant onboarding
+    enforces on a saved ``image_model``. The registry keeps the flag off for a
+    vision-capable model that also serves as a text tier (``gpt-6-luna``), so
+    that image turns do not land on the text tier at its text thinking level;
+    reading the flag from there would leave the image tier unable to take an
+    image.
+
     Raises on an unknown id, so a tier default cannot ship without a price and
     a context window: that miss used to surface only as a plausible wrong
     number much later (issue #140).
@@ -863,6 +871,7 @@ def _tier(
     # thinking_level, and only image tiers carry image_only.
     if image_only:
         tier["image_only"] = True
+        tier["supports_image"] = True
     if thinking_level is not None:
         tier["thinking_level"] = thinking_level
     return tier
@@ -1193,6 +1202,16 @@ def _router_tier_profile_defaults(profile: str | None) -> dict:
                 ),
                 thinking_level="high",
             ),
+            "image_model": _tier(
+                provider="openai",
+                model="gpt-6-luna",
+                description=(
+                    "Image model: GPT-6 Luna for user-supplied image attachments, "
+                    "screenshots, diagrams, and visual question answering"
+                ),
+                thinking_level="medium",
+                image_only=True,
+            ),
         },
         "dashscope": {
             "c0": _tier(
@@ -1291,6 +1310,16 @@ def _router_tier_profile_defaults(profile: str | None) -> dict:
                     "opt-in."
                 ),
                 thinking_level="high",
+            ),
+            "image_model": _tier(
+                provider="gemini",
+                model="gemini-3.1-flash-lite",
+                description=(
+                    "Image model: Gemini 3.1 Flash-Lite for user-supplied image attachments, "
+                    "screenshots, diagrams, and visual question answering"
+                ),
+                thinking_level="medium",
+                image_only=True,
             ),
         },
         "zhipu": {

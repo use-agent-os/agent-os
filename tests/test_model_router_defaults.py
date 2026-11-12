@@ -288,7 +288,7 @@ def test_deepseek_direct_legacy_openrouter_model_default_is_normalized() -> None
 def test_each_provider_profile_has_four_text_tiers_without_default_image_model() -> None:
     agentos_router_config_cls = _agentos_router_config_cls()
 
-    for profile in ("dashscope", "deepseek", "gemini", "volcengine"):
+    for profile in ("dashscope", "deepseek", "volcengine"):
         cfg = agentos_router_config_cls(tier_profile=profile)
         assert {"c0", "c1", "c2", "c3"}.issubset(cfg.tiers)
         assert "image_model" not in cfg.tiers
@@ -298,11 +298,50 @@ def test_each_provider_profile_has_four_text_tiers_without_default_image_model()
 def test_direct_provider_profiles_have_four_text_tiers_without_default_image_model() -> None:
     agentos_router_config_cls = _agentos_router_config_cls()
 
-    for profile in ("openai", "zhipu", "moonshot"):
+    for profile in ("zhipu", "moonshot"):
         cfg = agentos_router_config_cls(tier_profile=profile)
         assert {"c0", "c1", "c2", "c3"}.issubset(cfg.tiers)
         assert "image_model" not in cfg.tiers
         assert {cfg.tiers[tier]["provider"] for tier in ("c0", "c1", "c2", "c3")} == {profile}
+
+
+@pytest.mark.parametrize(
+    ("profile", "model"),
+    [("openai", "gpt-6-luna"), ("gemini", "gemini-3.1-flash-lite")],
+)
+def test_openai_and_gemini_profiles_ship_an_image_tier(profile: str, model: str) -> None:
+    """Their text tiers are all ``supports_image=False``, so without an image
+    tier every turn with an image attachment failed with "No image-capable
+    Pilot Router tier is configured"."""
+    cfg = _agentos_router_config_cls()(tier_profile=profile)
+
+    image_tier = cfg.tiers["image_model"]
+    assert image_tier["provider"] == profile
+    assert image_tier["model"] == model
+    assert image_tier["thinking_level"] == "medium"
+    assert image_tier["image_only"] is True
+    assert image_tier["supports_image"] is True
+    # The image tier is the only route an image turn can take.
+    assert [name for name, tier in cfg.tiers.items() if tier.get("supports_image")] == [
+        "image_model"
+    ]
+    assert {cfg.tiers[tier]["provider"] for tier in ("c0", "c1", "c2", "c3")} == {profile}
+
+
+def test_image_only_tier_default_supports_image_whatever_the_registry_says() -> None:
+    """``gpt-6-luna`` is declared ``supports_image=False`` in the registry so it
+    can be a text tier; as an image tier it must still accept the image."""
+    from agentos import model_registry
+    from agentos.gateway.config import _tier
+
+    assert model_registry.supports_image("gpt-6-luna") is False
+    text = _tier(provider="openai", model="gpt-6-luna", description="text")
+    image = _tier(provider="openai", model="gpt-6-luna", description="image", image_only=True)
+
+    assert text["supports_image"] is False
+    assert "image_only" not in text
+    assert image["supports_image"] is True
+    assert image["image_only"] is True
 
 
 def test_openai_profile_uses_streaming_compatible_models() -> None:
