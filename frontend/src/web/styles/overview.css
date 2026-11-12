@@ -100,11 +100,18 @@
   .ov-fill[data-series='output'] {
     --ov-fill: var(--info);
   }
-}
-
-/* Overrides of utility classes on primitives, so they sit in the same
-   layer as the utilities they replace. */
-@layer utilities {
+  /* Legend swatch (Home's usage chart). */
+  .ov-swatch {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 0.625rem;
+    height: 0.625rem;
+    border-radius: 3px;
+    background: var(--ov-fill, var(--accent));
+  }
+  .ov-swatch[data-series='output'] {
+    --ov-fill: var(--info);
+  }
 }
 
 @keyframes ov-reveal {
