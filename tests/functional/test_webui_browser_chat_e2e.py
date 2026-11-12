@@ -162,7 +162,7 @@ def test_react_chat_public_controls_work_without_sending_to_provider(
                 send: await send.count(),
                 capabilities: await page.getByRole("button", { name: "Capabilities" }).count(),
                 route: await page.getByRole("button", { name: /^Model route:/ }).count(),
-                details: await page.getByRole("button", { name: "Details" }).count(),
+                panels: await page.getByRole("button", { name: "Panels", exact: true }).count(),
               };
 
               await page.getByRole("button", { name: "Capabilities" }).click();
@@ -265,7 +265,7 @@ def test_react_chat_public_controls_work_without_sending_to_provider(
         "send": 1,
         "capabilities": 1,
         "route": 1,
-        "details": 1,
+        "panels": 1,
     }
     assert payload["capabilityMenu"] == 1
     assert payload["sendEnabledForDraft"] is True
