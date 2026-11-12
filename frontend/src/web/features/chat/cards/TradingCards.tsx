@@ -88,7 +88,7 @@ export function TradingCard({ category, artifact }: { category: string; artifact
           {t('webChat.cardRefresh')}
         </Button>
       </CardHeader>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-small">
+      <dl className="chat-kv">
         {summarizeTrading(payload).map((row) => (
           <div key={row.label} className="contents">
             <dt className="text-text-muted">{row.label}</dt>
@@ -96,7 +96,7 @@ export function TradingCard({ category, artifact }: { category: string; artifact
           </div>
         ))}
       </dl>
-      <p className="mt-3 flex items-center gap-1.5 border-t border-border pt-2.5 text-small text-text-muted">
+      <p className="chat-card-footer flex items-center gap-1.5 text-small text-text-muted">
         <Lock className="size-3.5" aria-hidden />
         {t('webChat.cardReadOnly')}
       </p>

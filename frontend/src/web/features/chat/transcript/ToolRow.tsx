@@ -27,7 +27,8 @@ type ToolItem = Extract<Item, { kind: 'toolCall' }>
 /** Results longer than this show a preview and Open in side panel. */
 export const INLINE_RESULT_LIMIT = 2_000
 
-const ICONS = {
+/** The tool icon set (`toolIconName`), shared with the activity summary. */
+export const TOOL_ICONS = {
   terminal: Terminal,
   'file-text': FileText,
   'pen-line': PenLine,
@@ -70,7 +71,7 @@ export function ToolRow({ item, live = false }: { item: ToolItem; live?: boolean
   const [mounted, setMounted] = useState(false)
   const actions = useChatActions()
   const regionId = useId()
-  const Icon = ICONS[toolIconName(item.name)] ?? Zap
+  const Icon = TOOL_ICONS[toolIconName(item.name)] ?? Zap
   const label = toolDisplayName(item.name, item.args)
   const detail = toolDetail(item.args)
   const duration =
@@ -98,37 +99,33 @@ export function ToolRow({ item, live = false }: { item: ToolItem; live?: boolean
           <Icon />
         </span>
         <span className={cn('shrink-0 font-medium', running && 'chat-shimmer')}>{label}</span>
-        {detail ? (
-          <span className="min-w-0 flex-1 truncate font-mono text-small text-text-muted">
-            {detail}
-          </span>
-        ) : (
-          <span className="flex-1" />
-        )}
+        {detail ? <span className="chat-step-detail">{detail}</span> : <span className="flex-1" />}
         {running ? (
-          <span className="flex shrink-0 items-center gap-1.5 text-small text-text-muted">
+          <span className="chat-step-status text-text-muted">
             <Loader2
               className="motion-status size-3.5 animate-spin text-accent"
               aria-hidden
               data-status-icon
             />
-            {t('webChat.toolRunning')}
+            <span className="max-sm:sr-only">{t('webChat.toolRunning')}</span>
           </span>
         ) : item.state === 'failed' ? (
-          <span className="flex shrink-0 items-center gap-1 text-small font-medium text-danger">
+          <span className="chat-step-status font-medium text-danger">
             <X className={cn('size-3.5', settle)} aria-hidden data-status-icon />
             {t('webChat.toolFailed')}
           </span>
         ) : (
-          <span className="flex shrink-0 items-center text-small text-ok">
+          <span className="chat-step-status text-ok">
             <Check className={cn('size-3.5', settle)} aria-hidden data-status-icon />
             <span className="sr-only">{t('webChat.toolSucceeded')}</span>
           </span>
         )}
         {duration ? (
-          <span className="shrink-0 text-small text-text-muted tabular-nums">{duration}</span>
+          <span className="shrink-0 text-small text-text-muted tabular-nums max-sm:hidden">
+            {duration}
+          </span>
         ) : null}
-        <ChevronRight className="chat-chevron -mr-0.5" aria-hidden />
+        <ChevronRight className="chat-chevron" aria-hidden />
       </button>
       {mounted ? (
         <div className="collapsible chat-collapse" data-open={open}>
