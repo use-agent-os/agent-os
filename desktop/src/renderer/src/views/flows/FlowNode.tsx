@@ -18,6 +18,7 @@ import {
   hasSocket,
   isSocketOnly,
   isVisible,
+  outputImagesToShow,
   resolveOptions,
   resolvedComboPatch,
   selectedModel,
@@ -130,6 +131,7 @@ export const FlowNode = memo(function FlowNode({ id, data, selected }: NodeProps
   // Combos showing a value they do not store (the model's first option): written on the next edit.
   const comboFixes = resolvedComboPatch(schema, data.values, model)
   const badge = badgeText(price)
+  const outputImages = outputImagesToShow(schema, data.values, outputs?.images ?? [])
 
   return (
     <div
@@ -247,9 +249,9 @@ export const FlowNode = memo(function FlowNode({ id, data, selected }: NodeProps
           {outputs.text}
         </div>
       ) : null}
-      {outputs?.images?.length || (state?.state === 'running' && multiImage) ? (
+      {outputImages.length || (state?.state === 'running' && multiImage) ? (
         <ImageGrid
-          images={outputs?.images ?? []}
+          images={outputImages}
           fileNames={savedFileNames(outputs)}
           downloadable={schema.is_output}
           pending={

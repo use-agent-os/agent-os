@@ -558,6 +558,24 @@ describe('FlowEditor', () => {
     expect(within(tray).queryAllByRole('button', { name: 'Open image' })).toHaveLength(0)
   })
 
+  it('Load Image shows its image once: the preview, not a second output copy', async () => {
+    mount()
+    await screen.findByText('Prompt Writer', { selector: '.flw-node__title' })
+    const ev = { run_id: 'run_l', flow_id: DOC.id }
+    emit('flows.run', { ...ev, seq: 1, status: 'running' })
+    emit('flows.node', {
+      ...ev,
+      seq: 2,
+      node_id: 'n6',
+      state: 'done',
+      outputs: { images: [IMG] },
+    })
+    const reference = nodeEl('Reference')
+    expect(reference).toHaveAttribute('data-state', 'done')
+    expect(reference.querySelectorAll('.flw-preview')).toHaveLength(1)
+    expect(reference.querySelector('.flw-grid')).toBeNull()
+  })
+
   it("shows a node's provider note under its outputs", async () => {
     mount()
     await screen.findByText('Prompt Writer', { selector: '.flw-node__title' })

@@ -7,13 +7,14 @@ import {
   isVisible,
   modelBlockReason,
   modelCaps,
+  outputImagesToShow,
   resolvedComboPatch,
   resolveOptions,
   schemaIndex,
   selectedModel,
   staleModelValues,
 } from './schema-logic'
-import { MODELS, NODES } from './test-fixtures'
+import { IMG, MODELS, NODES } from './test-fixtures'
 import type { InputSpec } from './types'
 
 const image = schemaIndex(NODES).get('image')!
@@ -141,5 +142,20 @@ describe('model picker facts', () => {
   it('summarises caps', () => {
     expect(modelCaps(banana)).toBe('t2i · edit · 14 refs · 1K–4K · 4 ratios')
     expect(modelCaps(gpt)).toBe('t2i · edit · 16 refs · mask · n≤8 · 4 sizes · transparent bg')
+  })
+})
+
+describe('output images', () => {
+  const load = schemaIndex(NODES).get('load_image')!
+  const other = { ...IMG, sha256: 'b'.repeat(64) }
+
+  it('leaves out the image the upload widget already previews', () => {
+    expect(outputImagesToShow(load, { image: IMG }, [IMG])).toEqual([])
+    expect(outputImagesToShow(load, { image: IMG }, [IMG, other])).toEqual([other])
+  })
+
+  it('keeps every image when nothing is uploaded or the node has no upload widget', () => {
+    expect(outputImagesToShow(load, {}, [IMG])).toEqual([IMG])
+    expect(outputImagesToShow(image, { image: IMG }, [IMG])).toEqual([IMG])
   })
 })

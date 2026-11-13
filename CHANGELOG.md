@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   or adopts that local gateway and connects to it. Before, the app tried to
   bind the managed gateway to the remote host, which exited with a
   configuration error (exit 78) and left the app disconnected.
+- Desktop › Image Flows: a Load Image node shows its image once after a run.
+  Before, the uploaded image drew again as the node's output under the
+  preview, so every reference appeared twice on the canvas.
 
 ## [2026.11.13] - 2026-11-13
 
