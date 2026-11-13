@@ -1,6 +1,7 @@
 import { t } from '~/i18n'
 import type {
   CapKey,
+  ImageRef,
   InputSpec,
   ModelOutputCaps,
   ModelsPayload,
@@ -24,6 +25,25 @@ export function hasSocket(spec: InputSpec): boolean {
 /** Socket only: there is nothing to type into, the value can only arrive on a link. */
 export function isSocketOnly(spec: InputSpec): boolean {
   return hasSocket(spec) && !spec.widget
+}
+
+/**
+ * A node's output images minus the ones its own upload widget already shows:
+ * Load Image passes its uploaded image straight through, and drawing it again
+ * under the preview just repeats it.
+ */
+export function outputImagesToShow(
+  schema: NodeSchema,
+  values: Record<string, unknown>,
+  images: readonly ImageRef[],
+): ImageRef[] {
+  const uploaded = new Set<string>()
+  for (const spec of schema.inputs) {
+    if (spec.widget !== 'image_upload') continue
+    const v = values[spec.name] as Partial<ImageRef> | null | undefined
+    if (v && typeof v.sha256 === 'string') uploaded.add(v.sha256)
+  }
+  return uploaded.size ? images.filter((img) => !uploaded.has(img.sha256)) : [...images]
 }
 
 export function schemaIndex(payload: NodesPayload | undefined): Map<string, NodeSchema> {
