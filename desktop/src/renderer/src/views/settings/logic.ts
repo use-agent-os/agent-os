@@ -1,4 +1,5 @@
 import {
+  DEFAULT_GATEWAY_SETTINGS,
   gatewayUrl,
   isValidHost,
   isValidPort,
@@ -41,6 +42,50 @@ export function gatewayFromDraft(draft: GatewayDraft): GatewaySettings {
     port: Number(draft.port.trim()),
     token: draft.token.trim() || null,
     cliPath: draft.cliPath.trim() || null,
+  }
+}
+
+/**
+ * Hosts a managed gateway can bind on this machine: loopback, `localhost`,
+ * or the wildcard addresses. Anything else in the Host field was typed for
+ * an external gateway somewhere else.
+ */
+export function isLocalGatewayHost(host: string): boolean {
+  const h = host
+    .trim()
+    .toLowerCase()
+    .replace(/^\[(.*)\]$/, '$1')
+  return (
+    h === 'localhost' ||
+    h.endsWith('.localhost') ||
+    /^127(\.\d{1,3}){3}$/.test(h) ||
+    h === '0.0.0.0' ||
+    h === '::1' ||
+    h === '::'
+  )
+}
+
+/**
+ * The draft after the Run mode control changes. A managed gateway is spawned
+ * on this machine with `--bind <host> --port <port>`, so an endpoint left
+ * over from an external gateway (a remote host behind TLS on 443) can neither
+ * be bound nor reached: going managed puts the endpoint back on the local
+ * default. A local endpoint (a custom port, a LAN-wide bind) is kept, and so
+ * is the token. Going external keeps the fields as they are for the user to
+ * point elsewhere.
+ */
+export function switchGatewayMode(
+  draft: GatewayDraft,
+  mode: GatewaySettings['mode'],
+): GatewayDraft {
+  if (mode === draft.mode) return draft
+  if (mode === 'external' || isLocalGatewayHost(draft.host)) return { ...draft, mode }
+  return {
+    ...draft,
+    mode,
+    scheme: DEFAULT_GATEWAY_SETTINGS.scheme,
+    host: DEFAULT_GATEWAY_SETTINGS.host,
+    port: String(DEFAULT_GATEWAY_SETTINGS.port),
   }
 }
 

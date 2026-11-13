@@ -290,6 +290,44 @@ describe('GatewaySupervisor.stop escalation', () => {
     expect(signals).toEqual(['SIGTERM'])
   })
 
+  it('drops the external endpoint and brings up the local gateway when the mode turns managed', async () => {
+    let cfg: GatewaySettings = {
+      ...external,
+      scheme: 'https',
+      host: 'gw.example.com',
+      port: 443,
+    }
+    let adopted = false
+    const probe = vi.fn(async (url: string) => url !== 'http://127.0.0.1:18791' || adopted)
+    const sup = new GatewaySupervisor(() => cfg, { probe, locate: () => null })
+    await sup.start()
+    expect(sup.current()).toMatchObject({ state: 'running', url: 'https://gw.example.com:443' })
+
+    // Saved as managed on the local default; a gateway already answers there.
+    cfg = { ...external, mode: 'managed' }
+    adopted = true
+    await sup.modeChanged('external', 'managed')
+    expect(sup.current()).toMatchObject({
+      state: 'running',
+      url: 'http://127.0.0.1:18791',
+      pid: null,
+    })
+  })
+
+  it('reports why the local gateway did not come up when the mode turns managed', async () => {
+    let cfg: GatewaySettings = { ...external, host: 'gw.example.com' }
+    const sup = new GatewaySupervisor(() => cfg, {
+      probe: async (url) => url.includes('gw.example.com'),
+      locate: () => null,
+    })
+    await sup.start()
+    cfg = { ...external, mode: 'managed' }
+    await sup.modeChanged('external', 'managed')
+    // Not left showing the external gateway as running.
+    expect(sup.current()).toMatchObject({ state: 'error', url: null })
+    expect(sup.current().error).toMatch(/CLI not found/)
+  })
+
   it('leaves an adopted gateway alone when the mode turns external', async () => {
     const sup = new GatewaySupervisor(() => ({ ...external, mode: 'managed' }), {
       probe: async () => true,

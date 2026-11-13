@@ -71,6 +71,13 @@ app is connected to. Configuration changes that need a restart (providers,
 channels, the router) still ask the gateway to restart itself in place, as
 they do from the Web UI.
 
+To go back, set **Run mode** to **Managed**. A host that is not on this Mac
+(the external gateway's) is replaced with the local default, HTTP on
+`127.0.0.1:18791`, since a managed gateway binds here; a local host and port
+you chose before are kept. Switching back to **External** before saving
+restores the endpoint you had. On **Save** the app starts its own gateway, or
+adopts one already answering on that endpoint, and connects to it.
+
 ## Chat and Trade
 
 The mode pill at the top of the window reads **Chat | Trade** (⌘⇧T switches).
