@@ -260,8 +260,9 @@ function mirrorSettingsToOs(
     if (next.appearance.uiScale !== last?.appearance.uiScale) {
       applyUiScale(next.appearance.uiScale)
     }
-    // Run mode turned external: the app stops the gateway it spawned instead
-    // of leaving it behind (see GatewaySupervisor.modeChanged).
+    // Run mode changed: external stops the gateway the app spawned instead of
+    // leaving it behind; managed starts (or adopts) the local one. See
+    // GatewaySupervisor.modeChanged.
     if (last && next.gateway.mode !== last.gateway.mode) {
       void gateway.modeChanged(last.gateway.mode, next.gateway.mode)
     }

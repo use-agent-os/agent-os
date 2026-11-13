@@ -1,5 +1,5 @@
 import { Copy, Eye, EyeOff, ExternalLink } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { GatewayState } from '@shared/gateway'
 import { gatewayUrl, type GatewaySettings } from '@shared/settings'
@@ -14,6 +14,7 @@ import {
   gatewayDraftErrors,
   gatewayFromDraft,
   gatewayNeedsRestart,
+  switchGatewayMode,
   type GatewayDraft,
 } from '../logic'
 import { Card, Head, Notice, Pill, Row, Segmented, Value, type Tone } from '../parts'
@@ -154,6 +155,22 @@ function ConnectionForm({
   const [draft, setDraft] = useState<GatewayDraft>(() => draftFromGateway(saved))
   const [showToken, setShowToken] = useState(false)
   const ids = { host: useId(), port: useId(), token: useId(), cli: useId() }
+  // The external endpoint as it was when the user switched away from it, so
+  // flipping back to External before saving brings it back.
+  const externalEndpoint = useRef<Pick<GatewayDraft, 'scheme' | 'host' | 'port'> | null>(null)
+
+  function changeMode(mode: GatewayDraft['mode']) {
+    if (mode === draft.mode) return
+    if (draft.mode === 'external') {
+      externalEndpoint.current = { scheme: draft.scheme, host: draft.host, port: draft.port }
+    }
+    const next = switchGatewayMode(draft, mode)
+    setDraft(
+      mode === 'external' && externalEndpoint.current
+        ? { ...next, ...externalEndpoint.current }
+        : next,
+    )
+  }
 
   const errors = gatewayDraftErrors(draft)
   const dirty = gatewayDirty(saved, draft)
@@ -173,7 +190,13 @@ function ConnectionForm({
       blurb={t('settings.gateway.connection.blurb')}
       foot={
         <>
-          <Button disabled={!dirty} onClick={() => setDraft(draftFromGateway(saved))}>
+          <Button
+            disabled={!dirty}
+            onClick={() => {
+              externalEndpoint.current = null
+              setDraft(draftFromGateway(saved))
+            }}
+          >
             {t('settings.revert')}
           </Button>
           <Button
@@ -194,7 +217,7 @@ function ConnectionForm({
             { value: 'managed', label: t('settings.gateway.mode.managed') },
             { value: 'external', label: t('settings.gateway.mode.external') },
           ]}
-          onChange={(mode) => setDraft((d) => ({ ...d, mode }))}
+          onChange={changeMode}
         />
       </Row>
       <Row label={t('settings.gateway.scheme')} help={t('settings.gateway.scheme.help')}>

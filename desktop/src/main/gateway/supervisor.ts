@@ -386,15 +386,17 @@ export class GatewaySupervisor {
    * Settings saved with a different run mode. Switching to `external` means
    * the app no longer runs a gateway, so a child it spawned is stopped
    * rather than left behind, and the configured endpoint is probed in its
-   * place. An adopted gateway was never ours and stays up. Switching back to
-   * `managed` is left to the user: the external gateway may still be what
-   * they want to talk to, and Start is one click away.
+   * place. An adopted gateway was never ours and stays up. Switching to
+   * `managed` is the user asking the app to run the gateway: the status
+   * still points at the external endpoint, so it is dropped and the local
+   * gateway started (or adopted, if one already answers there).
    */
   async modeChanged(
     previous: GatewaySettings['mode'],
     next: GatewaySettings['mode'],
   ): Promise<void> {
-    if (previous === next || next !== 'external' || !this.child) return
+    if (previous === next) return
+    if (next === 'external' && !this.child) return
     await this.restart()
   }
 

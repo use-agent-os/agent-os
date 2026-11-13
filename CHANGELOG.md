@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Desktop: switching Settings › Gateway › Run mode from External back to
+  Managed now moves the endpoint to the local gateway (HTTP on
+  `127.0.0.1:18791`) instead of keeping the external host, and saving starts
+  or adopts that local gateway and connects to it. Before, the app tried to
+  bind the managed gateway to the remote host, which exited with a
+  configuration error (exit 78) and left the app disconnected.
+
 ## [2026.11.13] - 2026-11-13
 
 ### Changed

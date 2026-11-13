@@ -8,8 +8,10 @@ import {
   gatewayDraftErrors,
   gatewayFromDraft,
   gatewayNeedsRestart,
+  isLocalGatewayHost,
   modelOptions,
   providerConfigurePayload,
+  switchGatewayMode,
   providerDirty,
   providerDraft,
   providerNeedsKey,
@@ -114,6 +116,57 @@ describe('gateway draft', () => {
     expect(gatewayDirty(GW, { ...draftFromGateway(GW), mode: 'external' })).toBe(true)
     expect(gatewayDirty(GW, { ...draftFromGateway(GW), scheme: 'https' })).toBe(true)
     expect(gatewayDirty(GW, { ...draftFromGateway(GW), host: ' 127.0.0.1 ' })).toBe(false)
+  })
+
+  it('puts a remote endpoint back on the local default when the mode turns managed', () => {
+    const remote = {
+      ...draftFromGateway(GW),
+      mode: 'external' as const,
+      scheme: 'https' as const,
+      host: 'pn.capminal.ai',
+      port: '443',
+      token: 'tok',
+    }
+    expect(switchGatewayMode(remote, 'managed')).toEqual({
+      ...remote,
+      mode: 'managed',
+      scheme: 'http',
+      host: '127.0.0.1',
+      port: '18791',
+    })
+    // A local endpoint (custom port, LAN-wide bind) is the user's choice: kept.
+    const local = { ...remote, scheme: 'http' as const, host: '0.0.0.0', port: '19000' }
+    expect(switchGatewayMode(local, 'managed')).toEqual({ ...local, mode: 'managed' })
+    // Going external leaves the fields for the user to point elsewhere.
+    expect(switchGatewayMode(draftFromGateway(GW), 'external')).toEqual({
+      ...draftFromGateway(GW),
+      mode: 'external',
+    })
+  })
+
+  it('knows which hosts a managed gateway binds locally', () => {
+    for (const h of [
+      '127.0.0.1',
+      '127.0.1.1',
+      'localhost',
+      'LOCALHOST',
+      'app.localhost',
+      '0.0.0.0',
+      '::1',
+      '[::1]',
+      '[::]',
+    ]) {
+      expect(isLocalGatewayHost(h)).toBe(true)
+    }
+    for (const h of [
+      'pn.capminal.ai',
+      '192.168.1.10',
+      '10.0.0.2',
+      'localhost.example.com',
+      '1270.0.0.1',
+    ]) {
+      expect(isLocalGatewayHost(h)).toBe(false)
+    }
   })
 
   it('asks for a restart only when the running endpoint differs', () => {
