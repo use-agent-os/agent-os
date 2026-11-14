@@ -7,6 +7,7 @@ from typing import Any
 
 import structlog
 
+from agentos.tools.authority import authority_from_context
 from agentos.tools.builtin.sessions import _get_session_manager, _get_task_runtime
 from agentos.tools.registry import tool
 from agentos.tools.types import ToolError, current_tool_context
@@ -295,6 +296,7 @@ async def subagents(
                     session_key,
                     message,
                     provenance={"kind": "internal_system", "source_tool": "subagents.steer"},
+                    authority=authority_from_context(current_tool_context.get()),
                 )
                 return json.dumps(
                     {

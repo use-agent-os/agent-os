@@ -187,6 +187,81 @@ def _operator_caller(ctx: Any) -> bool:
     return caller_kind in (CallerKind.CLI, CallerKind.WEB)
 
 
+def _delegating_caller(ctx: Any) -> bool:
+    """True for a known caller that is not the operator's CLI/Web session.
+
+    Work it schedules is bounded by its own authority. ``None`` is an
+    embedding that called the tool without a context, not a chat turn.
+    """
+    return ctx is not None and not _operator_caller(ctx)
+
+
+#: tool_policy keys that can only take tools away from a cron turn.
+_NARROWING_POLICY_KEYS = frozenset(
+    {"elevated", "deny", "workspace_write_deny_globs", "workspaceWriteDenyGlobs"}
+)
+
+
+def _policy_only_narrows(tool_policy: Any) -> bool:
+    """True for a tool_policy that grants nothing: no profile/allow, no elevation."""
+    from agentos.permissions import cron_tool_policy_elevated
+
+    if not tool_policy:
+        return True
+    if not isinstance(tool_policy, dict):
+        return False
+    return set(tool_policy) <= _NARROWING_POLICY_KEYS and (
+        cron_tool_policy_elevated(tool_policy) is None
+    )
+
+
+def _pinned_off(tool_policy: Any) -> bool:
+    """True when a job's policy explicitly opts out of cron default elevation."""
+    from agentos.permissions import normalize_cron_elevated
+
+    if not isinstance(tool_policy, dict) or "elevated" not in tool_policy:
+        return False
+    try:
+        return normalize_cron_elevated(tool_policy["elevated"]) == "off"
+    except ValueError:
+        return False
+
+
+def _policy_deny(tool_policy: dict[str, Any]) -> set[str]:
+    raw = tool_policy.get("deny") or []
+    return {str(item) for item in ([raw] if isinstance(raw, str) else raw)}
+
+
+def _creator_authority_policy(tool_policy: Any, ctx: Any) -> dict[str, Any]:
+    """The policy an agent_turn job created or edited by a non-operator carries.
+
+    A job runs unattended later, resolved against ``cron_default_mode`` --
+    ``bypass`` by default, which offers exec_command with no approval and no
+    sandbox. Work a chat (or any non-operator turn) schedules must not run
+    with more than that turn had, so elevation is pinned off and every tool
+    the creator could not use is denied to the job as well.
+    """
+    from agentos.tools.authority import authority_from_context
+    from agentos.tools.types import CRON_ELEVATED_ALLOW
+
+    policy = dict(tool_policy) if isinstance(tool_policy, dict) else {}
+    policy["elevated"] = "off"
+    deny = _policy_deny(policy)
+    authority = authority_from_context(ctx)
+    if authority is not None:
+        deny |= {
+            name
+            for name in CRON_ELEVATED_ALLOW
+            if name in authority.denied_tools
+            or (authority.allowed_tools is not None and name not in authority.allowed_tools)
+        }
+    if deny:
+        policy["deny"] = sorted(deny)
+    else:
+        policy.pop("deny", None)
+    return policy
+
+
 def _enum_value(value: Any, default: str = "") -> str:
     return str(getattr(value, "value", value) or default)
 
@@ -953,6 +1028,7 @@ async def cron(
 
     # Scheduled jobs belong to a profile, not to the session that created them.
     # The creator session remains delivery/display metadata only.
+    from agentos.permissions import cron_tool_policy_elevated
     from agentos.tools.types import CallerKind, current_tool_context
 
     ctx = current_tool_context.get()
@@ -981,10 +1057,20 @@ async def cron(
     # decision. Subagents and agent-kind callers already cannot reach `cron` at
     # all — this makes the rule explicit rather than emergent from two denylists.
     # Note: This gate only blocks explicit per-job tool_policy.elevated requests.
-    # Unattended default elevation from cron_default_mode is handled at routing time.
-    if tool_policy and isinstance(tool_policy, dict) and tool_policy.get("elevated"):
+    # cron_default_mode would elevate an agent_turn job by default, so add and
+    # update pin non-operator jobs to elevated=off (_creator_authority_policy).
+    if cron_tool_policy_elevated(tool_policy):
         if not _operator_caller(ctx):
             raise SafeToolError("tool_policy.elevated requires an interactive CLI or Web caller")
+    if (
+        action in ("add", "update")
+        and _delegating_caller(ctx)
+        and not _policy_only_narrows(tool_policy)
+    ):
+        # A non-operator may narrow a job's tools, never widen them.
+        raise SafeToolError(
+            "tool_policy can only deny tools unless the caller is an interactive CLI or Web session"
+        )
 
     # Any job that runs a script executes a file on this host every tick with
     # nothing in the loop to review it — the same unattended shell that
@@ -995,7 +1081,7 @@ async def cron(
         raise SafeToolError("scheduling a script requires an interactive CLI or Web caller")
 
     if action == "list":
-        from agentos.permissions import configured_cron_default_elevated, cron_tool_policy_elevated
+        from agentos.permissions import configured_cron_default_elevated
 
         jobs = [
             job for job in await sched.list_jobs() if _cron_job_agent_id(job) == current_agent_id
@@ -1115,7 +1201,7 @@ async def cron(
         if source_job is not None:
             if session_target == "session" and not target_session_key and not channel_caller:
                 target_session_key = str(getattr(source_job, "session_key", "") or "") or None
-            if channel_caller and (tool_policy or script):
+            if channel_caller and (not _policy_only_narrows(tool_policy) or script):
                 raise SafeToolError(
                     "clone_from is unavailable from a channel for jobs that carry "
                     "a tool policy or a script"
@@ -1127,11 +1213,10 @@ async def cron(
                     "that job reports to a destination this chat cannot address, "
                     "so it can only be cloned by an interactive CLI or Web caller"
                 )
-            if isinstance(tool_policy, dict) and tool_policy.get("elevated"):
-                if not _operator_caller(ctx):
-                    raise SafeToolError(
-                        "tool_policy.elevated requires an interactive CLI or Web caller"
-                    )
+            if cron_tool_policy_elevated(tool_policy) and not _operator_caller(ctx):
+                raise SafeToolError(
+                    "tool_policy.elevated requires an interactive CLI or Web caller"
+                )
             if (job_kind == SCRIPT_KIND or script) and not _operator_caller(ctx):
                 raise SafeToolError("scheduling a script requires an interactive CLI or Web caller")
 
@@ -1376,6 +1461,8 @@ async def cron(
                 normalized_args,
             )
             handler_key = "agent_run"
+            if _delegating_caller(ctx):
+                tool_policy = _creator_authority_policy(tool_policy, ctx)
         effective_tz = (schedule_tz or tz or "").strip()
         # A clone that was given a new prompt is a different job and gets a name
         # from it; one that was not keeps the source's name so the pair reads as
@@ -1495,7 +1582,8 @@ async def cron(
                 "updating a scheduled script requires an interactive CLI or Web caller"
             )
         # Note: This gate only blocks updates to jobs with explicit per-job elevation requests.
-        if dict(getattr(target_job, "tool_policy", None) or {}).get("elevated"):
+        # Default elevation is handled with the payload edit below.
+        if cron_tool_policy_elevated(getattr(target_job, "tool_policy", None)):
             if not _operator_caller(ctx):
                 raise SafeToolError(
                     "updating an elevated cron job requires an interactive CLI or Web caller"
@@ -1617,6 +1705,28 @@ async def cron(
             or session_target is not None
             or target_session_key is not None
         )
+        if (
+            (payload_touched or tool_policy is not None)
+            and new_kind == AGENT_TURN_KIND
+            and _delegating_caller(ctx)
+        ):
+            # The edited job runs with what this caller may do, on top of
+            # whatever it was already denied. A job that still relies on
+            # cron_default_mode carries the operator's unattended authority,
+            # so its prompt is not a non-operator's to rewrite.
+            current_policy = dict(getattr(target_job, "tool_policy", None) or {})
+            if (
+                payload_touched
+                and current_kind == AGENT_TURN_KIND
+                and not _pinned_off(current_policy)
+            ):
+                raise SafeToolError(
+                    "that agent_turn job runs with the operator's cron elevation, so its "
+                    "task can only be edited by an interactive CLI or Web caller"
+                )
+            merged = {**current_policy, **(tool_policy or {})}
+            merged["deny"] = sorted(_policy_deny(current_policy) | _policy_deny(tool_policy or {}))
+            patch["tool_policy"] = _creator_authority_policy(merged, ctx)
         if payload_touched:
             payload_agent = payload_agent_id(current_payload, current_agent_id)
             # A script payload's "text" is its path, not a prompt — it must not

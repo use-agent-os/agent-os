@@ -44,6 +44,7 @@ from agentos.sandbox.integration import (
 )
 from agentos.sandbox.policy import build_policy, select_level
 from agentos.sandbox.types import DenialReason, DenialResult, SandboxPolicy, SandboxRequest
+from agentos.tools.authority import cap_elevated
 from agentos.tools.batch_slot import wait_for_batch_turn, wait_outside_tool_slot
 from agentos.tools.builtin.artifacts import publish_inline_artifacts
 from agentos.tools.builtin.shell_policy import check_safe_bin
@@ -207,7 +208,12 @@ def _context_elevated_mode() -> str | None:
         return ctx.elevated
     if ctx.session_key:
         with contextlib.suppress(Exception):
-            mode = get_approval_queue().get_elevated_mode(ctx.session_key)
+            # The session's own /elevated mode does not lift work another,
+            # lower-authority context queued on it (sessions_send, subagent).
+            mode = cap_elevated(
+                get_approval_queue().get_elevated_mode(ctx.session_key),
+                ctx.authority_ceiling,
+            )
             if mode in ("on", "bypass", "full"):
                 ctx.elevated = mode
                 return mode

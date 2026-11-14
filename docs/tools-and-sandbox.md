@@ -133,6 +133,40 @@ allow = ["create_pdf_report"]   # tool names, never patterns
 
 Full status table: [HTTP API → Direct tool calls](http-api.md#direct-tool-calls).
 
+## Delegated Work and Caller Authority
+
+A turn can start work that runs later on another session: `sessions_spawn`
+children, turns queued with `sessions_send`, and `agent_turn` jobs scheduled
+with the in-agent `cron` tool. That work never runs with more authority than
+the turn that started it:
+
+- **Subagents and `sessions_send` turns** carry the caller's tool surface as a
+  ceiling. The target agent's own tool policy can narrow it further but cannot
+  widen it, and elevation is capped at the caller's — including a target
+  session's `/elevated` mode. Your own Web or CLI session is unrestricted, so
+  work it starts behaves as before.
+- **Cross-agent delegation** follows `subagents.allow_agents` when it is set.
+  When it is not, a caller whose tools were narrowed by policy (an agent or
+  channel `tools` policy, a cron allowlist) may not spawn or message another
+  agent. Your own Web or CLI session may still message any session.
+- **ACP harnesses** run their own shell and file tools, so a caller whose
+  policy withholds `exec_command` or `write_file` can neither start nor drive
+  one.
+- **Cron jobs** created or edited from a chat channel, or by any other
+  non-operator turn, are stored with `tool_policy.elevated = "off"` plus a
+  `deny` list of every tool their creator could not use, so
+  `permissions.cron_default_mode` never elevates them. Such a turn may pass a
+  `tool_policy` that only denies tools, and may not rewrite the task of an
+  `agent_turn` job that relies on the default elevation. Cron turns never get
+  `sessions_spawn` or `sessions_send`, whatever the tool profile.
+
+Group and channel chats, cron turns and subagents may not read private memory
+(`memory_search`, `memory_get`, `session_search`). They also may not write it
+(`memory`, `memory_save`, `memory_delete`), and the periodic memory review
+skips them. `sessions_history`, `sessions_list` and `sessions_send` reach only
+the calling session and the sessions it spawned. Your main and direct-message
+sessions keep all of these tools.
+
 ## Workspace Controls
 
 Read-side restriction:

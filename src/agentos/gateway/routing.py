@@ -13,6 +13,12 @@ from agentos.channel_pairing import ChannelAdmission
 from agentos.channels.types import IncomingMessage
 from agentos.permissions import CRON_ELEVATED_MODES, cron_tool_policy_elevated
 from agentos.session.keys import normalize_agent_id, parse_agent_id
+from agentos.tools.authority import (
+    AUTHORITY_METADATA_KEY,
+    apply_authority_ceiling,
+    authority_from_metadata,
+    authority_to_metadata,
+)
 from agentos.tools.policy import apply_tool_policy_layer
 from agentos.tools.types import (
     CRON_AGENT_ALLOW,
@@ -22,6 +28,7 @@ from agentos.tools.types import (
     SUBAGENT_TOOL_DENY,
     CallerKind,
     InteractionMode,
+    ToolAuthority,
     ToolContext,
 )
 
@@ -312,15 +319,22 @@ def build_subagent_route_envelope(
     parent_task_id: str | None = None,
     spawn_depth: int = 0,
     origin: str = "sessions_spawn",
+    authority: ToolAuthority | None = None,
 ) -> RouteEnvelope:
-    """Build a route for a child subagent run."""
-    metadata = {
+    """Build a route for a child subagent run.
+
+    *authority* is the parent's tool authority; the child's surface is
+    clipped to it (see :mod:`agentos.tools.authority`).
+    """
+    metadata: dict[str, Any] = {
         "parent_session_key": parent_session_key,
         "run_id": run_id,
         "parent_task_id": parent_task_id,
         "spawn_depth": spawn_depth,
         "origin": origin,
     }
+    if authority is not None:
+        metadata[AUTHORITY_METADATA_KEY] = authority_to_metadata(authority)
     return RouteEnvelope(
         source_kind=SourceKind.SUBAGENT,
         source_name="subagent",
@@ -456,7 +470,12 @@ def tool_context_from_envelope(
         denied_tools=denied_tools,
         elevated=elevated,
         tool_policy=envelope.metadata.get("tool_policy"),
+        # Work another context started (subagent, sessions_send) never runs
+        # with more than that context had. Applied here and again after the
+        # config policy layers in resolve_runtime_tool_surface.
+        authority_ceiling=authority_from_metadata(envelope.metadata),
     )
+    ctx = apply_authority_ceiling(ctx)
     if caller_kind is CallerKind.CRON:
         ctx = apply_tool_policy_layer(
             ctx,

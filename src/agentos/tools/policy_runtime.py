@@ -4,10 +4,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from agentos.tools.authority import apply_authority_ceiling
 from agentos.tools.types import CallerKind, InteractionMode, ToolContext
 
 _PRIVATE_MEMORY_READ_TOOL_NAMES: frozenset[str] = frozenset(
     {"memory_get", "memory_search", "session_search"}
+)
+# The curated store a private session's prompt injects as the user's profile
+# and notes. A context that may not read private memory may not write it
+# either, or a group chat could plant "facts" the operator's DM then trusts.
+_PRIVATE_MEMORY_WRITE_TOOL_NAMES: frozenset[str] = frozenset(
+    {"memory", "memory_save", "memory_delete"}
+)
+_PRIVATE_MEMORY_SCOPED_TOOL_NAMES: frozenset[str] = (
+    _PRIVATE_MEMORY_READ_TOOL_NAMES | _PRIVATE_MEMORY_WRITE_TOOL_NAMES
 )
 _IMAGE_GENERATION_TOOL_NAMES: frozenset[str] = frozenset({"image_generate"})
 # Image Flows: hidden while flows are off or no image model has a key.
@@ -70,9 +80,9 @@ def private_memory_read_tools_blocked(ctx: ToolContext | None) -> bool:
 
 
 def private_memory_read_tool_denied(ctx: ToolContext | None, tool_name: str) -> bool:
-    """Return True when a specific tool call would read blocked private memory."""
+    """Return True when a tool call would read or write blocked private memory."""
 
-    return tool_name in _PRIVATE_MEMORY_READ_TOOL_NAMES and private_memory_read_tools_blocked(ctx)
+    return tool_name in _PRIVATE_MEMORY_SCOPED_TOOL_NAMES and private_memory_read_tools_blocked(ctx)
 
 
 def _detect_image_generation_capability() -> bool:
@@ -186,10 +196,15 @@ def resolve_runtime_tool_surface(
             denied_tools |= set(_HUMAN_REPLY_TOOL_NAMES)
         denied_tools |= set(_INTERACTIVE_RUNTIME_TOOL_NAMES)
     if private_memory_read_tools_blocked(ctx):
-        denied_tools |= set(_PRIVATE_MEMORY_READ_TOOL_NAMES)
+        denied_tools |= set(_PRIVATE_MEMORY_SCOPED_TOOL_NAMES)
 
     allowed_tools = _remove_denied_from_allowed(allowed_tools, denied_tools)
-    return replace(ctx, allowed_tools=allowed_tools, denied_tools=denied_tools)
+    # Last, so no earlier layer (config policy for this turn's own agent
+    # included) can widen work past the authority of the context that
+    # started it.
+    return apply_authority_ceiling(
+        replace(ctx, allowed_tools=allowed_tools, denied_tools=denied_tools)
+    )
 
 
 def detect_runtime_tool_surface_capabilities(

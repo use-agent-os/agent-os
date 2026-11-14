@@ -62,6 +62,20 @@ def test_workspace_lockdown_requester_refused() -> None:
         check_spawn_allowed(AcpConfig(), "claude", requester_ctx={"workspace_lockdown": True})
 
 
+def test_requester_without_shell_or_writes_cannot_start_a_harness() -> None:
+    """A harness has its own shell and file tools: no escape via delegation."""
+    for ctx in (
+        ToolContext(denied_tools={"exec_command"}),
+        ToolContext(allowed_tools={"read_file", "sessions_spawn"}),
+        {"denied_tools": ["write_file"]},
+    ):
+        with pytest.raises(AcpAgentNotAllowedError) as exc:
+            check_spawn_allowed(AcpConfig(), "claude", requester_ctx=ctx)
+        assert exc.value.details["reason"] == "restricted_requester"
+    # The operator's unrestricted session still starts one.
+    assert check_spawn_allowed(AcpConfig(), "claude", requester_ctx=ToolContext()) == "claude"
+
+
 def test_unattended_requester_only_refused_when_every_prompt_would_fail() -> None:
     ctx = ToolContext(interaction_mode=InteractionMode.UNATTENDED)
     with pytest.raises(AcpAgentNotAllowedError) as exc:

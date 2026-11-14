@@ -82,6 +82,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Workspace strict: `pdf`, `image` and the audio tools that read a file now
   refuse paths outside the workspace (and the chat attachment store) under
   `--workspace-strict` / `workspace_strict`, like `read_file` already did.
+- Work a turn starts on another session now runs with no more authority than
+  that turn. A `sessions_spawn` child or a `sessions_send` turn is clipped to
+  the caller's tool surface and elevation (the target session's `/elevated`
+  mode included), whatever the target agent's own tool policy grants. A caller
+  narrowed by an agent/channel tool policy or a cron allowlist may no longer
+  spawn or message another agent unless `subagents.allow_agents` names it, and
+  may not start or drive an ACP harness when its policy withholds
+  `exec_command` or `write_file`. Cron turns never get `sessions_spawn` or
+  `sessions_send`. Your own Web/CLI sessions are unaffected.
+- `agent_turn` jobs the in-agent `cron` tool creates or edits from a chat
+  channel (or any non-operator turn) are stored with `tool_policy.elevated =
+  "off"` and a `deny` list of the tools their creator lacked, so
+  `permissions.cron_default_mode = "bypass"` no longer gives them an
+  approval-free, unsandboxed shell. Such a turn may only pass a narrowing
+  `tool_policy` and may not rewrite the task of an `agent_turn` job that runs
+  elevated by default. Jobs created before this release keep their stored
+  policy: `agentos cron list --json` shows each job's `createdFrom` session,
+  so review the ones a chat created and re-create any you want pinned.
+- Group/channel chats, cron turns and subagents can no longer write curated
+  memory (`memory`, `memory_save`, `memory_delete`), and the periodic memory
+  review skips those sessions, so they cannot plant entries the operator's
+  private prompt shows as the user profile. Their `sessions_history`,
+  `sessions_list` and `sessions_send` reach only their own session and the
+  sessions it spawned. A cron job that summarized another session's
+  transcript through `sessions_history` now gets "Session not found".
 
 ### Changed
 - Editing the config file by hand no longer applies the operator-only
