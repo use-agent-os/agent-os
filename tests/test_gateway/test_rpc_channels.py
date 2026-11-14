@@ -66,6 +66,8 @@ async def test_channels_status_includes_configured_channels_without_manager():
             "capability_profile": None,
             "platform_manifest": None,
             "diagnostics": {"network_probe": "not_run"},
+            # No allowed_user_ids and no pairing: the channel admits nobody.
+            "admission": {"mode": "closed", "allowed_user_count": 0, "pairing_enabled": False},
             # No channel manager: no runtime view for the health sweep.
             "state": None,
             "last_event_at": None,
@@ -265,3 +267,44 @@ async def test_telegram_pairing_can_be_approved_without_active_adapter(
 
     assert result.error is None, result.error
     assert store.is_approved("tg", "42") is True
+
+
+@pytest.mark.asyncio
+async def test_discord_pairing_rpc_lists_and_approves_when_enabled(tmp_path, monkeypatch):
+    """AOS-01: channels.pairing.* serves Discord/Slack entries with pairing on."""
+    monkeypatch.setenv("AGENTOS_STATE_DIR", str(tmp_path / "state"))
+    ctx = _pairing_ctx(tmp_path)
+    configured = upsert_channel(
+        ctx.config,
+        entry_payload={
+            "type": "discord",
+            "name": "dc",
+            "token": "secret",
+            "pairing_enabled": True,
+        },
+    )
+    configured = upsert_channel(
+        configured.config,
+        entry_payload={"type": "slack", "name": "sl", "token": "xoxb", "signing_secret": "s"},
+    )
+    ctx.config = configured.config
+    ctx.config.config_path = str(tmp_path / "agentos.toml")
+    store = ChannelPairingStore()
+    store.request("dc", "4242", profile={"chat_id": "dm-1"})
+
+    listed = await get_dispatcher().dispatch("r1", "channels.pairing.list", {}, ctx)
+    approved = await get_dispatcher().dispatch(
+        "r2", "channels.pairing.approve", {"channel": "dc", "senderId": "4242"}, ctx
+    )
+    refused = await get_dispatcher().dispatch(
+        "r3", "channels.pairing.approve", {"channel": "sl", "senderId": "4242"}, ctx
+    )
+
+    assert listed.error is None, listed.error
+    rows = listed.payload["channels"]
+    assert [(row["name"], row["type"]) for row in rows] == [("dc", "discord")]
+    assert rows[0]["pending"][0]["sender_id"] == "4242"
+    assert approved.error is None, approved.error
+    assert store.is_approved("dc", "4242") is True
+    # Slack entry without pairing_enabled is not a pairing channel.
+    assert refused.error is not None

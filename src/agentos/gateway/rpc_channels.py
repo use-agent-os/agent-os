@@ -6,7 +6,12 @@ from typing import Any
 
 import structlog
 
-from agentos.channel_pairing import ChannelPairingStore
+from agentos.channel_pairing import (
+    ChannelPairingStore,
+    admission_payload,
+    entry_uses_pairing,
+    pairing_platform_label,
+)
 from agentos.channels.contract import (
     channel_capability_profile,
     channel_platform_manifest,
@@ -69,12 +74,14 @@ def _diagnostics_payload() -> dict[str, Any]:
     return {"network_probe": "not_run"}
 
 
-def _telegram_pairing_rows(ctx: RpcContext) -> list[dict[str, Any]]:
+def _pairing_rows(ctx: RpcContext) -> list[dict[str, Any]]:
+    """Pairing state for every configured channel that admits by pairing."""
     rows: list[dict[str, Any]] = []
     for entry in _configured_channel_entries(ctx):
-        if entry.get("type") != "telegram":
+        if not entry_uses_pairing(entry):
             continue
         name = str(entry.get("name") or "")
+        channel_type = str(entry.get("type") or "")
         adapter = ctx.channel_manager.get(name) if ctx.channel_manager else None
         snapshot_fn = getattr(adapter, "access_snapshot", None)
         if callable(snapshot_fn):
@@ -85,17 +92,22 @@ def _telegram_pairing_rows(ctx: RpcContext) -> list[dict[str, Any]]:
                 "pending": pairing["pending"],
                 "paired": pairing["approved"],
                 "locked_until": pairing["locked_until"],
-                "groups_enabled": bool(entry.get("groups_enabled", False)),
-                "group_chat_ids": list(entry.get("group_chat_ids") or []),
-                "group_mention_required": bool(
-                    entry.get("group_mention_required", True)
-                ),
             }
-        rows.append({"name": name, "type": "telegram", **snapshot})
+            if channel_type == "telegram":
+                snapshot.update(
+                    {
+                        "groups_enabled": bool(entry.get("groups_enabled", False)),
+                        "group_chat_ids": list(entry.get("group_chat_ids") or []),
+                        "group_mention_required": bool(
+                            entry.get("group_mention_required", True)
+                        ),
+                    }
+                )
+        rows.append({"name": name, "type": channel_type, **snapshot})
     return rows
 
 
-def _telegram_entry(ctx: RpcContext, channel_name: str) -> tuple[Any, Any]:
+def _pairing_entry(ctx: RpcContext, channel_name: str) -> tuple[Any, Any]:
     from agentos.gateway.rpc_onboarding import _active_config
 
     config = _active_config(ctx)
@@ -105,8 +117,11 @@ def _telegram_entry(ctx: RpcContext, channel_name: str) -> tuple[Any, Any]:
     )
     if entry is None:
         raise KeyError(f"Channel not found: {channel_name}")
-    if entry.type != "telegram":
-        raise ValueError("Pairing is only supported for Telegram channels")
+    if not entry_uses_pairing(entry):
+        raise ValueError(
+            "Pairing is only supported for Telegram channels and for Discord, Slack "
+            "or MS Teams channels with pairing_enabled"
+        )
     return config, entry
 
 
@@ -222,6 +237,7 @@ async def _handle_channels_status(params: dict | None, ctx: RpcContext) -> dict[
                 "capability_profile": capability_profile,
                 "platform_manifest": platform_manifest,
                 "diagnostics": _diagnostics_payload(),
+                "admission": admission_payload(entry),
                 **_runtime_fields(runtime_map.get(name), now=now),
             }
         )
@@ -295,7 +311,9 @@ async def _handle_channels_delivery_targets(
     exhaustive.
     """
     targets: dict[str, list[dict[str, str]]] = {}
-    for row in _telegram_pairing_rows(ctx):
+    for row in _pairing_rows(ctx):
+        if row.get("type") != "telegram":
+            continue
         rows = _telegram_delivery_targets(row)
         if rows:
             targets[str(row.get("name") or "")] = rows
@@ -307,7 +325,7 @@ async def _handle_channels_pairing_list(
     params: dict | None,
     ctx: RpcContext,
 ) -> dict[str, Any]:
-    return {"channels": _telegram_pairing_rows(ctx)}
+    return {"channels": _pairing_rows(ctx)}
 
 
 async def _resolve_pairing_request(
@@ -318,7 +336,8 @@ async def _resolve_pairing_request(
 ) -> dict[str, Any]:
     channel_name = _required_string(params, "channel")
     sender_id = _required_string(params, "senderId")
-    _telegram_entry(ctx, channel_name)
+    _config, entry = _pairing_entry(ctx, channel_name)
+    label = pairing_platform_label(getattr(entry, "type", None))
     adapter = ctx.channel_manager.get(channel_name) if ctx.channel_manager else None
     store = getattr(adapter, "pairing_store", None) or ChannelPairingStore()
     snapshot_fn = getattr(adapter, "access_snapshot", None)
@@ -327,7 +346,7 @@ async def _resolve_pairing_request(
         str(item.get("sender_id") or "") for item in snapshot.get("pending", [])
     }
     if sender_id not in pending:
-        raise KeyError(f"Telegram access request not found: {sender_id}")
+        raise KeyError(f"{label} access request not found: {sender_id}")
 
     resolve = getattr(adapter, "resolve_access_request", None)
     if callable(resolve):
@@ -385,7 +404,7 @@ async def _handle_channels_pairing_revoke(
 ) -> dict[str, Any]:
     channel_name = _required_string(params, "channel")
     sender_id = _required_string(params, "senderId")
-    _telegram_entry(ctx, channel_name)
+    _pairing_entry(ctx, channel_name)
     adapter = ctx.channel_manager.get(channel_name) if ctx.channel_manager else None
     store = getattr(adapter, "pairing_store", None) or ChannelPairingStore()
     store.revoke(channel_name, sender_id)
@@ -403,7 +422,7 @@ async def _handle_channels_pairing_clear_pending(
     ctx: RpcContext,
 ) -> dict[str, Any]:
     channel_name = _required_string(params, "channel")
-    _telegram_entry(ctx, channel_name)
+    _pairing_entry(ctx, channel_name)
     adapter = ctx.channel_manager.get(channel_name) if ctx.channel_manager else None
     store = getattr(adapter, "pairing_store", None) or ChannelPairingStore()
     cleared = store.clear_pending(channel_name)

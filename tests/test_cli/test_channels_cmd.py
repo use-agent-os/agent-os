@@ -467,3 +467,53 @@ def test_channels_add_echoes_resolved_path_and_source(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.stdout
     assert str(project / "agentos.toml") in result.stdout
     assert "cwd" in result.stdout.lower()
+
+
+def test_channels_pairing_cli_accepts_discord_with_pairing_enabled(tmp_path, monkeypatch):
+    """AOS-01: Discord/Slack pairing reuses the Telegram pairing commands."""
+    _setenv(monkeypatch, tmp_path)
+    added = runner.invoke(
+        app,
+        [
+            "channels",
+            "add",
+            "discord",
+            "--name",
+            "dc",
+            "--token",
+            "abc",
+            "--field",
+            "pairing_enabled=true",
+        ],
+    )
+    assert added.exit_code == 0, added.stdout
+    request = ChannelPairingStore().request("dc", "4242", profile={"chat_id": "dm-1"})
+
+    approved = runner.invoke(app, ["channels", "pairing", "approve", "dc", request.code])
+
+    assert approved.exit_code == 0, approved.stdout
+    assert "Paired 4242 with Discord channel dc" in approved.stdout
+    assert ChannelPairingStore().is_approved("dc", "4242") is True
+
+
+def test_channels_pairing_cli_refuses_discord_without_pairing(tmp_path, monkeypatch):
+    _setenv(monkeypatch, tmp_path)
+    runner.invoke(app, ["channels", "add", "discord", "--name", "dc", "--token", "abc"])
+
+    result = runner.invoke(app, ["channels", "pairing", "approve", "dc", "ABCD2345"])
+
+    assert result.exit_code == 2
+    assert "pairing" in result.output.lower()
+
+
+def test_channels_edit_sets_discord_allowed_user_ids(tmp_path, monkeypatch):
+    target = _setenv(monkeypatch, tmp_path)
+    runner.invoke(app, ["channels", "add", "discord", "--name", "dc", "--token", "abc"])
+
+    result = runner.invoke(app, ["channels", "edit", "dc", "--field", "allowed_user_ids=111, 222"])
+
+    assert result.exit_code == 0, result.stdout
+    from agentos.onboarding.config_store import load_config
+
+    entry = load_config(target).channels.channels[0]
+    assert entry.allowed_user_ids == ["111", "222"]  # type: ignore[attr-defined]
