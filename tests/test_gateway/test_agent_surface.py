@@ -31,6 +31,14 @@ def _access() -> AccessContext:
     return AccessContext(surface=ConnectionSurface.CONTROL, admitted=True, credential_verified=True)
 
 
+@pytest.fixture
+def foreign_peers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The test peers are other machines, whatever addresses the CI host holds."""
+    from agentos.gateway import agent_surface as agent_surface_mod
+
+    monkeypatch.setattr(agent_surface_mod, "is_own_address", lambda addr: False)
+
+
 class TestTokens:
     def test_minted_token_binds_to_the_session(self, surface: AgentSurface) -> None:
         token = surface.mint_token("agent:trading:webchat:x", "trading")
@@ -167,6 +175,7 @@ class TestAttach:
         assert agent_binding(object()) is None
 
 
+@pytest.mark.usefixtures("foreign_peers")
 class TestRemoteToken:
     """The gateway token proved from another machine is the operator's."""
 
@@ -210,6 +219,7 @@ class TestRemoteToken:
             assert local.agent is not None and local.agent.via == "window"
 
 
+@pytest.mark.usefixtures("foreign_peers")
 class TestRemoteTokenOverWebSocket:
     """Through the real handshake, as the desktop app in External mode connects."""
 

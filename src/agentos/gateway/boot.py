@@ -2942,6 +2942,12 @@ async def start_gateway_server(
     from agentos.gateway.agent_surface import ensure_operator_file, get_agent_surface
 
     get_agent_surface().load_operator_secret_from_env()
+    # The config holds the env-sourced gateway/hooks token now; nothing else in
+    # this process reads the variables, so no child may inherit them either
+    # (gateway.credential_env keeps them only for an in-place re-exec).
+    from agentos.gateway.credential_env import scrub_credential_env
+
+    scrub_credential_env()
     # And write our own for the local CLI (0600 under wallets/, rotated every
     # boot). Without it the CLI on this machine is bound as an agent, which
     # fails safe, so an unwritable file is a warning rather than a refusal.

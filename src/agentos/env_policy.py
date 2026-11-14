@@ -139,6 +139,28 @@ _AGENTOS_POSTURE_NAMES = (
     "AGENTOS_HTTP_DOWNLOAD_LIMIT",
 )
 
+#: Every name the gateway reads a control-plane credential from: the gateway
+#: token in each spelling ``GatewayConfig`` accepts (``AuthConfig``'s own
+#: ``AGENTOS_AUTH_`` prefix and the nested ``AGENTOS_GATEWAY_AUTH__`` one), the
+#: reserved password, the webhook ingress token, the CLI's client token and the
+#: desktop's operator secret. One list, so the child-environment filter
+#: (``tools/env_passthrough.py``), the lifecycle-hook filter and the boot-time
+#: scrub (``gateway/credential_env.py``) cannot drift apart again: the child
+#: filter once listed only ``AGENTOS_GATEWAY_TOKEN`` while the gateway read its
+#: token from ``AGENTOS_AUTH_TOKEN``, and every agent shell held the live token.
+GATEWAY_CREDENTIAL_ENV: frozenset[str] = frozenset(
+    {
+        "AGENTOS_GATEWAY_TOKEN",
+        "AGENTOS_AUTH_TOKEN",
+        "AGENTOS_GATEWAY_AUTH__TOKEN",
+        "AGENTOS_AUTH_PASSWORD",
+        "AGENTOS_GATEWAY_AUTH__PASSWORD",
+        "AGENTOS_GATEWAY_HOOKS__TOKEN",
+        "AGENTOS_OPERATOR_SECRET",
+        "AGENTOS_OPERATOR_SECRET_FILE",
+    }
+)
+
 # Group 5 — egress steering. A proxy name is a posture name: whoever sets it
 # chooses the machine every outbound request is handed to, credentials and all.
 # ``AGENTOS_LLM_PROXY`` is read at ``gateway/llm_runtime.py``,
@@ -173,8 +195,11 @@ _EGRESS_NAMES = (
 _EGRESS_UPPER: frozenset[str] = frozenset(name.upper() for name in _EGRESS_NAMES)
 
 #: Names that may never be written through an AgentOS surface.
-WRITE_DENYLIST: frozenset[str] = frozenset(
-    _LOADER_NAMES + _INTERPRETER_NAMES + _SHELL_NAMES + _AGENTOS_POSTURE_NAMES + _EGRESS_NAMES
+WRITE_DENYLIST: frozenset[str] = (
+    frozenset(
+        _LOADER_NAMES + _INTERPRETER_NAMES + _SHELL_NAMES + _AGENTOS_POSTURE_NAMES + _EGRESS_NAMES
+    )
+    | GATEWAY_CREDENTIAL_ENV
 )
 
 _DENY_MESSAGE = (

@@ -24,11 +24,12 @@ from these signals, strongest first:
    gateway's bearer token. A Control WebSocket that proved that token from
    a non-loopback peer is the operator's too, unless it also presents an
    agent token (2 wins over this). The peer is the socket's own address,
-   never an ``X-Forwarded-For`` claim (``ws_transport``). An agent shell on
-   the gateway host reaches it over loopback, so its CLI never qualifies;
-   the trade-off is that a process on the gateway host which reads the
-   token and dials a non-loopback address does. HTTP RPC does not apply
-   this rule: it cannot see past uvicorn's proxy-header rewrite.
+   never an ``X-Forwarded-For`` claim (``ws_transport``), and it must not be
+   one of this host's own addresses: an agent shell on the gateway host
+   that read the token (from the environment of a compose deployment, or
+   the config file) and dialled the host's LAN or container address is
+   still on this host. HTTP RPC does not apply this rule: it cannot see
+   past uvicorn's proxy-header rewrite.
 2. **An agent token.** When an agent turn spawns a shell (or the scheduler
    runs a cron script), a token is minted here and passed to the child as
    ``AGENTOS_AGENT_TOKEN``. The CLI presents it back; the connection is bound
@@ -58,6 +59,7 @@ import hmac
 import ipaddress
 import os
 import secrets
+import socket
 import tempfile
 import threading
 from collections import OrderedDict
@@ -376,20 +378,55 @@ def _token_proved_remotely(access: AccessContext, peer_ip: str | None) -> bool:
     """A Control connection that proved the gateway token from another machine.
 
     ``credential_verified`` is only set by token auth. The peer must be a
-    literal non-loopback IP: an agent shell on the gateway host dials
-    loopback, and anything unparsable (a test client, a socket path) fails
-    closed.
+    literal IP that is neither loopback nor one of this host's own addresses:
+    an agent shell on the gateway host that dials the host's LAN or container
+    address (``172.18.0.2`` in the compose network) is still on this host,
+    and the token it presents may well be one it read from the gateway's
+    environment or config file. Anything unparsable (a test client, a socket
+    path) fails closed, and so does an IPv6 link-local peer, whose zone the
+    address check below cannot see.
     """
     if not access.credential_verified or access.surface != ConnectionSurface.CONTROL:
         return False
     host = (peer_ip or "").strip().strip("[]").split("%", 1)[0]
     try:
-        addr = ipaddress.ip_address(host)
+        addr: ipaddress.IPv4Address | ipaddress.IPv6Address = ipaddress.ip_address(host)
     except ValueError:
         return False
     if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
-        return not addr.ipv4_mapped.is_loopback
-    return not addr.is_loopback
+        addr = addr.ipv4_mapped
+    if addr.is_loopback or addr.is_unspecified or addr.is_multicast or addr.is_link_local:
+        return False
+    return not is_own_address(addr)
+
+
+#: Documentation addresses (RFC 5737 / RFC 3849): never assigned to a host, so
+#: a successful bind to one means the kernel accepts non-local binds.
+_NEVER_LOCAL = {4: "192.0.2.1", 6: "2001:db8::1"}
+
+
+def _bindable(family: socket.AddressFamily, host: str) -> bool:
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as sock:
+            sock.bind((host, 0))
+    except OSError:
+        return False
+    return True
+
+
+def is_own_address(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Whether *addr* is assigned to one of this host's interfaces.
+
+    A socket can only bind to an address the host owns, so a throwaway UDP
+    bind answers that on every platform without enumerating interfaces. A
+    kernel that accepts non-local binds (``net.ipv4.ip_nonlocal_bind=1``)
+    cannot answer it this way; then every address counts as this host's,
+    which keeps rule 1b from ever being earned by a same-host process.
+    """
+    family = socket.AF_INET6 if addr.version == 6 else socket.AF_INET
+    if _bindable(family, _NEVER_LOCAL[addr.version]):
+        return True
+    return _bindable(family, str(addr))
 
 
 _surface = AgentSurface()

@@ -3248,6 +3248,14 @@ class GatewayConfig(BaseSettings):
                 continue
             if any(name in os.environ for name in candidates):
                 self.mark_runtime_secret(f"auth.{field_name}")
+        # The webhook ingress token has the same provenance problem: the
+        # gateway drops the variable from its environment after boot
+        # (gateway.credential_env), so a config write must carry the running
+        # value forward instead of persisting it into TOML.
+        hooks_payload = source_payload.get("hooks")
+        hooks_payload = hooks_payload if isinstance(hooks_payload, dict) else {}
+        if "token" not in hooks_payload and "AGENTOS_GATEWAY_HOOKS__TOKEN" in os.environ:
+            self.mark_runtime_secret("hooks.token")
 
     @classmethod
     def load_from_toml(cls, path: str | Path) -> GatewayConfig:
