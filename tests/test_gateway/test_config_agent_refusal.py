@@ -20,7 +20,7 @@ from agentos.gateway.access import ConnectionSurface
 from agentos.gateway.agent_surface import AgentBinding, get_agent_surface
 from agentos.gateway.app import create_gateway_app
 from agentos.gateway.auth import AccessContext
-from agentos.gateway.config import GatewayConfig
+from agentos.gateway.config import ChannelsConfig, GatewayConfig
 from agentos.gateway.config_commit import commit_config
 from agentos.gateway.config_persist import persist_config, set_runtime_overrides
 
@@ -173,3 +173,56 @@ def test_the_users_unbound_console_keeps_its_settings_page(
     candidate.permissions.default_mode = "on"
     commit_config(_ctx(config, "unbound"), candidate, changed_paths={"permissions.default_mode"})
     assert config.permissions.default_mode == "on"
+
+
+def _with_discord(config: GatewayConfig, allowed: list[str]) -> GatewayConfig:
+    candidate = config.model_copy(deep=True)
+    candidate.channels = ChannelsConfig.model_validate(
+        {
+            "channels": [
+                {"name": "dc", "type": "discord", "token": "t", "allowed_user_ids": allowed},
+            ]
+        }
+    )
+    return candidate
+
+
+@pytest.mark.parametrize("via", ["token", "process", "window"])
+def test_recognized_agents_cannot_admit_a_channel_sender_through_config(
+    gateway: tuple[GatewayConfig, Path], via: str
+) -> None:
+    """AOS-01 x AOS-08: pairing.approve refuses an agent; ``allowed_user_ids`` must too.
+
+    The channel list diffs as one path, so no root check sees the new id.
+    """
+    config, _ = gateway
+    config.channels = _with_discord(config, ["111"]).channels
+    persist_config(config)
+    with pytest.raises(ValueError, match=r"channels\.dc\.allowed_user_ids"):
+        commit_config(_ctx(config, via), _with_discord(config, ["111", "666"]))
+    assert config.channels.channels[0].allowed_user_ids == ["111"]
+    # Narrowing (like deny / revoke) stays allowed.
+    commit_config(_ctx(config, via), _with_discord(config, []))
+    assert config.channels.channels[0].allowed_user_ids == []
+
+
+def test_an_agent_cannot_upsert_a_channel_that_admits_its_sender(
+    gateway: tuple[GatewayConfig, Path],
+) -> None:
+    config, _ = gateway
+    token = get_agent_surface().mint_token("agent:main:main", "main")
+    entry = {"name": "dc", "type": "discord", "token": "t", "allowed_user_ids": ["666"]}
+    with _session(config, {"agentToken": token}) as ws:
+        _connect(ws, {"agentToken": token})
+        res = _rpc(ws, "u", "onboarding.channel.upsert", {"entry": entry})
+    assert res["ok"] is False, res
+    assert "admitting a channel sender" in res["error"]["message"]
+    assert config.channels.channels == []
+
+
+def test_the_users_console_can_still_admit_a_channel_sender(
+    gateway: tuple[GatewayConfig, Path],
+) -> None:
+    config, _ = gateway
+    commit_config(_ctx(config, "unbound"), _with_discord(config, ["111"]))
+    assert config.channels.channels[0].allowed_user_ids == ["111"]

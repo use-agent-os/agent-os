@@ -43,7 +43,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   forgetting remembered answers, `POST /api/elevated-mode`, an `elevated`
   hint on `chat.send` and approving a channel pairing are refused
   (`approvals.operator_required`, HTTP 403) to a connection the gateway
-  recognizes as an agent's. An approval written straight into the approval
+  recognizes as an agent's, and so is any config write that adds an id to a
+  Discord, Slack or MS Teams channel's `allowed_user_ids`. An approval written straight into the approval
   queue's database is read as a denial.
 - No config write lets an agent change the operator-only settings:
   `config.apply` and every other writer now refuse `trading.*` like

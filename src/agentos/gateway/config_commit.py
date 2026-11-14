@@ -440,6 +440,43 @@ def _refuse_agent_config_change(
             "trading settings are the user's to change; an agent cannot set " + ", ".join(trading)
         )
     refuse_agent_operator_only_change(ctx, paths)
+    refuse_agent_channel_admission(ctx, source, new_config)
+
+
+def _admitted_user_ids(config: Any) -> dict[str, set[str]]:
+    channels = getattr(getattr(config, "channels", None), "channels", None) or ()
+    return {
+        str(getattr(entry, "name", "")): {str(uid) for uid in entry.allowed_user_ids}
+        for entry in channels
+        if isinstance(getattr(entry, "allowed_user_ids", None), list)
+    }
+
+
+def refuse_agent_channel_admission(ctx: Any, source: Any, new_config: Any) -> None:
+    """Refuse a config write by which an agent would admit a channel sender.
+
+    Letting a new sender in is the user's decision: ``channels.pairing.approve``
+    refuses an agent's connection (``rpc_approvals.require_human``), and adding
+    an id to a channel's ``allowed_user_ids`` admits that sender just the same.
+    The channel list diffs as one path (``channels.channels``), so the check
+    compares each channel's admitted ids. Removing an id stays allowed, as
+    denying and revoking a pairing does.
+    """
+    from agentos.gateway.agent_surface import recognized_agent
+
+    if recognized_agent(ctx) is None:
+        return
+    before = _admitted_user_ids(source)
+    added = sorted(
+        f"channels.{name}.allowed_user_ids"
+        for name, ids in _admitted_user_ids(new_config).items()
+        if ids - before.get(name, set())
+    )
+    if added:
+        raise ValueError(
+            "admitting a channel sender is the user's decision; an agent cannot change "
+            + ", ".join(added)
+        )
 
 
 def commit_config(
@@ -839,6 +876,7 @@ __all__ = [
     "expected_revision",
     "operator_only_paths",
     "pending_restart_metadata",
+    "refuse_agent_channel_admission",
     "refuse_agent_operator_only_change",
     "sync_media",
     "sync_provider_selector",

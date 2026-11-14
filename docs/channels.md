@@ -143,6 +143,13 @@ The MS Teams adapter (not yet exposed in the channel catalog) follows the same
 rules: `allowed_user_ids` holds Teams user ids (`29:…`, the activity
 `from.id`).
 
+Admitting a sender is your decision, never an agent's: a connection the
+gateway recognizes as an agent's (an agent token, a process it spawned, or one
+opened while an agent shell runs) is refused `channels.pairing.approve`, and
+any config write (`config.set` / `patch` / `apply`, `onboarding.channel.upsert`)
+that adds an id to a channel's `allowed_user_ids`. It may still deny, revoke,
+or remove ids.
+
 ## Email (IMAP/SMTP)
 
 The email channel needs no platform app registration — only IMAP and SMTP
