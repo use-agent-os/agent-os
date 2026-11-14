@@ -241,3 +241,42 @@ class TestMask:
         masked = env_policy.mask(value)
         assert masked == "sk-p…wxyz"
         assert value not in masked
+
+
+class TestOperatorOnlyConfigEnv:
+    """``.env`` is the config at the next boot: no surface may write a guardrail there."""
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "AGENTOS_TRADING_DAILY_CAP_USD",
+            "AGENTOS_TRADING_APPROVAL_THRESHOLD_USD",
+            "AGENTOS_GATEWAY_TRADING__DAILY_CAP_USD",
+            "AGENTOS_GATEWAY_TRADING",
+            "agentos_gateway_sandbox__sandbox",
+            "AGENTOS_SANDBOX_SANDBOX",
+            "AGENTOS_GATEWAY_PERMISSIONS__DEFAULT_MODE",
+            "AGENTOS_GATEWAY_HOOKS__LIFECYCLE",
+            "AGENTOS_GATEWAY_TOOLS__INVOKE__ALLOW",
+            "AGENTOS_GATEWAY_AUTH__MODE",
+            "AGENTOS_AUTH_MODE",
+            "AGENTOS_GATEWAY_SAFETY__INJECTION_SCAN_MODE",
+            "AGENTOS_GATEWAY_WORKSPACE_STRICT",
+            "AGENTOS_GATEWAY_WORKSPACE_DIR",
+        ],
+    )
+    def test_refused(self, name: str) -> None:
+        assert not env_policy.is_writable(name)
+        with pytest.raises(env_policy.EnvPolicyError):
+            env_policy.assert_writable(name)
+
+    @pytest.mark.parametrize(
+        "name", ["AGENTOS_LLM_API_KEY", "OPENROUTER_API_KEY", "AGENTOS_GATEWAY_TRADINGX"]
+    )
+    def test_ordinary_names_still_writable(self, name: str) -> None:
+        assert env_policy.is_writable(name)
+
+    def test_roots_match_the_gateways_list(self) -> None:
+        from agentos.gateway.config_commit import OPERATOR_ONLY_CONFIG_ROOTS
+
+        assert env_policy._OPERATOR_ONLY_CONFIG_ROOTS == OPERATOR_ONLY_CONFIG_ROOTS

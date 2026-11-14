@@ -161,3 +161,26 @@ class TestExportHintPastesBack:
         result = runner.invoke(app, ["config", "set", "port", "18800"])
         assert result.exit_code == 0, result.output
         assert "export AGENTOS_GATEWAY_PORT=18800" in result.output
+
+
+def test_config_reload_asks_the_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``agentos config reload`` is the operator's way to apply held file edits."""
+    from agentos.cli import gateway_rpc
+
+    calls: list[tuple[str, dict]] = []
+
+    class _Client:
+        async def call(self, method: str, params: dict | None = None) -> dict:
+            calls.append((method, params or {}))
+            return {"changed": ["trading.daily_cap_usd"], "restartRequired": []}
+
+    def fake_sync(action, **_kwargs):  # type: ignore[no-untyped-def]
+        import asyncio
+
+        return asyncio.run(action(_Client()))
+
+    monkeypatch.setattr(gateway_rpc, "run_gateway_sync", fake_sync)
+    result = runner.invoke(app, ["config", "reload"])
+    assert result.exit_code == 0, result.output
+    assert calls == [("config.reload", {})]
+    assert "trading.daily_cap_usd" in result.output

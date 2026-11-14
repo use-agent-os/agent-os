@@ -87,22 +87,51 @@ _SENSITIVE_PREFIXES: tuple[str, ...] = (
 )
 
 
+#: Config files the running gateway reads (``protect_config_path``), besides
+#: the state root's own ``config.toml``.
+_protected_config_paths: set[str] = set()
+
+
+def protect_config_path(path: str | Path | None) -> None:
+    """Put the gateway's active config file on the floor (called at boot).
+
+    The file holds the trading limits, hooks and tool policy that only the
+    operator may change, and the watcher reloads it while the gateway runs;
+    an agent's shell or file tool writing it is refused like ``~/.ssh``.
+    """
+    if not path:
+        return
+    try:
+        _protected_config_paths.add(str(_expanduser(path).resolve(strict=False)))
+    except (OSError, RuntimeError):
+        _protected_config_paths.add(str(path))
+
+
+def reset_protected_config_paths() -> None:
+    """Forget :func:`protect_config_path` registrations. For tests."""
+    _protected_config_paths.clear()
+
+
 def runtime_sensitive_prefixes() -> tuple[str, ...]:
-    """AgentOS's own operator proof, wherever the state root really is.
+    """AgentOS's own operator proof and config, wherever the state root really is.
 
     ``~/.agentos/wallets`` above is only the default layout. The vault and the
     gateway's ``operator.secret`` live under ``default_agentos_home()``, which
     honours ``AGENTOS_STATE_DIR`` -- ``/var/lib/agentos`` in the official
     container image, whose ``$HOME`` is elsewhere. Resolved at check time, so
-    the floor follows the state root the running process actually uses.
+    the floor follows the state root the running process actually uses. The
+    state root's ``config.toml`` and the active config file (which may be a
+    project-local ``agentos.toml``) are on it too.
     """
     from agentos.paths import default_agentos_home
 
     try:
         home = default_agentos_home()
-        return (str(home / "wallets"),)
+        entries = [str(home / "wallets"), str(home / "config.toml")]
     except (OSError, RuntimeError):
-        return ()
+        entries = []
+    entries.extend(sorted(_protected_config_paths - set(entries)))
+    return tuple(entries)
 
 
 def _all_sensitive_prefixes() -> tuple[str, ...]:

@@ -1671,6 +1671,22 @@ audited live list) are recorded as pending instead: `agentos doctor` reports
 `gateway.config.restart_pending` and the console gets a `config.changed`
 event listing `hot` and `restartRequired` paths. Restart to apply those.
 
+**Operator-only settings are held.** A change to `trading`, `hooks`,
+`tools` (including `tools.invoke`), `permissions`, `sandbox`, `auth`,
+`safety`, `workspace_dir` or `workspace_strict` is never applied from a file
+edit alone: the file is one same-user write away for an agent's shell on a
+host without the OS sandbox, and the config RPCs refuse an agent those
+settings. The running values stay, the gateway logs `config.reload_held`,
+`config.changed` carries the paths under `held` (`status: "held"` when
+nothing else changed), and `agentos doctor` reports
+`gateway.config.reload_held`. Apply them yourself with
+`agentos config reload` (refused from an agent's session) or by restarting
+the gateway. The active config file and `<state dir>/config.toml` are also
+sensitive paths: an agent's shell and file tools cannot read or write them.
+The same settings cannot be written into `.env` through `agentos env set`,
+the console or an agent tool (`AGENTOS_TRADING_*`,
+`AGENTOS_GATEWAY_SANDBOX__*`, ...): edit `.env` by hand if you mean it.
+
 An edit that does not parse or validate never replaces the running config: the
 gateway keeps its last good settings, logs `config.reload_skipped`, sends
 `config.changed` with `status: "invalid"`, and `agentos doctor` reports

@@ -13,6 +13,13 @@ carries ``status: "invalid"``; fixing it back to the running settings sends
 ``status: "recovered"``. A write the gateway made itself (a config RPC)
 is recognized by content and does nothing. ``[gateway] config_reload =
 false`` turns the watcher off without a restart.
+
+Changes to the operator-only settings (``config_commit.OPERATOR_ONLY_CONFIG_ROOTS``:
+trading, hooks, tools, permissions, sandbox, auth, ...) are *held*: the file
+is a same-user write away for an agent's shell, so the watcher never makes
+them live. They are reported (``held``, ``status: "held"`` when nothing else
+changed) and wait for ``agentos config reload`` from the operator or a
+restart.
 """
 
 from __future__ import annotations
@@ -48,11 +55,12 @@ def file_signature(path: Path) -> Signature:
 class ReloadStatus:
     """The watcher's last verdict, for ``doctor.status``."""
 
-    status: str = "idle"  # idle | applied | unchanged | invalid
+    status: str = "idle"  # idle | applied | held | unchanged | invalid
     at: float | None = None
     error: str | None = None
     changed: list[str] = field(default_factory=list)
     restart_paths: list[str] = field(default_factory=list)
+    held: list[str] = field(default_factory=list)
 
 
 _last_status = ReloadStatus()
@@ -166,6 +174,31 @@ class ConfigWatcher:
                 }
             )
             return
+        if result.held:
+            log.warning(
+                "config.reload_held",
+                path=str(result.path),
+                held=list(result.held_paths),
+                hint="operator-only settings; run `agentos config reload` or restart",
+            )
+        if not result.changed and result.held:
+            _last_status = ReloadStatus(status="held", at=time.time(), held=list(result.held_paths))
+            await self._send(
+                {
+                    "source": "file",
+                    "status": "held",
+                    "path": str(result.path),
+                    "revision": result.revision,
+                    "changed": [],
+                    "hot": [],
+                    "held": list(result.held_paths),
+                    "restartRequired": [],
+                    "restartReasons": list(result.restart_reasons),
+                    "pendingRestart": bool(result.restart_reasons),
+                    "appliedNow": False,
+                }
+            )
+            return
         if not result.changed:
             previous = _last_status.status
             _last_status = ReloadStatus(status="unchanged", at=time.time())
@@ -193,6 +226,7 @@ class ConfigWatcher:
             at=time.time(),
             changed=list(result.changed_paths),
             restart_paths=list(result.restart_paths),
+            held=list(result.held_paths),
         )
         log.info(
             "config.reloaded",
@@ -210,6 +244,7 @@ class ConfigWatcher:
                 "revision": result.revision,
                 "changed": list(result.changed_paths),
                 "hot": list(result.hot_paths),
+                "held": list(result.held_paths),
                 "restartRequired": list(result.restart_paths),
                 "restartReasons": list(result.restart_reasons),
                 "pendingRestart": bool(result.restart_reasons),
@@ -224,6 +259,17 @@ class ConfigWatcher:
             await self._emit("config.changed", payload)
         except Exception:  # noqa: BLE001 - a dead socket must not stop the watcher
             log.debug("config.changed_emit_failed", exc_info=True)
+
+
+def note_operator_reload(result: Any) -> None:
+    """Record an operator's ``config.reload`` as the watcher's last verdict."""
+    global _last_status
+    _last_status = ReloadStatus(
+        status="applied",
+        at=time.time(),
+        changed=list(getattr(result, "changed_paths", ())),
+        restart_paths=list(getattr(result, "restart_paths", ())),
+    )
 
 
 async def broadcast_to_control(event: str, payload: dict[str, Any]) -> None:
@@ -248,4 +294,5 @@ __all__ = [
     "broadcast_to_control",
     "file_signature",
     "last_reload_status",
+    "note_operator_reload",
 ]

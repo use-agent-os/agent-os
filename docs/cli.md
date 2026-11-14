@@ -24,7 +24,7 @@ available without `uv tool list` or `pip show`.
 | `agentos onboard` | Run or inspect first-run setup. |
 | `agentos auth` | Provider logins that are not API keys (`login`/`status`/`logout`; xAI today). |
 | `agentos configure` | Reconfigure provider, router, channels, search, x-search, image generation, or memory embedding. |
-| `agentos config` | Get or set configuration keys (`get`/`set`). |
+| `agentos config` | Get or set configuration keys (`get`/`set`); `reload` applies the config file to the running gateway, including the operator-only settings (trading, hooks, tools, permissions, sandbox, auth, safety, workspace) that a file edit never applies by itself. `reload` is refused from an agent's session. |
 | `agentos env` | Read or write `~/.agentos/.env` credentials (`list`/`get`/`set`/`import`/`unset`). |
 | `agentos gateway` | Run and manage the gateway server. |
 | `agentos chat` | Start interactive terminal chat. |

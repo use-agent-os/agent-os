@@ -2928,6 +2928,12 @@ async def start_gateway_server(
     _setup_file_logging(config)
     if config.config_path:
         log.info("gateway.config_loaded", path=config.config_path)
+        # The file the watcher reloads: an agent's shell and file tools may
+        # not write it (sandbox.sensitive_paths), and the operator-only
+        # settings in it never go live from a file edit alone.
+        from agentos.sandbox.sensitive_paths import protect_config_path
+
+        protect_config_path(config.config_path)
 
     if subscription_manager is None:
         from agentos.gateway.websocket import SubscriptionManager

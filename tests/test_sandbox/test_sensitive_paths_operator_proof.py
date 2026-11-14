@@ -185,3 +185,46 @@ class TestOrdinaryCommandsStayOrdinary:
             command, workspace=layout["workspace"], cwd=layout["workspace"]
         )
         assert marker is None, (command, marker)
+
+
+class TestActiveConfigFile:
+    """The file the watcher reloads holds the operator-only settings."""
+
+    @pytest.fixture
+    def config_file(self, layout: dict[str, Path]) -> Path:
+        from agentos.sandbox import sensitive_paths
+
+        path = layout["home"] / ".agentos" / "config.toml"
+        path.parent.mkdir(parents=True)
+        path.write_text("[trading]\ndaily_cap_usd = 1000.0\n")
+        project = layout["tmp"] / "project" / "agentos.toml"
+        project.parent.mkdir()
+        project.write_text("")
+        sensitive_paths.protect_config_path(project)
+        yield project
+        sensitive_paths.reset_protected_config_paths()
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat > ~/.agentos/config.toml <<'EOF'\n[trading]\ndaily_cap_usd = 1000000.0\nEOF",
+            "echo '[trading]' >> ~/.agentos/config.toml",
+            "cp /tmp/x ~/.agentos/conf*.toml",
+            "cd ~/.agentos && sed -i s/1000.0/1e9/ config.toml",
+            "cat {project}",
+        ],
+    )
+    async def test_agent_shell_cannot_touch_it(
+        self, config_file: Path, layout: dict[str, Path], command: str
+    ) -> None:
+        out = await _exec(
+            command.format(project=config_file), layout["workspace"], elevated="bypass"
+        )
+        assert _blocked(out), out
+        assert "1000000" not in (layout["home"] / ".agentos" / "config.toml").read_text()
+
+    def test_file_tools_see_it_too(self, config_file: Path, layout: dict[str, Path]) -> None:
+        assert is_sensitive_path(str(layout["home"] / ".agentos" / "config.toml")) is not None
+        assert is_sensitive_path(str(config_file)) is not None
+        # A sibling is not the config file.
+        assert is_sensitive_path(str(layout["home"] / ".agentos" / "config.toml.bak")) is None

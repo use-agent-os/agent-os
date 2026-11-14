@@ -202,13 +202,45 @@ WRITE_DENYLIST: frozenset[str] = (
     | GATEWAY_CREDENTIAL_ENV
 )
 
+# Group 6 — the environment spellings of the operator-only config roots
+# (``gateway.config_commit.OPERATOR_ONLY_CONFIG_ROOTS``; a test keeps the two
+# in step). pydantic-settings reads ``AGENTOS_GATEWAY_<ROOT>`` (a JSON value)
+# and ``AGENTOS_GATEWAY_<ROOT>__<FIELD>``, and the sections that are settings
+# models of their own also read their own prefix (``AGENTOS_TRADING_``,
+# ``AGENTOS_SANDBOX_``, ``AGENTOS_AUTH_``). A value written into ``.env`` here
+# is the config at the next boot, so writing one is changing the trading cap
+# or the sandbox by another route; the config RPC refuses an agent that, and
+# so does this surface for everyone. Matched case-insensitively, as
+# pydantic-settings matches them.
+_OPERATOR_ONLY_CONFIG_ROOTS = (
+    "trading",
+    "hooks",
+    "tools",
+    "permissions",
+    "sandbox",
+    "auth",
+    "safety",
+    "workspace_dir",
+    "workspace_strict",
+)
+_OPERATOR_ONLY_ENV_NAMES: frozenset[str] = frozenset(
+    f"AGENTOS_GATEWAY_{root.upper()}" for root in _OPERATOR_ONLY_CONFIG_ROOTS
+)
+_OPERATOR_ONLY_ENV_PREFIXES: tuple[str, ...] = (
+    *(f"{name}__" for name in sorted(_OPERATOR_ONLY_ENV_NAMES)),
+    "AGENTOS_TRADING_",
+    "AGENTOS_SANDBOX_",
+    "AGENTOS_AUTH_",
+)
+
 _DENY_MESSAGE = (
     "Environment variable {key!r} cannot be written through AgentOS. Names that "
     "steer subprocess execution (PATH, LD_PRELOAD, PYTHONPATH, EDITOR, ...) or "
     "AgentOS runtime posture (AGENTOS_AGENT_PERMISSIONS, AGENTOS_GATEWAY_TOKEN, "
-    "...) or outbound routing (HTTP_PROXY, AGENTOS_LLM_PROXY, ...) are refused "
-    "so this surface cannot escalate its own privileges. Edit "
-    "~/.agentos/.env directly if you genuinely need to set it."
+    "AGENTOS_TRADING_*, AGENTOS_GATEWAY_SANDBOX__*, ...) or outbound routing "
+    "(HTTP_PROXY, AGENTOS_LLM_PROXY, ...) are refused so this surface cannot "
+    "escalate its own privileges. Edit ~/.agentos/.env directly if you "
+    "genuinely need to set it."
 )
 
 
@@ -226,8 +258,14 @@ def assert_valid_name(key: str) -> None:
 
 
 def _is_denied(key: str) -> bool:
-    """Return whether *key* is on the denylist under either matching rule."""
-    return key in WRITE_DENYLIST or key.upper() in _EGRESS_UPPER
+    """Return whether *key* is on the denylist under any matching rule."""
+    upper = key.upper()
+    return (
+        key in WRITE_DENYLIST
+        or upper in _EGRESS_UPPER
+        or upper in _OPERATOR_ONLY_ENV_NAMES
+        or upper.startswith(_OPERATOR_ONLY_ENV_PREFIXES)
+    )
 
 
 def is_writable(key: str) -> bool:
