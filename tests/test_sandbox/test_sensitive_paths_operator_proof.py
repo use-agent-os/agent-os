@@ -211,6 +211,9 @@ class TestActiveConfigFile:
             "echo '[trading]' >> ~/.agentos/config.toml",
             "cp /tmp/x ~/.agentos/conf*.toml",
             "cd ~/.agentos && sed -i s/1000.0/1e9/ config.toml",
+            "A=~/.agentos; cp /tmp/x $A/config.toml",
+            "A=~/.agentos B=config.toml; tee $A/$B < /tmp/x",
+            "A=~/.agentos; B=$A/config.toml; cp /tmp/x $B",
             "cat {project}",
         ],
     )

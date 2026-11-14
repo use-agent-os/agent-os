@@ -724,12 +724,14 @@ def _shell_marker(
     bases: list[Path] = [start] if start is not None else []
 
     # In-command assignments (``D=wallets; cat ~/.agentos/$D/…``) expand
-    # before the rest is read.
+    # before the rest is read, each against the ones before it
+    # (``A=~/.agentos; B=$A/config.toml``).
     assigned: dict[str, str] = {}
     for word in words:
         match = _ASSIGNMENT_RE.match(word)
         if match is not None:
-            assigned[match.group(1)] = match.group(2)
+            assigned[match.group(1)] = _expand_assignments(match.group(2), assigned)
+    literal_words = words
     words = [_expand_assignments(word, assigned) for word in words]
 
     # ``cd`` chains: each target is a directory the following words resolve
@@ -753,7 +755,7 @@ def _shell_marker(
         current = Path(absolute)
         bases.append(current)
 
-    for word in words:
+    for literal, word in zip(literal_words, words, strict=True):
         if (
             not word
             or word in _SHELL_OPERATORS
@@ -768,7 +770,19 @@ def _shell_marker(
                 return marker
             continue
         if word.startswith(("/", "~")):
-            continue  # absolute: the literal scan already saw it
+            if word == literal:
+                continue  # absolute: the literal scan already saw it
+            # An assignment spelled it (``A=~/.agentos; cp x $A/config.toml``);
+            # the literal scan only saw ``$A``.
+            absolute = _absolute_text(word, None)
+            marker = (
+                sensitive_path_marker(absolute, workspace=workspace)
+                if absolute is not None
+                else None
+            )
+            if marker is not None:
+                return marker
+            continue
         # A relative word reaches a credential only from a directory outside
         # the workspace (``cd ~/.agentos``, a workdir of ``~``) or by climbing
         # out of it with ``..``; only those are resolved, so ordinary words in
