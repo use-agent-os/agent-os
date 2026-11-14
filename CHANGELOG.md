@@ -21,6 +21,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   approval and shown on the card. A remembered intent (`rm -rf build`)
   resolves relative targets against the approved command's workdir, so it no
   longer covers the same text run in another directory.
+- Tools: a tool hidden by default (`exposed_by_default=False`: `acp`,
+  `gateway`, `env_set`, `git_commit`, `create_pptx`, `exit_plan_mode`,
+  `install_skill_deps`, `skill_install_community`, ...) now runs only when the
+  turn's tool surface offers it -- an allowlist (agent `tools.allow` /
+  profile, plan mode, cron) or `tool_search` while tools are deferred.
+  Before, a model that named one it was never shown ran it. `POST
+  /api/v1/tools/invoke` is unchanged: it still runs what `[tools.invoke]`
+  admits.
 
 ## [2026.11.14] - 2026-11-14
 
