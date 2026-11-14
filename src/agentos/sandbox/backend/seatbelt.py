@@ -80,6 +80,12 @@ def _validate_request(request: SandboxRequest) -> None:
         _validate_mount_path(spec.sandbox_path, kind="sandbox mount")
         if spec.required and not spec.host_path.exists():
             raise SandboxBackendError(f"required mount missing on host: {spec.host_path!r}")
+    # The profile grants the cwd read access, and the process starts there:
+    # a cwd outside every mount would widen the profile past the policy.
+    if request.policy.mounts and not any(
+        _is_under(request.cwd, spec.host_path) for spec in request.policy.mounts
+    ):
+        raise SandboxBackendError(f"cwd outside every sandbox mount: {request.cwd!r}")
 
 
 def _scheme_string(value: str) -> str:
@@ -495,19 +501,23 @@ def _classify_denial(argv: tuple[str, ...], stderr: str) -> tuple[_SeatbeltNote,
 
     for match in _EXECVP_RE.finditer(tail):
         path = Path(match.group(1))
-        _add(_SeatbeltNote(
-            category="execve.denied",
-            hint=f"sandbox blocked execve of {path}",
-            blocked_path=path,
-        ))
+        _add(
+            _SeatbeltNote(
+                category="execve.denied",
+                hint=f"sandbox blocked execve of {path}",
+                blocked_path=path,
+            )
+        )
 
     for match in _DYLD_RE.finditer(tail):
         path = Path(match.group(1))
-        _add(_SeatbeltNote(
-            category="filesystem.read",
-            hint=f"dyld could not load {path}",
-            blocked_path=path,
-        ))
+        _add(
+            _SeatbeltNote(
+                category="filesystem.read",
+                hint=f"dyld could not load {path}",
+                blocked_path=path,
+            )
+        )
 
     for match in _OPNOTPERM_RE.finditer(tail):
         raw_path = match.group(1) or match.group(2)
@@ -516,11 +526,13 @@ def _classify_denial(argv: tuple[str, ...], stderr: str) -> tuple[_SeatbeltNote,
         path = Path(raw_path)
         if any(n.blocked_path == path for n in notes):
             continue
-        _add(_SeatbeltNote(
-            category="filesystem.read",
-            hint=f"sandbox blocked access to {path}",
-            blocked_path=path,
-        ))
+        _add(
+            _SeatbeltNote(
+                category="filesystem.read",
+                hint=f"sandbox blocked access to {path}",
+                blocked_path=path,
+            )
+        )
 
     if _TMP_RE.search(tail):
         _add(_SeatbeltNote(category="tmp.denied", hint="sandbox denied a tmp-directory operation"))

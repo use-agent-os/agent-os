@@ -179,6 +179,15 @@ agentos sandbox reset
 Sandbox behavior is platform-dependent. Treat `sandbox status` and `doctor` as
 the source of truth for the current machine.
 
+With the sandbox on, the configured workspace is what gets mounted writable
+(at `/workspace` under bubblewrap, as the write-allowed subpath under
+seatbelt). A tool's `workdir` (`exec_command`, `background_process`, the git
+tools) only picks where the command starts inside it: a `workdir` outside
+the workspace and the configured extra mounts is refused with a
+`policy_denied` result rather than mounted. Add a directory to the extra
+mounts (`AGENTOS_SANDBOX_EXTRA_RW_MOUNTS` / `AGENTOS_SANDBOX_EXTRA_RO_MOUNTS`)
+if commands legitimately need to run there.
+
 ## Recommended Patterns
 
 | Task | Recommended posture |

@@ -197,6 +197,7 @@ async def test_sandboxed_backend_output_is_redacted_too(
 
     monkeypatch.setattr(git, "get_runtime", lambda: runtime)
     monkeypatch.setattr(git, "build_policy", lambda *a, **k: None)
+    monkeypatch.setattr(git, "confine_sandbox_cwd", lambda cwd, policy: cwd)
     monkeypatch.setattr(git, "build_request_for_git", lambda *a, **k: None)
     monkeypatch.setattr(git, "run_under_backend", fake_run_under_backend)
 

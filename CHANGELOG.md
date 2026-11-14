@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+- Sandbox: with the OS sandbox on, the configured workspace is always the
+  writable `/workspace` mount (bubblewrap) / write-allowed subpath (seatbelt).
+  A tool `workdir` used to become that mount, so `workdir="/"` or `$HOME`
+  gave a sandboxed command write access to the whole home directory or host.
+  The `workdir` is now only where the command starts; one outside the
+  workspace and the configured extra mounts is refused with `policy_denied`.
+  Applies to `exec_command`, `background_process` and the git tools.
+
 ## [2026.11.14] - 2026-11-14
 
 ### Fixed

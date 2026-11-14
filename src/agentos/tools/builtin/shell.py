@@ -33,11 +33,14 @@ from agentos.sandbox.backend.seatbelt import (
 )
 from agentos.sandbox.governance import action_fingerprint
 from agentos.sandbox.integration import (
+    SandboxWorkdirError,
     build_request,
+    confine_sandbox_cwd,
     escalate_backend_denial,
     gate_action,
     get_runtime,
     run_under_backend,
+    sandbox_workspace_root,
 )
 from agentos.sandbox.policy import build_policy, select_level
 from agentos.sandbox.types import DenialReason, DenialResult, SandboxPolicy, SandboxRequest
@@ -1531,11 +1534,10 @@ def _sandbox_request_for(
     action_kind = "shell.background" if tool_name == "background_process" else "shell.exec"
     ctx = current_tool_context.get()
     effective_cwd = _effective_workdir(workdir)
-    workspace = (
-        Path(effective_cwd)
-        if effective_cwd
-        else (runtime.workspace if runtime.workspace.is_absolute() else Path.cwd())
-    )
+    # Mirror gate_action: the configured workspace is the mount, the workdir
+    # only the cwd, so a denial recorded here fingerprints like the gate's.
+    workspace = sandbox_workspace_root(runtime)
+    run_cwd = Path(effective_cwd) if effective_cwd else workspace
 
     level = (
         select_level(action_kind)
@@ -1543,11 +1545,16 @@ def _sandbox_request_for(
         else runtime.effective.default_level
     )
     policy = build_policy(level, action_kind, workspace, runtime.settings, trusted=True)
+    if runtime.effective.sandbox_enabled:
+        try:
+            run_cwd = confine_sandbox_cwd(run_cwd, policy)
+        except SandboxWorkdirError:
+            pass
     subprocess_env = build_subprocess_env(extra=env)
     request = build_request(
         action_kind=action_kind,
         argv=(tool_name, command),
-        cwd=workspace,
+        cwd=run_cwd,
         policy=policy,
         env=subprocess_env,
     )
