@@ -29,6 +29,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Before, a model that named one it was never shown ran it. `POST
   /api/v1/tools/invoke` is unchanged: it still runs what `[tools.invoke]`
   admits.
+- Workspace strict: `pdf`, `image` and the audio tools that read a file now
+  refuse paths outside the workspace (and the chat attachment store) under
+  `--workspace-strict` / `workspace_strict`, like `read_file` already did.
 
 ## [2026.11.14] - 2026-11-14
 

@@ -141,6 +141,10 @@ Read-side restriction:
 agentos agent --workspace /path/to/project --workspace-strict -m "Summarize this repo"
 ```
 
+`--workspace-strict` covers every tool that reads a local file by path:
+`read_file`, `read_spreadsheet`, `list_dir`, `glob_search`, `grep_search`,
+and the media tools (`pdf`, `image`, and the audio tools that take a file).
+
 Write containment:
 
 ```sh
