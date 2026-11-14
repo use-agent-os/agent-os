@@ -74,7 +74,6 @@ import hmac
 import ipaddress
 import os
 import secrets
-import socket
 import tempfile
 import threading
 from collections import OrderedDict
@@ -85,7 +84,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from agentos.gateway.access import ConnectionSurface
+from agentos.gateway.access import ConnectionSurface, is_own_address
 from agentos.paths import default_agentos_home
 
 if TYPE_CHECKING:
@@ -463,35 +462,6 @@ def _token_proved_remotely(access: AccessContext, peer_ip: str | None) -> bool:
     if addr.is_loopback or addr.is_unspecified or addr.is_multicast or addr.is_link_local:
         return False
     return not is_own_address(addr)
-
-
-#: Documentation addresses (RFC 5737 / RFC 3849): never assigned to a host, so
-#: a successful bind to one means the kernel accepts non-local binds.
-_NEVER_LOCAL = {4: "192.0.2.1", 6: "2001:db8::1"}
-
-
-def _bindable(family: socket.AddressFamily, host: str) -> bool:
-    try:
-        with socket.socket(family, socket.SOCK_DGRAM) as sock:
-            sock.bind((host, 0))
-    except OSError:
-        return False
-    return True
-
-
-def is_own_address(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    """Whether *addr* is assigned to one of this host's interfaces.
-
-    A socket can only bind to an address the host owns, so a throwaway UDP
-    bind answers that on every platform without enumerating interfaces. A
-    kernel that accepts non-local binds (``net.ipv4.ip_nonlocal_bind=1``)
-    cannot answer it this way; then every address counts as this host's,
-    which keeps rule 1b from ever being earned by a same-host process.
-    """
-    family = socket.AF_INET6 if addr.version == 6 else socket.AF_INET
-    if _bindable(family, _NEVER_LOCAL[addr.version]):
-        return True
-    return _bindable(family, str(addr))
 
 
 _surface = AgentSurface()

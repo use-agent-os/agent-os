@@ -75,7 +75,7 @@ def test_agent_validator_refuses_default_gateway_port_on_this_host(address: str)
 def test_agent_validator_follows_the_published_listener(monkeypatch) -> None:
     import agentos.gateway.access as access
 
-    monkeypatch.setattr(access, "local_interface_addresses", lambda: frozenset({"192.168.1.20"}))
+    monkeypatch.setattr(access, "is_own_address", lambda addr: str(addr) == "192.168.1.20")
     ssrf.set_gateway_listener(["0.0.0.0"], 28000)
     for addr in ("127.0.0.1", "192.168.1.20", "0.0.0.0"):
         with pytest.raises(SSRFBlockedError):
@@ -248,3 +248,39 @@ def test_agent_may_still_turn_plan_mode_on(_plan_client: TestClient) -> None:
     )
     assert resp.status_code == 200
     assert get_plan_mode_store().is_enabled(_KEY)
+
+
+# ── integration with the operator boundary (AOS-02/AOS-08) ─────────────────
+
+
+@pytest.mark.parametrize("headers", [{}, {"X-Forwarded-For": "203.0.113.7"}])
+def test_gateway_spawned_process_cannot_turn_plan_mode_off(
+    _plan_client: TestClient, monkeypatch, headers: dict[str, str]
+) -> None:
+    """``via="process"`` is an agent here as for approvals, forwarding header or not.
+
+    uvicorn no longer rewrites the peer (AOS-07), so a header the caller adds
+    is not a way to hide the process the gateway spawned.
+    """
+    import agentos.gateway.peer_process as peer_process
+
+    monkeypatch.setattr(peer_process, "peer_is_descendant", lambda peer, server=None: True)
+    resp = _plan_off(_plan_client, headers)
+    assert "plan.operator_required" in resp.text
+    assert get_plan_mode_store().is_enabled(_KEY)
+
+
+def test_agent_validator_refuses_a_secondary_address_of_this_host(monkeypatch) -> None:
+    """Any address the host holds, not only the primary outbound one.
+
+    ``local_interface_addresses`` knows one address per family; a container
+    bridge or second NIC answers on a wildcard bind just the same.
+    """
+    import agentos.gateway.access as access
+
+    monkeypatch.setattr(access, "local_interface_addresses", lambda: frozenset({"192.168.1.20"}))
+    monkeypatch.setattr(access, "_bindable", lambda family, host: host == "172.18.0.2")
+    ssrf.set_gateway_listener(["0.0.0.0"], 28000)
+    with pytest.raises(SSRFBlockedError):
+        validate_agent_http_address("h", ipaddress.ip_address("172.18.0.2"), 28000)
+    validate_agent_http_address("h", ipaddress.ip_address("172.18.0.3"), 28000)

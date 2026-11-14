@@ -307,9 +307,11 @@ def _names_this_host(addr: IPAddress, bind_hosts: frozenset[str]) -> bool:
         return True
     if str(addr) in bind_hosts:
         return True
-    from agentos.gateway.access import local_interface_addresses
+    # Any address the host holds (secondary interfaces and container bridges
+    # included), the same answer the agent surface uses for "same host".
+    from agentos.gateway.access import is_own_address
 
-    return str(addr) in local_interface_addresses()
+    return is_own_address(addr)
 
 
 def targets_gateway_listener(addr: IPAddress, port: int) -> bool:

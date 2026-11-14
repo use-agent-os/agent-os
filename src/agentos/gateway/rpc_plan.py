@@ -11,20 +11,13 @@ from __future__ import annotations
 from typing import Any
 
 from agentos.gateway.access import CONTROL_AND_CHANNEL, CONTROL_ONLY
-from agentos.gateway.agent_surface import agent_binding
+from agentos.gateway.agent_surface import recognized_agent
 from agentos.gateway.rpc import RpcContext, get_dispatcher
 from agentos.gateway.rpc.registry import RpcHandlerError
 from agentos.plan_mode import get_plan_mode_store
 from agentos.session.keys import canonicalize_session_key
 
 _d = get_dispatcher()
-
-#: Bindings the gateway positively identifies as an agent's: a shell or cron
-#: script presenting its minted agent token, or a connection opened while an
-#: agent shell runs. ``unbound`` is not refused here: the local web console
-#: has no operator secret and is bound that way, and its plan card is how a
-#: plan is approved.
-_AGENT_VIAS = frozenset({"token", "window"})
 
 
 def _require_key(params: dict | None) -> str:
@@ -53,8 +46,13 @@ async def _handle_plan_mode_set(params: dict | None, ctx: RpcContext) -> dict[st
     mode = str((params or {}).get("mode") or "").strip().lower()
     if mode not in {"on", "off"}:
         raise ValueError("params.mode must be 'on' or 'off'")
-    binding = agent_binding(ctx)
-    if mode == "off" and binding is not None and binding.via in _AGENT_VIAS:
+    # The same line approvals draw (``rpc_approvals.require_human``): an agent
+    # token, a process the gateway spawned, or a connection opened while an
+    # agent shell runs. ``unbound`` is not refused: the local web console has
+    # no operator secret and is bound that way, and its plan card is how a
+    # plan is approved.
+    binding = recognized_agent(ctx)
+    if mode == "off" and binding is not None:
         raise RpcHandlerError(
             "plan.operator_required",
             "Plan mode can only be turned off by the operator, not by an agent.",
