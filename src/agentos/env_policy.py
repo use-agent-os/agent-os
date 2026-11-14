@@ -222,9 +222,11 @@ _OPERATOR_ONLY_CONFIG_ROOTS = (
     "safety",
     "workspace_dir",
     "workspace_strict",
+    "acp.permission_mode",
+    "acp.non_interactive_permissions",
 )
 _OPERATOR_ONLY_ENV_NAMES: frozenset[str] = frozenset(
-    f"AGENTOS_GATEWAY_{root.upper()}" for root in _OPERATOR_ONLY_CONFIG_ROOTS
+    "AGENTOS_GATEWAY_" + root.upper().replace(".", "__") for root in _OPERATOR_ONLY_CONFIG_ROOTS
 )
 _OPERATOR_ONLY_ENV_PREFIXES: tuple[str, ...] = (
     *(f"{name}__" for name in sorted(_OPERATOR_ONLY_ENV_NAMES)),

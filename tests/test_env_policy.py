@@ -263,6 +263,7 @@ class TestOperatorOnlyConfigEnv:
             "AGENTOS_GATEWAY_SAFETY__INJECTION_SCAN_MODE",
             "AGENTOS_GATEWAY_WORKSPACE_STRICT",
             "AGENTOS_GATEWAY_WORKSPACE_DIR",
+            "AGENTOS_GATEWAY_ACP__PERMISSION_MODE",
         ],
     )
     def test_refused(self, name: str) -> None:

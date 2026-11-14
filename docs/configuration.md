@@ -1673,7 +1673,8 @@ event listing `hot` and `restartRequired` paths. Restart to apply those.
 
 **Operator-only settings are held.** A change to `trading`, `hooks`,
 `tools` (including `tools.invoke`), `permissions`, `sandbox`, `auth`,
-`safety`, `workspace_dir` or `workspace_strict` is never applied from a file
+`safety`, `workspace_dir`, `workspace_strict`, `acp.permission_mode` or
+`acp.non_interactive_permissions` is never applied from a file
 edit alone: the file is one same-user write away for an agent's shell on a
 host without the OS sandbox, and the config RPCs refuse an agent those
 settings. The running values stay, the gateway logs `config.reload_held`,

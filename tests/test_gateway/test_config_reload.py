@@ -340,6 +340,7 @@ class TestOperatorOnlySettingsAreHeld:
             {"tools": {"invoke": {"allow": ["exec_command"]}}},
             {"tools": {"deny": []}, "safety": {"injection_scan_mode": "off"}},
             {"workspace_strict": False},
+            {"acp": {"permission_mode": "approve-all"}},
         ],
     )
     def test_every_operator_only_root_is_held(self, tmp_path: Path, section: Any) -> None:

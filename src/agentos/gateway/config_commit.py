@@ -551,11 +551,13 @@ class ConfigReloadError(ValueError):
 #: Settings that are the operator's alone: the trading guardrails, commands
 #: the gateway itself runs (``hooks``), the tool policy (allow/deny, the HTTP
 #: ``tools.invoke`` surface, SSRF exceptions), the default elevation, the
-#: sandbox, authentication, the prompt-injection guards and the workspace
-#: confinement. An agent-bound connection may not write them through any
-#: config RPC (:func:`refuse_agent_operator_only_change`), and an edit of the
-#: config file -- which an agent shell can reach on a host without the OS
-#: sandbox -- does not go live by itself (:func:`reload_config_from_disk`).
+#: sandbox, authentication, the prompt-injection guards, the workspace
+#: confinement and how ACP harness prompts are answered (the same decision
+#: ``exec.approvals.set`` makes for exec prompts). An agent-bound connection
+#: may not write them through any config RPC
+#: (:func:`refuse_agent_operator_only_change`), and an edit of the config file
+#: -- which an agent shell can reach on a host without the OS sandbox -- does
+#: not go live by itself (:func:`reload_config_from_disk`).
 OPERATOR_ONLY_CONFIG_ROOTS: tuple[str, ...] = (
     "trading",
     "hooks",
@@ -566,6 +568,8 @@ OPERATOR_ONLY_CONFIG_ROOTS: tuple[str, ...] = (
     "safety",
     "workspace_dir",
     "workspace_strict",
+    "acp.permission_mode",
+    "acp.non_interactive_permissions",
 )
 
 

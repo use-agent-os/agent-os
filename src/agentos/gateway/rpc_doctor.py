@@ -774,7 +774,8 @@ def _config_reload_findings(ctx: RpcContext) -> list[HealthFinding]:
                     "The config file changes "
                     + ", ".join(status.held)
                     + ". The gateway never applies trading, hooks, tool policy, permissions, "
-                    "sandbox, auth, safety or workspace settings from a file edit by itself, "
+                    "sandbox, auth, safety, workspace or ACP permission settings from a file "
+                    "edit by itself, "
                     "because an agent's shell could have made it. Check the file, then apply "
                     "it yourself."
                 ),

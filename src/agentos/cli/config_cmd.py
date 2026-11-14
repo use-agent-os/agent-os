@@ -119,7 +119,8 @@ def config_reload(
 
     The gateway applies most edits of its config file by itself, but never a
     change to an operator-only setting (trading limits, hooks, tool policy,
-    permissions, sandbox, auth, safety, workspace confinement): an agent's
+    permissions, sandbox, auth, safety, workspace confinement, ACP permission
+    mode): an agent's
     shell could have written it. Run this from your own terminal after editing
     those by hand. An agent's session is refused.
     """
