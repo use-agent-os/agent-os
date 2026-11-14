@@ -39,6 +39,9 @@ from agentos.gateway.uploads import (
 # Direct unit tests against UploadStore (no network).
 # ---------------------------------------------------------------------------
 
+# auth.mode=none admits only a loopback peer (TestClient's default is "testclient").
+_LOOPBACK_PEER = ("127.0.0.1", 50000)
+
 
 @pytest.fixture
 def store(tmp_path: Path) -> UploadStore:
@@ -511,7 +514,7 @@ def test_upload_route_rejects_oversize_text_family() -> None:
     app = Starlette(debug=False)
     register_upload_routes(app, config=GatewayConfig(), store=store)
 
-    with TestClient(app) as client:
+    with TestClient(app, client=_LOOPBACK_PEER) as client:
         response = client.post(
             "/api/v1/files/upload",
             files={"file": ("big.txt", b"a" * (TEXT_ATTACHMENT_BYTES + 1), "text/plain")},
@@ -539,7 +542,7 @@ def test_upload_route_rejects_wrong_token_without_middleware() -> None:
     app = Starlette(debug=False)
     register_upload_routes(app, config=config, store=store)
 
-    with TestClient(app) as client:
+    with TestClient(app, client=_LOOPBACK_PEER) as client:
         response = client.post(
             "/api/v1/files/upload",
             headers={"Authorization": "Bearer nope"},
@@ -569,7 +572,7 @@ def test_upload_unauthenticated_rejected() -> None:
     register_upload_routes(app, config=config, store=store)
     app.add_middleware(AuthMiddleware, config=config)
 
-    with TestClient(app) as client:
+    with TestClient(app, client=_LOOPBACK_PEER) as client:
         response = client.post(
             "/api/v1/files/upload",
             files={"file": ("x.pdf", b"%PDF-1.4\n", "application/pdf")},
@@ -593,7 +596,7 @@ def test_upload_rejects_query_token_when_disallowed_for_multipart() -> None:
     register_upload_routes(app, config=config, store=store)
     app.add_middleware(AuthMiddleware, config=config)
 
-    with TestClient(app) as client:
+    with TestClient(app, client=_LOOPBACK_PEER) as client:
         # Query-string token is rejected by AuthMiddleware with 401
         response = client.post(
             "/api/v1/files/upload?token=secret",
@@ -651,7 +654,7 @@ def test_upload_route_reads_bounded_and_skips_store_on_oversize(
     app = Starlette(debug=False)
     register_upload_routes(app, config=GatewayConfig(), store=store)
 
-    with TestClient(app) as client:
+    with TestClient(app, client=_LOOPBACK_PEER) as client:
         response = client.post(
             "/api/v1/files/upload",
             files={"file": ("big.txt", b"a" * (TEXT_ATTACHMENT_BYTES + 1), "text/plain")},
@@ -698,6 +701,7 @@ def test_upload_route_rejects_declared_content_length_without_parsing(
         "raw_path": b"/api/v1/files/upload",
         "query_string": b"",
         "root_path": "",
+        "client": _LOOPBACK_PEER,
         "headers": [
             (b"content-type", b"multipart/form-data; boundary=testboundary"),
             (b"content-length", str(8 * 1024 * 1024 * 1024).encode("ascii")),
@@ -748,7 +752,7 @@ def test_transcribe_route_reads_bounded_and_skips_provider(
         app, config=config, provider_factory=lambda _cfg: _RefusingProvider()
     )
 
-    with TestClient(app) as client:
+    with TestClient(app, client=_LOOPBACK_PEER) as client:
         response = client.post(
             "/api/audio/transcribe",
             files={"file": ("voice.webm", b"a" * 4096, "audio/webm")},
