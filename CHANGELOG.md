@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+- **Breaking default — Discord and Slack channels now refuse senders you have
+  not admitted.** Before, any Discord user who could DM or @mention the bot,
+  and any Slack workspace member or guest, started an agent turn with the
+  operator's tools (including the host shell), ran channel slash commands,
+  and could press tool-approval buttons. Discord and Slack channels gain two
+  settings, `allowed_user_ids` (platform user ids that are always admitted)
+  and `pairing_enabled` (the Telegram pairing flow: an unknown DM sender gets
+  a one-time code you approve with `agentos channels pairing approve <name>
+  <code>`). With neither set, the channel still connects and sends, but
+  refuses every inbound message, slash command and approval button.
+  **To keep using an existing Discord or Slack channel, before upgrading run
+  `agentos channels edit <name> --field allowed_user_ids=<your id>` (or
+  `--field pairing_enabled=true`) and restart the gateway.** The gateway logs
+  `channel.admission_closed` at start and `channel.sender_not_admitted` (with
+  the sender id) for each refused message, and `agentos doctor` reports
+  `channel.<name>.admission_closed`. The hidden MS Teams adapter follows the
+  same rules. `agentos channels pairing …` and the `channels.pairing.*` RPCs
+  now accept Discord and Slack channels with pairing enabled. See
+  [Sender admission](docs/channels.md#sender-admission).
+
 ## [2026.11.14] - 2026-11-14
 
 ### Fixed
