@@ -98,9 +98,7 @@ def _pairing_rows(ctx: RpcContext) -> list[dict[str, Any]]:
                     {
                         "groups_enabled": bool(entry.get("groups_enabled", False)),
                         "group_chat_ids": list(entry.get("group_chat_ids") or []),
-                        "group_mention_required": bool(
-                            entry.get("group_mention_required", True)
-                        ),
+                        "group_mention_required": bool(entry.get("group_mention_required", True)),
                     }
                 )
         rows.append({"name": name, "type": channel_type, **snapshot})
