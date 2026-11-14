@@ -6,6 +6,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+- The gateway's line between you and an agent is harder to cross. A sign
+  that an agent is asking now outranks any proof it could have read: an
+  agent token (even an unknown one), a connection from a process the gateway
+  spawned (Linux), and an open exec window all beat the on-disk
+  `operator.secret`. The CLI no longer reads or sends that file from an
+  agent's session (any of `AGENTOS_AGENT_TOKEN`, `AGENTOS_SESSION_KEY`,
+  `AGENTOS_AGENT`, `AGENTOS_ACP_LEASE` present, or a gateway among its
+  parent processes), and HTTP requests never count it. `execute_code` now
+  runs inside an exec window like `exec_command`.
+- The wallets directory and the active config file are sensitive paths
+  wherever `AGENTOS_STATE_DIR` puts them (the container image keeps them in
+  `/var/lib/agentos`), and the shell check reads globs, variables, `cd` and
+  model-supplied `env` values the way the shell will.
+- Approvals are yours alone: answering a prompt, changing the approval mode,
+  forgetting remembered answers, `POST /api/elevated-mode`, an `elevated`
+  hint on `chat.send` and approving a channel pairing are refused
+  (`approvals.operator_required`, HTTP 403) to a connection the gateway
+  recognizes as an agent's. An approval written straight into the approval
+  queue's database is read as a denial.
+- No config write lets an agent change the operator-only settings:
+  `config.apply` and every other writer now refuse `trading.*` like
+  `config.set` does, and refuse `hooks`, `tools`, `permissions`, `sandbox`,
+  `auth`, `safety`, `workspace_dir`, `workspace_strict` and the ACP
+  permission mode to an agent's connection.
+- The gateway token (`AGENTOS_AUTH_TOKEN`, `AGENTOS_GATEWAY_AUTH__TOKEN`),
+  the hooks token and the other gateway credentials no longer reach any
+  process an agent runs, and the gateway drops them from its own
+  environment after boot (an in-place restart still gets them). A
+  token-authenticated connection from the gateway host's own LAN or
+  container address is no longer treated as coming from another machine.
+
+### Changed
+- Editing the config file by hand no longer applies the operator-only
+  settings above while the gateway runs: they are held (logged as
+  `config.reload_held`, listed by `agentos doctor`) until you run the new
+  `agentos config reload` or restart the gateway. Everything else in the
+  file still applies live.
+- While an agent's shell, background process or `execute_code` run is
+  going, the local CLI is not treated as the operator (approve trades and
+  prompts in the desktop app, or retry when it has finished). A web console
+  that connected during that time cannot answer approvals until it
+  reconnects. The desktop app is unaffected.
+- `agentos env set`, the console and agent tools refuse to write the
+  environment spellings of the operator-only settings (`AGENTOS_TRADING_*`,
+  `AGENTOS_SANDBOX_*`, `AGENTOS_AUTH_*`, `AGENTOS_GATEWAY_<SECTION>__*`) and
+  the gateway credentials into `.env`; edit `.env` by hand if you mean it.
+
 ## [2026.11.14] - 2026-11-14
 
 ### Fixed
