@@ -24,7 +24,7 @@ available without `uv tool list` or `pip show`.
 | `agentos onboard` | Run or inspect first-run setup. |
 | `agentos auth` | Provider logins that are not API keys (`login`/`status`/`logout`; xAI today). |
 | `agentos configure` | Reconfigure provider, router, channels, search, x-search, image generation, or memory embedding. |
-| `agentos config` | Get or set configuration keys (`get`/`set`). |
+| `agentos config` | Get or set configuration keys (`get`/`set`); `reload` applies the config file to the running gateway, including the operator-only settings (trading, hooks, tools, permissions, sandbox, auth, safety, workspace, ACP permission mode) that a file edit never applies by itself. `reload` is refused from an agent's session. |
 | `agentos env` | Read or write `~/.agentos/.env` credentials (`list`/`get`/`set`/`import`/`unset`). |
 | `agentos gateway` | Run and manage the gateway server. |
 | `agentos chat` | Start interactive terminal chat. |
@@ -305,7 +305,7 @@ Useful automation flags:
 | Flag | Purpose |
 | --- | --- |
 | `--workspace` | Set the workspace root. |
-| `--workspace-strict` | Restrict read-side file tools to the workspace. |
+| `--workspace-strict` | Restrict read-side file tools (including `pdf`, `image` and audio) to the workspace. |
 | `--workspace-lockdown` | Contain writes to workspace or scratch directory. |
 | `--scratch-dir` | Place temporary scripts/logs/candidate patches in a known directory. |
 | `--file` / `-f` | Attach a local file; repeat for multiple files. |
@@ -686,6 +686,9 @@ agentos channels pairing deny personal <telegram-user-id>
 agentos channels pairing revoke personal <telegram-user-id>
 agentos channels pairing clear-pending personal
 agentos channels edit inbox --field allowed_senders=you@example.com
+agentos channels edit team --field allowed_user_ids=U012ABCDEF
+agentos channels edit my-discord --field pairing_enabled=true
+agentos channels pairing approve my-discord ABCD2345
 agentos channels logout personal -y
 agentos channels enable personal
 agentos channels disable personal
@@ -724,13 +727,22 @@ default and require an explicit group chat ID, a paired sender, and—by
 default—a bot mention. Any connected Control client may approve, deny, or
 disconnect a pairing.
 
+Discord and Slack admit only the platform user ids in `allowed_user_ids`
+and, when `pairing_enabled = true`, senders paired through the same
+`agentos channels pairing` commands (codes are issued in DMs). With neither
+field set the channel refuses every inbound message, slash command, and
+approval button; `agentos doctor` flags it as
+`channel.<name>.admission_closed`. `agentos channels pairing …` accepts any
+Telegram channel and any Discord or Slack channel with pairing enabled. See
+[Sender admission](channels.md#sender-admission).
+
 ### Platform-Native Interactive Approvals
 
 Platform-native interactive tool approvals (such as Slack block actions, Telegram inline keyboard callbacks, and Discord message components) allow operators to approve or deny gated tool executions directly using interactive buttons in their messaging app.
 
 For security, interactive approvals are:
 - **Restricted to Direct Messages (DMs)**: Interactive approval prompts are only sent in channel DMs, not group/channel chats, ensuring they cannot be triggered or visible to unauthorized participants in a shared room.
-- **Access Gated**: Each button click/interaction verifies that the clicker's sender ID is paired and authorized under the channel's access policy. Clicking by an unpaired or unauthorized user is dropped and rejected.
+- **Access Gated**: Each button click/interaction verifies that the clicker's sender ID is admitted by the channel (paired, or listed in `allowed_user_ids` on Discord/Slack). Clicking by an unadmitted user is dropped and rejected.
 - **Session Bound**: Approval tokens are strictly bound to their originating chat session key. A click received from a different chat context or user session will mismatch and be ignored.
 
 Raw config (`agentos config`):
@@ -1678,6 +1690,10 @@ delivery and failure destinations stay CLI/Web/RPC-only. See
 By default, cron jobs of kind `agent_turn` run elevated under the `bypass` mode
 (controlled globally by `permissions.cron_default_mode`). This allows them to
 run shell-based commands (like those in skills) without interactive approval prompts.
+That default applies to jobs you create. A job the in-agent `cron` tool creates
+from a chat channel (or any turn other than your own CLI/Web session) is stored
+with `elevated = "off"` and a `deny` list of the tools its creator lacked; see
+[`tools-and-sandbox.md`](tools-and-sandbox.md#delegated-work-and-caller-authority).
 
 If you wish to opt out a job from elevated execution, pass `--no-elevated`:
 

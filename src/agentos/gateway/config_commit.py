@@ -8,6 +8,7 @@ runtime adapters.  This module owns that final commit boundary.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
@@ -409,6 +410,75 @@ def _prepare_for_persistence(config: Any, changed_paths: set[str]) -> None:
     resolve_llm_runtime_config(config)
 
 
+def _refuse_agent_config_change(
+    ctx: Any, source: Any, new_config: Any, changed_paths: Iterable[str] | None
+) -> None:
+    """The one gate every config writer passes: no agent sets the operator's settings.
+
+    ``config.set`` / ``config.patch`` refused the trading limits by the path
+    the caller *named*, and ``config.apply`` -- the full-replace sibling --
+    did not refuse them at all. The check here runs on what actually changes
+    (the caller's list plus a diff of the two configs), for every RPC writer:
+    set, patch, apply, onboarding, heartbeat and whatever comes next.
+    ``trading`` is refused for any binding, unbound included; the other
+    operator-only roots for a connection the gateway recognizes as an agent's.
+    """
+    from agentos.gateway.agent_surface import agent_binding
+
+    if agent_binding(ctx) is None:
+        return
+    paths = {str(path) for path in (changed_paths or ())}
+    dump_old = getattr(source, "model_dump", None)
+    dump_new = getattr(new_config, "model_dump", None)
+    if callable(dump_old) and callable(dump_new):
+        from agentos.gateway.rpc_config import diff_paths
+
+        paths |= diff_paths(dump_old(mode="python"), dump_new(mode="python"))
+    trading = sorted(p for p in paths if p == "trading" or p.startswith("trading."))
+    if trading:
+        raise ValueError(
+            "trading settings are the user's to change; an agent cannot set " + ", ".join(trading)
+        )
+    refuse_agent_operator_only_change(ctx, paths)
+    refuse_agent_channel_admission(ctx, source, new_config)
+
+
+def _admitted_user_ids(config: Any) -> dict[str, set[str]]:
+    channels = getattr(getattr(config, "channels", None), "channels", None) or ()
+    return {
+        str(getattr(entry, "name", "")): {str(uid) for uid in entry.allowed_user_ids}
+        for entry in channels
+        if isinstance(getattr(entry, "allowed_user_ids", None), list)
+    }
+
+
+def refuse_agent_channel_admission(ctx: Any, source: Any, new_config: Any) -> None:
+    """Refuse a config write by which an agent would admit a channel sender.
+
+    Letting a new sender in is the user's decision: ``channels.pairing.approve``
+    refuses an agent's connection (``rpc_approvals.require_human``), and adding
+    an id to a channel's ``allowed_user_ids`` admits that sender just the same.
+    The channel list diffs as one path (``channels.channels``), so the check
+    compares each channel's admitted ids. Removing an id stays allowed, as
+    denying and revoking a pairing does.
+    """
+    from agentos.gateway.agent_surface import recognized_agent
+
+    if recognized_agent(ctx) is None:
+        return
+    before = _admitted_user_ids(source)
+    added = sorted(
+        f"channels.{name}.allowed_user_ids"
+        for name, ids in _admitted_user_ids(new_config).items()
+        if ids - before.get(name, set())
+    )
+    if added:
+        raise ValueError(
+            "admitting a channel sender is the user's decision; an agent cannot change "
+            + ", ".join(added)
+        )
+
+
 def commit_config(
     ctx: RpcContext,
     new_config: Any,
@@ -437,6 +507,7 @@ def commit_config(
         if running_config is not None
         else new_config
     )
+    _refuse_agent_config_change(ctx, source, new_config, changed_paths)
     has_existing_runtime = running_config is not None or source_config is not None
     if new_config.auth.mode == "token" and not new_config.auth.token:
         source_had_missing_token_mode = (
@@ -514,6 +585,70 @@ class ConfigReloadError(ValueError):
     """The file on disk cannot become the running config (it stays as it was)."""
 
 
+#: Settings that are the operator's alone: the trading guardrails, commands
+#: the gateway itself runs (``hooks``), the tool policy (allow/deny, the HTTP
+#: ``tools.invoke`` surface, SSRF exceptions), the default elevation, the
+#: sandbox, authentication, the prompt-injection guards, the workspace
+#: confinement and how ACP harness prompts are answered (the same decision
+#: ``exec.approvals.set`` makes for exec prompts). An agent-bound connection
+#: may not write them through any config RPC
+#: (:func:`refuse_agent_operator_only_change`), and an edit of the config file
+#: -- which an agent shell can reach on a host without the OS sandbox -- does
+#: not go live by itself (:func:`reload_config_from_disk`).
+OPERATOR_ONLY_CONFIG_ROOTS: tuple[str, ...] = (
+    "trading",
+    "hooks",
+    "tools",
+    "permissions",
+    "sandbox",
+    "auth",
+    "safety",
+    "workspace_dir",
+    "workspace_strict",
+    "acp.permission_mode",
+    "acp.non_interactive_permissions",
+)
+
+
+def _root_of(path: str) -> str | None:
+    for root in OPERATOR_ONLY_CONFIG_ROOTS:
+        if path == root or path.startswith(f"{root}."):
+            return root
+    return None
+
+
+def operator_only_paths(paths: Iterable[str]) -> list[str]:
+    """The paths in *paths* that touch an operator-only root (or contain one)."""
+    touched: set[str] = set()
+    for path in paths:
+        text = str(path)
+        if _root_of(text) is not None:
+            touched.add(text)
+        elif not text or any(root.startswith(f"{text}.") for root in OPERATOR_ONLY_CONFIG_ROOTS):
+            touched.add(text)
+    return sorted(touched)
+
+
+def refuse_agent_operator_only_change(ctx: Any, changed_paths: Iterable[str]) -> None:
+    """Refuse a config write from a connection the gateway recognizes as an agent's.
+
+    Applied to the *computed* diff of every config writer (``commit_config``),
+    so a full-replace (``config.apply``), a merge patch or an onboarding
+    mutation cannot carry what a ``config.set`` of the same path would be
+    refused. ``trading`` is refused for an unbound connection too
+    (``rpc_config._refuse_agent_trading_paths``).
+    """
+    from agentos.gateway.agent_surface import recognized_agent
+
+    if recognized_agent(ctx) is None:
+        return
+    touched = operator_only_paths(changed_paths)
+    if touched:
+        raise ValueError(
+            "these settings are the user's to change; an agent cannot set " + ", ".join(touched)
+        )
+
+
 @dataclass(frozen=True)
 class ConfigReloadResult:
     """Outcome of applying an external edit of the config file."""
@@ -525,10 +660,17 @@ class ConfigReloadResult:
     restart_paths: tuple[str, ...]
     restart_reasons: tuple[str, ...]
     applied_now: bool
+    #: Operator-only paths the file changed that were *not* applied: they wait
+    #: for ``config.reload`` from the operator, or a restart.
+    held_paths: tuple[str, ...] = ()
 
     @property
     def changed(self) -> bool:
         return bool(self.changed_paths)
+
+    @property
+    def held(self) -> bool:
+        return bool(self.held_paths)
 
 
 def _set_dotted_attr(target: Any, path: str, value: Any) -> None:
@@ -554,7 +696,9 @@ def _leaf_paths(paths: set[str]) -> set[str]:
     }
 
 
-def reload_config_from_disk(ctx: RpcContext) -> ConfigReloadResult:
+def reload_config_from_disk(
+    ctx: RpcContext, *, include_operator_only: bool = False
+) -> ConfigReloadResult:
     """Make an edit of the active config file the running config.
 
     The file was written by someone else -- an editor, a deploy script -- so
@@ -564,6 +708,14 @@ def reload_config_from_disk(ctx: RpcContext) -> ConfigReloadResult:
     in-place update and hot adapters, and the same restart bookkeeping. Values
     the process holds that the file does not -- ``--listen``/``--port``
     overrides, an auto-generated token, env-sourced secrets -- carry over.
+
+    "Someone else" may also be an agent's shell: on a host without the OS
+    sandbox the file is a same-user write away, and the config RPC refuses
+    an agent the same settings. So unless *include_operator_only* (the
+    operator's ``config.reload``), changes under
+    :data:`OPERATOR_ONLY_CONFIG_ROOTS` are not applied, hot or otherwise: the
+    running values stay and the paths come back as ``held_paths``. A restart
+    reads the file as the operator's, as it always has.
 
     Raises :class:`ConfigReloadError` when the file cannot be read, parsed or
     validated; the running config is untouched then.
@@ -622,6 +774,20 @@ def reload_config_from_disk(ctx: RpcContext) -> ConfigReloadResult:
 
     old_payload = running.model_dump(mode="python")
     changed = diff_paths(old_payload, new_config.model_dump(mode="python"))
+    held: list[str] = []
+    if not include_operator_only:
+        held = sorted(p for p in _leaf_paths(changed) if _root_of(p) is not None)
+        # Keep the running value of every operator-only root the file touched;
+        # the rest of the edit goes ahead as before.
+        for root in sorted({cast(str, _root_of(p)) for p in held}):
+            _set_dotted_attr(new_config, root, copy.deepcopy(_get_dotted_attr(running, root)))
+        if held:
+            log.warning(
+                "config.reload_held_operator_only paths=%s; apply with `agentos config reload` "
+                "as the operator, or restart the gateway",
+                ",".join(held),
+            )
+            changed = diff_paths(old_payload, new_config.model_dump(mode="python"))
     leaves = _leaf_paths(changed)
     if not leaves:
         return ConfigReloadResult(
@@ -632,6 +798,7 @@ def reload_config_from_disk(ctx: RpcContext) -> ConfigReloadResult:
             restart_paths=(),
             restart_reasons=(),
             applied_now=True,
+            held_paths=tuple(held),
         )
 
     if new_config.auth.mode == "token" and not new_config.auth.token:
@@ -680,6 +847,7 @@ def reload_config_from_disk(ctx: RpcContext) -> ConfigReloadResult:
         restart_paths=tuple(restart_paths),
         restart_reasons=pending,
         applied_now=applied_now,
+        held_paths=tuple(held),
     )
 
 
@@ -696,6 +864,7 @@ def _short_error(exc: BaseException) -> str:
 
 
 __all__ = [
+    "OPERATOR_ONLY_CONFIG_ROOTS",
     "ConfigCommitResult",
     "ConfigReloadError",
     "ConfigReloadResult",
@@ -705,7 +874,10 @@ __all__ = [
     "config_disk_state",
     "config_revision",
     "expected_revision",
+    "operator_only_paths",
     "pending_restart_metadata",
+    "refuse_agent_channel_admission",
+    "refuse_agent_operator_only_change",
     "sync_media",
     "sync_provider_selector",
     "sync_search",

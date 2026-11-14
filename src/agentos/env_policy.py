@@ -139,6 +139,28 @@ _AGENTOS_POSTURE_NAMES = (
     "AGENTOS_HTTP_DOWNLOAD_LIMIT",
 )
 
+#: Every name the gateway reads a control-plane credential from: the gateway
+#: token in each spelling ``GatewayConfig`` accepts (``AuthConfig``'s own
+#: ``AGENTOS_AUTH_`` prefix and the nested ``AGENTOS_GATEWAY_AUTH__`` one), the
+#: reserved password, the webhook ingress token, the CLI's client token and the
+#: desktop's operator secret. One list, so the child-environment filter
+#: (``tools/env_passthrough.py``), the lifecycle-hook filter and the boot-time
+#: scrub (``gateway/credential_env.py``) cannot drift apart again: the child
+#: filter once listed only ``AGENTOS_GATEWAY_TOKEN`` while the gateway read its
+#: token from ``AGENTOS_AUTH_TOKEN``, and every agent shell held the live token.
+GATEWAY_CREDENTIAL_ENV: frozenset[str] = frozenset(
+    {
+        "AGENTOS_GATEWAY_TOKEN",
+        "AGENTOS_AUTH_TOKEN",
+        "AGENTOS_GATEWAY_AUTH__TOKEN",
+        "AGENTOS_AUTH_PASSWORD",
+        "AGENTOS_GATEWAY_AUTH__PASSWORD",
+        "AGENTOS_GATEWAY_HOOKS__TOKEN",
+        "AGENTOS_OPERATOR_SECRET",
+        "AGENTOS_OPERATOR_SECRET_FILE",
+    }
+)
+
 # Group 5 — egress steering. A proxy name is a posture name: whoever sets it
 # chooses the machine every outbound request is handed to, credentials and all.
 # ``AGENTOS_LLM_PROXY`` is read at ``gateway/llm_runtime.py``,
@@ -173,17 +195,54 @@ _EGRESS_NAMES = (
 _EGRESS_UPPER: frozenset[str] = frozenset(name.upper() for name in _EGRESS_NAMES)
 
 #: Names that may never be written through an AgentOS surface.
-WRITE_DENYLIST: frozenset[str] = frozenset(
-    _LOADER_NAMES + _INTERPRETER_NAMES + _SHELL_NAMES + _AGENTOS_POSTURE_NAMES + _EGRESS_NAMES
+WRITE_DENYLIST: frozenset[str] = (
+    frozenset(
+        _LOADER_NAMES + _INTERPRETER_NAMES + _SHELL_NAMES + _AGENTOS_POSTURE_NAMES + _EGRESS_NAMES
+    )
+    | GATEWAY_CREDENTIAL_ENV
+)
+
+# Group 6 — the environment spellings of the operator-only config roots
+# (``gateway.config_commit.OPERATOR_ONLY_CONFIG_ROOTS``; a test keeps the two
+# in step). pydantic-settings reads ``AGENTOS_GATEWAY_<ROOT>`` (a JSON value)
+# and ``AGENTOS_GATEWAY_<ROOT>__<FIELD>``, and the sections that are settings
+# models of their own also read their own prefix (``AGENTOS_TRADING_``,
+# ``AGENTOS_SANDBOX_``, ``AGENTOS_AUTH_``). A value written into ``.env`` here
+# is the config at the next boot, so writing one is changing the trading cap
+# or the sandbox by another route; the config RPC refuses an agent that, and
+# so does this surface for everyone. Matched case-insensitively, as
+# pydantic-settings matches them.
+_OPERATOR_ONLY_CONFIG_ROOTS = (
+    "trading",
+    "hooks",
+    "tools",
+    "permissions",
+    "sandbox",
+    "auth",
+    "safety",
+    "workspace_dir",
+    "workspace_strict",
+    "acp.permission_mode",
+    "acp.non_interactive_permissions",
+)
+_OPERATOR_ONLY_ENV_NAMES: frozenset[str] = frozenset(
+    "AGENTOS_GATEWAY_" + root.upper().replace(".", "__") for root in _OPERATOR_ONLY_CONFIG_ROOTS
+)
+_OPERATOR_ONLY_ENV_PREFIXES: tuple[str, ...] = (
+    *(f"{name}__" for name in sorted(_OPERATOR_ONLY_ENV_NAMES)),
+    "AGENTOS_TRADING_",
+    "AGENTOS_SANDBOX_",
+    "AGENTOS_AUTH_",
 )
 
 _DENY_MESSAGE = (
     "Environment variable {key!r} cannot be written through AgentOS. Names that "
     "steer subprocess execution (PATH, LD_PRELOAD, PYTHONPATH, EDITOR, ...) or "
     "AgentOS runtime posture (AGENTOS_AGENT_PERMISSIONS, AGENTOS_GATEWAY_TOKEN, "
-    "...) or outbound routing (HTTP_PROXY, AGENTOS_LLM_PROXY, ...) are refused "
-    "so this surface cannot escalate its own privileges. Edit "
-    "~/.agentos/.env directly if you genuinely need to set it."
+    "AGENTOS_TRADING_*, AGENTOS_GATEWAY_SANDBOX__*, ...) or outbound routing "
+    "(HTTP_PROXY, AGENTOS_LLM_PROXY, ...) are refused so this surface cannot "
+    "escalate its own privileges. Edit ~/.agentos/.env directly if you "
+    "genuinely need to set it."
 )
 
 
@@ -201,8 +260,14 @@ def assert_valid_name(key: str) -> None:
 
 
 def _is_denied(key: str) -> bool:
-    """Return whether *key* is on the denylist under either matching rule."""
-    return key in WRITE_DENYLIST or key.upper() in _EGRESS_UPPER
+    """Return whether *key* is on the denylist under any matching rule."""
+    upper = key.upper()
+    return (
+        key in WRITE_DENYLIST
+        or upper in _EGRESS_UPPER
+        or upper in _OPERATOR_ONLY_ENV_NAMES
+        or upper.startswith(_OPERATOR_ONLY_ENV_PREFIXES)
+    )
 
 
 def is_writable(key: str) -> bool:

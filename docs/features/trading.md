@@ -216,44 +216,67 @@ Trading** pane has a *Test key* button (`trading.probe`).
 
 Guardrails are only worth anything if the gateway, not the client, decides
 who is asking. `agentos.gateway.agent_surface` computes an *agent binding*
-for every admitted connection from three signals, strongest first:
+for every admitted connection. One rule orders the signals: **a sign that an
+agent is asking outranks any proof an agent could have read.** Strongest
+first:
 
-1. **An operator secret.** Two are accepted. The desktop app spawns the
-   gateway and hands it a random secret (`AGENTOS_OPERATOR_SECRET_FILE`, a
-   `0600` file the gateway deletes after reading; `AGENTOS_OPERATOR_SECRET`
-   as a fallback, scrubbed from the environment). The gateway also writes
-   its own secret to `~/.agentos/wallets/operator.secret` (`0600`, rotated
-   at every boot); the CLI reads it automatically when `AGENTOS_AGENT_TOKEN`
-   is not set and the gateway is local, and an agent's shell cannot read it
-   (`~/.agentos/wallets` is a denied path). A connection presenting either
-   at the handshake is the operator's, never an agent's.
-
-   **From another machine, the gateway token.** Neither secret reaches a
-   gateway on another host (a container behind a reverse proxy), so a
-   Control WebSocket that authenticated with the gateway's bearer token
-   from a non-loopback peer is the operator's too: the desktop app in
-   External mode, the web console and a remote CLI can create, import and
-   unlock wallets and approve orders. An agent token presented alongside
-   still wins. The peer is the socket's own address: an `X-Forwarded-For`
-   header never counts (uvicorn rewrites the client address from it for
-   loopback peers). An agent shell on the gateway host reaches the gateway
-   over loopback, so its CLI never qualifies; the trade-off is that a
-   process on that host which reads the token (from `config.toml` or the
-   environment) and dials a non-loopback address does. HTTP RPC
-   (`POST /api/v1/rpc`) does not apply this rule.
-2. **An agent token.** When an agent turn spawns a shell — or the scheduler
+1. **An agent token.** When an agent turn spawns a shell — or the scheduler
    runs a `cron --script` job — a token is minted and passed to the child
    as `AGENTOS_AGENT_TOKEN`; the CLI presents it back and the connection is
    bound to that session and agent. A script job therefore trades under
-   the agent's rules.
-3. **An exec window.** While any agent shell is running (background
-   processes included), a new connection that presents nothing is treated
-   as the agent's. Unsetting variables gains nothing; a person who opens
-   the CLI in that window gets the agent's rules, which fail safe (their
-   order waits for approval instead of executing).
-4. **Nothing.** A connection with no secret, no token and no open window
+   the agent's rules. A connection that presents *any* agent token — one
+   this gateway does not know (minted before a restart, or made up)
+   included — is an agent's, and an operator secret next to it is ignored.
+2. **The peer process (Linux).** The gateway looks up which process holds
+   the client end of a local connection. One the gateway spawned, directly
+   or not — an agent's shell, a background process, `execute_code`, an ACP
+   harness, an MCP server — is an agent's whatever it presents.
+3. **The desktop's operator secret.** The desktop app spawns the gateway and
+   hands it a random secret (`AGENTOS_OPERATOR_SECRET_FILE`, a `0600` file
+   the gateway deletes after reading; `AGENTOS_OPERATOR_SECRET` as a
+   fallback, scrubbed from the environment). It never sits on disk or in
+   the environment afterwards, so the app stays the operator even while an
+   agent shell runs.
+4. **From another machine, the gateway token.** Neither secret reaches a
+   gateway on another host (a container behind a reverse proxy), so a
+   Control WebSocket that authenticated with the gateway's bearer token
+   from another machine is the operator's too: the desktop app in External
+   mode, the web console and a remote CLI can create, import and unlock
+   wallets and approve orders. The peer is the socket's own address — an
+   `X-Forwarded-For` header never counts — and it must be neither loopback
+   nor one of the gateway host's own addresses: a process on that host
+   which read the token (from `config.toml` or the environment) and dialled
+   the LAN or container address is still on that host. HTTP RPC
+   (`POST /api/v1/rpc`) does not apply this rule. The gateway also keeps
+   its token out of every process an agent runs, whichever variable it came
+   from (`AGENTOS_AUTH_TOKEN`, `AGENTOS_GATEWAY_AUTH__TOKEN`, the hooks
+   token), and drops it from its own environment after boot.
+5. **An exec window.** While any agent shell is running (background
+   processes and `execute_code` runs included), a new connection is the
+   agent's unless one of the signals above says otherwise — *including one
+   that presents the operator file below*. A person who opens the CLI in
+   that window gets the agent's rules, which fail safe: their order waits
+   for approval instead of executing, and an approval they try to give is
+   refused with a reason. Approve in the desktop app, or retry once the
+   agent's shell has finished.
+6. **The operator file.** The gateway writes its own secret to
+   `<state dir>/wallets/operator.secret` (`0600`, rotated at every boot;
+   the state dir is `~/.agentos` unless `AGENTOS_STATE_DIR` moves it). The
+   CLI reads it only outside an agent's session: never when
+   `AGENTOS_AGENT_TOKEN`, `AGENTOS_SESSION_KEY`, `AGENTOS_AGENT` or
+   `AGENTOS_ACP_LEASE` is present (even empty), and never when a running
+   gateway is among its ancestors, so `env -u` / `env -i` gain nothing. It
+   counts on the WebSocket handshake only. The wallets directory, wherever
+   the state dir is, is a sensitive path for an agent's shell and file
+   tools.
+7. **Nothing.** A connection with no secret, no token and no open window
    is unbound and gets the agent's rules as well: a process an agent
    detached (`setsid`, `nohup`, `&`) that connects later gains nothing.
+
+This is a guardrail, not a sandbox: on a host without the OS sandbox, a
+process an agent detached and that was re-parented away from the gateway can
+still read the operator file once no agent shell is running. Turn the
+sandbox on (`agentos sandbox`) where that matters.
 
 An agent-bound connection is `initiator: agent` whatever it declares, and
 its orders are filed under the session the binding names. These RPCs are
@@ -263,9 +286,12 @@ its orders are filed under the session the binding names. These RPCs are
 `trading.orders.approve`, `trading.orders.reject`, `trading.tokens.hide`,
 `trading.unwrap`, `trading.lot.setCost`, `trading.probe` with an `apiKey`
 (testing a key that is not in config) and `trading.sync` with `full`
-(dropping and rebuilding the ledger). `config.set` / `config.patch` of
-any `trading.*` key is refused from an agent as well (as an invalid request,
-not with a `trading.*` code). So `agentos trade approve`,
+(dropping and rebuilding the ledger). Every config write (`config.set`,
+`config.patch`, `config.apply`, onboarding) of any `trading.*` key is refused
+from an agent as well (as an invalid request, not with a `trading.*` code),
+and an edit of the config file itself never changes the trading settings of
+the running gateway: the watcher holds it until the user runs
+`agentos config reload` or restarts. So `agentos trade approve`,
 `agentos wallet export` or `agentos config set trading.daily_cap_usd`
 simply fail inside an agent turn. `wallet.status` and `trading.status`
 answer an agent without `vaultPath`. A `note` on a swap, send or revoke is

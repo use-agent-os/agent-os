@@ -81,6 +81,28 @@ The terminal chat supports:
 Use these commands when you need to inspect or reset cached approval decisions
 during a chat.
 
+### Only you answer a prompt
+
+Answering a prompt, changing how prompts are answered, forgetting remembered
+answers, raising a session's permission mode and pairing a new channel sender
+are refused to a connection the gateway recognizes as an agent's
+(`approvals.operator_required`, HTTP `403`): one that carries an agent token,
+comes from a process the gateway spawned (Linux), or opened while an agent's
+shell, background process or `execute_code` run was going. That covers
+`exec.approval.resolve`, `plugin.approval.resolve`, `exec.approvals.set`,
+`exec.approvals.node.set`, `exec.approval.forget`, `channels.pairing.approve`,
+`POST /api/approvals/resolve`, `POST /api/approvals/settings` and
+`POST /api/elevated-mode`; an `elevated` hint on `chat.send` /
+`sessions.send` from such a connection is ignored. The desktop app (it holds
+the operator secret) is never refused. A web console that connected while an
+agent's shell was running is: reload it once the shell has finished, or answer
+in the app.
+
+The approval queue's database is not a way around this: a decision counts only
+if the gateway process that asked made it, through one of the surfaces above,
+on the same parameters. A row approved by writing the database directly is
+read as a denial.
+
 ### Cached Intents
 
 Approving a destructive action caches the *intent* — kind plus target path —

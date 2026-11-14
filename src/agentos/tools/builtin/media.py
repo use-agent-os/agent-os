@@ -147,6 +147,7 @@ async def image(path: str, prompt: str = "Describe this image") -> str:
         path_block = _sensitive_media_path_block("image", p, path)
         if path_block is not None:
             return json.dumps(path_block)
+        _gate_media_strict_read("image", p, path)
         image_bytes, media_type = await _read_image_file(path)
 
     # Validate not corrupt using Pillow
@@ -262,6 +263,13 @@ def _sensitive_media_path_block(tool_name: str, resolved: Path, original_path: s
     if sensitive is None:
         return None
     return build_block_envelope(f"{tool_name} {original_path}", sensitive, tool_name=tool_name)
+
+
+def _gate_media_strict_read(tool_name: str, resolved: Path, original_path: str) -> None:
+    """Refuse a local media read outside the strict read roots, like read_file."""
+    from agentos.tools.builtin.filesystem import _gate_workspace_strict_read
+
+    _gate_workspace_strict_read(tool_name, resolved, original_path)
 
 
 def _sensitive_media_url_block(tool_name: str, url: str) -> dict | None:
@@ -682,6 +690,7 @@ async def pdf(
     path_block = _sensitive_media_path_block("pdf", p, path)
     if path_block is not None:
         return json.dumps(path_block)
+    _gate_media_strict_read("pdf", p, path)
     if not p.exists():
         raise SafeToolError(f"PDF file not found: {path} (resolved={p})")
 
@@ -1007,6 +1016,7 @@ async def _resolve_supported_audio_file_for_tool(
     path_block = _sensitive_media_path_block(tool_name, resolved, path)
     if path_block is not None:
         raise SafeToolError(path_block["message"])
+    _gate_media_strict_read(tool_name, resolved, path)
     if not resolved.exists():
         raise SafeToolError(f"Audio file not found: {path} (resolved={resolved})")
     ext = resolved.suffix.lstrip(".").lower()

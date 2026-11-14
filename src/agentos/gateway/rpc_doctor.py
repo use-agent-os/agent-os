@@ -763,6 +763,31 @@ def _config_reload_findings(ctx: RpcContext) -> list[HealthFinding]:
                 ],
             )
         )
+    if status.held:
+        findings.append(
+            HealthFinding(
+                id="gateway.config.reload_held",
+                severity="warn",
+                surface="gateway",
+                title="Config file changes to operator-only settings are waiting for you",
+                detail=(
+                    "The config file changes "
+                    + ", ".join(status.held)
+                    + ". The gateway never applies trading, hooks, tool policy, permissions, "
+                    "sandbox, auth, safety, workspace or ACP permission settings from a file "
+                    "edit by itself, "
+                    "because an agent's shell could have made it. Check the file, then apply "
+                    "it yourself."
+                ),
+                evidence={"paths": list(status.held), "at": status.at},
+                fix_steps=[
+                    FixStep(
+                        label="Apply the file as the operator", command="agentos config reload"
+                    ),
+                    FixStep(label="Or restart the gateway", command="agentos gateway restart"),
+                ],
+            )
+        )
     return findings
 
 

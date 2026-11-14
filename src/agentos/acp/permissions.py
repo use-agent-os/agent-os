@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import shlex
 from collections.abc import Callable
@@ -134,38 +135,206 @@ def command_of(raw_input: Any) -> str:
     return ""
 
 
-def command_prefix(command: str) -> str:
-    """Program plus subcommand (``git push``), the unit an "always" covers.
+_COMMAND_KEYS = ("command", "cmd", "argv", "commandLine")
 
-    The second token is kept only when it looks like a subcommand (no flag,
-    no path, no shell metacharacter), so ``rm -rf /`` remembers ``rm`` and
-    ``git push --force`` remembers ``git push``.
+#: Characters that let a shell chain, pipe, redirect, background, substitute,
+#: expand or continue onto another line. A command containing any of them --
+#: quoted or not -- is never remembered and never matches a remembered grant.
+_UNSAFE_COMMAND_CHARS = frozenset(";&|<>$`(){}\\\n\r") | (
+    frozenset("%^!") if os.name == "nt" else frozenset()
+)
+
+#: Programs whose job is to run another command (shells, privilege and exec
+#: wrappers, state-changing shell builtins). "Always" on one of them would
+#: cover any command at all, so they are never remembered.
+_COMMAND_RUNNERS = frozenset(
+    {
+        # shells
+        "sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish", "csh", "tcsh",
+        "busybox", "cmd", "powershell", "pwsh",
+        # builtins that run, source or re-route commands
+        ".", "source", "eval", "exec", "command", "builtin", "time", "coproc",
+        "alias", "hash", "enable", "trap", "export", "declare", "typeset",
+        "readonly", "local", "set", "unset", "shopt", "cd", "pushd", "popd",
+        "umask", "ulimit",
+        # exec / privilege wrappers
+        "env", "sudo", "doas", "su", "runuser", "pkexec", "xargs", "nohup",
+        "nice", "ionice", "timeout", "stdbuf", "setsid", "chroot", "unshare",
+        "nsenter", "flock", "script", "watch", "strace", "ltrace", "taskset",
+        "chrt", "caffeinate", "parallel",
+    }
+)  # fmt: skip
+
+#: ``<shell> -c '<script>'`` argv that is unwrapped to its one inner command
+#: (Codex sends ``["bash", "-lc", "git status"]``).
+_WRAPPING_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+_SHELL_SCRIPT_FLAGS = frozenset({"-c", "-lc", "-cl"})
+
+_ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+_SUBCOMMAND = re.compile(r"[A-Za-z][\w.:-]*")
+
+
+def _is_safe_command_text(text: str) -> bool:
+    return not any(
+        ch in _UNSAFE_COMMAND_CHARS or (ch != "\t" and (ord(ch) < 0x20 or ord(ch) == 0x7F))
+        for ch in text
+    )
+
+
+def _split_simple_command(text: str) -> list[str] | None:
+    """argv of one simple shell command, or ``None`` (fail closed).
+
+    ``None`` for anything a shell could turn into more than one program run:
+    control operators, pipes, redirections, substitutions, expansions, line
+    continuations, unbalanced quotes.
     """
-    text = command.strip()
-    if not text:
-        return ""
+    text = text.strip()
+    if not text or not _is_safe_command_text(text):
+        return None
     try:
         tokens = shlex.split(text, posix=True)
     except ValueError:
-        tokens = text.split()
-    if not tokens:
-        return ""
-    program = tokens[0].rsplit("/", 1)[-1]
-    if len(tokens) > 1 and re.fullmatch(r"[A-Za-z][\w.:-]*", tokens[1]):
-        return f"{program} {tokens[1]}"
+        return None
+    return tokens or None
+
+
+def _program_name(path: str) -> str:
+    name = os.path.basename(path).lower()
+    if os.name == "nt":
+        stem, ext = os.path.splitext(name)
+        if ext in {e.lower() for e in os.environ.get("PATHEXT", ".EXE").split(os.pathsep) if e}:
+            return stem
+    return name
+
+
+def _is_executable_file(path: str) -> bool:
+    return os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def _resolve_program(token: str) -> str | None:
+    """Absolute path of the program a shell would run for ``token``.
+
+    Absolute paths are taken as given; bare names are looked up on the
+    absolute ``PATH`` entries only (an empty or ``.`` entry would search the
+    current directory). Relative paths and unresolvable names give ``None``.
+
+    The path is ``os.path.normcase``-d: on Windows, ``git`` (found as
+    ``git`` + a ``PATHEXT`` entry such as ``.EXE``) and ``C:/bin/git.exe``
+    name the same file and must give the same remembered key. On POSIX
+    ``normcase`` is the identity.
+    """
+    if not token or any(ch.isspace() or ch in "*?[]~" for ch in token):
+        return None
+    has_sep = "/" in token or os.sep in token or bool(os.altsep and os.altsep in token)
+    if has_sep:
+        if not os.path.isabs(token):
+            return None
+        candidate = os.path.normpath(token)
+        return os.path.normcase(candidate) if _is_executable_file(candidate) else None
+    names = [token]
+    if os.name == "nt":
+        names += [token + ext for ext in os.environ.get("PATHEXT", ".EXE").split(os.pathsep) if ext]
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry or not os.path.isabs(entry):
+            continue
+        for name in names:
+            candidate = os.path.normpath(os.path.join(entry, name))
+            if _is_executable_file(candidate):
+                return os.path.normcase(candidate)
+    return None
+
+
+def _argv_prefix(argv: list[str], *, unwrap_shell: bool = True) -> str | None:
+    """``"<resolved program> [<subcommand>]"`` for one argv, or ``None``."""
+    if not argv or not all(isinstance(a, str) and _is_safe_command_text(a) for a in argv):
+        return None
+    if _ENV_ASSIGNMENT.match(argv[0]):
+        return None
+    program = _resolve_program(argv[0])
+    if program is None:
+        return None
+    name = _program_name(program)
+    if (
+        unwrap_shell
+        and name in _WRAPPING_SHELLS
+        and len(argv) == 3
+        and argv[1] in _SHELL_SCRIPT_FLAGS
+    ):
+        inner = _split_simple_command(argv[2])
+        inner_prefix = _argv_prefix(inner, unwrap_shell=False) if inner else None
+        return f"{program} {argv[1]} {inner_prefix}" if inner_prefix else None
+    if name in _COMMAND_RUNNERS:
+        return None
+    if len(argv) > 1 and _SUBCOMMAND.fullmatch(argv[1]):
+        return f"{program} {argv[1]}"
     return program
 
 
-def remember_key(request: PermissionRequest) -> tuple[str, str]:
+def command_prefix(command: str) -> str | None:
+    """Resolved program plus subcommand, the unit an "always" covers.
+
+    ``git push --force`` remembers ``/usr/bin/git push``; ``rm -rf /``
+    remembers ``/usr/bin/rm``. The second token is kept only when it looks
+    like a subcommand (no flag, no path).
+
+    ``None`` -- never remember, never match -- unless ``command`` is one
+    simple command whose program resolves to an absolute path: no control
+    operator, pipe, redirection, substitution, newline or ``VAR=`` prefix, no
+    relative program path, no shell or exec wrapper, and it parses.
+    """
+    argv = _split_simple_command(command)
+    return _argv_prefix(argv) if argv else None
+
+
+def _execute_argv(raw_input: Any, title: str) -> list[str] | None:
+    """argv of the command a harness ``execute`` prompt will run, or ``None``.
+
+    Read from ``raw_input`` (what the harness executes); the display title is
+    used only when the harness sent no input at all. Ambiguous input (two
+    command keys, non-string parts) gives ``None``.
+    """
+    if raw_input is None or raw_input == {}:
+        return _split_simple_command(title or "")
+    if not isinstance(raw_input, dict):
+        return None
+    present = [raw_input[k] for k in _COMMAND_KEYS if k in raw_input]
+    if len(present) != 1:
+        return None
+    value = present[0]
+    if isinstance(value, str):
+        argv = _split_simple_command(value)
+    elif isinstance(value, list) and value and all(isinstance(p, str) for p in value):
+        argv = list(value)
+    else:
+        return None
+    if argv is None:
+        return None
+    extra = raw_input.get("args")
+    if extra is not None and extra != []:
+        if not isinstance(extra, list) or not all(isinstance(a, str) for a in extra):
+            return None
+        argv += extra
+    return argv
+
+
+def _has_command(raw_input: Any) -> bool:
+    return isinstance(raw_input, dict) and any(k in raw_input for k in _COMMAND_KEYS)
+
+
+def remember_key(request: PermissionRequest) -> tuple[str, str] | None:
     """``(tool_kind, prefix)`` for the per-session "always" memory.
 
-    ``execute`` prompts are remembered per command prefix; any other kind is
-    remembered for the whole kind (the harness's own "allow edits this
-    session" granularity).
+    ``execute`` prompts (and ``other`` prompts that carry a shell command) are
+    remembered per :func:`command_prefix`; any other kind is remembered for
+    the whole kind (the harness's own "allow edits this session"
+    granularity). ``None`` means the prompt can be neither remembered nor
+    answered from memory.
     """
     kind = str(request.tool_kind or "other").lower()
-    if kind == "execute":
-        return kind, command_prefix(command_of(request.raw_input) or request.title or "")
+    if kind == "execute" or (kind == "other" and _has_command(request.raw_input)):
+        argv = _execute_argv(request.raw_input, request.title)
+        prefix = _argv_prefix(argv) if argv else None
+        return (kind, prefix) if prefix else None
     return kind, ""
 
 
@@ -269,8 +438,18 @@ class ApprovalQueuePermissionBridge:
         return set(self._remembered.get(session_key) or ())
 
     def remember(self, request: PermissionRequest) -> None:
+        key = remember_key(request)
+        if key is None:
+            log.info(
+                "acp.permission.not_remembered",
+                session_key=request.session_key,
+                agent_id=request.agent_id,
+                tool_kind=request.tool_kind,
+                tool_call_id=request.tool_call_id,
+            )
+            return
         grants = set(self._remembered.get(request.session_key) or ())
-        grants.add(remember_key(request))
+        grants.add(key)
         self._remembered[request.session_key] = grants
 
     def mode_for(self, session_key: str) -> str:
@@ -317,7 +496,8 @@ class ApprovalQueuePermissionBridge:
         if mode == "approve-reads" and kind in READ_TOOL_KINDS:
             return self._log(request, mode, allow_decision(options))
         # ask (and approve-reads for anything that is not a read)
-        if remember_key(request) in self.remembered(request.session_key):
+        key = remember_key(request)
+        if key is not None and key in self.remembered(request.session_key):
             return self._log(request, mode, allow_decision(options), source="remembered")
         if self.is_unattended(request.session_key):
             return self._no_surface(request, mode, options, reason="unattended")

@@ -75,6 +75,23 @@ def is_unattended_ctx(ctx: Any) -> bool:
     return str(getattr(mode, "value", mode) or "").lower() == "unattended"
 
 
+#: What an ACP harness can do on its own. A requester that may not use these
+#: itself must not get them by delegating to a harness.
+_HARNESS_HOST_TOOLS: tuple[str, ...] = ("exec_command", "write_file")
+
+
+def requester_lacks_host_tools(ctx: Any) -> bool:
+    """``True`` when ``ctx``'s tool surface withholds a shell or file writes."""
+    if ctx is None:
+        return False
+    allowed = _ctx_attr(ctx, "allowed_tools")
+    denied = _ctx_attr(ctx, "denied_tools") or ()
+    return any(
+        tool in denied or (allowed is not None and tool not in allowed)
+        for tool in _HARNESS_HOST_TOOLS
+    )
+
+
 def agent_allowed(config: AcpConfig, agent_id: str) -> bool:
     """Whether ``agent_id`` passes ``[acp].allowed_agents`` (``*`` = any)."""
     aid = normalize_agent_id(agent_id)
@@ -125,6 +142,13 @@ def check_spawn_allowed(
             "workspace-locked run cannot start one.",
             agent_id=aid,
             reason="sandboxed_requester",
+        )
+    if requester_lacks_host_tools(requester_ctx):
+        raise AcpAgentNotAllowedError(
+            "ACP harness sessions run on the host with their own file and shell tools, so a "
+            "run whose tool policy withholds exec_command or write_file cannot start one.",
+            agent_id=aid,
+            reason="restricted_requester",
         )
     mode = permission_mode or config.permission_mode
     if (

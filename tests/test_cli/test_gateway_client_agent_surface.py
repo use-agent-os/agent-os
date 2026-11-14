@@ -24,7 +24,11 @@ _REMOTE = "ws://10.0.0.5:18791/ws"
 def secret_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "wallets" / "operator.secret"
     monkeypatch.setenv(gateway_client.OPERATOR_SECRET_FILE_ENV, str(path))
-    monkeypatch.delenv(gateway_client.AGENT_TOKEN_ENV, raising=False)
+    for name in gateway_client.AGENT_SESSION_ENV:
+        monkeypatch.delenv(name, raising=False)
+    # Whoever runs the suite (a CI runner, or an agent's own shell) is not
+    # the subject here: the operator's terminal has no gateway ancestor.
+    monkeypatch.setattr(gateway_client, "_ancestors", lambda: [])
     return path
 
 
@@ -52,6 +56,75 @@ class TestAgentSurfaceAuth:
         secret_file.write_text("op-secret\n")
         assert gateway_client.agent_surface_auth(_REMOTE) == {}
         assert gateway_client.agent_surface_auth(None) == {}
+
+    @pytest.mark.parametrize(
+        "marker",
+        ["AGENTOS_AGENT_TOKEN", "AGENTOS_SESSION_KEY", "AGENTOS_AGENT", "AGENTOS_ACP_LEASE"],
+    )
+    def test_an_agent_session_never_presents_the_file(
+        self, secret_file: Path, monkeypatch: pytest.MonkeyPatch, marker: str
+    ) -> None:
+        # ``AGENTOS_AGENT_TOKEN= agentos trade approve …``: the token emptied,
+        # the session markers (or just the variable's presence) left behind.
+        secret_file.parent.mkdir()
+        secret_file.write_text("op-secret\n")
+        monkeypatch.setenv(marker, "")
+        assert gateway_client.agent_surface_auth(_LOCAL) == {}
+
+    def test_a_gateway_ancestor_never_presents_the_file(
+        self, secret_file: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # ``env -i agentos …`` strips every variable; the parent stays.
+        secret_file.parent.mkdir()
+        secret_file.write_text("op-secret\n")
+        monkeypatch.setattr(
+            gateway_client,
+            "_ancestors",
+            lambda: [(4242, ["/bin/sh", "-c", "agentos trade approve x"]), (4100, ["zsh"])],
+        )
+        monkeypatch.setattr(gateway_client, "_gateway_pid_candidates", lambda: {4100})
+        assert gateway_client.agent_surface_auth(_LOCAL) == {}
+        monkeypatch.setattr(gateway_client, "_gateway_pid_candidates", lambda: set())
+        assert gateway_client.agent_surface_auth(_LOCAL) == {"operatorSecret": "op-secret"}
+        monkeypatch.setattr(
+            gateway_client,
+            "_ancestors",
+            lambda: [
+                (4242, ["sh"]),
+                (
+                    4100,
+                    [
+                        "/opt/agentos/bin/python",
+                        "-m",
+                        "agentos.cli.main",
+                        "gateway",
+                        "run",
+                        "--port",
+                        "1",
+                    ],
+                ),
+            ],
+        )
+        assert gateway_client.agent_surface_auth(_LOCAL) == {}
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["agentos", "gateway", "run"],
+            ["/Users/u/.local/bin/agentos", "gateway", "run", "--bind", "127.0.0.1"],
+            ["/usr/bin/python3", "-m", "agentos.cli.main", "gateway", "run"],
+            ["/home/u/.local/bin/gateway", "run"],
+        ],
+    )
+    def test_gateway_command_lines(self, argv: list[str]) -> None:
+        assert gateway_client._looks_like_gateway(argv)
+
+    @pytest.mark.parametrize(
+        "argv",
+        [["zsh"], ["agentos", "chat"], ["pytest", "tests/test_gateway"], ["vim", "gateway", "run"]],
+    )
+    def test_other_command_lines(self, argv: list[str]) -> None:
+        assert not gateway_client._looks_like_gateway(argv)
 
     def test_missing_or_empty_file_gets_neither(self, secret_file: Path) -> None:
         assert gateway_client.agent_surface_auth(_LOCAL) == {}

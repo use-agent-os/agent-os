@@ -274,3 +274,104 @@ def _is_trusted_fake_ip(addr: IPAddress, trusted_networks: tuple[IPNetwork, ...]
 
 def _blocked_message(hostname: str, addr: IPAddress, reason: str) -> str:
     return f"Blocked: {hostname} resolves to {addr} ({reason})"
+
+
+# ---------------------------------------------------------------------------
+# The gateway's own listener.
+# ---------------------------------------------------------------------------
+
+#: The port ``gateway run`` listens on unless configured otherwise; guarded
+#: when no listener has been published (a tool running outside the gateway).
+DEFAULT_GATEWAY_PORT = 18791
+
+_gateway_listener: tuple[frozenset[str], int] | None = None
+
+
+def set_gateway_listener(hosts: Iterable[str], port: int) -> None:
+    """Publish the gateway's bind hosts and port (called at ``gateway run``)."""
+    global _gateway_listener
+    _gateway_listener = (frozenset(h.strip().strip("[]").lower() for h in hosts), int(port))
+
+
+def clear_gateway_listener() -> None:
+    """Forget the published listener (gateway shutdown, tests)."""
+    global _gateway_listener
+    _gateway_listener = None
+
+
+def _names_this_host(addr: IPAddress, bind_hosts: frozenset[str]) -> bool:
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        addr = mapped
+    if addr.is_loopback or addr.is_unspecified:
+        return True
+    if str(addr) in bind_hosts:
+        return True
+    # Any address the host holds (secondary interfaces and container bridges
+    # included), the same answer the agent surface uses for "same host".
+    from agentos.gateway.access import is_own_address
+
+    return is_own_address(addr)
+
+
+def targets_gateway_listener(addr: IPAddress, port: int) -> bool:
+    """Whether ``addr:port`` reaches this host's AgentOS gateway listener.
+
+    Any address naming this host counts — loopback (``127.0.0.0/8``, ``::1``),
+    the unspecified ``0.0.0.0``/``::`` (which connects to the local host), the
+    configured bind host and this host's own interface addresses — because a
+    wildcard bind answers on all of them.
+    """
+    listener = _gateway_listener
+    bind_hosts, gateway_port = (
+        listener if listener is not None else (frozenset(), DEFAULT_GATEWAY_PORT)
+    )
+    return port == gateway_port and _names_this_host(addr, bind_hosts)
+
+
+def assert_address_not_gateway(hostname: str, addr: IPAddress, port: int) -> None:
+    """Raise :class:`SSRFBlockedError` if ``addr:port`` is the gateway's own listener.
+
+    The gateway's Control API admits loopback callers without credentials in
+    ``auth.mode = "none"``; an agent tool that can send arbitrary requests
+    there could lift restrictions the operator set (plan mode, approvals).
+    """
+    if targets_gateway_listener(addr, port):
+        raise SSRFBlockedError(
+            f"Blocked request to {hostname}:{port}: that is this AgentOS gateway's own "
+            "control API, which is never a valid agent target."
+        )
+
+
+def assert_not_gateway_endpoint(url: str) -> None:
+    """URL-level :func:`assert_address_not_gateway`, for an early, clear refusal.
+
+    The connect-time guard in :mod:`agentos.tools.ssrf_client` is the one that
+    binds; this check only resolves the name up front. An unresolvable name is
+    left to fail on its own.
+    """
+    try:
+        parsed = urlparse(url)
+        port = parsed.port
+    except ValueError:
+        return
+    hostname = (parsed.hostname or "").strip().lower().rstrip(".")
+    if not hostname:
+        return
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
+    try:
+        addresses = [ipaddress.ip_address(hostname.strip("[]"))]
+    except ValueError:
+        try:
+            infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+        except (socket.gaierror, UnicodeError, ValueError):
+            return
+        addresses = []
+        for info in infos:
+            try:
+                addresses.append(ipaddress.ip_address(info[4][0]))
+            except ValueError:  # pragma: no cover - getaddrinfo returned a non-address
+                continue
+    for addr in addresses:
+        assert_address_not_gateway(hostname, addr, port)

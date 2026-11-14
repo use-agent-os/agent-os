@@ -53,6 +53,7 @@ import structlog
 from agentos import __version__
 from agentos.asyncio_utils import create_background_task
 from agentos.gateway.agent_surface import OPERATOR_SECRET_FILE_ENV, get_agent_surface
+from agentos.gateway.credential_env import credential_env_for_reexec
 from agentos.paths import default_agentos_home
 
 log = structlog.get_logger(__name__)
@@ -478,6 +479,9 @@ class GatewayRestarter:
         try:
             argv = list(self._argv_factory())
             env = dict(os.environ)
+            # Boot removed the env-sourced gateway token from os.environ
+            # (gateway.credential_env); the new image needs it back.
+            env.update(credential_env_for_reexec())
             secret_path = self._export_operator_secret()
             if secret_path is not None:
                 env[OPERATOR_SECRET_FILE_ENV] = str(secret_path)

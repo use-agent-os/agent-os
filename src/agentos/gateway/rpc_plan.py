@@ -11,7 +11,9 @@ from __future__ import annotations
 from typing import Any
 
 from agentos.gateway.access import CONTROL_AND_CHANNEL, CONTROL_ONLY
+from agentos.gateway.agent_surface import recognized_agent
 from agentos.gateway.rpc import RpcContext, get_dispatcher
+from agentos.gateway.rpc.registry import RpcHandlerError
 from agentos.plan_mode import get_plan_mode_store
 from agentos.session.keys import canonicalize_session_key
 
@@ -37,12 +39,25 @@ async def _handle_plan_mode_set(params: dict | None, ctx: RpcContext) -> dict[st
 
     ``mode`` accepts "on"/"off". Turning it off is also how a plan gets
     approved: the plan card's Approve button and ``/plan off`` both land
-    here — approval is out of band by design, never an in-band model call.
+    here — approval is out of band by design, never an in-band model call,
+    so a connection bound to an agent may turn it on but never off.
     """
     key = _require_key(params)
     mode = str((params or {}).get("mode") or "").strip().lower()
     if mode not in {"on", "off"}:
         raise ValueError("params.mode must be 'on' or 'off'")
+    # The same line approvals draw (``rpc_approvals.require_human``): an agent
+    # token, a process the gateway spawned, or a connection opened while an
+    # agent shell runs. ``unbound`` is not refused: the local web console has
+    # no operator secret and is bound that way, and its plan card is how a
+    # plan is approved.
+    binding = recognized_agent(ctx)
+    if mode == "off" and binding is not None:
+        raise RpcHandlerError(
+            "plan.operator_required",
+            "Plan mode can only be turned off by the operator, not by an agent.",
+            details=binding.to_dict(),
+        )
     store = get_plan_mode_store()
     if mode == "on":
         store.enable(key)

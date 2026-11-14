@@ -39,7 +39,7 @@ from agentos.contracts.attachments import (
     attachment_size_limit_for_mime,
     normalize_attachment_mime,
 )
-from agentos.gateway.auth import token_matches
+from agentos.gateway.auth import resolve_http_auth
 from agentos.gateway.config import GatewayConfig
 
 log = logging.getLogger(__name__)
@@ -229,8 +229,7 @@ class UploadStore:
         max_bytes = min(self.max_file_bytes, mime_limit)
         if len(payload) > max_bytes:
             raise UploadOversizeError(
-                f"upload exceeds {max_bytes} byte cap for {normalized_mime} "
-                f"(got {len(payload)})"
+                f"upload exceeds {max_bytes} byte cap for {normalized_mime} (got {len(payload)})"
             )
 
         file_uuid = f"u-{_uuid.uuid4().hex}"
@@ -333,20 +332,6 @@ class UploadStore:
 # ---------------------------------------------------------------------------
 
 
-def _extract_authorization_token(request: Request) -> str | None:
-    """Header-only token extraction.
-
-    Like all gateway endpoints, the multipart upload endpoint requires
-    header-based token auth (``Authorization: Bearer <token>`` or
-    ``x-agentos-token: <token>``) and rejects query-string tokens.
-    """
-
-    auth_header = request.headers.get("authorization", "")
-    if auth_header.startswith("Bearer "):
-        return auth_header[7:]
-    return request.headers.get("x-agentos-token")
-
-
 def _too_large(max_bytes: int, *, mime: str | None = None) -> JSONResponse:
     """Build the shared 413 body used by every upload size guard."""
 
@@ -366,20 +351,16 @@ def register_upload_routes(
     """Register POST /api/v1/files/upload on the given Starlette app."""
 
     async def upload_handler(request: Request) -> JSONResponse:
-        if config.auth.mode == "token":
-            if config.auth.token and not token_matches(
-                _extract_authorization_token(request), config.auth.token
-            ):
-                return JSONResponse(
-                    {
-                        "error": (
-                            "Authorization header (Bearer …) required for "
-                            "/api/v1/files/upload"
-                        ),
-                        "code": "UNAUTHORIZED",
-                    },
-                    status_code=401,
-                )
+        # Admit with the shared check in every auth mode: a token-only check
+        # left trusted-proxy uploads relying solely on AuthMiddleware.
+        if resolve_http_auth(config, request) is None:
+            return JSONResponse(
+                {
+                    "error": ("Authorization header (Bearer …) required for /api/v1/files/upload"),
+                    "code": "UNAUTHORIZED",
+                },
+                status_code=401,
+            )
 
         # The per-mime cap is only known once the part headers are parsed, so
         # bound the body by the store's absolute ceiling first and tighten it
@@ -394,9 +375,7 @@ def register_upload_routes(
         except RequestBodyTooLargeError:
             return _too_large(store.max_file_bytes)
         except Exception as exc:
-            return JSONResponse(
-                {"error": f"multipart/form-data required: {exc}"}, status_code=400
-            )
+            return JSONResponse({"error": f"multipart/form-data required: {exc}"}, status_code=400)
 
         # Starlette spools each uploaded part to a SpooledTemporaryFile.
         # Nothing closes those for us: the handler owns the parsed form, so
@@ -406,9 +385,7 @@ def register_upload_routes(
         try:
             upload = form.get("file")
             if upload is None or not hasattr(upload, "read"):
-                return JSONResponse(
-                    {"error": "missing 'file' multipart field"}, status_code=400
-                )
+                return JSONResponse({"error": "missing 'file' multipart field"}, status_code=400)
 
             filename = getattr(upload, "filename", None) or "attachment"
             content_type = getattr(upload, "content_type", None) or form.get("mime") or ""
@@ -430,9 +407,7 @@ def register_upload_routes(
             )
             payload = await upload.read(cap + 1)
             if not isinstance(payload, bytes) or len(payload) == 0:
-                return JSONResponse(
-                    {"error": "empty upload"}, status_code=400
-                )
+                return JSONResponse({"error": "empty upload"}, status_code=400)
             if len(payload) > cap:
                 return _too_large(cap, mime=normalized_mime)
 
@@ -456,9 +431,7 @@ def register_upload_routes(
         finally:
             await form.close()
 
-    app.router.routes.append(
-        Route("/api/v1/files/upload", upload_handler, methods=["POST"])
-    )
+    app.router.routes.append(Route("/api/v1/files/upload", upload_handler, methods=["POST"]))
 
 
 # ---------------------------------------------------------------------------

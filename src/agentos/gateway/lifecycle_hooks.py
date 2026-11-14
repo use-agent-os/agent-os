@@ -38,6 +38,8 @@ from typing import Any
 
 import structlog
 
+from agentos.env_policy import GATEWAY_CREDENTIAL_ENV
+
 log = structlog.get_logger(__name__)
 
 STARTUP = "gateway:startup"
@@ -56,18 +58,9 @@ CONFIG_KEYS: dict[str, str] = {
     PRE_RESTART: "pre_restart",
 }
 
-#: Environment a lifecycle command never inherits.
-_CREDENTIAL_ENV = frozenset(
-    {
-        "AGENTOS_GATEWAY_TOKEN",
-        "AGENTOS_AUTH_TOKEN",
-        "AGENTOS_GATEWAY_AUTH__TOKEN",
-        "AGENTOS_OPERATOR_SECRET",
-        "AGENTOS_OPERATOR_SECRET_FILE",
-        "AGENTOS_AGENT_TOKEN",
-        "AGENTOS_GATEWAY_HOOKS__TOKEN",
-    }
-)
+#: Environment a lifecycle command never inherits: the shared gateway
+#: credential list (``env_policy.GATEWAY_CREDENTIAL_ENV``) plus an agent token.
+_CREDENTIAL_ENV = GATEWAY_CREDENTIAL_ENV | frozenset({"AGENTOS_AGENT_TOKEN"})
 
 
 @dataclass(frozen=True, slots=True)

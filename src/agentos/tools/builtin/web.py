@@ -18,8 +18,8 @@ from agentos.sandbox.integration import sandboxed
 from agentos.search.types import SearchProviderError, SearchResult
 from agentos.tools.path_policy import reject_foreign_host_path
 from agentos.tools.registry import tool
-from agentos.tools.ssrf import assert_not_metadata_endpoint
-from agentos.tools.ssrf_client import ssrf_guarded_client, validate_metadata_only_address
+from agentos.tools.ssrf import assert_not_gateway_endpoint, assert_not_metadata_endpoint
+from agentos.tools.ssrf_client import ssrf_guarded_client, validate_agent_http_address
 from agentos.tools.types import ToolError, UnsupportedURLSchemeError, current_tool_context
 from agentos.tools.write_tracking import record_workspace_file_write
 
@@ -34,6 +34,10 @@ def _validate_http_url(url: str) -> None:
     # reachable — unlike web_fetch, http_request is the tool people point at a
     # local dev server on purpose.
     assert_not_metadata_endpoint(url)
+    # The gateway's own Control API is the exception: it admits loopback
+    # callers without credentials in auth.mode=none, so a model-chosen
+    # request there could lift plan mode or other operator restrictions.
+    assert_not_gateway_endpoint(url)
 
 
 _TEXT_BODY_LIMIT = 10_000
@@ -249,14 +253,14 @@ async def http_request(
 
     content: bytes | None = body.encode() if body else None
 
-    # Metadata-only policy at connect time: http_request keeps reaching
+    # Metadata-and-gateway policy at connect time: http_request keeps reaching
     # localhost and LAN services on purpose, but a rebinding domain must not be
-    # able to swap a public answer for the instance-credential endpoint between
-    # the URL check and the socket.
+    # able to swap a public answer for the instance-credential endpoint or the
+    # gateway's own listener between the URL check and the socket.
     async with ssrf_guarded_client(
         timeout=timeout,
         trust_env=_trust_env(),
-        validator=validate_metadata_only_address,
+        validator=validate_agent_http_address,
     ) as client:
         response = await client.send(
             client.build_request(

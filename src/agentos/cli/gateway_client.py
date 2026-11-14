@@ -75,6 +75,18 @@ def gateway_base_is_local(base_url: str | None) -> bool:
 AGENT_TOKEN_ENV = "AGENTOS_AGENT_TOKEN"
 OPERATOR_SECRET_FILE_ENV = "AGENTOS_OPERATOR_SECRET_FILE"
 
+#: Variables the gateway sets in the environment of a process an agent runs:
+#: the minted token and the session markers (``tools/builtin/shell.py``,
+#: ``scheduler/scripts.py``) and the ACP harness lease (``acp/process.py``).
+#: *Present* is enough, even empty: ``AGENTOS_AGENT_TOKEN= agentos …`` is
+#: the same as unsetting it.
+AGENT_SESSION_ENV: tuple[str, ...] = (
+    AGENT_TOKEN_ENV,
+    "AGENTOS_SESSION_KEY",
+    "AGENTOS_AGENT",
+    "AGENTOS_ACP_LEASE",
+)
+
 
 def _operator_secret_path() -> Path:
     override = os.environ.get(OPERATOR_SECRET_FILE_ENV, "").strip()
@@ -100,6 +112,103 @@ def read_operator_secret() -> str | None:
     return secret or None
 
 
+def _gateway_pid_candidates() -> set[int]:
+    """Pids of the gateways that own the default state directory, as recorded."""
+    from agentos.gateway.pidlock import _PID_FILENAME, _read_pid_from_path
+    from agentos.paths import default_agentos_home
+
+    pid = _read_pid_from_path(default_agentos_home() / "state" / _PID_FILENAME)
+    return {pid} if pid else set()
+
+
+def _looks_like_gateway(argv: list[str]) -> bool:
+    """``agentos gateway run`` in any of its spellings (console script, ``-m``, desktop)."""
+    names = [Path(arg).name for arg in argv]
+    for index, name in enumerate(names[:-1]):
+        if name == "gateway" and names[index + 1] == "run":
+            return any("agentos" in arg for arg in argv) or names[0] == "gateway"
+    return False
+
+
+def _ancestors() -> list[tuple[int, list[str]]]:
+    """This process's ancestors as ``(pid, argv)``, nearest first. Best effort."""
+    chain: list[tuple[int, list[str]]] = []
+    if os.name != "posix":
+        return chain
+    proc = Path("/proc")
+    if (proc / "self" / "stat").exists():
+        pid = os.getppid()
+        for _ in range(64):
+            if pid <= 1:
+                break
+            try:
+                stat = (proc / str(pid) / "stat").read_text()
+                raw = (proc / str(pid) / "cmdline").read_bytes()
+            except OSError:
+                break
+            chain.append(
+                (pid, [part.decode(errors="replace") for part in raw.split(b"\0") if part])
+            )
+            fields = stat.rsplit(")", 1)[-1].split()
+            pid = int(fields[1]) if len(fields) > 1 and fields[1].isdigit() else 0
+        return chain
+    # macOS and other POSIX systems without /proc: one ``ps`` for the table.
+    import subprocess
+
+    try:
+        listing = subprocess.run(
+            ["ps", "-axo", "pid=,ppid=,command="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return chain
+    table: dict[int, tuple[int, list[str]]] = {}
+    for line in listing.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+            command = parts[2].split() if len(parts) > 2 else []
+            table[int(parts[0])] = (int(parts[1]), command)
+    pid = os.getppid()
+    for _ in range(64):
+        if pid <= 1 or pid not in table:
+            break
+        parent, command = table[pid]
+        chain.append((pid, command))
+        pid = parent
+    return chain
+
+
+def agent_session_marker() -> str | None:
+    """Why this process belongs to an agent's session, or ``None``.
+
+    Two independent signals, so unsetting one variable is not enough:
+
+    * any of :data:`AGENT_SESSION_ENV` is present in the environment;
+    * a running gateway is among this process's ancestors. The gateway spawns
+      every agent shell, cron script, ``execute_code`` run and ACP harness;
+      the operator's terminal and the desktop app are never its children.
+      ``env -u``/``env -i`` cannot change who the parent is.
+
+    The gateway checks the same thing from its side (``gateway.peer_process``,
+    ``gateway.agent_surface``), so this is a second wall, not the only one: a
+    client an agent wrote itself never runs this code.
+    """
+    for name in AGENT_SESSION_ENV:
+        if name in os.environ:
+            return name
+    try:
+        gateway_pids = _gateway_pid_candidates()
+        for pid, argv in _ancestors():
+            if pid in gateway_pids or _looks_like_gateway(argv):
+                return "gateway-ancestor"
+    except Exception:  # noqa: BLE001 - detection must never break the CLI
+        return None
+    return None
+
+
 def agent_surface_auth(url: str | None) -> dict[str, str]:
     """What this process presents so the gateway can tell agent from operator.
 
@@ -109,17 +218,22 @@ def agent_surface_auth(url: str | None) -> dict[str, str]:
       it in an agent's shell; presenting it binds the connection to that chat.
       It wins even if the operator file happens to be readable, so an agent
       that can somehow see the file still cannot use it from here.
-    * ``operatorSecret`` when the gateway is local and the file it wrote at
-      boot is readable. That is what makes the operator's own terminal the
-      operator: an agent's shell cannot read ``~/.agentos/wallets``.
-    * nothing otherwise — a remote gateway, or no file. The gateway then binds
-      the connection as ``unbound`` and applies the agent's rules, so a
-      detached process an agent left behind gains nothing by connecting later.
+    * ``operatorSecret`` when the gateway is local, the file it wrote at boot
+      is readable, and this process is not an agent's
+      (:func:`agent_session_marker`). That is what makes the operator's own
+      terminal the operator.
+    * nothing otherwise — a remote gateway, no file, or an agent's process
+      that dropped its token. The gateway then binds the connection as
+      ``unbound`` (or the agent's, if it can tell) and applies the agent's
+      rules, so neither ``env -u AGENTOS_AGENT_TOKEN`` nor a detached process
+      an agent left behind gains anything by connecting.
     """
     agent_token = os.environ.get(AGENT_TOKEN_ENV, "").strip()
     if agent_token:
         return {"agentToken": agent_token}
     if not gateway_base_is_local(url):
+        return {}
+    if agent_session_marker() is not None:
         return {}
     secret = read_operator_secret()
     if secret:

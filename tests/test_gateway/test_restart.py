@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -217,6 +218,27 @@ async def test_force_restart_cancels_in_flight(tmp_path: Path) -> None:
             "restart_expected_ms": MIN_RESTART_EXPECTED_MS,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_scrubbed_gateway_token_is_handed_to_the_new_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Boot drops the env-sourced token from os.environ; the re-exec needs it back."""
+    from agentos.gateway import credential_env
+
+    credential_env.reset_scrubbed_credential_env()
+    monkeypatch.setenv("AGENTOS_AUTH_TOKEN", "compose-token")
+    credential_env.scrub_credential_env()
+    try:
+        assert "AGENTOS_AUTH_TOKEN" not in os.environ
+        restarter, _, _, _ = _restarter(tmp_path, secret_path=None)
+        restarter.request(reason="cli")
+        await restarter.task
+        assert restarter.exec_plan is not None
+        assert restarter.exec_plan[1]["AGENTOS_AUTH_TOKEN"] == "compose-token"
+    finally:
+        credential_env.reset_scrubbed_credential_env()
 
 
 @pytest.mark.asyncio

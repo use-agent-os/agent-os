@@ -249,7 +249,7 @@ export function render(text: string): string {
   try {
     const { text: stashed, stash } = stashMath(inlineQrImages(text))
     const parsed = markdown.parse(stashed, { breaks: true, gfm: true, async: false })
-    let html = String(DOMPurify.sanitize(parsed))
+    let html = String(DOMPurify.sanitize(parsed, { ALLOW_DATA_ATTR: false }))
     html = wrapCodeBlocks(html)
     html = markInlineCode(html)
     html = restoreMath(html, stash)
@@ -259,7 +259,15 @@ export function render(text: string): string {
     // result as the last operation so every innerHTML call receives clean HTML.
     // `target` is allowed through because the pass above is what sets it, and
     // strips any the model tried to choose for itself.
-    return String(DOMPurify.sanitize(html, { ADD_ATTR: ['target'] }))
+    //
+    // No `data-*` attribute survives either pass except the copy buttons'
+    // `data-target`, which wrapCodeBlocks adds after the first one stripped
+    // the model's own. The transcript treats `data-*` as its control hooks
+    // (`data-ticket-src`, `data-artifact-download`, …): model-written ones
+    // would let a reply point them, and the gateway token, at any URL.
+    return String(
+      DOMPurify.sanitize(html, { ADD_ATTR: ['target', 'data-target'], ALLOW_DATA_ATTR: false }),
+    )
   } catch {
     return fallbackRender(text)
   }

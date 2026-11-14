@@ -3279,6 +3279,12 @@ class TurnRunner:
             run_kind=run_kind,
         ):
             return False
+        # A group chat, cron or child session may not write the curated store
+        # the operator's private prompt trusts, so it is never reviewed into it.
+        from agentos.session.keys import allows_private_memory_prompt_injection
+
+        if not allows_private_memory_prompt_injection(session_key):
+            return False
 
         key = (agent_id, session_key)
         self._evict_nudge_counters_if_needed()

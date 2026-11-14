@@ -9,6 +9,7 @@ the surface that admitted the request, not on user roles or implied scopes.
 from __future__ import annotations
 
 import ipaddress
+import socket
 from collections.abc import Iterable
 from enum import StrEnum
 
@@ -196,8 +197,6 @@ def _discover_local_addresses() -> frozenset[str]:
     local address would route to a public destination. No route (offline,
     no IPv6) simply contributes nothing.
     """
-    import socket
-
     found: set[str] = set()
     for family, target in (
         (socket.AF_INET, ("192.0.2.1", 9)),
@@ -227,6 +226,41 @@ def local_interface_addresses() -> frozenset[str]:
     addresses = _discover_local_addresses()
     _local_address_cache = (now, addresses)
     return addresses
+
+
+#: Documentation addresses (RFC 5737 / RFC 3849): never assigned to a host, so
+#: a successful bind to one means the kernel accepts non-local binds.
+_NEVER_LOCAL = {4: "192.0.2.1", 6: "2001:db8::1"}
+
+
+def _bindable(family: socket.AddressFamily, host: str) -> bool:
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as sock:
+            sock.bind((host, 0))
+    except OSError:
+        return False
+    return True
+
+
+def is_own_address(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Whether *addr* is assigned to one of this host's interfaces.
+
+    A socket can only bind to an address the host owns, so a throwaway UDP
+    bind answers that on every platform without enumerating interfaces. A
+    kernel that accepts non-local binds (``net.ipv4.ip_nonlocal_bind=1``)
+    cannot answer it this way; then every address counts as this host's,
+    which fails closed for both users: the agent surface's remote-operator
+    rule is never earned by a same-host process, and an agent HTTP tool is
+    refused the gateway's port on every address (``tools.ssrf``).
+
+    Unlike :func:`local_interface_addresses` (the primary outbound address
+    per family, for forwarded-header trust), this answers for *any* address
+    the host holds: secondary interfaces, container bridges, aliases.
+    """
+    family = socket.AF_INET6 if addr.version == 6 else socket.AF_INET
+    if _bindable(family, _NEVER_LOCAL[addr.version]):
+        return True
+    return _bindable(family, str(addr))
 
 
 def _forwarded_hop(value: str) -> str | None:
@@ -311,6 +345,7 @@ __all__ = [
     "NODE_RPC_METHODS",
     "ConnectionSurface",
     "is_loopback_address",
+    "is_own_address",
     "is_loopback_bind",
     "normalize_audiences",
     "local_interface_addresses",

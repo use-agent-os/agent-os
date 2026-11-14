@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
-import { apiOrigin } from '@/lib/api-origin'
+import { apiOrigin, isGatewayUrl } from '@/lib/api-origin'
 import { callIdempotent } from '@/lib/ws-rpc'
 import {
   bindTicketResolver,
@@ -102,10 +102,11 @@ function getAuthToken(): string {
  * `artifactPreviewUrl`). A ticket for it needs no header; without one (an
  * older gateway) the Authorization header mirrors `downloadArtifact`.
  */
-async function fetchChartPayload(url: string, tickets: TicketResolver): Promise<unknown> {
+export async function fetchChartPayload(url: string, tickets: TicketResolver): Promise<unknown> {
   const ticketUrl = await tickets.resolveUrl(url)
   const headers: Record<string, string> = {}
-  const token = ticketUrl ? '' : getAuthToken()
+  // The URL can come from transcript markup: the token goes to the gateway only.
+  const token = ticketUrl || !isGatewayUrl(url) ? '' : getAuthToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
   const response = await fetch(ticketUrl || url, {
     method: 'GET',
@@ -116,9 +117,14 @@ async function fetchChartPayload(url: string, tickets: TicketResolver): Promise<
   return response.json()
 }
 
-/** The legacy source of a ticketed preview: its URL with the token appended. */
-function legacyMediaUrl(raw: string): string {
-  return artifactAuthenticatedDownloadUrl(raw, { sessionKey: '', token: getAuthToken() })
+/**
+ * The legacy source of a ticketed preview: its URL with the token appended.
+ * `raw` is read from a `data-ticket-src` attribute, so a URL that is not the
+ * gateway's loads nothing at all (no token, and no beacon to its host).
+ */
+export function legacyMediaUrl(raw: string): string {
+  const url = artifactAuthenticatedDownloadUrl(raw, { sessionKey: '', token: getAuthToken() })
+  return url && isGatewayUrl(url) ? url : ''
 }
 
 /**

@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from agentos.plan_mode import get_plan_mode_store, reset_plan_mode_store
+from agentos.plan_mode import PLAN_MODE_TOOL_ALLOW, get_plan_mode_store, reset_plan_mode_store
 from agentos.tool_boundary import ToolCall
 from agentos.tools import get_default_registry
 from agentos.tools.dispatch import build_tool_handler
@@ -18,6 +18,11 @@ def _fresh_store() -> None:
     reset_plan_mode_store()
     yield
     reset_plan_mode_store()
+
+
+# Plan mode narrows the turn to this allowlist (gateway/routing.py); that is
+# what offers the otherwise hidden exit_plan_mode tool.
+_PLAN_SURFACE = set(PLAN_MODE_TOOL_ALLOW)
 
 
 def _call(plan: str = "## Plan\n1. Do X") -> ToolCall:
@@ -32,7 +37,7 @@ def _call(plan: str = "## Plan\n1. Do X") -> ToolCall:
 async def test_exit_plan_mode_presents_and_terminates_turn() -> None:
     key = "agent:main:t-plan"
     get_plan_mode_store().enable(key)
-    ctx = ToolContext(caller_kind=CallerKind.AGENT, session_key=key)
+    ctx = ToolContext(caller_kind=CallerKind.AGENT, session_key=key, allowed_tools=_PLAN_SURFACE)
     handler = build_tool_handler(get_default_registry(), ctx)
 
     result = await handler(_call())
@@ -47,7 +52,11 @@ async def test_exit_plan_mode_presents_and_terminates_turn() -> None:
 
 @pytest.mark.asyncio
 async def test_exit_plan_mode_refused_outside_plan_mode() -> None:
-    ctx = ToolContext(caller_kind=CallerKind.AGENT, session_key="agent:main:t-noplan")
+    ctx = ToolContext(
+        caller_kind=CallerKind.AGENT,
+        session_key="agent:main:t-noplan",
+        allowed_tools=_PLAN_SURFACE,
+    )
     handler = build_tool_handler(get_default_registry(), ctx)
 
     result = await handler(_call())
@@ -58,10 +67,22 @@ async def test_exit_plan_mode_refused_outside_plan_mode() -> None:
 
 
 @pytest.mark.asyncio
+async def test_exit_plan_mode_is_not_dispatchable_on_the_default_surface() -> None:
+    """Hidden by default: without plan mode's surface the call never reaches it."""
+    ctx = ToolContext(caller_kind=CallerKind.AGENT, session_key="agent:main:t-noplan")
+    handler = build_tool_handler(get_default_registry(), ctx)
+
+    result = await handler(_call())
+
+    assert result.is_error is True
+    assert json.loads(result.content)["error_class"] == "PolicyDenied"
+
+
+@pytest.mark.asyncio
 async def test_exit_plan_mode_rejects_an_empty_plan() -> None:
     key = "agent:main:t-plan-empty"
     get_plan_mode_store().enable(key)
-    ctx = ToolContext(caller_kind=CallerKind.AGENT, session_key=key)
+    ctx = ToolContext(caller_kind=CallerKind.AGENT, session_key=key, allowed_tools=_PLAN_SURFACE)
     handler = build_tool_handler(get_default_registry(), ctx)
 
     result = await handler(_call(plan="   "))
@@ -79,6 +100,7 @@ async def test_exit_plan_mode_refuses_unattended_non_channel_surfaces() -> None:
         caller_kind=CallerKind.CLI,
         interaction_mode=InteractionMode.UNATTENDED,
         session_key=key,
+        allowed_tools=_PLAN_SURFACE,
     )
     handler = build_tool_handler(get_default_registry(), ctx)
 
@@ -98,6 +120,7 @@ async def test_exit_plan_mode_allows_channel_turns_despite_unattended_mark() -> 
         caller_kind=CallerKind.CHANNEL,
         interaction_mode=InteractionMode.UNATTENDED,
         session_key=key,
+        allowed_tools=_PLAN_SURFACE,
     )
     handler = build_tool_handler(get_default_registry(), ctx)
 

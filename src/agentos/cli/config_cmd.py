@@ -111,6 +111,43 @@ def config_set(
     )
 
 
+@app.command("reload")
+def config_reload(
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Apply the config file to the running gateway, operator-only settings included.
+
+    The gateway applies most edits of its config file by itself, but never a
+    change to an operator-only setting (trading limits, hooks, tool policy,
+    permissions, sandbox, auth, safety, workspace confinement, ACP permission
+    mode): an agent's
+    shell could have written it. Run this from your own terminal after editing
+    those by hand. An agent's session is refused.
+    """
+    from agentos.cli.gateway_rpc import run_gateway_sync
+    from agentos.cli.output import print_json
+
+    async def _run(client: Any) -> Any:
+        return await client.call("config.reload", {})
+
+    payload = run_gateway_sync(_run, json_output=json_output) or {}
+    if json_output:
+        print_json(payload)
+        return
+    changed = [str(path) for path in payload.get("changed") or []]
+    if not changed:
+        console.print("The running gateway already matches the config file.")
+        return
+    console.print(f"[{ACCENT_MARKUP}]Applied:[/] " + escape(", ".join(changed)), soft_wrap=True)
+    restart = [str(path) for path in payload.get("restartRequired") or []]
+    if restart:
+        console.print(
+            "[yellow]Restart the gateway for these to take full effect:[/yellow] "
+            + escape(", ".join(restart)),
+            soft_wrap=True,
+        )
+
+
 def _validated_config(data: dict[str, Any], key: str) -> Any:
     """Validate the edited TOML dict through the model, or exit 2 naming *key*."""
     from agentos.gateway.config import GatewayConfig

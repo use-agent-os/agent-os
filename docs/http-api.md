@@ -237,7 +237,9 @@ Only an allowlist is reachable: reads (`health`, `status`, `config.get`,
 `channels.status`, `doctor.status`, `acp.*` status, ...) and mutations that
 create, rename or send without deleting anything (`chat.send`,
 `sessions.send`, `sessions.create`, `sessions.rename`,
-`projects.create`/`update`, `*.abort`, `plan.mode.set`). `chat.send` and
+`projects.create`/`update`, `*.abort`, `plan.mode.set`; turning plan mode
+off is refused for a caller the gateway recognizes as an agent's: its token,
+a process the gateway spawned, or an open agent shell). `chat.send` and
 `sessions.send` start an agent turn with the same options as over the
 WebSocket, including an elevated execution mode the request asks for, so the
 token must be treated as full operator access either way. Configuration

@@ -186,7 +186,10 @@ async def test_slack_interactive_payload_handling() -> None:
         },
     )
 
-    channel = SlackChannel(token="xoxb-test", slack_channel_id="C12345")
+    # Only U99999 is admitted, so U12345's click is refused first.
+    channel = SlackChannel(
+        token="xoxb-test", slack_channel_id="C12345", allowed_user_ids=["U99999"]
+    )
 
     # Mock parse_event
     channel.parse_event = lambda ev: IncomingMessage(
@@ -227,13 +230,6 @@ async def test_slack_interactive_payload_handling() -> None:
         post_calls.append((url, json))
         return FakeResponse()
 
-    # Reject if policy does not admit
-    from dataclasses import replace
-
-    channel.policy = replace(
-        channel.policy, allowlist=frozenset({"U99999"}), allowlist_enabled=True
-    )
-
     with patch("httpx.AsyncClient.post", side_effect=fake_post):
         await channel._handle_slack_interactive(payload)
 
@@ -242,8 +238,12 @@ async def test_slack_interactive_payload_handling() -> None:
     assert entry.resolved is False
     assert len(post_calls) == 0
 
-    # Admit by opening allowlist or disabling it
-    channel.policy = replace(channel.policy, allowlist=frozenset(), allowlist_enabled=False)
+    # Admit the clicker
+    admitted = SlackChannel(
+        token="xoxb-test", slack_channel_id="C12345", allowed_user_ids=["U12345"]
+    )
+    admitted.parse_event = channel.parse_event
+    channel = admitted
 
     with patch("httpx.AsyncClient.post", side_effect=fake_post):
         await channel._handle_slack_interactive(payload)
@@ -387,7 +387,8 @@ async def test_discord_component_interaction_handling() -> None:
         },
     )
 
-    channel = DiscordChannel(DiscordChannelConfig(token="test-token"))
+    # Only usr999 is admitted, so usr123's click is refused first.
+    channel = DiscordChannel(DiscordChannelConfig(token="test-token", allowed_user_ids=["usr999"]))
 
     post_calls = []
 
@@ -419,23 +420,16 @@ async def test_discord_component_interaction_handling() -> None:
         },
     }
 
-    # Reject if policy does not admit
-    from dataclasses import replace
-
-    channel.policy = replace(
-        channel.policy, allowlist=frozenset({"usr999"}), allowlist_enabled=True
-    )
-
     await channel._handle_discord_component_interaction(data)
     entry = queue.get(approval_id)
     assert entry.resolved is False
     assert len(post_calls) == 1
-    assert "Only paired users" in post_calls[0][1]["data"]["content"]
+    assert "only admitted users" in post_calls[0][1]["data"]["content"]
     post_calls.clear()
 
-    # Admit
-    channel.policy = replace(channel.policy, allowlist=frozenset(), allowlist_enabled=False)
-    channel._dedupe._seen.clear()
+    # Admit the clicker
+    channel = DiscordChannel(DiscordChannelConfig(token="test-token", allowed_user_ids=["usr123"]))
+    channel._get_client = lambda: AsyncMock(post=fake_post)
 
     await channel._handle_discord_component_interaction(data)
 

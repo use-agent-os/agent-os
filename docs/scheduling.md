@@ -183,7 +183,10 @@ your shell profile, and remember that anything with write access to that
 directory can schedule itself. For that reason a script job can only be created
 by an interactive CLI or Web caller: the in-agent `cron` tool refuses
 `job_kind='script'` from a channel, which keeps a chat message from scheduling
-unattended execution.
+unattended execution. For the same reason an `agent_turn` job the tool creates
+from a channel is stored with `tool_policy.elevated = "off"`, so
+`cron_default_mode` never hands it a shell its creator did not have (see
+[`tools-and-sandbox.md`](tools-and-sandbox.md#delegated-work-and-caller-authority)).
 
 Script jobs never take `--elevated` — elevation only means something for a job
 that runs an agent turn.
@@ -426,7 +429,9 @@ address. Webhook destinations and failure destinations remain CLI/Web/RPC-only.
 
 Both paths keep the operator gates. A job carrying a script or
 `tool_policy.elevated` can only be cloned or updated by an interactive CLI or
-Web caller. So can a job whose delivery points somewhere the calling session
+Web caller, and so can the task of an `agent_turn` job that runs elevated
+through `cron_default_mode`; a chat's edit of its own job keeps it at
+`elevated = "off"`. So can a job whose delivery points somewhere the calling session
 cannot post — another channel, or a webhook — because rewriting its text or
 cloning it would put the caller's words on somebody else's destination. A
 webhook's URL and token are never disclosed by `action="get"`: it reports the

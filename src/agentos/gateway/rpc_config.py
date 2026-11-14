@@ -13,7 +13,7 @@ from agentos.gateway.config_commit import (
     sync_provider_selector,
     update_config_in_place,
 )
-from agentos.gateway.rpc import RpcContext, get_dispatcher
+from agentos.gateway.rpc import RpcContext, RpcHandlerError, get_dispatcher
 
 _d = get_dispatcher()
 
@@ -524,28 +524,17 @@ def _refuse_agent_trading_paths(ctx: RpcContext, paths: list[str]) -> None:
         )
 
 
-#: Settings a connection the gateway recognizes as an agent's (an agent token
-#: or an open exec window) may not touch at all, not even to clear them.
-_AGENT_FORBIDDEN_ROOTS = ("tools.invoke", "hooks")
-
-
 def _refuse_agent_file_only_paths(ctx: RpcContext, paths: list[str]) -> None:
-    from agentos.gateway.agent_surface import agent_binding
+    """Settings an agent's connection may not touch at all, not even to clear them.
 
-    binding = agent_binding(ctx)
-    if binding is None or binding.via == "unbound":
-        return
-    touched = [
-        p
-        for p in paths
-        for root in _AGENT_FORBIDDEN_ROOTS
-        if p == root or str(p).startswith(f"{root}.") or root.startswith(f"{p}.")
-    ]
-    if touched:
-        raise ValueError(
-            "these settings are the user's to change in agentos.toml; an agent cannot set "
-            + ", ".join(sorted(set(touched)))
-        )
+    The operator-only roots (``config_commit.OPERATOR_ONLY_CONFIG_ROOTS``)
+    for a connection the gateway recognizes as an agent's (token, process or
+    window). Checked on the paths the request names, for a clear error;
+    ``commit_config`` checks the computed diff of every writer again.
+    """
+    from agentos.gateway.config_commit import refuse_agent_operator_only_change
+
+    refuse_agent_operator_only_change(ctx, paths)
 
 
 _BIND_READONLY_PATHS = frozenset({"host", "port"})
@@ -992,6 +981,9 @@ async def _handle_config_apply(params: dict | None, ctx: RpcContext) -> dict[str
     _inherit_runtime_secrets(ctx.config, new_config)
     _clear_runtime_secret_paths(new_config, _collect_paths(config_payload) - redacted_paths)
     changed_paths = diff_paths(old_payload, new_config.model_dump(mode="python"))
+    # The full-replace sibling of config.set/patch: the same refusals, on what
+    # the replacement actually changes.
+    _refuse_agent_trading_paths(ctx, sorted(changed_paths))
     _refuse_agent_file_only_paths(ctx, sorted(changed_paths))
     result = commit_config(
         ctx,
@@ -1011,6 +1003,45 @@ async def _handle_config_apply(params: dict | None, ctx: RpcContext) -> dict[str
         ),
     )
     return {"restartRequired": result.restart_required}
+
+
+@_d.method("config.reload")
+async def _handle_config_reload(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """Apply the config file as it is on disk, operator-only settings included.
+
+    The file watcher never makes a change to an operator-only setting live
+    (``config_commit.OPERATOR_ONLY_CONFIG_ROOTS``): the file is a same-user
+    write away for an agent's shell. This is the operator saying "I wrote
+    that". Any agent binding -- token, process, window or unbound -- is
+    refused, as for the trading limits.
+    """
+    from agentos.gateway.agent_surface import agent_binding
+    from agentos.gateway.config_commit import ConfigReloadError, reload_config_from_disk
+    from agentos.gateway.config_watcher import note_operator_reload
+
+    binding = agent_binding(ctx)
+    if binding is not None:
+        raise RpcHandlerError(
+            "config.operator_required",
+            "Reloading the config file applies settings that are the user's to change; "
+            "an agent cannot do it. Run `agentos config reload` from your own terminal, "
+            "or restart the gateway.",
+            details=binding.to_dict(),
+        )
+    try:
+        result = reload_config_from_disk(ctx, include_operator_only=True)
+    except ConfigReloadError as exc:
+        raise ValueError(str(exc)) from exc
+    note_operator_reload(result)
+    return {
+        "path": str(result.path),
+        "revision": result.revision,
+        "changed": list(result.changed_paths),
+        "hot": list(result.hot_paths),
+        "restartRequired": list(result.restart_paths),
+        "restartReasons": list(result.restart_reasons),
+        "appliedNow": result.applied_now,
+    }
 
 
 @_d.method("config.schema")

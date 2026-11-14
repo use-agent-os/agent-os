@@ -16,10 +16,11 @@ to ``hello-ok.policy.max_payload`` once the handshake succeeds, through the
 callable it publishes in the ASGI scope under :data:`FRAME_LIMIT_EXTENSION`.
 
 It also records the socket's own peer under :data:`TRANSPORT_PEER_EXTENSION`
-before the app runs. uvicorn's proxy-header middleware rewrites
-``scope["client"]`` from ``X-Forwarded-For`` whenever the peer is loopback,
-so any local process can claim to be a remote address there; the agent
-surface needs the address the socket actually saw.
+before the app runs. The gateway turns uvicorn's proxy-header middleware off
+(``boot.UVICORN_PEER_KWARGS``), which would otherwise rewrite
+``scope["client"]`` from ``X-Forwarded-For`` for loopback peers; the agent
+surface still reads the address the socket actually saw, so it stays correct
+for any host that embeds the app with that middleware on.
 
 The limit is read when the payload arrives, not when the read starts: the
 reader is already waiting for the first post-handshake message while the

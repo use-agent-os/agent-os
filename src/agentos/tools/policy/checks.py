@@ -217,3 +217,52 @@ class AllowListPolicy:
             )
             return PolicyDecision(allowed=False, envelope=envelope, log_event=log_event)
         return PolicyDecision(allowed=True)
+
+
+# ---------------------------------------------------------------------------
+# Visibility
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class VisibilityPolicy:
+    """Reject a hidden (``exposed_by_default=False``) tool the context never offered.
+
+    Visibility used to shape only what the model was *shown*: dispatch looked
+    the tool up by name, and with ``allowed_tools`` unset nothing else stood in
+    the way, so a model that named ``install_skill_deps`` ran it. Admission now
+    matches :func:`agentos.tools.visibility.is_tool_visible`: a hidden tool runs
+    when the context allows or surfaces it by name, and ``tool_search`` runs
+    while the session has a deferred-tool surface (that is when the turn
+    offers it).
+    """
+
+    name: str = "visibility"
+
+    def evaluate(self, d: DispatchInput) -> PolicyDecision:
+        ctx = d.ctx
+        registered = d.registered
+        if ctx is None or registered is None or registered.spec.exposed_by_default:
+            return PolicyDecision(allowed=True)
+        name = d.tool_call.tool_name
+        if ctx.allowed_tools is not None and name in ctx.allowed_tools:
+            return PolicyDecision(allowed=True)
+        if ctx.surfaced_tools is not None and name in ctx.surfaced_tools:
+            return PolicyDecision(allowed=True)
+        from agentos.tools.deferred import TOOL_SEARCH_NAME, surface_for
+
+        if name == TOOL_SEARCH_NAME and surface_for(ctx.session_key) is not None:
+            return PolicyDecision(allowed=True)
+        envelope = _denial_envelope(
+            d.tool_call,
+            exc=PermissionError("tool not exposed"),
+            error_class_override="PolicyDenied",
+            user_message_override=f"Tool '{name}' not available in this context.",
+        )
+        log_event = _block_log_event(
+            d.tool_call,
+            ctx,
+            event="dispatch.defense_in_depth_block",
+            reason="not_exposed",
+        )
+        return PolicyDecision(allowed=False, envelope=envelope, log_event=log_event)

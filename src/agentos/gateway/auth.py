@@ -16,6 +16,8 @@ from agentos.gateway.access import (
 )
 
 if TYPE_CHECKING:
+    from starlette.requests import Request
+
     from agentos.gateway.agent_surface import AgentBinding
     from agentos.gateway.config import GatewayConfig
 
@@ -141,4 +143,39 @@ def resolve_auth(
     return None
 
 
-__all__ = ["AccessContext", "denied_access", "resolve_auth", "token_matches"]
+def extract_http_token(request: Request | None) -> str | None:
+    """Header-only gateway token (``Authorization: Bearer`` or ``x-agentos-token``)."""
+
+    if request is None:
+        return None
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        return auth_header[7:]
+    return request.headers.get("x-agentos-token")
+
+
+def resolve_http_auth(config: GatewayConfig, request: Request) -> AccessContext | None:
+    """``resolve_auth`` for a plain HTTP request, against its transport peer.
+
+    Routes that do their own admission call this instead of re-implementing a
+    mode-specific check, so every auth mode (token, trusted-proxy, none) is
+    enforced the same way it is for RPC and the WebSocket handshake.
+    """
+
+    token = extract_http_token(request)
+    return resolve_auth(
+        config,
+        auth_params={"token": token} if token else {},
+        client_kind=ConnectionSurface.CONTROL,
+        peer_ip=request.client.host if request.client else None,
+    )
+
+
+__all__ = [
+    "AccessContext",
+    "denied_access",
+    "extract_http_token",
+    "resolve_auth",
+    "resolve_http_auth",
+    "token_matches",
+]

@@ -31,6 +31,9 @@ from agentos.gateway.config import GatewayConfig  # noqa: E402
 
 _PNG = bytes.fromhex("89504e470d0a1a0a") + b"\x00" * 64
 
+# auth.mode=none admits only a loopback peer (TestClient's default is "testclient").
+_LOOPBACK_PEER = ("127.0.0.1", 50000)
+
 
 class _FormSpy:
     """Records the forms a handler parses, and whether their files closed."""
@@ -82,7 +85,7 @@ def _upload_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, _FormSp
     store = UploadStore(marker_dir=None, ttl_seconds=600, max_file_bytes=30 * 1024 * 1024)
     app = Starlette(debug=False)
     register_upload_routes(app, config=GatewayConfig(), store=store)
-    return TestClient(app), spy
+    return TestClient(app, client=_LOOPBACK_PEER), spy
 
 
 def test_upload_closes_the_form_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -166,7 +169,7 @@ def test_upload_closes_the_form_when_the_store_raises(
     app = Starlette(debug=False)
     register_upload_routes(app, config=GatewayConfig(), store=store)
 
-    with TestClient(app) as client:
+    with TestClient(app, client=_LOOPBACK_PEER) as client:
         response = client.post(
             "/api/v1/files/upload",
             files={"file": ("a.png", _PNG, "image/png")},
@@ -197,7 +200,7 @@ def test_transcribe_closes_the_form_when_the_mime_is_rejected(
     app = Starlette(debug=False)
     register_audio_transcription_routes(app, config=_audio_config())
 
-    with TestClient(app) as client:
+    with TestClient(app, client=_LOOPBACK_PEER) as client:
         response = client.post(
             "/api/audio/transcribe",
             files={"file": ("note.txt", b"not audio", "text/plain")},
@@ -217,7 +220,7 @@ def test_transcribe_closes_the_form_when_the_upload_is_empty(
     app = Starlette(debug=False)
     register_audio_transcription_routes(app, config=_audio_config())
 
-    with TestClient(app) as client:
+    with TestClient(app, client=_LOOPBACK_PEER) as client:
         response = client.post(
             "/api/audio/transcribe",
             files={"file": ("voice.webm", b"", "audio/webm")},
@@ -244,7 +247,7 @@ def test_transcribe_closes_the_form_when_the_provider_fails(
     app = Starlette(debug=False)
     register_audio_transcription_routes(app, config=_audio_config())
 
-    with TestClient(app) as client:
+    with TestClient(app, client=_LOOPBACK_PEER) as client:
         response = client.post(
             "/api/audio/transcribe",
             files={"file": ("voice.webm", b"audio-bytes", "audio/webm")},

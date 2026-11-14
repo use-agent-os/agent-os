@@ -35,6 +35,7 @@ import httpx
 from agentos.tools.ssrf import (
     IPAddress,
     assert_address_allowed_for_fetch,
+    assert_address_not_gateway,
     assert_address_not_metadata,
     is_metadata_hostname,
     resolve_trusted_fake_ip_networks,
@@ -48,19 +49,21 @@ from agentos.tools.types import SSRFBlockedError
 #: socket).
 _REAL_ASYNC_CLIENT = httpx.AsyncClient
 
-#: Applied to every address a hostname resolves to, immediately before connect.
-AddressValidator = Callable[[str, IPAddress], None]
+#: Applied to every address a hostname resolves to, immediately before connect,
+#: as ``validator(hostname, addr, port)``.
+AddressValidator = Callable[[str, IPAddress, int], None]
 
 __all__ = [
     "AddressValidator",
     "ValidatingNetworkBackend",
     "ssrf_guarded_client",
+    "validate_agent_http_address",
     "validate_fetch_address",
     "validate_metadata_only_address",
 ]
 
 
-def validate_fetch_address(hostname: str, addr: IPAddress) -> None:
+def validate_fetch_address(hostname: str, addr: IPAddress, port: int | None = None) -> None:
     """Full fetch policy: no private, loopback, link-local or reserved targets.
 
     Used by ``web_fetch``, the media image fetch and skill-dependency downloads
@@ -69,13 +72,25 @@ def validate_fetch_address(hostname: str, addr: IPAddress) -> None:
     assert_address_allowed_for_fetch(hostname, addr, resolve_trusted_fake_ip_networks())
 
 
-def validate_metadata_only_address(hostname: str, addr: IPAddress) -> None:
+def validate_metadata_only_address(hostname: str, addr: IPAddress, port: int | None = None) -> None:
     """Security floor: block cloud metadata endpoints, allow private addresses.
 
-    Used by ``http_request``, which is pointed at ``localhost`` and LAN services
-    on purpose and so cannot take the full fetch policy.
+    Used by MCP HTTP servers, cron webhooks and ``x_search``, which are pointed
+    at ``localhost`` and LAN services on purpose and so cannot take the full
+    fetch policy.
     """
     assert_address_not_metadata(hostname, addr)
+
+
+def validate_agent_http_address(hostname: str, addr: IPAddress, port: int) -> None:
+    """Metadata floor plus the gateway's own listener.
+
+    Used by ``http_request``, whose URL, method and body are model-chosen:
+    private addresses stay reachable (local dev servers), but the gateway's
+    Control API on this host never is.
+    """
+    assert_address_not_metadata(hostname, addr)
+    assert_address_not_gateway(hostname, addr, port)
 
 
 def _as_ip_literal(host: str) -> IPAddress | None:
@@ -178,7 +193,7 @@ class ValidatingNetworkBackend(httpcore.AsyncNetworkBackend):
                 raise httpcore.ConnectError(f"Cannot resolve hostname: {host}")
 
         for addr in addresses:
-            self._validator(hostname, addr)
+            self._validator(hostname, addr, port)
         return addresses
 
 

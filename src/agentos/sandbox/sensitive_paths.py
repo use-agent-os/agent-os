@@ -12,6 +12,7 @@ grows. It is not a substitute for OS-level permissions.
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 import shlex
@@ -85,10 +86,65 @@ _SENSITIVE_PREFIXES: tuple[str, ...] = (
     *_SYSTEM_SENSITIVE_PREFIXES,
 )
 
+
+#: Config files the running gateway reads (``protect_config_path``), besides
+#: the state root's own ``config.toml``.
+_protected_config_paths: set[str] = set()
+
+
+def protect_config_path(path: str | Path | None) -> None:
+    """Put the gateway's active config file on the floor (called at boot).
+
+    The file holds the trading limits, hooks and tool policy that only the
+    operator may change, and the watcher reloads it while the gateway runs;
+    an agent's shell or file tool writing it is refused like ``~/.ssh``.
+    """
+    if not path:
+        return
+    try:
+        _protected_config_paths.add(str(_expanduser(path).resolve(strict=False)))
+    except (OSError, RuntimeError):
+        _protected_config_paths.add(str(path))
+
+
+def reset_protected_config_paths() -> None:
+    """Forget :func:`protect_config_path` registrations. For tests."""
+    _protected_config_paths.clear()
+
+
+def runtime_sensitive_prefixes() -> tuple[str, ...]:
+    """AgentOS's own operator proof and config, wherever the state root really is.
+
+    ``~/.agentos/wallets`` above is only the default layout. The vault and the
+    gateway's ``operator.secret`` live under ``default_agentos_home()``, which
+    honours ``AGENTOS_STATE_DIR`` -- ``/var/lib/agentos`` in the official
+    container image, whose ``$HOME`` is elsewhere. Resolved at check time, so
+    the floor follows the state root the running process actually uses. The
+    state root's ``config.toml`` and the active config file (which may be a
+    project-local ``agentos.toml``) are on it too.
+    """
+    from agentos.paths import default_agentos_home
+
+    try:
+        home = default_agentos_home()
+        entries = [str(home / "wallets"), str(home / "config.toml")]
+    except (OSError, RuntimeError):
+        entries = []
+    entries.extend(sorted(_protected_config_paths - set(entries)))
+    return tuple(entries)
+
+
+def _all_sensitive_prefixes() -> tuple[str, ...]:
+    return (*_SENSITIVE_PREFIXES, *runtime_sensitive_prefixes())
+
+
 # Exact filename tails we never want mutated, regardless of parent directory.
 # Covers cases like moving an id_rsa out of ~/.ssh into /tmp.
 _BASE_SENSITIVE_SUFFIXES: tuple[str, ...] = (
     "/unlock.key",
+    # The gateway's operator secret for the local CLI (gateway.agent_surface).
+    # The wallets prefix guards it where it lives; this guards a copy.
+    "/operator.secret",
     "/id_rsa",
     "/id_ed25519",
     "/id_ecdsa",
@@ -305,7 +361,7 @@ def is_sensitive_path(path: str) -> str | None:
             or "/root/.ssh/" in expanded
         ):
             return "~/.ssh"
-    for prefix in _SENSITIVE_PREFIXES:
+    for prefix in _all_sensitive_prefixes():
         for expanded in candidates:
             for normalized in _comparison_path_candidates(prefix):
                 if expanded == normalized or expanded.startswith(normalized + "/"):
@@ -453,15 +509,29 @@ def sensitive_path_in_text(
     text: str,
     *,
     workspace: str | Path | None = None,
+    cwd: str | Path | None = None,
 ) -> str | None:
     """Return the first sensitive path marker appearing in free-form text.
 
     This is intentionally conservative glue for shell/Python-code scanners.
     Structured callers should still resolve concrete paths and call
-    :func:`is_sensitive_path` directly.
+    :func:`is_sensitive_path` directly. *cwd* is the directory a shell
+    command runs in; with it, relative paths, ``cd`` chains and globs are
+    resolved the way the shell will resolve them (:func:`_shell_marker`).
 
     Honors :data:`_DISABLED` (env var ``AGENTOS_SENSITIVE_PATHS_DISABLED``).
     """
+    marker = _literal_marker_in_text(text, workspace=workspace)
+    if marker is not None or _DISABLED or not text:
+        return marker
+    return _shell_marker(text, workspace=workspace, cwd=cwd)
+
+
+def _literal_marker_in_text(
+    text: str,
+    *,
+    workspace: str | Path | None = None,
+) -> str | None:
     if _DISABLED:
         return None
     if not text:
@@ -504,6 +574,230 @@ def sensitive_path_in_text(
         if tail_marker is None:
             tail_marker = marker
     return tail_marker
+
+
+# ── what the shell will do to a token before anything opens it ──────────────
+#
+# The literal scan above matches path *text*. The shell then expands globs and
+# variables and applies ``cd`` before the kernel sees a path, which is how
+# ``cat ~/.agentos/wal*/operator.secret``, ``D=wallets; cat ~/.agentos/$D/x``
+# and ``cd ~/.agentos && cd wallets && cat operator.secret`` reached the
+# operator secret. This layer approximates those expansions for the paths
+# that guard credentials. It is still a floor, not a sandbox: the gateway's
+# agent binding does not rely on it (gateway.agent_surface).
+
+_GLOB_CHARS = frozenset("*?[")
+#: A parameter or command substitution the scanner cannot evaluate. In a path
+#: it can expand to anything, so it is matched as ``*``.
+_UNEVALUATED_RE = re.compile(
+    r"\$\{[^}]*\}|\$\([^)]*\)|`[^`]*`|\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9@*#?!-]"
+)
+_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
+_PARAM_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+_SHELL_OPERATORS = frozenset({"&&", "||", ";", "|", "&", "(", ")", ";;", "|&", "\n"})
+_CD_COMMANDS = frozenset({"cd", "pushd"})
+#: AgentOS's own secret files, matched by name when a glob could spell them
+#: (``unlock.k?y``). Only names with this much literal text count, so ``*``
+#: or ``*.key`` on its own is not read as one of them.
+_GLOB_SENSITIVE_NAMES: tuple[str, ...] = ("operator.secret", "unlock.key")
+_GLOB_NAME_MIN_LITERALS = 6
+
+
+def _shell_words(text: str) -> list[str]:
+    try:
+        lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        return list(lexer)
+    except ValueError:
+        return text.split()
+
+
+def _expand_assignments(word: str, assigned: dict[str, str]) -> str:
+    def replace(match: re.Match[str]) -> str:
+        name = match.group(1) or match.group(2)
+        return assigned.get(name, match.group(0))
+
+    return _PARAM_RE.sub(replace, word) if "$" in word else word
+
+
+def _glob_targets() -> list[tuple[list[str], str]]:
+    """``(segments, marker)`` for each credential location a glob must not reach.
+
+    Home credential directories and files plus AgentOS's own operator proof;
+    the system prefixes (``/etc``, ``/proc``) are left to the literal scan, so
+    ``ls /*`` stays an ordinary command. A glob only ever expands to paths
+    that exist, so a location that does not is not a target.
+    """
+    targets: list[tuple[list[str], str]] = []
+    entries = (
+        *_BASE_SENSITIVE_PREFIXES,
+        *(f"~/{name}" for name in _HOST_CREDENTIAL_FILES),
+        *runtime_sensitive_prefixes(),
+    )
+    for entry in entries:
+        for candidate in _comparison_path_candidates(entry):
+            if candidate.startswith("/") and os.path.lexists(candidate):
+                targets.append(([seg for seg in candidate.split("/") if seg], entry))
+    return targets
+
+
+def _segment_matches(pattern: str, name: str) -> bool:
+    if not any(char in _GLOB_CHARS for char in pattern):
+        return pattern == name
+    # The shell's ``*`` and ``?`` do not match a leading dot.
+    if name.startswith(".") and not pattern.startswith("."):
+        return False
+    return fnmatch.fnmatchcase(name, pattern)
+
+
+def _pattern_reaches(pattern: list[str], target: list[str]) -> bool:
+    """Whether a path *pattern* matches could be *target* or lie inside it."""
+    if not target:
+        return True
+    if not pattern:
+        return False
+    head = pattern[0]
+    if head == "**":
+        return _pattern_reaches(pattern[1:], target) or _pattern_reaches(pattern, target[1:])
+    if _segment_matches(head, target[0]):
+        return _pattern_reaches(pattern[1:], target[1:])
+    return False
+
+
+def _absolute_text(word: str, base: Path | None) -> str | None:
+    expanded = _expand_env_vars(word)
+    if expanded == "~" or expanded.startswith("~/"):
+        home = _home()
+        if home is None:
+            return None
+        expanded = str(home) + expanded[1:]
+    if not expanded.startswith("/"):
+        if base is None:
+            return None
+        expanded = f"{base}/{expanded}"
+    return os.path.normpath(expanded).replace("\\", "/")
+
+
+def _glob_marker(word: str, bases: list[Path]) -> str | None:
+    pattern_text = _UNEVALUATED_RE.sub("*", _expand_env_vars(word))
+    anchors: list[Path | None] = (
+        [None] if pattern_text.startswith(("/", "~")) else list(bases) or [None]
+    )
+    targets = _glob_targets()
+    for base in anchors:
+        absolute = _absolute_text(pattern_text, base)
+        if absolute is None:
+            continue
+        segments = [seg for seg in absolute.split("/") if seg]
+        for target, marker in targets:
+            if _pattern_reaches(segments, target):
+                return marker
+        last = segments[-1] if segments else ""
+        literals = sum(1 for char in last if char not in "*?[]")
+        if literals >= _GLOB_NAME_MIN_LITERALS:
+            for name in _GLOB_SENSITIVE_NAMES:
+                if _segment_matches(last, name):
+                    return f"/{name}"
+    return None
+
+
+def _within(path: Path, root: Path | None) -> bool:
+    if root is None:
+        return False
+    try:
+        path.resolve(strict=False).relative_to(root.resolve(strict=False))
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return True
+
+
+def _shell_marker(
+    text: str,
+    *,
+    workspace: str | Path | None,
+    cwd: str | Path | None,
+) -> str | None:
+    """Sensitive paths the literal scan missed but the shell would open."""
+    words = _shell_words(text)
+    workspace_root = _expanduser(workspace) if workspace is not None else None
+    start = _expanduser(cwd) if cwd is not None else workspace_root
+    bases: list[Path] = [start] if start is not None else []
+
+    # In-command assignments (``D=wallets; cat ~/.agentos/$D/…``) expand
+    # before the rest is read, each against the ones before it
+    # (``A=~/.agentos; B=$A/config.toml``).
+    assigned: dict[str, str] = {}
+    for word in words:
+        match = _ASSIGNMENT_RE.match(word)
+        if match is not None:
+            assigned[match.group(1)] = _expand_assignments(match.group(2), assigned)
+    literal_words = words
+    words = [_expand_assignments(word, assigned) for word in words]
+
+    # ``cd`` chains: each target is a directory the following words resolve
+    # against, and a sensitive directory in its own right.
+    current = start
+    for index, word in enumerate(words[:-1]):
+        if word not in _CD_COMMANDS:
+            continue
+        target = words[index + 1]
+        if target in _SHELL_OPERATORS or target.startswith("-"):
+            continue
+        absolute = _absolute_text(target, current)
+        if absolute is None:
+            continue
+        if any(char in _GLOB_CHARS for char in target) or _UNEVALUATED_RE.search(target):
+            marker = _glob_marker(target, [current] if current is not None else [])
+        else:
+            marker = sensitive_path_marker(absolute, workspace=workspace)
+        if marker is not None:
+            return marker
+        current = Path(absolute)
+        bases.append(current)
+
+    for literal, word in zip(literal_words, words, strict=True):
+        if (
+            not word
+            or word in _SHELL_OPERATORS
+            or word.startswith("-")
+            or "://" in word
+            or _ASSIGNMENT_RE.match(word)
+        ):
+            continue
+        if any(char in _GLOB_CHARS for char in word) or _UNEVALUATED_RE.search(word):
+            marker = _glob_marker(word, bases)
+            if marker is not None:
+                return marker
+            continue
+        if word.startswith(("/", "~")):
+            if word == literal:
+                continue  # absolute: the literal scan already saw it
+            # An assignment spelled it (``A=~/.agentos; cp x $A/config.toml``);
+            # the literal scan only saw ``$A``.
+            absolute = _absolute_text(word, None)
+            marker = (
+                sensitive_path_marker(absolute, workspace=workspace)
+                if absolute is not None
+                else None
+            )
+            if marker is not None:
+                return marker
+            continue
+        # A relative word reaches a credential only from a directory outside
+        # the workspace (``cd ~/.agentos``, a workdir of ``~``) or by climbing
+        # out of it with ``..``; only those are resolved, so ordinary words in
+        # an ordinary command are never read as paths.
+        climbs = ".." in word.replace("\\", "/").split("/")
+        for base in bases:
+            if not climbs and _within(base, workspace_root):
+                continue
+            absolute = _absolute_text(word, base)
+            if absolute is None:
+                continue
+            marker = sensitive_path_marker(absolute, workspace=workspace)
+            if marker is not None:
+                return marker
+    return None
 
 
 def sensitive_target_in_command(

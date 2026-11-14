@@ -962,6 +962,13 @@ async def execute_code(
     # sandbox branch below returns early on denial, backend failure,
     # escalation denial, timeout and error, and each of those used to skip
     # the cleanup that only guarded the non-sandbox path.
+    #
+    # The interpreter is the agent's code, like an exec_command shell: while
+    # it runs, a new gateway connection that cannot prove more is the agent's
+    # and the on-disk operator file proves nothing (gateway.agent_surface).
+    from agentos.gateway.agent_surface import get_agent_surface
+
+    window = get_agent_surface().begin_window(ctx.session_key if ctx is not None else None)
     try:
         start_ns = time.monotonic_ns()
 
@@ -976,6 +983,8 @@ async def execute_code(
                 argv=(python_bin, "-c", code),
                 cwd=workdir_path,
                 env=safe_env,
+                # Chosen above, never by the model: it is the mount root.
+                workspace_root=workdir_path,
             )
             if isinstance(decision, DenialResult):
                 return json.dumps(decision.to_dict())
@@ -1101,5 +1110,6 @@ async def execute_code(
                 elapsed_ms=0,
             )
     finally:
+        get_agent_surface().end_window(window)
         if cleanup_dir:
             shutil.rmtree(cleanup_dir, ignore_errors=True)

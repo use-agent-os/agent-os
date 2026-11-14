@@ -352,7 +352,23 @@ def _local_config_findings(config_path: str | Path | None = None) -> list[Health
     return [
         *_local_onboarding_findings(config, config_path=config_path),
         *_local_security_findings(config),
+        *_local_channel_admission_findings(config),
     ]
+
+
+def _local_channel_admission_findings(config: Any) -> list[HealthFinding]:
+    """``channel.<name>.admission_closed`` from the config file alone."""
+    try:
+        from agentos.channel_pairing import admission_payload
+        from agentos.health.evaluator import channel_admission_findings
+
+        rows = []
+        for entry in config.channels.channels:
+            data = entry.model_dump(mode="python")
+            rows.append({**data, "admission": admission_payload(data)})
+        return channel_admission_findings(rows)
+    except Exception:  # noqa: BLE001 - doctor stays total on a partial config
+        return []
 
 
 def _local_security_findings(config: Any) -> list[HealthFinding]:

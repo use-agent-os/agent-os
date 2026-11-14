@@ -6,6 +6,158 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+- **Breaking default — Discord and Slack channels now refuse senders you have
+  not admitted.** Before, any Discord user who could DM or @mention the bot,
+  and any Slack workspace member or guest, started an agent turn with the
+  operator's tools (including the host shell), ran channel slash commands,
+  and could press tool-approval buttons. Discord and Slack channels gain two
+  settings, `allowed_user_ids` (platform user ids that are always admitted)
+  and `pairing_enabled` (the Telegram pairing flow: an unknown DM sender gets
+  a one-time code you approve with `agentos channels pairing approve <name>
+  <code>`). With neither set, the channel still connects and sends, but
+  refuses every inbound message, slash command and approval button.
+  **To keep using an existing Discord or Slack channel, before upgrading run
+  `agentos channels edit <name> --field allowed_user_ids=<your id>` (or
+  `--field pairing_enabled=true`) and restart the gateway.** The gateway logs
+  `channel.admission_closed` at start and `channel.sender_not_admitted` (with
+  the sender id) for each refused message, and `agentos doctor` reports
+  `channel.<name>.admission_closed`. The hidden MS Teams adapter follows the
+  same rules. `agentos channels pairing …` and the `channels.pairing.*` RPCs
+  now accept Discord and Slack channels with pairing enabled. See
+  [Sender admission](docs/channels.md#sender-admission).
+- The gateway's line between you and an agent is harder to cross. A sign
+  that an agent is asking now outranks any proof it could have read: an
+  agent token (even an unknown one), a connection from a process the gateway
+  spawned (Linux), and an open exec window all beat the on-disk
+  `operator.secret`. The CLI no longer reads or sends that file from an
+  agent's session (any of `AGENTOS_AGENT_TOKEN`, `AGENTOS_SESSION_KEY`,
+  `AGENTOS_AGENT`, `AGENTOS_ACP_LEASE` present, or a gateway among its
+  parent processes), and HTTP requests never count it. `execute_code` now
+  runs inside an exec window like `exec_command`.
+- The wallets directory and the active config file are sensitive paths
+  wherever `AGENTOS_STATE_DIR` puts them (the container image keeps them in
+  `/var/lib/agentos`), and the shell check reads globs, variables, `cd` and
+  model-supplied `env` values the way the shell will.
+- Approvals are yours alone: answering a prompt, changing the approval mode,
+  forgetting remembered answers, `POST /api/elevated-mode`, an `elevated`
+  hint on `chat.send` and approving a channel pairing are refused
+  (`approvals.operator_required`, HTTP 403) to a connection the gateway
+  recognizes as an agent's, and so is any config write that adds an id to a
+  Discord, Slack or MS Teams channel's `allowed_user_ids`. An approval written straight into the approval
+  queue's database is read as a denial.
+- No config write lets an agent change the operator-only settings:
+  `config.apply` and every other writer now refuse `trading.*` like
+  `config.set` does, and refuse `hooks`, `tools`, `permissions`, `sandbox`,
+  `auth`, `safety`, `workspace_dir`, `workspace_strict` and the ACP
+  permission mode to an agent's connection.
+- The gateway token (`AGENTOS_AUTH_TOKEN`, `AGENTOS_GATEWAY_AUTH__TOKEN`),
+  the hooks token and the other gateway credentials no longer reach any
+  process an agent runs, and the gateway drops them from its own
+  environment after boot (an in-place restart still gets them). A
+  token-authenticated connection from the gateway host's own LAN or
+  container address is no longer treated as coming from another machine.
+- Sandbox: with the OS sandbox on, the configured workspace is always the
+  writable `/workspace` mount (bubblewrap) / write-allowed subpath (seatbelt).
+  A tool `workdir` used to become that mount, so `workdir="/"` or `$HOME`
+  gave a sandboxed command write access to the whole home directory or host.
+  The `workdir` is now only where the command starts; one outside the
+  workspace and the configured extra mounts is refused with `policy_denied`.
+  Applies to `exec_command`, `background_process` and the git tools.
+- Approvals: retrying `exec_command` / `background_process` with an
+  `approval_id` now requires the same workdir, env overrides and session the
+  operator approved, not just the same command text; a mismatch is refused
+  and the approval stays unconsumed. Env overrides are now part of the
+  approval and shown on the card. A remembered intent (`rm -rf build`)
+  resolves relative targets against the approved command's workdir, so it no
+  longer covers the same text run in another directory.
+- Tools: a tool hidden by default (`exposed_by_default=False`: `acp`,
+  `gateway`, `env_set`, `git_commit`, `create_pptx`, `exit_plan_mode`,
+  `install_skill_deps`, `skill_install_community`, ...) now runs only when the
+  turn's tool surface offers it -- an allowlist (agent `tools.allow` /
+  profile, plan mode, cron) or `tool_search` while tools are deferred.
+  Before, a model that named one it was never shown ran it. `POST
+  /api/v1/tools/invoke` is unchanged: it still runs what `[tools.invoke]`
+  admits.
+- Workspace strict: `pdf`, `image` and the audio tools that read a file now
+  refuse paths outside the workspace (and the chat attachment store) under
+  `--workspace-strict` / `workspace_strict`, like `read_file` already did.
+- Work a turn starts on another session now runs with no more authority than
+  that turn. A `sessions_spawn` child or a `sessions_send` turn is clipped to
+  the caller's tool surface and elevation (the target session's `/elevated`
+  mode included), whatever the target agent's own tool policy grants. A caller
+  narrowed by an agent/channel tool policy or a cron allowlist may no longer
+  spawn or message another agent unless `subagents.allow_agents` names it, and
+  may not start or drive an ACP harness when its policy withholds
+  `exec_command` or `write_file`. Cron turns never get `sessions_spawn` or
+  `sessions_send`. Your own Web/CLI sessions are unaffected.
+- `agent_turn` jobs the in-agent `cron` tool creates or edits from a chat
+  channel (or any non-operator turn) are stored with `tool_policy.elevated =
+  "off"` and a `deny` list of the tools their creator lacked, so
+  `permissions.cron_default_mode = "bypass"` no longer gives them an
+  approval-free, unsandboxed shell. Such a turn may only pass a narrowing
+  `tool_policy` and may not rewrite the task of an `agent_turn` job that runs
+  elevated by default. Jobs created before this release keep their stored
+  policy: `agentos cron list --json` shows each job's `createdFrom` session,
+  so review the ones a chat created and re-create any you want pinned.
+- Group/channel chats, cron turns and subagents can no longer write curated
+  memory (`memory`, `memory_save`, `memory_delete`), and the periodic memory
+  review skips those sessions, so they cannot plant entries the operator's
+  private prompt shows as the user profile. Their `sessions_history`,
+  `sessions_list` and `sessions_send` reach only their own session and the
+  sessions it spawned. A cron job that summarized another session's
+  transcript through `sessions_history` now gets "Session not found".
+- Gateway: a plain HTTP request carrying an `Upgrade: websocket` header no
+  longer skips authentication. `/api/system/status`, `/metrics`, legacy
+  downloads and, in trusted-proxy mode, file uploads and audio transcription
+  were reachable without a token or trusted-proxy peer. Uploads and
+  transcription now run the same admission check as RPC in every auth mode,
+  so in `auth.mode = "none"` they also require a loopback peer. Real
+  WebSocket connections are unaffected. (AOS-06)
+- Gateway: `agentos gateway run` turns uvicorn's proxy-header rewriting off.
+  uvicorn's default replaced the peer address with `X-Forwarded-For` for any
+  loopback caller, so a local process could pose as a trusted proxy in
+  trusted-proxy mode. The gateway already parses `X-Forwarded-For` itself,
+  only from a trusted peer; `FORWARDED_ALLOW_IPS` no longer has any effect.
+  (AOS-07)
+- Tools: `http_request` refuses the AgentOS gateway's own listener (its port
+  on loopback, `0.0.0.0`, `localhost`, `::1` or this host's addresses), at
+  both the URL check and the connect-time check. In `auth.mode = "none"` the
+  gateway admits loopback callers without credentials, so a prompt-injected
+  model could POST `plan.mode.set off` and lift plan mode during a plan-mode
+  turn. Other local ports stay reachable. `plan.mode.set` with `mode: "off"`
+  is also refused for connections the gateway recognizes as an agent's (an
+  agent token, a process the gateway spawned, or a connection opened while an
+  agent shell runs), as approvals are; the web console, CLI,
+  desktop app and chat `/plan off` are unaffected. (AOS-17)
+- ACP: **Always allow** on a harness command no longer approves a different
+  command that starts the same way. Before, Always allow on `git status`
+  also auto-approved `git status && curl … | sh`, a second line, a `$(…)`
+  or backtick substitution, a redirection like `> ~/.bashrc`, and
+  `/tmp/evil/git status`. A remembered grant now covers one simple command:
+  the same program (by resolved absolute path) and subcommand. Commands
+  with control operators, pipes, redirection, substitution, line breaks,
+  `VAR=` prefixes, relative program paths, shell or exec wrappers (`bash`,
+  `env`, `sudo`, `xargs`, …), or that do not parse always ask. `bash -lc
+  '<command>'` is matched by its inner command. Docs:
+  [ACP agents › Permission modes](docs/acp-agents.md#permission-modes).
+
+### Changed
+- Editing the config file by hand no longer applies the operator-only
+  settings above while the gateway runs: they are held (logged as
+  `config.reload_held`, listed by `agentos doctor`) until you run the new
+  `agentos config reload` or restart the gateway. Everything else in the
+  file still applies live.
+- While an agent's shell, background process or `execute_code` run is
+  going, the local CLI is not treated as the operator (approve trades and
+  prompts in the desktop app, or retry when it has finished). A web console
+  that connected during that time cannot answer approvals until it
+  reconnects. The desktop app is unaffected.
+- `agentos env set`, the console and agent tools refuse to write the
+  environment spellings of the operator-only settings (`AGENTOS_TRADING_*`,
+  `AGENTOS_SANDBOX_*`, `AGENTOS_AUTH_*`, `AGENTOS_GATEWAY_<SECTION>__*`) and
+  the gateway credentials into `.env`; edit `.env` by hand if you mean it.
+
 ## [2026.11.14] - 2026-11-14
 
 ### Fixed

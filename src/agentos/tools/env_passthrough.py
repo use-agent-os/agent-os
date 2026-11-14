@@ -106,15 +106,17 @@ def _allowed(*, create: bool = True) -> set[str]:
 
 #: Names AgentOS reads to decide how much the agent may do, or where its state
 #: lives. A child that can see them can be made to change them for the next
-#: invocation, and the gateway token authenticates to the control plane.
-_RUNTIME_POSTURE_NAMES: frozenset[str] = frozenset(
+#: invocation, and the gateway credentials authenticate to the control plane.
+#: The credentials come from :data:`agentos.env_policy.GATEWAY_CREDENTIAL_ENV`
+#: (every spelling the gateway reads its token from, the hooks token, the
+#: desktop's operator secret); the gateway also drops them from its own
+#: environment at boot, and this keeps them out even if a caller planted one in
+#: ``extra``. ``AGENTOS_AGENT_TOKEN`` is withheld too: the shell mints a fresh
+#: one per call, so one inherited from whoever started the gateway, or passed
+#: by the model, must never reach the child.
+_RUNTIME_POSTURE_NAMES: frozenset[str] = env_policy.GATEWAY_CREDENTIAL_ENV | frozenset(
     {
-        "AGENTOS_GATEWAY_TOKEN",
-        # What the desktop hands the gateway to prove it is the operator; the
-        # gateway scrubs it at boot, and this keeps it out even if a caller
-        # planted one in ``extra`` (gateway.agent_surface).
-        "AGENTOS_OPERATOR_SECRET",
-        "AGENTOS_OPERATOR_SECRET_FILE",
+        "AGENTOS_AGENT_TOKEN",
         "AGENTOS_SENSITIVE_PATHS_DISABLED",
         "AGENTOS_SENSITIVE_PAYLOAD_DISABLED",
         "AGENTOS_REDACT_SECRETS",

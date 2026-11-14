@@ -1262,3 +1262,63 @@ def test_channel_evaluator_flags_a_blocked_channel_as_terminal() -> None:
         {"channels": [{"name": "s", "enabled": True, "status": "connected", "state": "blocked"}]}
     )
     assert finding.id == "channel.s.terminal"
+
+
+def test_channels_evaluator_flags_closed_sender_admission() -> None:
+    """AOS-01: a Discord/Slack channel that admits nobody is a doctor warning."""
+    closed = {"mode": "closed", "allowed_user_count": 0, "pairing_enabled": False}
+    findings = evaluate_channels(
+        {
+            "channels": [
+                {
+                    "name": "dc",
+                    "type": "discord",
+                    "enabled": True,
+                    "status": "connected",
+                    "admission": closed,
+                },
+                {
+                    "name": "off",
+                    "type": "slack",
+                    "enabled": False,
+                    "status": "disabled",
+                    "admission": closed,
+                },
+                {
+                    "name": "ok",
+                    "type": "slack",
+                    "enabled": True,
+                    "status": "connected",
+                    "admission": {
+                        "mode": "allowlist",
+                        "allowed_user_count": 1,
+                        "pairing_enabled": False,
+                    },
+                },
+            ]
+        }
+    )
+    admission = [f for f in findings if f.id.endswith("admission_closed")]
+    assert [f.id for f in admission] == ["channel.dc.admission_closed"]
+    assert admission[0].severity == "warn"
+    commands = [step.command for step in admission[0].fix_steps]
+    assert "agentos channels edit dc --field allowed_user_ids=USER_ID" in commands
+    assert "agentos channels edit dc --field pairing_enabled=true" in commands
+
+
+def test_local_doctor_flags_closed_channel_from_config(tmp_path, monkeypatch) -> None:
+    from agentos.cli.doctor_cmd import _local_channel_admission_findings
+    from agentos.gateway.config import GatewayConfig
+    from agentos.onboarding.mutations import upsert_channel
+
+    config = upsert_channel(
+        GatewayConfig(), entry_payload={"type": "discord", "name": "dc", "token": "t"}
+    ).config
+    config = upsert_channel(
+        config,
+        entry_payload={"type": "discord", "name": "paired", "token": "t", "pairing_enabled": True},
+    ).config
+
+    findings = _local_channel_admission_findings(config)
+
+    assert [f.id for f in findings] == ["channel.dc.admission_closed"]

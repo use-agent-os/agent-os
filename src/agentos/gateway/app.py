@@ -251,27 +251,16 @@ def create_gateway_app(
         msg = result.error.message if result.error else "error"
         return JSONResponse({"error": msg}, status_code=_rpc_status_code(result))
 
-    def _extract_http_token(request: Request | None) -> str | None:
-        if request is None:
-            return None
-        auth_header = request.headers.get("authorization", "")
-        if auth_header.startswith("Bearer "):
-            return auth_header[7:]
-        return request.headers.get("x-agentos-token")
-
     def _make_ctx(request: Request | None = None) -> RpcContext:
-        from agentos.gateway.auth import denied_access, resolve_auth
+        from agentos.gateway.auth import denied_access, resolve_auth, resolve_http_auth
 
-        auth_params: dict[str, str] = {}
-        token = _extract_http_token(request)
-        if token:
-            auth_params["token"] = token
-        peer_ip = request.client.host if request is not None and request.client else None
-        access = resolve_auth(
-            config,
-            auth_params=auth_params,
-            client_kind="control",
-            peer_ip=peer_ip,
+        # The same admission uploads and audio use (``auth.resolve_http_auth``),
+        # against the transport peer: ``gateway run`` keeps uvicorn from
+        # rewriting it (``boot.UVICORN_PEER_KWARGS``).
+        access = (
+            resolve_http_auth(config, request)
+            if request is not None
+            else resolve_auth(config, auth_params={}, client_kind="control", peer_ip=None)
         )
         if access is None:
             access = denied_access()
@@ -286,8 +275,35 @@ def create_gateway_app(
                 operator = request.headers.get("x-agentos-operator-secret")
                 if operator:
                     agent_auth["operatorSecret"] = operator
-            access = get_agent_surface().attach(access, agent_auth)
+            # The CLI's on-disk operator file proves the operator only on the
+            # WebSocket handshake: nothing first-party sends it over HTTP, and
+            # an agent's in-process HTTP tool could (gateway.agent_surface).
+            access = get_agent_surface().attach(
+                access,
+                agent_auth,
+                agent_process=_http_peer_is_agent_process(request),
+                file_secret=False,
+            )
         return _rpc_ctx(access)
+
+    def _http_peer_is_agent_process(request: Request | None) -> bool:
+        """Whether a process the gateway spawned sent *request* (Linux; else False).
+
+        ``request.client`` is the transport peer (``gateway run`` turns
+        uvicorn's ``X-Forwarded-For`` rewrite off), so a forwarding header the
+        caller added does not hide an agent's process. Where a host embeds the
+        app with that rewrite on, the claimed address matches no local socket
+        and the other rules decide, as before.
+        """
+        from agentos.gateway.peer_process import peer_is_descendant
+
+        if request is None or request.client is None:
+            return False
+        server = request.scope.get("server")
+        return peer_is_descendant(
+            (request.client.host, request.client.port),
+            tuple(server) if isinstance(server, (tuple, list)) else None,
+        )
 
     def _rpc_ctx(access: Any, conn_id: str = "http") -> RpcContext:
         return RpcContext(
@@ -447,6 +463,12 @@ def create_gateway_app(
         ctx = _make_ctx(request)
         if not ctx.access.admitted:
             return JSONResponse({"error": "control connection required"}, status_code=403)
+        from agentos.gateway.agent_surface import recognized_agent
+
+        if recognized_agent(ctx) is not None:
+            # Elevating a session (and so auto-approving its pending rows) is
+            # the user's decision, never the agent's (rpc_approvals.require_human).
+            return JSONResponse({"error": "Not available to an agent"}, status_code=403)
         session_key = str(body.get("sessionKey") or body.get("session_key") or "").strip()
         if not session_key:
             return JSONResponse({"error": "sessionKey is required"}, status_code=400)

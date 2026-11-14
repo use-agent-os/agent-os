@@ -22,6 +22,7 @@ from agentos.tools.policy.checks import (
     ChannelAdmissionPolicy,
     DenyListPolicy,
     PrivateMemoryScopePolicy,
+    VisibilityPolicy,
 )
 from agentos.tools.policy.types import DispatchInput, PolicyCheck, PolicyDecision
 
@@ -30,6 +31,7 @@ POLICY_CHAIN: tuple[PolicyCheck, ...] = cast(tuple[PolicyCheck, ...], (
     DenyListPolicy(),
     PrivateMemoryScopePolicy(),
     AllowListPolicy(),
+    VisibilityPolicy(),
 ))
 
 PolicyLogEmitter = Callable[[dict], None]

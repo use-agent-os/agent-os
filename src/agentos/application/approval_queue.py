@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sqlite3
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
@@ -23,6 +25,8 @@ from agentos.application.approval_events import (
 from agentos.application.gateway_pidlock import live_gateway_pid
 from agentos.paths import state_dir
 from agentos.util.bounded_registry import BoundedRegistry
+
+_log = logging.getLogger(__name__)
 
 VALID_APPROVAL_MODES = frozenset({"auto-approve", "auto-deny", "prompt"})
 VALID_ELEVATED_MODES = frozenset({"on", "bypass", "full"})
@@ -75,6 +79,32 @@ def claim_local_approval_surface() -> None:
     """Declare that this process can present approval prompts itself."""
     global _LOCAL_APPROVAL_SURFACE
     _LOCAL_APPROVAL_SURFACE = True
+
+
+#: The approvals this process decided: ``(database, approval_id)`` -> the
+#: params the decision was written with. The queue re-reads its rows from
+#: SQLite on every ``get``/``wait``, and the file is a same-user write away
+#: for an agent's shell, so ``UPDATE approval_queue SET approved = 1`` (or a
+#: forged row carrying ``elevatedMode``) used to approve the agent's own
+#: command without any of the gateway's checks. Every legitimate resolver --
+#: the RPC/HTTP handlers, channel buttons, ACP, policy, the standalone CLI --
+#: resolves through :meth:`ApprovalQueue.resolve` in the process that asked,
+#: so an approval this map does not vouch for, or whose params changed since,
+#: is read as a denial. Module-level so every queue object in the process
+#: shares it; nothing outside the process can add to it.
+_LOCAL_DECISIONS: OrderedDict[tuple[str, str], str] = OrderedDict()
+#: Oldest decisions are forgotten past this many, so a long-lived gateway does
+#: not grow the record forever. Forgetting fails closed (the row reads as a
+#: denial), and an approval is consumed within seconds of being decided, so
+#: the ceiling only has to dwarf the approvals awaiting consumption at once.
+_MAX_LOCAL_DECISIONS = 4096
+
+
+def _remember_decision(key: tuple[str, str], params_json: str) -> None:
+    _LOCAL_DECISIONS[key] = params_json
+    _LOCAL_DECISIONS.move_to_end(key)
+    while len(_LOCAL_DECISIONS) > _MAX_LOCAL_DECISIONS:
+        _LOCAL_DECISIONS.popitem(last=False)
 
 
 class ApprovalQueueOwnedByGatewayError(RuntimeError):
@@ -153,6 +183,11 @@ class ApprovalQueue:
         )
 
         self._db_path = Path(db_path or os.fspath(_DEFAULT_APPROVAL_QUEUE_PATH))
+        self._foreign_logged: set[str] = set()
+        try:
+            self._decision_db = os.fspath(self._db_path.resolve())
+        except (OSError, RuntimeError):
+            self._decision_db = os.fspath(self._db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(
             self._db_path,
@@ -207,6 +242,9 @@ class ApprovalQueue:
             parsed = {}
         return parsed if isinstance(parsed, dict) else {}
 
+    def _decision_key(self, approval_id: str) -> tuple[str, str]:
+        return (self._decision_db, approval_id)
+
     def _row_to_entry(self, row: sqlite3.Row) -> PendingApproval:
         aid = str(row["approval_id"])
         existing = self._pending.get(aid)
@@ -214,13 +252,21 @@ class ApprovalQueue:
         raw_payload = row["payload"] if "payload" in keys else None
         raw_expires = row["expires_at"] if "expires_at" in keys else None
         raw_audience = row["audience"] if "audience" in keys else None
+        approved = bool(row["approved"])
+        if approved and _LOCAL_DECISIONS.get(self._decision_key(aid)) != row["params"]:
+            # Approved on disk, but not by this process (or not on these
+            # params): someone wrote the database directly. Fail closed.
+            if aid not in self._foreign_logged:
+                self._foreign_logged.add(aid)
+                _log.warning("approval_queue.foreign_approval_ignored approval_id=%s", aid)
+            approved = False
         return PendingApproval(
             approval_id=aid,
             namespace=str(row["namespace"]),
             params=self._deserialize_params(row["params"]),
             created_at=float(row["created_at"]),
             resolved=bool(row["resolved"]),
-            approved=bool(row["approved"]),
+            approved=approved,
             consumed=bool(row["consumed"]),
             payload=self._deserialize_params(raw_payload) if raw_payload is not None else None,
             expires_at=float(raw_expires) if raw_expires is not None else None,
@@ -527,12 +573,15 @@ class ApprovalQueue:
         if approved and elevated_mode in VALID_ELEVATED_MODES:
             params["elevatedMode"] = elevated_mode
         payload_json = self._serialize_params(payload) if isinstance(payload, dict) else None
+        params_json = self._serialize_params(params)
         cursor = self._conn.execute(
             "UPDATE approval_queue "
             "SET resolved = 1, approved = ?, params = ?, payload = COALESCE(?, payload) "
             "WHERE approval_id = ? AND resolved = 0",
-            (1 if approved else 0, self._serialize_params(params), payload_json, approval_id),
+            (1 if approved else 0, params_json, payload_json, approval_id),
         )
+        if approved and cursor.rowcount == 1:
+            _remember_decision(self._decision_key(approval_id), params_json)
         if cursor.rowcount != 1:
             self._conn.rollback()
             entry = self.get(approval_id)
@@ -653,14 +702,18 @@ class ApprovalQueue:
         # Same params, same scope as the elevated mode resolved just above:
         # the grant belongs to the session that was prompted.
         session_key = str(params.get("sessionKey") or "")
+        # Relative targets mean the approved command's own directory.
+        args = params.get("args")
+        workdir = args.get("workdir") if isinstance(args, dict) else None
+        base_dir = workdir if isinstance(workdir, str) and workdir else None
         try:
             from agentos.application.intent_cache import get_intent_cache
 
             cache = get_intent_cache()
             if allow_always:
-                cache.record_always(command, session_key=session_key)
+                cache.record_always(command, session_key=session_key, base_dir=base_dir)
             else:
-                cache.record(command, session_key=session_key)
+                cache.record(command, session_key=session_key, base_dir=base_dir)
         except Exception:  # pragma: no cover — cache path is best-effort
             return
 
