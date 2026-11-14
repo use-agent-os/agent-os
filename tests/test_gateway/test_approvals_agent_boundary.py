@@ -226,3 +226,13 @@ class TestTheDatabaseIsNotAnApprovalSurface:
             assert other.get(row).approved is True
         finally:
             other.close()
+
+    def test_the_decision_record_is_bounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from collections import OrderedDict
+
+        decisions: OrderedDict[tuple[str, str], str] = OrderedDict()
+        monkeypatch.setattr(approval_queue_mod, "_LOCAL_DECISIONS", decisions)
+        monkeypatch.setattr(approval_queue_mod, "_MAX_LOCAL_DECISIONS", 3)
+        for index in range(5):
+            approval_queue_mod._remember_decision(("db", f"a{index}"), "{}")
+        assert list(decisions) == [("db", "a2"), ("db", "a3"), ("db", "a4")]

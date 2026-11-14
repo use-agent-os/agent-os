@@ -9,6 +9,7 @@ import os
 import sqlite3
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
@@ -91,7 +92,19 @@ def claim_local_approval_surface() -> None:
 #: so an approval this map does not vouch for, or whose params changed since,
 #: is read as a denial. Module-level so every queue object in the process
 #: shares it; nothing outside the process can add to it.
-_LOCAL_DECISIONS: dict[tuple[str, str], str] = {}
+_LOCAL_DECISIONS: OrderedDict[tuple[str, str], str] = OrderedDict()
+#: Oldest decisions are forgotten past this many, so a long-lived gateway does
+#: not grow the record forever. Forgetting fails closed (the row reads as a
+#: denial), and an approval is consumed within seconds of being decided, so
+#: the ceiling only has to dwarf the approvals awaiting consumption at once.
+_MAX_LOCAL_DECISIONS = 4096
+
+
+def _remember_decision(key: tuple[str, str], params_json: str) -> None:
+    _LOCAL_DECISIONS[key] = params_json
+    _LOCAL_DECISIONS.move_to_end(key)
+    while len(_LOCAL_DECISIONS) > _MAX_LOCAL_DECISIONS:
+        _LOCAL_DECISIONS.popitem(last=False)
 
 
 class ApprovalQueueOwnedByGatewayError(RuntimeError):
@@ -568,7 +581,7 @@ class ApprovalQueue:
             (1 if approved else 0, params_json, payload_json, approval_id),
         )
         if approved and cursor.rowcount == 1:
-            _LOCAL_DECISIONS[self._decision_key(approval_id)] = params_json
+            _remember_decision(self._decision_key(approval_id), params_json)
         if cursor.rowcount != 1:
             self._conn.rollback()
             entry = self.get(approval_id)
