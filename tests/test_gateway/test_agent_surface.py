@@ -47,11 +47,17 @@ class TestTokens:
             via="token", session_key="agent:trading:webchat:x", agent_id="trading"
         )
 
-    def test_unknown_token_is_not_a_binding(self, surface: AgentSurface) -> None:
+    def test_unknown_token_is_still_an_agent(self, surface: AgentSurface) -> None:
         assert surface.resolve_token("nope") is None
         assert surface.resolve_token(None) is None
-        # Not a token, not the operator either: unbound, so agent rules.
-        assert surface.bind({"agentToken": "nope"}) == AgentBinding(via="unbound")
+        # Not a token this gateway minted (one from before a restart, or made
+        # up), but the client says it is an agent: never the operator, and
+        # recognized as an agent where human decisions are refused.
+        assert surface.bind({"agentToken": "nope"}) == AgentBinding(via="token")
+        surface.add_operator_secret("op")
+        assert surface.bind({"agentToken": "nope", "operatorSecret": "op"}) == AgentBinding(
+            via="token"
+        )
 
     def test_tokens_are_bounded(self, surface: AgentSurface) -> None:
         first = surface.mint_token("s0", "a")
@@ -104,6 +110,69 @@ class TestUnbound:
         assert access.agent is not None and access.agent.via == "unbound"
         # The trading handlers test ``binding is not None``: agent rules.
         assert agent_binding(RpcContext(conn_id="c", access=access)) is not None
+
+
+class TestPrecedence:
+    """A sign that an agent is asking outranks any proof an agent could have read."""
+
+    def test_operator_file_does_not_beat_an_open_exec_window(
+        self, surface: AgentSurface, tmp_path: Path
+    ) -> None:
+        # The audit's reproduction: a shell that read operator.secret (a glob,
+        # a cd, a variable) presented it while its own window was open.
+        path = surface.ensure_operator_file(tmp_path)
+        stolen = path.read_text().strip()
+        with surface.exec_window("agent:main:v316"):
+            assert surface.bind({"operatorSecret": stolen}) == AgentBinding(
+                via="window", session_key="agent:main:v316"
+            )
+        # The operator's own terminal, with no agent shell running.
+        assert surface.bind({"operatorSecret": stolen}) is None
+
+    def test_agent_token_beats_every_secret(self, surface: AgentSurface, tmp_path: Path) -> None:
+        surface.set_operator_secret("desktop")
+        file_secret = surface.ensure_operator_file(tmp_path).read_text().strip()
+        token = surface.mint_token("agent:x", "trading")
+        for secret in ("desktop", file_secret):
+            binding = surface.bind({"agentToken": token, "operatorSecret": secret})
+            assert binding == AgentBinding(via="token", session_key="agent:x", agent_id="trading")
+
+    def test_an_agent_process_is_an_agent_whatever_it_presents(
+        self, surface: AgentSurface, tmp_path: Path
+    ) -> None:
+        surface.set_operator_secret("desktop")
+        file_secret = surface.ensure_operator_file(tmp_path).read_text().strip()
+        for presented in ({}, {"operatorSecret": "desktop"}, {"operatorSecret": file_secret}):
+            assert surface.bind(presented, agent_process=True) == AgentBinding(via="process")
+        with surface.exec_window("agent:x"):
+            assert surface.bind({}, agent_process=True) == AgentBinding(
+                via="process", session_key="agent:x"
+            )
+        # Even with the gateway token proved from another machine.
+        assert surface.bind({}, agent_process=True, remote_operator=True) is not None
+
+    def test_desktop_secret_survives_an_open_window(self, surface: AgentSurface) -> None:
+        # The app reconnecting while an agent's dev server runs in the
+        # background is still the user: the secret never touched the disk.
+        surface.set_operator_secret("desktop")
+        with surface.exec_window("agent:x"):
+            assert surface.bind({"operatorSecret": "desktop"}) is None
+
+    def test_operator_file_is_not_accepted_over_http(
+        self, surface: AgentSurface, tmp_path: Path
+    ) -> None:
+        file_secret = surface.ensure_operator_file(tmp_path).read_text().strip()
+        surface.set_operator_secret("desktop")
+        assert surface.bind({"operatorSecret": file_secret}, file_secret=False) == AgentBinding(
+            via="unbound"
+        )
+        assert surface.bind({"operatorSecret": "desktop"}, file_secret=False) is None
+
+    def test_recognized_is_everything_but_unbound(self) -> None:
+        assert AgentBinding(via="token").recognized
+        assert AgentBinding(via="process").recognized
+        assert AgentBinding(via="window").recognized
+        assert not AgentBinding(via="unbound").recognized
 
 
 class TestOperator:
@@ -335,3 +404,40 @@ def test_env_names_are_the_documented_ones() -> None:
     assert AGENT_TOKEN_ENV == "AGENTOS_AGENT_TOKEN"
     assert OPERATOR_SECRET_ENV == "AGENTOS_OPERATOR_SECRET"
     assert os.environ.get(OPERATOR_SECRET_ENV) is None
+
+
+def test_http_requests_never_honour_the_operator_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An agent's in-process HTTP tool must not turn a read secret into the operator."""
+    from starlette.testclient import TestClient
+
+    from agentos.gateway.agent_surface import get_agent_surface
+    from agentos.gateway.app import create_gateway_app
+    from agentos.gateway.config import GatewayConfig
+
+    surface = get_agent_surface()
+    surface.reset()
+    surface.set_operator_secret("desktop")
+    file_secret = surface.ensure_operator_file(tmp_path).read_text().strip()
+    bound: list[AgentBinding | None] = []
+    original = AgentSurface.attach
+
+    def spy(self: AgentSurface, access: AccessContext, *args, **kwargs) -> AccessContext:
+        result = original(self, access, *args, **kwargs)
+        bound.append(result.agent)
+        return result
+
+    monkeypatch.setattr(AgentSurface, "attach", spy)
+    try:
+        client = TestClient(create_gateway_app(GatewayConfig()), client=("127.0.0.1", 50000))
+        for secret in (file_secret, "desktop"):
+            response = client.post(
+                "/api/v1/rpc",
+                json={"id": 1, "method": "health"},
+                headers={"x-agentos-operator-secret": secret, "host": "127.0.0.1:18791"},
+            )
+            assert response.status_code == 200
+    finally:
+        surface.reset()
+    assert bound == [AgentBinding(via="unbound"), None]

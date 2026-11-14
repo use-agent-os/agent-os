@@ -286,8 +286,33 @@ def create_gateway_app(
                 operator = request.headers.get("x-agentos-operator-secret")
                 if operator:
                     agent_auth["operatorSecret"] = operator
-            access = get_agent_surface().attach(access, agent_auth)
+            # The CLI's on-disk operator file proves the operator only on the
+            # WebSocket handshake: nothing first-party sends it over HTTP, and
+            # an agent's in-process HTTP tool could (gateway.agent_surface).
+            access = get_agent_surface().attach(
+                access,
+                agent_auth,
+                agent_process=_http_peer_is_agent_process(request),
+                file_secret=False,
+            )
         return _rpc_ctx(access)
+
+    def _http_peer_is_agent_process(request: Request | None) -> bool:
+        """Whether a process the gateway spawned sent *request* (Linux; else False)."""
+        from agentos.gateway.origin_policy import request_is_forwarded
+        from agentos.gateway.peer_process import peer_is_descendant
+
+        if request is None or request.client is None:
+            return False
+        # A forwarding header may have rewritten ``request.client``; the real
+        # peer is then unknown and the other rules decide.
+        if request_is_forwarded(request.headers):
+            return False
+        server = request.scope.get("server")
+        return peer_is_descendant(
+            (request.client.host, request.client.port),
+            tuple(server) if isinstance(server, (tuple, list)) else None,
+        )
 
     def _rpc_ctx(access: Any, conn_id: str = "http") -> RpcContext:
         return RpcContext(

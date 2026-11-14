@@ -6,50 +6,65 @@ decides who is asking. Until now the client said ``initiator: manual`` or
 ``agent`` and was believed; an ``agentos trade swap`` run from an agent's
 shell with the session variables unset became a human order.
 
-This module computes an :class:`AgentBinding` for every admitted connection
-from these signals, strongest first:
+This module computes an :class:`AgentBinding` for every admitted connection.
+The rule that orders everything below: **a sign that an agent is asking
+outranks any proof an agent could have read.** The signals, strongest first:
 
-1. **An operator secret.** Two are accepted. The desktop app spawns the
-   gateway and hands it a random secret (through a 0600 file the gateway
-   deletes after reading, so it never sits in the process environment). The
-   gateway also writes its own secret at every boot to
-   ``<agentos home>/wallets/operator.secret`` (0600, rotated each boot); the
-   CLI on the same machine reads it back. ``~/.agentos/wallets`` is a denied
-   path for agent shells, so the agent cannot read the file. A connection
-   that presents either secret at the handshake is the operator's and is
-   never an agent's.
-1b. **The gateway token, from another machine.** Neither secret can reach a
-   gateway on another host (a container behind a reverse proxy): the desktop
-   app in External mode, the web console and a remote CLI only hold the
-   gateway's bearer token. A Control WebSocket that proved that token from
-   a non-loopback peer is the operator's too, unless it also presents an
-   agent token (2 wins over this). The peer is the socket's own address,
-   never an ``X-Forwarded-For`` claim (``ws_transport``), and it must not be
-   one of this host's own addresses: an agent shell on the gateway host
-   that read the token (from the environment of a compose deployment, or
-   the config file) and dialled the host's LAN or container address is
-   still on this host. HTTP RPC does not apply this rule: it cannot see
-   past uvicorn's proxy-header rewrite.
-2. **An agent token.** When an agent turn spawns a shell (or the scheduler
+1. **An agent token.** When an agent turn spawns a shell (or the scheduler
    runs a cron script), a token is minted here and passed to the child as
    ``AGENTOS_AGENT_TOKEN``. The CLI presents it back; the connection is bound
-   to that session and agent.
-3. **An exec window.** While any agent shell is running, a new connection that
-   presents nothing is treated as the agent's. That is what ``env -u`` gains:
-   nothing. The window is the shell command's lifetime, including background
-   processes it left behind. A human who opens the CLI in that window gets
-   the agent's rules, which fail safe: their order waits for approval in the
-   app instead of executing.
-4. **Nothing.** A connection with no secret, no token and no open window is
+   to that session and agent. A connection that presents *any* agent token
+   -- a live one, or one this gateway does not know (minted before a
+   restart, or made up) -- is an agent's, whatever else it presents: an
+   operator secret next to it is ignored.
+2. **The peer process.** On Linux the gateway looks up which process holds
+   the client end of a local connection (``gateway.peer_process``). One the
+   gateway spawned, directly or not -- an agent's shell, a background
+   process, ``execute_code``, an ACP harness, an MCP server -- is an agent's
+   (``via="process"``), whatever it presents.
+3. **The desktop's operator secret.** The desktop app spawns the gateway and
+   hands it a random secret through a 0600 file the gateway deletes after
+   reading; it is never on disk afterwards, never in the environment, and
+   no agent process can read it. A connection presenting it is the
+   operator's, even while an agent shell runs, so the app keeps working.
+4. **The gateway token, from another machine** (rule "1b"). Neither secret
+   can reach a gateway on another host (a container behind a reverse
+   proxy): the desktop app in External mode, the web console and a remote
+   CLI only hold the gateway's bearer token. A Control WebSocket that proved
+   that token from another machine is the operator's. The peer is the
+   socket's own address, never an ``X-Forwarded-For`` claim
+   (``ws_transport``), and it must not be one of this host's own addresses:
+   an agent shell on the gateway host that read the token (from the
+   environment of a compose deployment, or the config file) and dialled the
+   host's LAN or container address is still on this host. HTTP RPC does not
+   apply this rule: it cannot see past uvicorn's proxy-header rewrite.
+5. **An exec window.** While any agent shell is running (an ``exec_command``,
+   a background process it left, a cron script, ``execute_code``), a new
+   connection that proves nothing stronger is the agent's -- *including one
+   that presents the operator file below*: that file is on this host's disk,
+   so a shell that got past the sensitive-path floor could have read it. A
+   human who opens the CLI in that window gets the agent's rules, which
+   fail safe: their order waits for approval in the app instead of
+   executing, and an approval they try to give is refused with a reason.
+6. **The operator file.** The gateway writes its own secret at every boot to
+   ``<agentos home>/wallets/operator.secret`` (0600, rotated each boot); the
+   CLI on the same machine reads it back, and only over the WebSocket: an
+   HTTP request presenting it is not the operator (nothing first-party
+   sends it there, and an in-process HTTP tool could). The wallets
+   directory, wherever ``AGENTOS_STATE_DIR`` puts it, is on the
+   sensitive-path floor for agent tools, and the CLI never presents the
+   file from an agent's session (``cli.gateway_client``).
+7. **Nothing.** A connection with no secret, no token and no open window is
    *unbound* (``via="unbound"``) and gets the agent's rules too. Being
    anonymous is never a way to become the operator: a process an agent
    detached (``setsid``, ``nohup``, a double fork) that connects after the
-   window closed is still treated as the agent's. Only an operator secret,
-   or the gateway token from another machine (1b), proves the operator.
+   window closed is still treated as the agent's.
 
-Nothing here is a full sandbox: a same-user process can still read the
-user's files. It is the difference between a guardrail the prompt can talk
-its way around and one it cannot.
+Nothing here is a full sandbox: a same-user process that escaped every rule
+above (a detached process re-parented away from the gateway, on a host
+without the OS sandbox) can still read the operator file once no agent shell
+is running. It is the difference between a guardrail the prompt can talk its
+way around and one it cannot.
 """
 
 from __future__ import annotations
@@ -82,8 +97,9 @@ AGENT_TOKEN_ENV = "AGENTOS_AGENT_TOKEN"
 OPERATOR_SECRET_ENV = "AGENTOS_OPERATOR_SECRET"
 OPERATOR_SECRET_FILE_ENV = "AGENTOS_OPERATOR_SECRET_FILE"
 #: Where the gateway writes its own operator secret, relative to the AgentOS
-#: home. Lives under ``wallets`` because that directory is already denied to
-#: agent shells (sandbox.sensitive_paths).
+#: home. Lives under ``wallets`` because that directory -- resolved from the
+#: real state root, wherever ``AGENTOS_STATE_DIR`` puts it -- is on the
+#: sensitive-path floor for agent tools (sandbox.sensitive_paths).
 OPERATOR_SECRET_FILENAME = "wallets/operator.secret"
 
 _MAX_TOKENS = 4096
@@ -99,12 +115,22 @@ def default_operator_secret_path(state_dir: Path | None = None) -> Path:
 class AgentBinding:
     """Why a connection counts as an agent's, and for which chat."""
 
-    via: str  # "token" | "window" | "unbound"
+    via: str  # "token" | "process" | "window" | "unbound"
     session_key: str | None = None
     agent_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {"via": self.via, "sessionKey": self.session_key, "agentId": self.agent_id}
+
+    @property
+    def recognized(self) -> bool:
+        """The gateway *knows* this is an agent (token, process or window).
+
+        ``unbound`` is weaker: agent rules for trading, but the user's own
+        web console on loopback is unbound too, so the human-decision surfaces
+        (approvals, elevation, ``tools.invoke``) only refuse a recognized one.
+        """
+        return self.via != "unbound"
 
 
 class AgentSurface:
@@ -164,6 +190,13 @@ class AgentSurface:
             if hmac.compare_digest(candidate, secret.encode()):
                 matched = True
         return matched
+
+    def _is_spawn_secret(self, presented: Any) -> bool:
+        """The desktop's secret: handed over in memory, never on disk afterwards."""
+        secret = self._env_secret
+        if not secret or not isinstance(presented, str) or not presented:
+            return False
+        return hmac.compare_digest(presented.encode(), secret.encode())
 
     @property
     def operator_file(self) -> Path | None:
@@ -322,27 +355,47 @@ class AgentSurface:
     # ── admission ──────────────────────────────────────────────────────
 
     def bind(
-        self, auth_params: dict[str, Any] | None, *, remote_operator: bool = False
+        self,
+        auth_params: dict[str, Any] | None,
+        *,
+        remote_operator: bool = False,
+        agent_process: bool = False,
+        file_secret: bool = True,
     ) -> AgentBinding | None:
         """The binding for a connection presenting ``auth_params``.
 
-        ``None`` means the operator: an operator secret earns it, and so does
+        ``None`` means the operator. The order is the module docstring's: an
+        agent token (known or not) and an agent *process* come first and
+        cannot be outvoted by any secret; the desktop's in-memory secret and
         ``remote_operator`` (the gateway token proved from another machine,
-        see :meth:`attach`) unless an agent token says otherwise. A connection
-        that proves nothing is bound as ``via="unbound"``: it gets the agent's
-        rules, whether or not a shell happens to be running.
+        see :meth:`attach`) are the operator even while a shell runs; an open
+        exec window outranks the on-disk operator file; the file is honoured
+        only when *file_secret* (the WebSocket handshake, never HTTP). A
+        connection that proves nothing is ``via="unbound"``: agent rules.
         """
         params = auth_params if isinstance(auth_params, dict) else {}
-        if self.is_operator(params.get("operatorSecret")):
+        presented_token = params.get("agentToken")
+        if presented_token:
+            token = self.resolve_token(presented_token)
+            if token is not None:
+                return token
+            # A token this gateway never minted (or minted before a restart):
+            # the client says it is an agent, and adding a secret does not
+            # change that.
+            return self._window_binding() or AgentBinding(via="token")
+        if agent_process:
+            window = self._window_binding()
+            return AgentBinding(via="process", session_key=window.session_key if window else None)
+        secret = params.get("operatorSecret")
+        if self._is_spawn_secret(secret):
             return None
-        token = self.resolve_token(params.get("agentToken"))
-        if token is not None:
-            return token
         if remote_operator:
             return None
         window = self._window_binding()
         if window is not None:
             return window
+        if file_secret and self.is_operator(secret):
+            return None
         return AgentBinding(via="unbound")
 
     def attach(
@@ -351,9 +404,21 @@ class AgentSurface:
         auth_params: dict[str, Any] | None,
         *,
         peer_ip: str | None = None,
+        agent_process: bool = False,
+        file_secret: bool = True,
     ) -> AccessContext:
-        """Mark *access* with its binding; *peer_ip* is the transport peer."""
-        binding = self.bind(auth_params, remote_operator=_token_proved_remotely(access, peer_ip))
+        """Mark *access* with its binding.
+
+        *peer_ip* is the transport peer (for rule 1b, WebSocket only);
+        *agent_process* is :func:`gateway.peer_process.peer_is_descendant` for
+        the connection; *file_secret* is false for HTTP requests.
+        """
+        binding = self.bind(
+            auth_params,
+            remote_operator=_token_proved_remotely(access, peer_ip),
+            agent_process=agent_process,
+            file_secret=file_secret,
+        )
         if binding is None:
             return access
         log.debug(
@@ -452,6 +517,16 @@ def agent_binding(ctx: Any) -> AgentBinding | None:
     return binding if isinstance(binding, AgentBinding) else None
 
 
+def recognized_agent(ctx: Any) -> AgentBinding | None:
+    """The binding on *ctx* when the gateway recognizes the caller as an agent.
+
+    Token, process and window bindings; not ``unbound`` (see
+    :attr:`AgentBinding.recognized`).
+    """
+    binding = agent_binding(ctx)
+    return binding if binding is not None and binding.recognized else None
+
+
 __all__ = [
     "AGENT_TOKEN_ENV",
     "OPERATOR_SECRET_ENV",
@@ -463,5 +538,7 @@ __all__ = [
     "default_operator_secret_path",
     "ensure_operator_file",
     "get_agent_surface",
+    "is_own_address",
+    "recognized_agent",
     "remove_operator_file",
 ]

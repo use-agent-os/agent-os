@@ -896,6 +896,8 @@ async def handle_ws_connection(
             dispatcher,
             peer_ip=peer_ip,
             transport_peer=_transport_peer_ip(ws),
+            transport_addr=_transport_peer(ws),
+            server_addr=_server_addr(ws),
             client_ip=client_ip,
             origin=origin,
             auth_guard=auth_guard,
@@ -1029,8 +1031,8 @@ def _revoke_download_grants(conn_id: str) -> None:
     get_download_grants().revoke_connection(conn_id)
 
 
-def _transport_peer_ip(ws: WebSocket) -> str | None:
-    """The address the socket itself saw, never one an ``X-Forwarded-For`` claimed.
+def _transport_peer(ws: WebSocket) -> tuple[str, int] | None:
+    """The ``(host, port)`` the socket itself saw, never an ``X-Forwarded-For`` claim.
 
     :class:`~agentos.gateway.ws_transport.GatewayWebSocketProtocol` records it
     before uvicorn's proxy-header middleware can rewrite ``ws.client`` (which
@@ -1042,10 +1044,31 @@ def _transport_peer_ip(ws: WebSocket) -> str | None:
     extensions = scope.get("extensions") if isinstance(scope, dict) else None
     if isinstance(extensions, dict) and TRANSPORT_PEER_EXTENSION in extensions:
         peer = extensions[TRANSPORT_PEER_EXTENSION]
-        return str(peer[0]) if isinstance(peer, (tuple, list)) and peer else None
-    if request_is_forwarded(ws.headers):
+        if isinstance(peer, (tuple, list)) and len(peer) >= 2:
+            try:
+                return str(peer[0]), int(peer[1])
+            except (TypeError, ValueError):
+                return None
         return None
-    return ws.client.host if ws.client is not None else None
+    if request_is_forwarded(ws.headers) or ws.client is None:
+        return None
+    return ws.client.host, ws.client.port
+
+
+def _transport_peer_ip(ws: WebSocket) -> str | None:
+    peer = _transport_peer(ws)
+    return peer[0] if peer is not None else None
+
+
+def _server_addr(ws: WebSocket) -> tuple[str, int] | None:
+    scope = getattr(ws, "scope", None)
+    server = scope.get("server") if isinstance(scope, dict) else None
+    if isinstance(server, (tuple, list)) and len(server) >= 2:
+        try:
+            return str(server[0]), int(server[1])
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 async def _handshake(
@@ -1058,6 +1081,8 @@ async def _handshake(
     origin: str | None,
     auth_guard: AuthGuard | None,
     transport_peer: str | None = None,
+    transport_addr: tuple[str, int] | None = None,
+    server_addr: tuple[str, int] | None = None,
 ) -> HelloOk | None:
     """``connect.challenge`` → ``connect`` → ``hello-ok``; ``None`` when refused.
 
@@ -1231,8 +1256,18 @@ async def _handshake(
     # An agent's connection is marked as such for its whole life: the trading
     # handlers read this instead of trusting an ``initiator`` param.
     from agentos.gateway.agent_surface import get_agent_surface
+    from agentos.gateway.peer_process import peer_is_descendant
 
-    access = get_agent_surface().attach(access, auth_params, peer_ip=transport_peer)
+    # Which process holds the other end, where the kernel can say: one the
+    # gateway spawned is an agent's whatever it presents (gateway.peer_process).
+    agent_process = (
+        await asyncio.to_thread(peer_is_descendant, transport_addr, server_addr)
+        if transport_addr is not None
+        else False
+    )
+    access = get_agent_surface().attach(
+        access, auth_params, peer_ip=transport_peer, agent_process=agent_process
+    )
 
     # Step 5: Negotiate protocol version
     negotiated = negotiate_protocol(params.min_protocol, params.max_protocol)

@@ -126,3 +126,38 @@ async def test_a_detached_sleeper_does_not_outlive_the_exec_window(
             break
         await asyncio.sleep(0.05)
     assert not _pid_alive(pid), f"detached sleeper {pid} survived the exec window"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX env(1) and process ancestry")
+@pytest.mark.asyncio
+async def test_cli_in_an_agent_shell_with_a_wiped_env_never_reads_the_operator_file(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``env -i … agentos …`` from the agent's shell: no variable left, same parent.
+
+    The test process stands in for the gateway: its pid is in the state dir's
+    pid file, exactly as a running gateway's is, and the shell it spawns is
+    its child. The operator file is readable on purpose (a sandbox-off host).
+    """
+    import json
+    import sys
+
+    from agentos.gateway.agent_surface import ensure_operator_file
+
+    state = tmp_path / "home"
+    (state / "state").mkdir(parents=True)
+    (state / "state" / "gateway.pid").write_text(json.dumps({"pid": os.getpid()}))
+    monkeypatch.setenv("AGENTOS_STATE_DIR", str(state))
+    ensure_operator_file(state)
+    monkeypatch.setattr(shell, "get_runtime", lambda: None)
+    probe = (
+        "from agentos.cli.gateway_client import agent_surface_auth as a;"
+        "print(sorted(a('ws://127.0.0.1:18791')))"
+    )
+    command = (
+        f'env -i PATH="$PATH" HOME="$HOME" AGENTOS_STATE_DIR="$AGENTOS_STATE_DIR" '
+        f'{sys.executable} -c "{probe}"'
+    )
+    out = await shell.exec_command(command, workdir=str(tmp_path))
+    assert out.startswith("exit_code=0"), out
+    assert out.strip().splitlines()[-1] == "[]", out

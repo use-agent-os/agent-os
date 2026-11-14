@@ -81,3 +81,86 @@ async def test_loopback_peer_with_the_token_is_an_agent() -> None:
     async with _gateway() as url:
         error = await _rename_error(url, {})
     assert error["code"] == "trading.operator_required"
+
+
+# ── the operator file, from a process the gateway spawned ────────────────
+
+_CHILD_CLIENT = """
+import asyncio, json, sys
+import websockets
+
+async def main(url, secret):
+    async with websockets.connect(url) as ws:
+        await ws.recv()
+        params = {"minProtocol": 3, "maxProtocol": 3,
+                  "auth": {"token": sys.argv[3], "operatorSecret": secret}}
+        await ws.send(json.dumps({"type": "req", "id": "c", "method": "connect",
+                                  "params": params}))
+        assert json.loads(await ws.recv())["type"] == "hello-ok"
+        await ws.send(json.dumps({"type": "req", "id": "r", "method": "wallet.rename"}))
+        while True:
+            frame = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+            if frame.get("type") == "res" and frame.get("id") == "r":
+                print(frame["error"]["code"])
+                return
+
+asyncio.run(main(sys.argv[1], sys.argv[2]))
+"""
+
+
+async def _rename_error_with_secret(url: str, secret: str) -> str:
+    async with websockets.connect(url) as ws:
+        await ws.recv()
+        params = {
+            "minProtocol": 3,
+            "maxProtocol": 3,
+            "auth": {"token": _TOKEN, "operatorSecret": secret},
+        }
+        await ws.send(json.dumps({"type": "req", "id": "c", "method": "connect", "params": params}))
+        assert json.loads(await ws.recv())["type"] == "hello-ok"
+        await ws.send(json.dumps({"type": "req", "id": "r", "method": "wallet.rename"}))
+        while True:
+            frame = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+            if frame.get("type") == "res" and frame.get("id") == "r":
+                return str(frame["error"]["code"])
+
+
+async def test_operator_file_from_a_spawned_process_is_still_an_agent(tmp_path) -> None:
+    """An agent's process that read operator.secret, with no exec window open.
+
+    The gateway in this test is the pytest process; the client is its child,
+    as every agent shell, ``execute_code`` run or ACP harness is the
+    gateway's. The same secret from a process the gateway did not spawn (here:
+    the test process itself) is the operator.
+    """
+    import sys
+
+    import pytest
+
+    from agentos.gateway import peer_process
+    from agentos.gateway.agent_surface import get_agent_surface
+
+    if not peer_process.supported():
+        pytest.skip("needs Linux /proc to map sockets to processes")
+    surface = get_agent_surface()
+    surface.reset()
+    secret = surface.ensure_operator_file(tmp_path).read_text().strip()
+    try:
+        async with _gateway() as url:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-c",
+                _CHILD_CLIENT,
+                url,
+                secret,
+                _TOKEN,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, err = await asyncio.wait_for(proc.communicate(), timeout=30)
+            assert proc.returncode == 0, err.decode()
+            assert out.decode().strip() == "trading.operator_required"
+            # Control: the operator's own (non-descendant) connection.
+            assert await _rename_error_with_secret(url, secret) == "INVALID_REQUEST"
+    finally:
+        surface.reset()
