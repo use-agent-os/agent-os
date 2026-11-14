@@ -30,12 +30,15 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
+from agentos.channel_pairing import ChannelPairingStore
+from agentos.channels._admission import SenderAdmission, normalize_user_ids
 from agentos.channels._util import (
+    AccessDecision,
     ChannelAccessPolicy,
     EventDedupeCache,
     split_stream_segment,
@@ -142,6 +145,15 @@ class MSTeamsChannelConfig(BaseModel):
     webhook_path: str = "/msteams/messages"
     workspace_dir: str | None = None
     edit_interval_s: float = 2.0
+    # Sender admission (see ``agentos.channels._admission``). With neither set
+    # the channel refuses every inbound sender.
+    allowed_user_ids: list[str] = []
+    pairing_enabled: bool = False
+
+    @field_validator("allowed_user_ids", mode="before")
+    @classmethod
+    def _normalize_allowed_user_ids(cls, value: Any) -> list[str]:
+        return normalize_user_ids(value)
 
 
 @dataclass
@@ -154,13 +166,11 @@ class MSTeamsChannel:
     """
 
     config: MSTeamsChannelConfig
+    pairing_store: ChannelPairingStore = field(default_factory=ChannelPairingStore)
+    # Replaced in ``__post_init__`` by the strict policy derived from the
+    # config's sender admission; ``evaluate_access`` is what dispatch uses.
     policy: ChannelAccessPolicy = field(
-        default_factory=lambda: ChannelAccessPolicy(
-            dm_allowed=True,
-            group_allowed=True,
-            mention_required_in_group=True,
-            allowlist=frozenset(),
-        )
+        default_factory=lambda: ChannelAccessPolicy(allowlist_enabled=True)
     )
 
     _adapter: Any = field(default=None, init=False, repr=False)  # BotFrameworkAdapter
@@ -188,6 +198,48 @@ class MSTeamsChannel:
         init=False,
         repr=False,
     )
+    _admission: SenderAdmission = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._admission = SenderAdmission(
+            channel_name=self.config.name,
+            platform_label="MS Teams",
+            allowed_user_ids=frozenset(self.config.allowed_user_ids),
+            pairing_enabled=self.config.pairing_enabled,
+            pairing_store=self.pairing_store,
+        )
+        self.policy = self._admission.strict_policy()
+
+    # ------------------------------------------------------------------
+    # Sender admission
+    # ------------------------------------------------------------------
+
+    def evaluate_access(
+        self,
+        message: IncomingMessage,
+        *,
+        is_group: bool,
+        mentioned: bool,
+    ) -> AccessDecision:
+        return self._admission.evaluate(message.sender_id, is_group=is_group, mentioned=mentioned)
+
+    def record_access_denial(self, message: IncomingMessage, reason: str) -> None:
+        self._admission.record_denial(message, reason)
+
+    async def notify_access_denied(self, message: IncomingMessage) -> None:
+        notice = self._admission.denial_notice(message)
+        if notice is None:
+            return
+        await self.send(OutgoingMessage(content=notice, reply_to=message.channel_id))
+
+    def access_snapshot(self) -> dict[str, Any]:
+        return self._admission.snapshot()
+
+    def resolve_access_request(self, sender_id: str, *, approved: bool) -> dict[str, Any]:
+        return self._admission.resolve_request(sender_id, approved=approved)
+
+    def revoke_sender(self, sender_id: str) -> str:
+        return self._admission.revoke(sender_id)
 
     @property
     def capability_profile(self) -> ChannelCapabilityProfile:
@@ -238,6 +290,7 @@ class MSTeamsChannel:
 
     async def start(self) -> None:
         """Build the BotFrameworkAdapter and load the persisted ref cache."""
+        self._admission.log_if_closed()
         if self._adapter is None:
             # Lazy import keeps Bot Framework out of gateway startup unless configured.
             from botbuilder.core import (  # type: ignore[import-untyped]  # noqa: PLC0415

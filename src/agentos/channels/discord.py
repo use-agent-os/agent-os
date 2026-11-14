@@ -16,8 +16,10 @@ import httpx
 import structlog
 import websockets
 import websockets.asyncio.client
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
+from agentos.channel_pairing import ChannelPairingStore
+from agentos.channels._admission import SenderAdmission, normalize_user_ids
 from agentos.channels._attachment_io import (
     attachment_limit_for_mime,
     ensure_declared_size_within_limit,
@@ -25,6 +27,7 @@ from agentos.channels._attachment_io import (
     preferred_attachment_mime,
 )
 from agentos.channels._util import (
+    AccessDecision,
     ChannelAccessPolicy,
     EventDedupeCache,
     RateLimiter,
@@ -108,8 +111,17 @@ class DiscordChannelConfig(BaseModel):
     intents: int = GATEWAY_INTENTS
     reconnect_max_retries: int = 5
     reconnect_base_delay_s: float = 1.0
+    # Sender admission (see ``agentos.channels._admission``). With neither set
+    # the channel refuses every inbound sender.
+    allowed_user_ids: list[str] = []
+    pairing_enabled: bool = False
 
     model_config = {}  # explicit params only; no env loading
+
+    @field_validator("allowed_user_ids", mode="before")
+    @classmethod
+    def _normalize_allowed_user_ids(cls, value: Any) -> list[str]:
+        return normalize_user_ids(value)
 
 
 @dataclass
@@ -161,14 +173,11 @@ class DiscordChannel:
     config: DiscordChannelConfig
     bot_user_id: str | None = None
     supports_slash_commands: bool = True
-    # Discord mirrors slack: DMs admit, groups require mention.
+    pairing_store: ChannelPairingStore = field(default_factory=ChannelPairingStore)
+    # Replaced in ``__post_init__`` by the strict policy derived from the
+    # config's sender admission; ``evaluate_access`` is what dispatch uses.
     policy: ChannelAccessPolicy = field(
-        default_factory=lambda: ChannelAccessPolicy(
-            dm_allowed=True,
-            group_allowed=True,
-            mention_required_in_group=True,
-            allowlist=frozenset(),
-        )
+        default_factory=lambda: ChannelAccessPolicy(allowlist_enabled=True)
     )
 
     _queue: asyncio.Queue[IncomingMessage] = field(
@@ -222,6 +231,68 @@ class DiscordChannel:
         init=False,
         repr=False,
     )
+    _admission: SenderAdmission = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._admission = SenderAdmission(
+            channel_name=self.config.name,
+            platform_label="Discord",
+            allowed_user_ids=frozenset(self.config.allowed_user_ids),
+            pairing_enabled=self.config.pairing_enabled,
+            pairing_store=self.pairing_store,
+        )
+        self.policy = self._admission.strict_policy()
+
+    # ------------------------------------------------------------------
+    # Sender admission
+    # ------------------------------------------------------------------
+
+    def evaluate_access(
+        self,
+        message: IncomingMessage,
+        *,
+        is_group: bool,
+        mentioned: bool,
+    ) -> AccessDecision:
+        return self._admission.evaluate(message.sender_id, is_group=is_group, mentioned=mentioned)
+
+    def record_access_denial(self, message: IncomingMessage, reason: str) -> None:
+        self._admission.record_denial(message, reason)
+
+    async def notify_access_denied(self, message: IncomingMessage) -> None:
+        notice = self._admission.denial_notice(message)
+        if notice is None and message.metadata.get("interaction_type") == "slash_command":
+            # The interaction was already deferred ("thinking..."); answer it
+            # so the refused user is not left waiting on a reply that never comes.
+            notice = "You are not authorized to use this bot."
+        if notice is None:
+            return
+        await self.send(self.build_reply_message(notice, message))
+
+    def access_snapshot(self) -> dict[str, Any]:
+        return self._admission.snapshot()
+
+    def resolve_access_request(self, sender_id: str, *, approved: bool) -> dict[str, Any]:
+        return self._admission.resolve_request(sender_id, approved=approved)
+
+    def revoke_sender(self, sender_id: str) -> str:
+        return self._admission.revoke(sender_id)
+
+    async def notify_access_resolution(
+        self,
+        request: dict[str, Any],
+        *,
+        approved: bool,
+    ) -> None:
+        chat_id = str(request.get("chat_id") or "")
+        if not chat_id:
+            return
+        content = (
+            "This Discord connection is paired. Send your message again to continue."
+            if approved
+            else "This Discord pairing request was denied."
+        )
+        await self.send(OutgoingMessage(content=content, reply_to=chat_id))
 
     @property
     def capability_profile(self) -> ChannelCapabilityProfile:
@@ -699,14 +770,11 @@ class DiscordChannel:
         guild_id = data.get("guild_id")
         is_group = guild_id is not None
 
-        # 1. Admission Check
-        from agentos.channels._util import evaluate_policy
-
-        decision = evaluate_policy(
-            self.policy,
+        # 1. Admission Check: the same sender admission that gates chat turns.
+        decision = self.evaluate_access(
+            IncomingMessage(sender_id=user_id, channel_id=channel_id, content=""),
             is_group=is_group,
             mentioned=True,
-            sender_id=user_id,
         )
         interaction_token = data.get("token")
         if not decision.admit:
@@ -717,7 +785,7 @@ class DiscordChannel:
                     json={
                         "type": 4,  # CHANNEL_MESSAGE_WITH_SOURCE
                         "data": {
-                            "content": "Unauthorized: Only paired users can approve/deny tools.",
+                            "content": "Unauthorized: only admitted users can approve/deny tools.",
                             "flags": 64,  # EPHEMERAL
                         },
                     },
@@ -895,6 +963,7 @@ class DiscordChannel:
 
     async def start(self) -> None:
         """Connect to the Discord gateway and begin dispatch/heartbeat loops."""
+        self._admission.log_if_closed()
         url = self.config.gateway_url
         self._ws = await self._connect_ws(url)
 

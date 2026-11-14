@@ -65,7 +65,9 @@ def _application_command(
 async def test_discord_application_command_is_deferred_before_group_dispatch() -> None:
     client = _FakeDiscordClient()
     channel = DiscordChannel(
-        DiscordChannelConfig(token="bot-token", application_id="configured-app-id")
+        DiscordChannelConfig(
+            token="bot-token", application_id="configured-app-id", allowed_user_ids=["user-1"]
+        )
     )
     channel._client = client
 

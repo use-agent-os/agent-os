@@ -36,7 +36,12 @@ def _clean_approval_queue():
 
 
 def _channel() -> SlackChannel:
-    channel = SlackChannel(token="xoxb-test", slack_channel_id=CHANNEL_ID, reply_in_thread=True)
+    channel = SlackChannel(
+        token="xoxb-test",
+        slack_channel_id=CHANNEL_ID,
+        reply_in_thread=True,
+        allowed_user_ids=[USER_ID],
+    )
     return channel
 
 

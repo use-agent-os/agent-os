@@ -17,7 +17,7 @@ async def _channel_with_sent_message() -> tuple[DiscordChannel, str]:
     """``_sent_messages`` is normally populated by send()/send_file() as a
     side effect of actually posting a message via the REST API -- set it
     directly here rather than exercising that unrelated path."""
-    channel = DiscordChannel(DiscordChannelConfig(token="token"))
+    channel = DiscordChannel(DiscordChannelConfig(token="token", allowed_user_ids=["user-1"]))
     channel._sent_messages["bot-msg-1"] = "guild-channel-1"
     return channel, "bot-msg-1"
 
@@ -45,7 +45,7 @@ async def test_reaction_on_the_bots_own_message_is_treated_as_mentioned() -> Non
 
 
 async def test_reaction_on_someone_elses_message_is_still_gated() -> None:
-    channel = DiscordChannel(DiscordChannelConfig(token="token"))
+    channel = DiscordChannel(DiscordChannelConfig(token="token", allowed_user_ids=["user-1"]))
 
     await channel._handle_dispatch(
         "MESSAGE_REACTION_ADD",

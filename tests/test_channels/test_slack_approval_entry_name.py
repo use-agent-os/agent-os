@@ -34,7 +34,10 @@ def _clean_approval_queue():
 
 
 def _channel(name: str) -> SlackChannel:
-    entry = SlackChannelEntry(name=name, token="xoxb-test", slack_channel_id=CHANNEL_ID)
+    # The clicker is admitted, so these tests exercise approval custody alone.
+    entry = SlackChannelEntry(
+        name=name, token="xoxb-test", slack_channel_id=CHANNEL_ID, allowed_user_ids=[USER_ID]
+    )
     adapter = build_managed_channel(entry)
     assert isinstance(adapter, SlackChannel)
     return adapter

@@ -18,7 +18,7 @@ import secrets
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -94,6 +94,75 @@ class ChannelAdmission:
 
 def pairing_root() -> Path:
     return default_agentos_home() / "pairing"
+
+
+#: Display names for the channel types that can admit senders by pairing.
+PAIRING_PLATFORM_LABELS = {
+    "telegram": "Telegram",
+    "discord": "Discord",
+    "slack": "Slack",
+    "msteams": "MS Teams",
+}
+
+
+def entry_uses_pairing(entry: Any) -> bool:
+    """Whether a configured channel entry (model or dict) admits by pairing.
+
+    Telegram always pairs. Discord, Slack and MS Teams pair only when the
+    entry sets ``pairing_enabled``.
+    """
+    if isinstance(entry, dict):
+        channel_type, enabled = entry.get("type"), entry.get("pairing_enabled")
+    else:
+        channel_type = getattr(entry, "type", None)
+        enabled = getattr(entry, "pairing_enabled", None)
+    if channel_type == "telegram":
+        return True
+    return channel_type in PAIRING_PLATFORM_LABELS and enabled is True
+
+
+def pairing_platform_label(channel_type: Any) -> str:
+    return PAIRING_PLATFORM_LABELS.get(str(channel_type or ""), "Channel")
+
+
+AdmissionMode = Literal["closed", "allowlist", "pairing", "allowlist+pairing"]
+
+#: Channel types configured through ``allowed_user_ids`` / ``pairing_enabled``
+#: (see ``agentos.channels._admission``).
+SENDER_ADMISSION_CHANNEL_TYPES = frozenset({"discord", "slack", "msteams"})
+
+
+def normalize_user_ids(value: Any) -> list[str]:
+    """Accept a list or a comma-separated string; strip, drop blanks, dedupe."""
+    if value is None:
+        return []
+    values: Iterable[Any] = value.split(",") if isinstance(value, str) else value
+    normalized = (str(item).strip() for item in values)
+    return list(dict.fromkeys(item for item in normalized if item))
+
+
+def admission_mode(*, allowed_user_ids: Iterable[str], pairing_enabled: bool) -> AdmissionMode:
+    has_allowlist = any(str(item).strip() for item in allowed_user_ids)
+    if has_allowlist and pairing_enabled:
+        return "allowlist+pairing"
+    if has_allowlist:
+        return "allowlist"
+    if pairing_enabled:
+        return "pairing"
+    return "closed"
+
+
+def admission_payload(entry: dict[str, Any]) -> dict[str, Any] | None:
+    """How a configured entry admits senders, for ``channels.status`` and doctor."""
+    if entry.get("type") not in SENDER_ADMISSION_CHANNEL_TYPES:
+        return None
+    allowed = normalize_user_ids(entry.get("allowed_user_ids"))
+    pairing = entry.get("pairing_enabled") is True
+    return {
+        "mode": admission_mode(allowed_user_ids=allowed, pairing_enabled=pairing),
+        "allowed_user_count": len(allowed),
+        "pairing_enabled": pairing,
+    }
 
 
 class ChannelPairingStore:
@@ -531,6 +600,8 @@ class ChannelPairingStore:
 
 
 __all__ = [
+    "SENDER_ADMISSION_CHANNEL_TYPES",
+    "AdmissionMode",
     "ChannelAdmission",
     "ChannelPairingStore",
     "InvalidPairingCodeError",
@@ -539,9 +610,15 @@ __all__ = [
     "PAIRING_LOCKOUT_S",
     "PAIRING_MAX_FAILED_ATTEMPTS",
     "PAIRING_MAX_PENDING",
+    "PAIRING_PLATFORM_LABELS",
     "PAIRING_REQUEST_RATE_LIMIT_S",
     "PairingApprovalLockedError",
     "PairingRequestResult",
     "PairingStoreError",
+    "admission_mode",
+    "admission_payload",
+    "entry_uses_pairing",
+    "normalize_user_ids",
+    "pairing_platform_label",
     "pairing_root",
 ]
