@@ -58,6 +58,24 @@ def _common_fields() -> tuple[ChannelSetupField, ...]:
     )
 
 
+def _sender_admission_fields(id_hint: str) -> tuple[ChannelSetupField, ...]:
+    return (
+        ChannelSetupField(
+            "allowed_user_ids", "Allowed user ids", "text", required=False, default="",
+            group="access",
+            description=f"Comma-separated {id_hint} allowed to use the bot. Leave "
+            "blank and enable pairing to approve users one by one instead.",
+        ),
+        ChannelSetupField(
+            "pairing_enabled", "Enable pairing", "bool", required=False, default=False,
+            group="access",
+            description="An unknown user who DMs the bot gets a one-time code; approve "
+            "it with 'agentos channels pairing approve'. With no allowed user ids "
+            "and pairing off, the bot refuses every sender.",
+        ),
+    )
+
+
 def _slack_spec() -> ChannelSetupSpec:
     return ChannelSetupSpec(
         type="slack",
@@ -110,6 +128,7 @@ def _slack_spec() -> ChannelSetupSpec:
             ChannelSetupField("connection_mode", "Connection mode", "select",
                               required=False, default="webhook",
                               choices=("webhook", "socket")),
+            *_sender_admission_fields("Slack member ids (U…)"),
         ),
     )
 
@@ -137,6 +156,7 @@ def _discord_spec() -> ChannelSetupSpec:
                               default="wss://gateway.discord.gg/?v=10&encoding=json"),
             ChannelSetupField("intents", "Intents bitmask", "int",
                               required=False, default=33281),
+            *_sender_admission_fields("Discord user ids"),
         ),
     )
 
@@ -159,6 +179,7 @@ def _msteams_spec() -> ChannelSetupSpec:
                               required=True, secret=True),
             ChannelSetupField("webhook_path", "Webhook path", "text",
                               required=False, default="/msteams/messages"),
+            *_sender_admission_fields("Teams user ids (29:…)"),
         ),
     )
 

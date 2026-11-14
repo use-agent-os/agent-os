@@ -2025,7 +2025,29 @@ class ConfiguredChannelEntry(BaseModel):
         return value
 
 
-class SlackChannelEntry(ConfiguredChannelEntry):
+class SenderAdmissionEntry(ConfiguredChannelEntry):
+    """Channel entry whose inbound senders must be admitted by the operator.
+
+    ``allowed_user_ids`` lists platform user ids that are always admitted;
+    ``pairing_enabled`` turns on the Telegram-style pairing flow (an unknown DM
+    sender gets a one-time code the operator approves with ``agentos channels
+    pairing approve``). With neither set the channel fails closed and refuses
+    every inbound message, slash command and approval button; ``agentos
+    doctor`` reports it as ``channel.<name>.admission_closed``.
+    """
+
+    allowed_user_ids: list[str] = Field(default_factory=list)
+    pairing_enabled: bool = False
+
+    @field_validator("allowed_user_ids", mode="before")
+    @classmethod
+    def _normalize_allowed_user_ids(cls, value: Any) -> list[str]:
+        from agentos.channel_pairing import normalize_user_ids
+
+        return normalize_user_ids(value)
+
+
+class SlackChannelEntry(SenderAdmissionEntry):
     """Gateway config entry for a Slack channel."""
 
     type: Literal["slack"] = "slack"
@@ -2053,7 +2075,7 @@ class SlackChannelEntry(ConfiguredChannelEntry):
         return self
 
 
-class DiscordChannelEntry(ConfiguredChannelEntry):
+class DiscordChannelEntry(SenderAdmissionEntry):
     """Gateway config entry for a Discord channel."""
 
     type: Literal["discord"] = "discord"
@@ -2064,7 +2086,7 @@ class DiscordChannelEntry(ConfiguredChannelEntry):
     intents: int = 33281
 
 
-class MSTeamsChannelEntry(ConfiguredChannelEntry):
+class MSTeamsChannelEntry(SenderAdmissionEntry):
     """Gateway config entry for an MS Teams channel."""
 
     type: Literal["msteams"] = "msteams"

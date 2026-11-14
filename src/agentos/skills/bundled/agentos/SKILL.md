@@ -173,9 +173,17 @@ explicit path for other names. Configure each Slack app's Events API,
 Interactivity, and slash-command Request URLs to match, then restart the gateway.
 Duplicate webhook paths with overlapping HTTP methods cause a startup error.
 
+Discord and Slack admit only user ids in `allowed_user_ids` and, with
+`pairing_enabled = true`, paired senders; with neither set the channel refuses
+every inbound message, slash command and approval button (doctor:
+`channel.<name>.admission_closed`). Fix with `agentos channels edit <name>
+--field allowed_user_ids=<id,...>` or `--field pairing_enabled=true`, then
+restart the gateway. Never suggest opening a channel to everyone.
+
 Telegram direct messages always require pairing. Use `agentos channels pairing
 list <name>`, `approve <name> <code>`, `deny <name> <sender-id>`, `revoke
-<name> <sender-id>`, or `clear-pending <name>`. Pairing is binary and has no
+<name> <sender-id>`, or `clear-pending <name>` (also for Discord/Slack
+channels with pairing enabled). Pairing is binary and has no
 admin/owner tier. Telegram groups are disabled by default; enable them only
 with explicit `group_chat_ids`, paired senders, and the desired mention
 requirement. Telegram replies show typing for the whole turn and arrive as one
@@ -186,7 +194,7 @@ registration. `allowed_senders` is a required fail-closed From-address
 allowlist (exact addresses or `*@domain` patterns); one mail thread is one
 session.
 
-Platform-native interactive tool approvals (Slack block actions, Telegram inline keyboard callbacks, and Discord message components) allow operators to approve or deny gated tool executions directly using interactive buttons. For security, these approvals are restricted to channel DMs (never group chats), access-gated by evaluating the clicker's sender ID against the channel's access policy, and strictly session-bound to their originating chat context.
+Platform-native interactive tool approvals (Slack block actions, Telegram inline keyboard callbacks, and Discord message components) allow operators to approve or deny gated tool executions directly using interactive buttons. For security, these approvals are restricted to channel DMs (never group chats), access-gated by evaluating the clicker's sender ID against the channel's sender admission (pairing or `allowed_user_ids`), and strictly session-bound to their originating chat context.
 
 ## Configuration
 

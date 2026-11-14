@@ -46,7 +46,11 @@ async def test_discord_approval_resolves_for_a_non_default_named_entry() -> None
         {"argv": ["rm", "-rf"], "action_kind": "exec", "sessionKey": session_key},
     )
 
-    channel = DiscordChannel(DiscordChannelConfig(token="test-token", name="discord-support"))
+    channel = DiscordChannel(
+        DiscordChannelConfig(
+            token="test-token", name="discord-support", allowed_user_ids=["usr123"]
+        )
+    )
     channel.policy = replace(channel.policy, allowlist=frozenset(), allowlist_enabled=False)
 
     post_calls: list[tuple[str, dict]] = []

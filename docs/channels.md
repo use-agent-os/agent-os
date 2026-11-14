@@ -87,6 +87,62 @@ agentos channels remove <name>
 Use `gateway restart` after config changes. Use `channels restart <name>` only
 for an already-loaded live adapter.
 
+## Sender Admission
+
+Every channel that can start an agent turn admits only senders the operator
+chose. A channel turn runs with the operator's tools (including the shell), so
+"anyone who can message the bot" must never be the default.
+
+| Channel | How senders are admitted |
+| --- | --- |
+| Telegram | Pairing, always (see [Telegram Account Pairing](#telegram-account-pairing)). |
+| Email | `allowed_senders` From-address allowlist (required). |
+| Discord, Slack | `allowed_user_ids` and/or `pairing_enabled`. With neither, nobody is admitted. |
+
+For Discord and Slack, set at least one of:
+
+- `allowed_user_ids`: comma-separated platform user ids that are always
+  admitted. Discord ids are numeric snowflakes (Developer Mode › right-click
+  the user › Copy User ID); Slack ids are member ids such as `U012ABCDEF`
+  (profile › ⋯ › Copy member ID).
+- `pairing_enabled = true`: an unknown user who DMs the bot gets a one-time
+  code, exactly like Telegram, and is admitted once you approve it with
+  `agentos channels pairing approve <name> <code>`. Codes are only issued in
+  DMs; group messages from unpaired users are ignored.
+
+```sh
+agentos channels edit team --field allowed_user_ids=U012ABCDEF,U034GHIJKL
+agentos channels edit my-discord --field pairing_enabled=true
+agentos gateway restart
+```
+
+```toml
+[[channels.channels]]
+type = "discord"
+name = "my-discord"
+token = "..."
+allowed_user_ids = ["123456789012345678"]
+pairing_enabled = false
+```
+
+The same admission decision gates every inbound path: DMs, group messages that
+@mention the bot (the mention is still required), slash commands, and
+interactive approval buttons (Discord message components, Slack block
+actions). A refused sender gets no reply unless pairing just issued them a
+code; a refused Discord slash command is answered with "not authorized" so the
+deferred interaction does not hang.
+
+A Discord or Slack channel with neither setting **fails closed**: it still
+connects and can deliver outbound messages (cron results, notifications), but
+refuses every inbound sender. The gateway logs `channel.admission_closed` at
+start, each refused message is logged as `channel.sender_not_admitted` with the
+sender id (copy it into `allowed_user_ids`), and `agentos doctor` reports
+`channel.<name>.admission_closed` with the fix commands.
+
+The MS Teams adapter (not yet exposed in the channel catalog) follows the same
+rules: `allowed_user_ids` holds Teams user ids (`29:…`, the activity
+`from.id`).
+
 ## Email (IMAP/SMTP)
 
 The email channel needs no platform app registration — only IMAP and SMTP
@@ -176,6 +232,10 @@ retries on the next interval.
 
 ## Telegram Account Pairing
 
+Discord and Slack channels with `pairing_enabled = true` use this same flow
+and the same `agentos channels pairing` commands; everything below applies to
+them except the Telegram group settings.
+
 Telegram direct messages always require pairing. There is no Telegram
 admin/owner role and no open or allowlist mode. An unknown sender is stopped
 before commands or agent execution, then receives a one-time 8-character code.
@@ -231,7 +291,8 @@ from both surfaces immediately.
 ## Channel Command Authorization
 
 Channel admission runs before native or text slash-command dispatch. An
-unpaired Telegram sender cannot execute commands or start an agent turn. Once
+unpaired Telegram sender, or a Discord/Slack sender who is neither in
+`allowed_user_ids` nor paired, cannot execute commands or start an agent turn. Once
 paired, the sender gets the channel command surface, including session and
 router operations such as `/new`, `/reset`, `/compact`, `/abort`, `/c0`
 through `/c3`, and `/auto`. Direct messages and configured groups use the same
@@ -411,6 +472,10 @@ If a channel does not respond:
 
 4. For webhook channels, confirm the public URL, provider callback secret, and
    gateway auth/network boundary.
+
+5. For Discord and Slack, confirm the sender is admitted: look for
+   `channel.sender_not_admitted` in the gateway log and run `agentos doctor`.
+   See [Sender Admission](#sender-admission).
 
 ---
 

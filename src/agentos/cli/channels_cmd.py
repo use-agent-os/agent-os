@@ -14,6 +14,8 @@ from agentos.channel_pairing import (
     InvalidPairingCodeError,
     PairingApprovalLockedError,
     PairingStoreError,
+    entry_uses_pairing,
+    pairing_platform_label,
 )
 from agentos.cli.channel_fields import (
     apply_channel_token,
@@ -45,7 +47,12 @@ from agentos.onboarding.mutations import (
 )
 
 channels_app = typer.Typer(help="Manage messaging channels.")
-pairing_app = typer.Typer(help="Manage Telegram pairing requests and paired connections.")
+pairing_app = typer.Typer(
+    help=(
+        "Manage pairing requests and paired connections (Telegram, and Discord, "
+        "Slack or MS Teams channels with pairing_enabled)."
+    )
+)
 channels_app.add_typer(pairing_app, name="pairing")
 
 
@@ -150,34 +157,44 @@ def _filter_status_rows(payload: dict[str, Any], name: str | None) -> list[dict[
     return [row for row in rows if isinstance(row, dict) and str(row.get("name") or "") == name]
 
 
-def _resolve_pairing_channel(config_path: Path | None, name: str) -> str:
+def _pairing_entries(config_path: Path | None) -> dict[str, str]:
+    """Configured channels that admit by pairing, as ``{name: type}``."""
     cfg = load_config(resolve_config_path(config_path)[0])
-    telegram_names = [entry.name for entry in cfg.channels.channels if entry.type == "telegram"]
-    if name in telegram_names:
-        return name
-    if name == "telegram" and len(telegram_names) == 1:
-        return telegram_names[0]
-    if not telegram_names:
-        raise typer.BadParameter("no Telegram channel is configured")
+    return {entry.name: entry.type for entry in cfg.channels.channels if entry_uses_pairing(entry)}
+
+
+def _resolve_pairing_channel(config_path: Path | None, name: str) -> tuple[str, str]:
+    """Return ``(channel name, platform label)`` for a pairing channel argument."""
+    entries = _pairing_entries(config_path)
+    if name in entries:
+        return name, pairing_platform_label(entries[name])
+    # A bare type name ("telegram", "discord", ...) picks the only entry of it.
+    same_type = [entry_name for entry_name, kind in entries.items() if kind == name]
+    if len(same_type) == 1:
+        return same_type[0], pairing_platform_label(name)
+    if not entries:
+        raise typer.BadParameter(
+            "no channel uses pairing; configure a Telegram channel or set "
+            "pairing_enabled = true on a Discord, Slack or MS Teams channel"
+        )
     raise typer.BadParameter(
-        f"unknown Telegram channel {name!r}; choose one of: {', '.join(telegram_names)}"
+        f"unknown pairing channel {name!r}; choose one of: {', '.join(entries)}"
     )
 
 
 def _pairing_channel_names(config_path: Path | None, name: str | None) -> list[str]:
     if name:
-        return [_resolve_pairing_channel(config_path, name)]
-    cfg = load_config(resolve_config_path(config_path)[0])
-    return [entry.name for entry in cfg.channels.channels if entry.type == "telegram"]
+        return [_resolve_pairing_channel(config_path, name)[0]]
+    return list(_pairing_entries(config_path))
 
 
 @pairing_app.command("list")
 def pairing_list(
-    name: str | None = typer.Argument(None, help="Telegram channel name (optional)."),
+    name: str | None = typer.Argument(None, help="Channel name (optional)."),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
     config_path: Path | None = typer.Option(None, "--config"),
 ) -> None:
-    """List pending requests and paired Telegram connections."""
+    """List pending requests and paired connections."""
     store = ChannelPairingStore()
     rows = []
     for channel_name in _pairing_channel_names(config_path, name):
@@ -194,7 +211,7 @@ def pairing_list(
         print_json({"channels": rows})
         return
     if not rows:
-        typer.echo("No Telegram channels configured.")
+        typer.echo("No pairing channels configured.")
         return
     table = Table(title="Channel pairing", show_header=True, header_style=ACCENT_HEADER)
     table.add_column("Channel")
@@ -230,59 +247,59 @@ def pairing_list(
 
 @pairing_app.command("approve")
 def pairing_approve(
-    name: str = typer.Argument(..., help="Telegram channel name."),
+    name: str = typer.Argument(..., help="Channel name."),
     code: str = typer.Argument(..., help="8-character pairing code."),
     config_path: Path | None = typer.Option(None, "--config"),
 ) -> None:
-    """Pair the Telegram sender for a pending code."""
-    channel_name = _resolve_pairing_channel(config_path, name)
+    """Pair the sender for a pending code."""
+    channel_name, label = _resolve_pairing_channel(config_path, name)
     try:
         request = ChannelPairingStore().approve(channel_name, code)
     except (InvalidPairingCodeError, PairingApprovalLockedError, PairingStoreError) as exc:
         typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
-    typer.echo(f"Paired {request.get('sender_id')} with Telegram channel {channel_name}.")
+    typer.echo(f"Paired {request.get('sender_id')} with {label} channel {channel_name}.")
 
 
 @pairing_app.command("deny")
 def pairing_deny(
-    name: str = typer.Argument(..., help="Telegram channel name."),
-    sender_id: str = typer.Argument(..., help="Telegram user ID."),
+    name: str = typer.Argument(..., help="Channel name."),
+    sender_id: str = typer.Argument(..., help="Platform user ID."),
     config_path: Path | None = typer.Option(None, "--config"),
 ) -> None:
-    """Deny and remove a pending Telegram pairing request."""
-    channel_name = _resolve_pairing_channel(config_path, name)
+    """Deny and remove a pending pairing request."""
+    channel_name, label = _resolve_pairing_channel(config_path, name)
     try:
         ChannelPairingStore().deny(channel_name, sender_id)
     except (KeyError, PairingStoreError) as exc:
         typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
-    typer.echo(f"Denied pending Telegram connection {sender_id} on {channel_name}.")
+    typer.echo(f"Denied pending {label} connection {sender_id} on {channel_name}.")
 
 
 @pairing_app.command("revoke")
 def pairing_revoke(
-    name: str = typer.Argument(..., help="Telegram channel name."),
-    sender_id: str = typer.Argument(..., help="Telegram user ID."),
+    name: str = typer.Argument(..., help="Channel name."),
+    sender_id: str = typer.Argument(..., help="Platform user ID."),
     config_path: Path | None = typer.Option(None, "--config"),
 ) -> None:
-    """Disconnect a paired Telegram sender."""
-    channel_name = _resolve_pairing_channel(config_path, name)
+    """Disconnect a paired sender."""
+    channel_name, label = _resolve_pairing_channel(config_path, name)
     try:
         ChannelPairingStore().revoke(channel_name, sender_id)
     except (KeyError, PairingStoreError) as exc:
         typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
-    typer.echo(f"Disconnected {sender_id} from Telegram channel {channel_name}.")
+    typer.echo(f"Disconnected {sender_id} from {label} channel {channel_name}.")
 
 
 @pairing_app.command("clear-pending")
 def pairing_clear_pending(
-    name: str = typer.Argument(..., help="Telegram channel name."),
+    name: str = typer.Argument(..., help="Channel name."),
     config_path: Path | None = typer.Option(None, "--config"),
 ) -> None:
-    """Clear pending Telegram pairing codes for a channel."""
-    channel_name = _resolve_pairing_channel(config_path, name)
+    """Clear pending pairing codes for a channel."""
+    channel_name, _label = _resolve_pairing_channel(config_path, name)
     count = ChannelPairingStore().clear_pending(channel_name)
     typer.echo(f"Cleared {count} pending request(s) for {channel_name}.")
 

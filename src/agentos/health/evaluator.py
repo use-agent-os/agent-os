@@ -1350,6 +1350,61 @@ def evaluate_memory_embedding(payload: dict[str, Any]) -> list[HealthFinding]:
     ]
 
 
+def channel_admission_findings(rows: list[dict[str, Any]]) -> list[HealthFinding]:
+    """Warn about enabled channels that admit no inbound sender at all.
+
+    Discord, Slack and MS Teams admit only senders listed in
+    ``allowed_user_ids`` or paired through ``pairing_enabled``. With neither the
+    channel fails closed: it connects and can send, but refuses every message,
+    slash command and approval button. ``rows`` are ``channels.status`` rows;
+    only their ``name``, ``type``, ``enabled`` and ``admission`` keys are read.
+    """
+    findings: list[HealthFinding] = []
+    for row in rows:
+        admission = row.get("admission")
+        if row.get("enabled") is False or not isinstance(admission, dict):
+            continue
+        if admission.get("mode") != "closed":
+            continue
+        name = str(row.get("name") or "unnamed")
+        name_arg = _command_arg(name)
+        findings.append(
+            HealthFinding(
+                id=f"channel.{name}.admission_closed",
+                severity="warn",
+                surface="channels",
+                title=f"Channel {name} admits no senders",
+                detail=(
+                    "Neither allowed_user_ids nor pairing_enabled is set, so every "
+                    "inbound message, slash command and approval button on this "
+                    "channel is refused. List the platform user ids allowed to use the "
+                    "bot, or enable pairing and approve each user's code. See "
+                    "docs/channels.md#sender-admission."
+                ),
+                evidence={"name": name, "type": row.get("type"), "admission": admission},
+                fix_steps=[
+                    FixStep(
+                        label="Allow specific users",
+                        command=(
+                            f"agentos channels edit {name_arg} --field allowed_user_ids=USER_ID"
+                        ),
+                        detail="Replace USER_ID with a comma-separated list of platform ids.",
+                    ),
+                    FixStep(
+                        label="Or enable pairing",
+                        command=(f"agentos channels edit {name_arg} --field pairing_enabled=true"),
+                        detail=(
+                            "A user who DMs the bot gets a code; approve it with "
+                            f"agentos channels pairing approve {name_arg} CODE."
+                        ),
+                    ),
+                ],
+                restart_required=True,
+            )
+        )
+    return findings
+
+
 def evaluate_channels(payload: dict[str, Any]) -> list[HealthFinding]:
     if "channels" not in payload:
         return _diagnostic_incomplete(
@@ -1536,6 +1591,7 @@ def evaluate_channels(payload: dict[str, Any]) -> list[HealthFinding]:
                     ],
                 )
             )
+    findings.extend(channel_admission_findings(rows))
     if findings:
         return findings
     status_counts: dict[str, int] = {}

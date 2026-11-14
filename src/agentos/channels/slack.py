@@ -21,8 +21,11 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from agentos.channel_pairing import ChannelPairingStore
+from agentos.channels._admission import SenderAdmission, normalize_user_ids
 from agentos.channels._reactions import NULL_STATUS_REACTOR, SlackStatusReactor
 from agentos.channels._util import (
+    AccessDecision,
     ChannelAccessPolicy,
     EventDedupeCache,
     StreamThrottle,
@@ -137,17 +140,15 @@ class SlackChannel:
     app_id: str = ""
     manifest_token: str = ""
     command_request_url: str = ""
-    # ``policy`` declares the admit/deny semantics consumed by
-    # ``agentos.channels._util.evaluate_policy``. Slack admits DMs, admits
-    # group messages only when the bot is mentioned, and applies no
-    # sender-allowlist filter at the dispatch layer today.
+    # Sender admission (see ``agentos.channels._admission``). With neither
+    # set the channel refuses every inbound sender, slash command and button.
+    allowed_user_ids: list[str] = field(default_factory=list)
+    pairing_enabled: bool = False
+    pairing_store: ChannelPairingStore = field(default_factory=ChannelPairingStore)
+    # Replaced in ``__post_init__`` by the strict policy derived from the
+    # sender admission above; ``evaluate_access`` is what dispatch uses.
     policy: ChannelAccessPolicy = field(
-        default_factory=lambda: ChannelAccessPolicy(
-            dm_allowed=True,
-            group_allowed=True,
-            mention_required_in_group=True,
-            allowlist=frozenset(),
-        )
+        default_factory=lambda: ChannelAccessPolicy(allowlist_enabled=True)
     )
     _queue: asyncio.Queue[IncomingMessage] = field(
         default_factory=asyncio.Queue, init=False, repr=False
@@ -165,6 +166,66 @@ class SlackChannel:
     _background_tasks: set[asyncio.Task] = field(default_factory=set, init=False, repr=False)
     supports_slash_commands: bool = True
     webhook_path: str = ""
+    _admission: SenderAdmission = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._admission = SenderAdmission(
+            channel_name=self.name,
+            platform_label="Slack",
+            allowed_user_ids=frozenset(normalize_user_ids(self.allowed_user_ids)),
+            pairing_enabled=self.pairing_enabled,
+            pairing_store=self.pairing_store,
+            # parse_event falls back to ``sender_id`` when Slack sent no user.
+            placeholder_sender_ids=frozenset({self.sender_id}),
+        )
+        self.policy = self._admission.strict_policy()
+
+    # ------------------------------------------------------------------
+    # Sender admission
+    # ------------------------------------------------------------------
+
+    def evaluate_access(
+        self,
+        message: IncomingMessage,
+        *,
+        is_group: bool,
+        mentioned: bool,
+    ) -> AccessDecision:
+        return self._admission.evaluate(message.sender_id, is_group=is_group, mentioned=mentioned)
+
+    def record_access_denial(self, message: IncomingMessage, reason: str) -> None:
+        self._admission.record_denial(message, reason)
+
+    async def notify_access_denied(self, message: IncomingMessage) -> None:
+        notice = self._admission.denial_notice(message)
+        if notice is None:
+            return
+        await self.send(self.build_reply_message(notice, message))
+
+    def access_snapshot(self) -> dict[str, Any]:
+        return self._admission.snapshot()
+
+    def resolve_access_request(self, sender_id: str, *, approved: bool) -> dict[str, Any]:
+        return self._admission.resolve_request(sender_id, approved=approved)
+
+    def revoke_sender(self, sender_id: str) -> str:
+        return self._admission.revoke(sender_id)
+
+    async def notify_access_resolution(
+        self,
+        request: dict[str, Any],
+        *,
+        approved: bool,
+    ) -> None:
+        chat_id = str(request.get("chat_id") or "")
+        if not chat_id:
+            return
+        content = (
+            "This Slack connection is paired. Send your message again to continue."
+            if approved
+            else "This Slack pairing request was denied."
+        )
+        await self.send(OutgoingMessage(content=content, metadata={"channel": chat_id}))
 
     @property
     def transport_name(self) -> str:
@@ -761,6 +822,7 @@ class SlackChannel:
     async def start(self) -> None:
         """Validate the bot token, store ``bot_user_id``, and - in Socket Mode -
         open the Slack Socket Mode long-connection."""
+        self._admission.log_if_closed()
         client = self._get_client()
         resp = await client.post("/auth.test")
         resp.raise_for_status()
@@ -1018,15 +1080,12 @@ class SlackChannel:
         channel_id = payload.get("channel", {}).get("id", "unknown")
         team_id = payload.get("team", {}).get("id")
 
-        # 1. Admission Check
-        from agentos.channels._util import evaluate_policy
-
+        # 1. Admission Check: the same sender admission that gates chat turns.
         is_group = not channel_id.startswith("D")
-        decision = evaluate_policy(
-            self.policy,
+        decision = self.evaluate_access(
+            IncomingMessage(sender_id=user_id, channel_id=channel_id, content=""),
             is_group=is_group,
             mentioned=True,
-            sender_id=user_id,
         )
         if not decision.admit:
             log.warning(
