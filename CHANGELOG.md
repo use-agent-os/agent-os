@@ -14,6 +14,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   The `workdir` is now only where the command starts; one outside the
   workspace and the configured extra mounts is refused with `policy_denied`.
   Applies to `exec_command`, `background_process` and the git tools.
+- Approvals: retrying `exec_command` / `background_process` with an
+  `approval_id` now requires the same workdir, env overrides and session the
+  operator approved, not just the same command text; a mismatch is refused
+  and the approval stays unconsumed. Env overrides are now part of the
+  approval and shown on the card. A remembered intent (`rm -rf build`)
+  resolves relative targets against the approved command's workdir, so it no
+  longer covers the same text run in another directory.
 
 ## [2026.11.14] - 2026-11-14
 

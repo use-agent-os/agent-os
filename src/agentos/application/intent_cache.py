@@ -719,15 +719,18 @@ class IntentApprovalCache:
         *,
         scope: str = "once",
         session_key: str = "",
+        base_dir: str | Path | None = None,
     ) -> list[tuple[str, str]]:
         """Mark every intent extracted from *command* as approved in a session.
 
         Handles multi-target commands like ``rm a b c`` — each path becomes its
         own cache entry. Returns the list of recorded intents (empty if none
         could be extracted); the returned tuples stay ``(kind, target)``, since
-        the session is the caller's own.
+        the session is the caller's own. ``base_dir`` is the directory the
+        approved command runs in: relative targets resolve against it, so
+        ``rm -rf build`` approved in one workdir is not ``build`` in another.
         """
-        intents = _extract_intents(command)
+        intents = _extract_intents(command, base_dir=base_dir)
         if not intents:
             return []
         session = _session_scope(session_key)
@@ -737,16 +740,29 @@ class IntentApprovalCache:
                 self._entries[(session, kind, target)] = (expires, scope)
         return intents
 
-    def record_always(self, command: str, *, session_key: str = "") -> list[tuple[str, str]]:
+    def record_always(
+        self,
+        command: str,
+        *,
+        session_key: str = "",
+        base_dir: str | Path | None = None,
+    ) -> list[tuple[str, str]]:
         """Remember every intent in *command* for the granting session's lifetime."""
         return self.record(
             command,
             ttl=_ALWAYS_TTL_SECONDS,
             scope="always",
             session_key=session_key,
+            base_dir=base_dir,
         )
 
-    def check(self, command: str, *, session_key: str = "") -> bool:
+    def check(
+        self,
+        command: str,
+        *,
+        session_key: str = "",
+        base_dir: str | Path | None = None,
+    ) -> bool:
         """Return True only when **every** extracted intent is still approved.
 
         Multi-target commands must have approval for *all* targets — one
@@ -758,7 +774,7 @@ class IntentApprovalCache:
         *session_key*. A grant from another session is not an answer to this
         session's prompt, so it re-prompts rather than short-circuiting.
         """
-        intents = _extract_intents(command)
+        intents = _extract_intents(command, base_dir=base_dir)
         if not intents:
             return False
         session = _session_scope(session_key)

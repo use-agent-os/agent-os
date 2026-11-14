@@ -653,14 +653,18 @@ class ApprovalQueue:
         # Same params, same scope as the elevated mode resolved just above:
         # the grant belongs to the session that was prompted.
         session_key = str(params.get("sessionKey") or "")
+        # Relative targets mean the approved command's own directory.
+        args = params.get("args")
+        workdir = args.get("workdir") if isinstance(args, dict) else None
+        base_dir = workdir if isinstance(workdir, str) and workdir else None
         try:
             from agentos.application.intent_cache import get_intent_cache
 
             cache = get_intent_cache()
             if allow_always:
-                cache.record_always(command, session_key=session_key)
+                cache.record_always(command, session_key=session_key, base_dir=base_dir)
             else:
-                cache.record(command, session_key=session_key)
+                cache.record(command, session_key=session_key, base_dir=base_dir)
         except Exception:  # pragma: no cover — cache path is best-effort
             return
 
