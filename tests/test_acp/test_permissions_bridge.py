@@ -11,9 +11,7 @@ from agentos.acp.permissions import (
     ACP_APPROVAL_NAMESPACE,
     ApprovalQueuePermissionBridge,
     acp_approval_title,
-    command_prefix,
     redact_raw_input,
-    remember_key,
 )
 from agentos.acp.types import PermissionOptionInfo, PermissionPromptUnavailableError
 from agentos.application import approval_queue as approval_queue_mod
@@ -295,21 +293,7 @@ async def test_default_queue_is_the_process_queue(tmp_path, monkeypatch) -> None
 # -- helpers ------------------------------------------------------------------
 
 
-def test_command_prefix() -> None:
-    assert command_prefix("git push --force origin") == "git push"
-    assert command_prefix("rm -rf /") == "rm"
-    assert command_prefix("/usr/bin/npm install left-pad") == "npm install"
-    assert command_prefix("ls ./src") == "ls"
-    assert command_prefix("") == ""
-
-
-def test_remember_key_uses_command_for_execute_only() -> None:
-    assert remember_key(perm_request(raw_input={"command": ["npm", "test"]})) == (
-        "execute",
-        "npm test",
-    )
-    assert remember_key(perm_request(tool_kind="edit", title="x")) == ("edit", "")
-    assert remember_key(perm_request(tool_kind=None, title="x")) == ("other", "")
+# command_prefix / remember_key: see test_permissions_always_allow.py (AOS-12).
 
 
 def test_raw_input_is_truncated_to_4k() -> None:

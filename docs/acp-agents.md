@@ -238,6 +238,24 @@ permission_mode` decides who answers:
 | `approve-all` | Everything is allowed. Only this mode may answer "always allow". |
 | `deny-all` | Everything is rejected; the harness continues without the tool. |
 
+Answering an `ask` prompt with **Always allow** skips later prompts of the
+same kind in that harness session. For commands the grant covers one
+program and subcommand: Always allow on `git push origin main` covers
+`git push --force` but not `git reset`. The program is matched by the
+absolute path it resolves to on the gateway's `PATH`, so `/tmp/x/git push`
+or `./git push` still asks. These commands always ask, even after Always
+allow:
+
+- anything with `;`, `&`, `|`, `<`, `>`, `$`, a backtick, `(`, `)`, `{`, `}`,
+  `\` or a line break, quoted or not (chaining, pipes, redirection,
+  substitution, expansion);
+- a `VAR=value` prefix, a relative program path, or a program that does not
+  resolve;
+- shells and wrappers that run another command (`bash`, `sh`, `env`,
+  `sudo`, `xargs`, `eval`, `nohup`, `timeout`, ...). `bash -lc '<command>'`
+  is matched by the one command inside;
+- a command that does not parse (an unbalanced quote).
+
 With `ask` and nobody able to answer (cron, unattended runs),
 `non_interactive_permissions = "fail"` fails the turn with
 `ACP_PERMISSION_PROMPT_UNAVAILABLE`; `"deny"` rejects and lets the harness

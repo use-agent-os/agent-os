@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- ACP: **Always allow** on a harness command no longer approves a different
+  command that starts the same way. Before, Always allow on `git status`
+  also auto-approved `git status && curl … | sh`, a second line, a `$(…)`
+  or backtick substitution, a redirection like `> ~/.bashrc`, and
+  `/tmp/evil/git status`. A remembered grant now covers one simple command:
+  the same program (by resolved absolute path) and subcommand. Commands
+  with control operators, pipes, redirection, substitution, line breaks,
+  `VAR=` prefixes, relative program paths, shell or exec wrappers (`bash`,
+  `env`, `sudo`, `xargs`, …), or that do not parse always ask. `bash -lc
+  '<command>'` is matched by its inner command. Docs:
+  [ACP agents › Permission modes](docs/acp-agents.md#permission-modes).
+
 ## [2026.11.14] - 2026-11-14
 
 ### Fixed
