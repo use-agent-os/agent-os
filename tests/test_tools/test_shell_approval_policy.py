@@ -1462,10 +1462,11 @@ async def test_inline_web_approval_timeout_returns_pending_and_no_ledger_denial(
     assert queue.get(approval_id).resolved is True
     assert queue.get(approval_id).approved is True
 
+    # The retry carries the same resolved workdir exec_command requested with.
     approval_granted = await shell._check_exec_approval(
         "exec_command",
         cmd,
-        None,
+        str(tmp_path.resolve()),
         "warning",
         approval_id=approval_id,
         background=False,

@@ -118,6 +118,20 @@ def _env_args(policy: SandboxPolicy, override_env: dict[str, str]) -> list[str]:
     return args
 
 
+def _sandbox_cwd(cwd: Path, policy: SandboxPolicy) -> Path:
+    if not policy.mounts:
+        return cwd
+    for spec in policy.mounts:
+        try:
+            rel = cwd.relative_to(spec.host_path)
+        except ValueError:
+            continue
+        if ".." in rel.parts:
+            continue
+        return spec.sandbox_path / rel
+    raise SandboxBackendError(f"cwd outside every sandbox mount: {cwd!r}")
+
+
 def build_bwrap_argv(request: SandboxRequest, *, binary: str = _BWRAP_BINARY) -> list[str]:
     """Return the ``bwrap`` argv for ``request``.
 
@@ -175,19 +189,10 @@ def build_bwrap_argv(request: SandboxRequest, *, binary: str = _BWRAP_BINARY) ->
 
     argv += _env_args(policy, request.env)
 
-    # Working directory inside the sandbox — default to the workspace mount
-    # point when one exists, otherwise the host cwd mapped through.
-    workspace_mount = next((m for m in policy.mounts if m.sandbox_path == Path("/workspace")), None)
-    if workspace_mount is not None:
-        try:
-            rel = request.cwd.relative_to(workspace_mount.host_path)
-        except ValueError:
-            argv += ["--chdir", str(request.cwd)]
-        else:
-            sandbox_cwd = workspace_mount.sandbox_path / rel
-            argv += ["--chdir", str(sandbox_cwd)]
-    else:
-        argv += ["--chdir", str(request.cwd)]
+    # Working directory inside the sandbox: the host cwd mapped through the
+    # mount that contains it. A cwd outside every mount is refused rather
+    # than passed through -- the process must start inside what it can see.
+    argv += ["--chdir", str(_sandbox_cwd(request.cwd, policy))]
 
     argv.append("--")
     argv.extend(request.argv)

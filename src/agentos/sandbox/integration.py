@@ -176,11 +176,7 @@ def _apply_host_compatibility(settings: SandboxSettings) -> SandboxSettings:
     setting ``sandbox=false``.
     """
 
-    if (
-        sys.platform.startswith("win")
-        and settings.sandbox
-        and settings.backend == "auto"
-    ):
+    if sys.platform.startswith("win") and settings.sandbox and settings.backend == "auto":
         log.warning(
             "sandbox.windows_auto_backend_unsupported: "
             "no Windows sandbox backend is available; disabling sandbox for this runtime"
@@ -276,6 +272,45 @@ def _resolve_workspace(runtime: SandboxRuntime, cwd: str | None) -> Path:
     return root
 
 
+class SandboxWorkdirError(ValueError):
+    """A requested working directory lies outside every sandbox mount."""
+
+
+def confine_sandbox_cwd(cwd: Path, policy: SandboxPolicy) -> Path:
+    """Return ``cwd`` as a chdir target inside one of ``policy``'s mounts.
+
+    The policy's mounts are what the sandboxed process can see; ``cwd`` only
+    picks where inside them it starts. Containment is checked on the
+    symlink-resolved path, so ``ws/..`` or a link out of the workspace does
+    not count as inside. The returned path keeps the mount's own spelling
+    (``<mount host path>/<rel>``) so backends can map it to the sandbox path.
+    Raises :class:`SandboxWorkdirError` when no mount contains ``cwd``.
+    """
+    resolved = cwd.expanduser().resolve(strict=False)
+    for spec in policy.mounts:
+        host = spec.host_path
+        try:
+            rel = resolved.relative_to(host.resolve(strict=False))
+        except ValueError:
+            continue
+        return host / rel if rel.parts else host
+    raise SandboxWorkdirError(
+        f"workdir {str(cwd)!r} is outside the sandbox workspace "
+        f"{str(policy.mounts[0].host_path) if policy.mounts else '?'!r}. With the OS "
+        "sandbox on, commands run inside the configured workspace; pass a workdir "
+        "under it (or a relative one)."
+    )
+
+
+def sandbox_workspace_root(runtime: SandboxRuntime) -> Path:
+    """The operator-configured directory mounted read-write at ``/workspace``.
+
+    Never derived from a tool argument: a model-chosen ``workdir`` is only a
+    chdir target inside this root (see :func:`confine_sandbox_cwd`).
+    """
+    return _workspace_root(runtime)
+
+
 def _workspace_root(runtime: SandboxRuntime) -> Path:
     try:
         from agentos.tools.types import current_tool_context
@@ -285,7 +320,7 @@ def _workspace_root(runtime: SandboxRuntime) -> Path:
         ctx = None
     workspace_dir = getattr(ctx, "workspace_dir", None) if ctx is not None else None
     if isinstance(workspace_dir, str) and workspace_dir:
-        wp = Path(workspace_dir)
+        wp = Path(workspace_dir).expanduser()
         if wp.is_absolute():
             return wp
     if runtime.workspace.is_absolute():
@@ -328,12 +363,20 @@ async def gate_action(
     session_id: str | None = None,
     reason: str = "",
     runtime: SandboxRuntime | None = None,
+    workspace_root: Path | None = None,
 ) -> tuple[ApprovalDecision, SandboxPolicy, SandboxRequest]:
     """Consult the approval gate for an action.
 
     Returns a triple ``(decision, policy, request)``. The ``request`` and
     ``policy`` are always populated even on denial so callers can log
     action fingerprints and levels uniformly.
+
+    The policy's ``/workspace`` mount is always the configured workspace
+    root (``workspace_root`` when a trusted caller picks its own directory,
+    otherwise :func:`sandbox_workspace_root`), never ``cwd``. ``cwd`` -- often
+    a model-supplied ``workdir`` -- becomes ``request.cwd`` only. With the
+    sandbox on, a ``cwd`` outside every mount is refused (``POLICY_DENIED``)
+    instead of being mounted.
     """
     rt = runtime or get_runtime()
     if rt is None:
@@ -354,8 +397,6 @@ async def gate_action(
             env=env,
             reason=reason,
         )
-        from agentos.sandbox.governance import action_fingerprint
-
         log.warning(
             "sandbox.runtime_unconfigured: action_kind=%s — denying fail-closed",
             action_kind,
@@ -375,7 +416,8 @@ async def gate_action(
         )
         return denial, policy, req
 
-    workspace = _resolve_workspace(rt, str(cwd) if cwd else None)
+    root = workspace_root if workspace_root is not None else sandbox_workspace_root(rt)
+    run_cwd = _resolve_workspace(rt, str(cwd) if cwd else None)
     level = (
         select_level(action_kind, hints)
         if rt.effective.grading_enabled
@@ -384,18 +426,43 @@ async def gate_action(
     policy = build_policy(
         level,
         action_kind,
-        workspace,
+        root,
         rt.settings,
         trusted=(hints is None or hints.trusted_source),
     )
+    workdir_error: SandboxWorkdirError | None = None
+    if rt.effective.sandbox_enabled:
+        try:
+            run_cwd = confine_sandbox_cwd(run_cwd, policy)
+        except SandboxWorkdirError as exc:
+            workdir_error = exc
     request = build_request(
         action_kind=action_kind,
         argv=argv,
-        cwd=workspace,
+        cwd=run_cwd,
         policy=policy,
         env=env,
         reason=reason,
     )
+    if workdir_error is not None:
+        log.warning(
+            "sandbox.workdir_outside_workspace: action_kind=%s cwd=%s root=%s",
+            action_kind,
+            run_cwd,
+            root,
+        )
+        return (
+            DenialResult(
+                reason=DenialReason.POLICY_DENIED,
+                suggested_next_step=SuggestedNextStep.REPLAN,
+                level=policy.level,
+                action_fingerprint=action_fingerprint(request),
+                message=str(workdir_error),
+                retryable=False,
+            ),
+            policy,
+            request,
+        )
     decision = await gate_execution(
         request,
         policy,

@@ -57,6 +57,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   environment after boot (an in-place restart still gets them). A
   token-authenticated connection from the gateway host's own LAN or
   container address is no longer treated as coming from another machine.
+- Sandbox: with the OS sandbox on, the configured workspace is always the
+  writable `/workspace` mount (bubblewrap) / write-allowed subpath (seatbelt).
+  A tool `workdir` used to become that mount, so `workdir="/"` or `$HOME`
+  gave a sandboxed command write access to the whole home directory or host.
+  The `workdir` is now only where the command starts; one outside the
+  workspace and the configured extra mounts is refused with `policy_denied`.
+  Applies to `exec_command`, `background_process` and the git tools.
+- Approvals: retrying `exec_command` / `background_process` with an
+  `approval_id` now requires the same workdir, env overrides and session the
+  operator approved, not just the same command text; a mismatch is refused
+  and the approval stays unconsumed. Env overrides are now part of the
+  approval and shown on the card. A remembered intent (`rm -rf build`)
+  resolves relative targets against the approved command's workdir, so it no
+  longer covers the same text run in another directory.
+- Tools: a tool hidden by default (`exposed_by_default=False`: `acp`,
+  `gateway`, `env_set`, `git_commit`, `create_pptx`, `exit_plan_mode`,
+  `install_skill_deps`, `skill_install_community`, ...) now runs only when the
+  turn's tool surface offers it -- an allowlist (agent `tools.allow` /
+  profile, plan mode, cron) or `tool_search` while tools are deferred.
+  Before, a model that named one it was never shown ran it. `POST
+  /api/v1/tools/invoke` is unchanged: it still runs what `[tools.invoke]`
+  admits.
+- Workspace strict: `pdf`, `image` and the audio tools that read a file now
+  refuse paths outside the workspace (and the chat attachment store) under
+  `--workspace-strict` / `workspace_strict`, like `read_file` already did.
 
 ### Changed
 - Editing the config file by hand no longer applies the operator-only

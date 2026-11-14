@@ -422,6 +422,10 @@ async def invoke_tool(
         )
 
     ctx = build_invoke_tool_context(config, registry, session_key=session_key, runtime=runtime)
+    # The caller named this tool and ``invocable`` admitted it (read-only, or
+    # ``[tools.invoke] allow``): surface it so dispatch's visibility check
+    # treats a hidden tool as offered. Allow/deny policy still applies.
+    ctx.surfaced_tools = {*(ctx.surfaced_tools or ()), tool}
     call = ToolCall(tool_use_id=f"http-{uuid.uuid4().hex[:12]}", tool_name=tool, arguments=args)
     # A dry run is the whole check, so it runs the hooks' before_tool; a real
     # call runs them in the dispatch below, once.

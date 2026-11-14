@@ -33,11 +33,14 @@ from agentos.sandbox.backend.seatbelt import (
 )
 from agentos.sandbox.governance import action_fingerprint
 from agentos.sandbox.integration import (
+    SandboxWorkdirError,
     build_request,
+    confine_sandbox_cwd,
     escalate_backend_denial,
     gate_action,
     get_runtime,
     run_under_backend,
+    sandbox_workspace_root,
 )
 from agentos.sandbox.policy import build_policy, select_level
 from agentos.sandbox.types import DenialReason, DenialResult, SandboxPolicy, SandboxRequest
@@ -947,6 +950,7 @@ async def exec_command(
             warning=result.reason,
             approval_id=approval_id,
             background=False,
+            env=env,
         )
         if approval_response is not None:
             status = approval_response.get("status")
@@ -1537,11 +1541,10 @@ def _sandbox_request_for(
     action_kind = "shell.background" if tool_name == "background_process" else "shell.exec"
     ctx = current_tool_context.get()
     effective_cwd = _effective_workdir(workdir)
-    workspace = (
-        Path(effective_cwd)
-        if effective_cwd
-        else (runtime.workspace if runtime.workspace.is_absolute() else Path.cwd())
-    )
+    # Mirror gate_action: the configured workspace is the mount, the workdir
+    # only the cwd, so a denial recorded here fingerprints like the gate's.
+    workspace = sandbox_workspace_root(runtime)
+    run_cwd = Path(effective_cwd) if effective_cwd else workspace
 
     level = (
         select_level(action_kind)
@@ -1549,11 +1552,16 @@ def _sandbox_request_for(
         else runtime.effective.default_level
     )
     policy = build_policy(level, action_kind, workspace, runtime.settings, trusted=True)
+    if runtime.effective.sandbox_enabled:
+        try:
+            run_cwd = confine_sandbox_cwd(run_cwd, policy)
+        except SandboxWorkdirError:
+            pass
     subprocess_env = build_subprocess_env(extra=env)
     request = build_request(
         action_kind=action_kind,
         argv=(tool_name, command),
-        cwd=workspace,
+        cwd=run_cwd,
         policy=policy,
         env=subprocess_env,
     )
@@ -1635,14 +1643,21 @@ async def _check_exec_approval(
     warning: str,
     approval_id: str | None,
     background: bool,
+    env: dict[str, str] | None = None,
 ) -> dict[str, object] | None:
     queue = get_approval_queue()
     settings = queue.get_settings()
     ctx = current_tool_context.get()
+    args: dict[str, object] = {"command": command, "workdir": workdir}
+    if env:
+        # Env overrides change what the command does (PATH, LD_PRELOAD, ...):
+        # they are part of what the operator approves, shown on the card and
+        # matched on retry like the command and workdir.
+        args["env"] = {str(k): str(v) for k, v in sorted(env.items())}
     params = {
         "toolName": tool_name,
         "command": command,
-        "args": {"command": command, "workdir": workdir},
+        "args": args,
         "sessionKey": ctx.session_key if ctx is not None and ctx.session_key else "",
         "agent": ctx.agent_id if ctx is not None else "",
         "mode": "background" if background else "foreground",
@@ -1756,7 +1771,9 @@ async def _check_exec_approval(
     if approval_id is None and not sandbox_off_requires_approval:
         from agentos.sandbox.intent_cache import get_intent_cache
 
-        if get_intent_cache().check(command, session_key=str(params["sessionKey"])):
+        if get_intent_cache().check(
+            command, session_key=str(params["sessionKey"]), base_dir=workdir
+        ):
             log.info(
                 "shell_approval_intent_cached",
                 command=_audit_command(command),
@@ -1843,6 +1860,16 @@ async def _check_exec_approval(
         raise ToolError(f"Approval does not belong to exec namespace: {approval_id}")
     if entry.params.get("toolName") != tool_name or entry.params.get("command") != command:
         raise ToolError("Approval does not match the requested command")
+    # An approval authorizes exactly what the card showed: this command, in
+    # this workdir, with these env overrides, for the session that asked.
+    # Matching the command text alone let one approval run in another
+    # directory or another session.
+    if entry.params.get("args") != params["args"]:
+        raise ToolError(
+            "Approval does not match the requested workdir or env; request a new approval"
+        )
+    if str(entry.params.get("sessionKey") or "") != params["sessionKey"]:
+        raise ToolError("Approval belongs to a different session; request a new approval")
     if not entry.resolved:
         # Block the retry waiting for the user's decision instead of bouncing
         # back approval_pending — otherwise the model sees pending and pivots

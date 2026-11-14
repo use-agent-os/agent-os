@@ -305,7 +305,7 @@ Useful automation flags:
 | Flag | Purpose |
 | --- | --- |
 | `--workspace` | Set the workspace root. |
-| `--workspace-strict` | Restrict read-side file tools to the workspace. |
+| `--workspace-strict` | Restrict read-side file tools (including `pdf`, `image` and audio) to the workspace. |
 | `--workspace-lockdown` | Contain writes to workspace or scratch directory. |
 | `--scratch-dir` | Place temporary scripts/logs/candidate patches in a known directory. |
 | `--file` / `-f` | Attach a local file; repeat for multiple files. |

@@ -983,6 +983,8 @@ async def execute_code(
                 argv=(python_bin, "-c", code),
                 cwd=workdir_path,
                 env=safe_env,
+                # Chosen above, never by the model: it is the mount root.
+                workspace_root=workdir_path,
             )
             if isinstance(decision, DenialResult):
                 return json.dumps(decision.to_dict())

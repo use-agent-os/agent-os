@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from agentos.redact import redact_sensitive_text
-from agentos.sandbox.integration import get_runtime, run_under_backend, sandboxed
+from agentos.sandbox.integration import (
+    SandboxWorkdirError,
+    confine_sandbox_cwd,
+    get_runtime,
+    run_under_backend,
+    sandbox_workspace_root,
+    sandboxed,
+)
 from agentos.sandbox.policy import build_policy, select_level
 from agentos.tools.path_policy import reject_foreign_host_path
 from agentos.tools.registry import tool
@@ -69,13 +76,10 @@ def _redact_git_output(output: str) -> str:
 async def _run_git(*args: str, cwd: str | None = None) -> str:
     runtime = get_runtime()
     if runtime is not None and runtime.effective.sandbox_enabled:
-        ctx = current_tool_context.get()
-        if cwd:
-            workspace = Path(cwd).expanduser().resolve()
-        elif ctx and ctx.workspace_dir:
-            workspace = Path(ctx.workspace_dir).expanduser().resolve()
-        else:
-            workspace = runtime.workspace.expanduser().resolve()
+        # The configured workspace is the mount; the repository directory is
+        # only where git starts inside it. Mounting ``cwd`` itself let a
+        # model-chosen workdir ('/', $HOME) become the writable /workspace.
+        workspace = sandbox_workspace_root(runtime)
         action_kind = (
             "git.write" if any(arg in {"add", "commit"} for arg in args[:2]) else "git.read"
         )
@@ -91,8 +95,12 @@ async def _run_git(*args: str, cwd: str | None = None) -> str:
             runtime.settings,
             trusted=True,
         )
+        try:
+            run_cwd = confine_sandbox_cwd(Path(cwd) if cwd else workspace, policy)
+        except SandboxWorkdirError as exc:
+            raise RuntimeError(str(exc)) from exc
         result = await run_under_backend(
-            build_request_for_git(args, workspace, action_kind, policy),
+            build_request_for_git(args, run_cwd, action_kind, policy),
             runtime=runtime,
         )
         output = _redact_git_output(result.stdout + result.stderr)
