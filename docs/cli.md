@@ -1678,6 +1678,10 @@ delivery and failure destinations stay CLI/Web/RPC-only. See
 By default, cron jobs of kind `agent_turn` run elevated under the `bypass` mode
 (controlled globally by `permissions.cron_default_mode`). This allows them to
 run shell-based commands (like those in skills) without interactive approval prompts.
+That default applies to jobs you create. A job the in-agent `cron` tool creates
+from a chat channel (or any turn other than your own CLI/Web session) is stored
+with `elevated = "off"` and a `deny` list of the tools its creator lacked; see
+[`tools-and-sandbox.md`](tools-and-sandbox.md#delegated-work-and-caller-authority).
 
 If you wish to opt out a job from elevated execution, pass `--no-elevated`:
 

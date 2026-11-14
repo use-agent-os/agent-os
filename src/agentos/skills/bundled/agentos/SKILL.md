@@ -814,7 +814,8 @@ agentos cron add --every 10m --job-kind agent_turn --script watch_rss.py \
 # Cron turns run elevated by default (cron_default_mode="bypass"): an agent-turn
 # job CAN run shell-based skills unattended, with no approval prompt, no sandbox,
 # host shell as the user. --no-elevated opts one job out of that, running it
-# read-only instead. See docs/cli.md before suggesting either.
+# read-only instead. See docs/cli.md before suggesting either. Jobs the in-agent
+# cron tool creates from a chat are stored elevated=off and are never elevated.
 agentos cron add --every 6h --agent main --no-elevated --name "LP check" --text "..."
 # A run still going when the next one is due: --concurrency forbid (default,
 # skip it), replace (cancel the running one), allow (run both). After a laptop
