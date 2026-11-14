@@ -114,10 +114,10 @@ def read_operator_secret() -> str | None:
 
 def _gateway_pid_candidates() -> set[int]:
     """Pids of the gateways that own the default state directory, as recorded."""
-    from agentos.application.gateway_pidlock import PID_FILENAME, read_pid_from_path
+    from agentos.gateway.pidlock import _PID_FILENAME, _read_pid_from_path
     from agentos.paths import default_agentos_home
 
-    pid = read_pid_from_path(default_agentos_home() / "state" / PID_FILENAME)
+    pid = _read_pid_from_path(default_agentos_home() / "state" / _PID_FILENAME)
     return {pid} if pid else set()
 
 
