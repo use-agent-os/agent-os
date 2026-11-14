@@ -17,10 +17,12 @@ from agentos.session.keys import (
     build_subagent_session_key,
     canonicalize_session_key,
     is_acp_key,
+    normalize_agent_id,
     parse_agent_id,
 )
 from agentos.session.naming import normalize_session_name
 from agentos.tools.authority import authority_from_context, authority_restricted
+from agentos.tools.policy_runtime import private_memory_read_tools_blocked
 from agentos.tools.registry import tool
 from agentos.tools.types import (
     CallerKind,
@@ -203,6 +205,40 @@ async def _check_cross_agent(
         f"Cross-agent {verb} not allowed: '{caller_agent_id}' may not {verb} "
         f"'{target_agent_id}' (allow_agents={allow_agents})"
     )
+
+
+def _row_field(row: object, name: str) -> Any:
+    if isinstance(row, dict):
+        return row.get(name)
+    return getattr(row, name, None)
+
+
+async def _session_in_caller_scope(mgr: Any, ctx: ToolContext | None, session_key: str) -> bool:
+    """Whether *session_key* is the caller's own session or one it spawned.
+
+    Contexts that may not read private memory (group/channel chats, cron,
+    subagents) are confined to this scope by the transcript and send tools,
+    the same way ``session_search`` and ``memory_search`` are denied there.
+    """
+    own = canonicalize_session_key(ctx.session_key if ctx is not None else None)
+    target = canonicalize_session_key(session_key)
+    if not own or not target:
+        return False
+    current = target
+    for _ in range(_MAX_SPAWN_DEPTH + 1):
+        if current == own:
+            return True
+        try:
+            row = await mgr.get_session(current)
+        except (AttributeError, NotImplementedError):
+            return False
+        if row is None:
+            return False
+        parent = _row_field(row, "spawned_by") or _row_field(row, "parent_session_key")
+        if not isinstance(parent, str) or not parent:
+            return False
+        current = canonicalize_session_key(parent)
+    return False
 
 
 async def _count_active_children(mgr: object, parent_session_key: str) -> int:
@@ -406,6 +442,13 @@ async def _check_send_authority(ctx: ToolContext | None, session_key: str) -> No
         mgr = _get_session_manager()
     except ToolError:
         return
+    if private_memory_read_tools_blocked(ctx) and not await _session_in_caller_scope(
+        mgr, ctx, session_key
+    ):
+        raise SafeToolError(
+            "From this context sessions_send can only reach this session and the "
+            "sessions it spawned"
+        )
     if ctx.caller_kind in (CallerKind.CLI, CallerKind.WEB):
         # The operator's own console may message any session, as before;
         # the queued turn still carries the console's authority.
@@ -743,12 +786,80 @@ async def sessions_list(
 
     try:
         mgr = _get_session_manager()
-        sessions = await mgr.list_sessions(agent_id=agent_id, status=status, limit=limit)
+        ctx = current_tool_context.get()
+        if private_memory_read_tools_blocked(ctx):
+            sessions = await _scoped_session_rows(
+                mgr, ctx, agent_id=agent_id, status=status, limit=limit
+            )
+        else:
+            sessions = await mgr.list_sessions(agent_id=agent_id, status=status, limit=limit)
         return json.dumps(sessions)
     except ToolError:
         raise
     except (ImportError, AttributeError, NotImplementedError) as exc:
         raise _manager_unavailable(exc) from exc
+
+
+#: Most sessions a scoped ``sessions_list`` walks (own session + descendants).
+_SCOPED_LIST_SCAN_CAP = 200
+
+
+def _row_dict(row: object) -> dict[str, Any] | None:
+    if isinstance(row, dict):
+        return row
+    dump = getattr(row, "model_dump", None)
+    if callable(dump):
+        dumped = dump(mode="json")
+        return dumped if isinstance(dumped, dict) else None
+    return None
+
+
+async def _scoped_session_rows(
+    mgr: Any,
+    ctx: ToolContext | None,
+    *,
+    agent_id: str | None,
+    status: str | None,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """The caller's own session and its descendants, filtered like list."""
+    own = canonicalize_session_key(ctx.session_key if ctx is not None else None)
+    if not own:
+        return []
+    rows: list[dict[str, Any]] = []
+    own_row = _row_dict(await mgr.get_session(own))
+    if own_row is not None:
+        rows.append(own_row)
+    frontier = [own]
+    seen = {own}
+    for _ in range(_MAX_SPAWN_DEPTH):
+        next_frontier: list[str] = []
+        for parent in frontier:
+            try:
+                children = await mgr.list_sessions(spawned_by=parent, limit=_SCOPED_LIST_SCAN_CAP)
+            except TypeError:
+                children = []
+            for child in children or []:
+                row = _row_dict(child)
+                key = canonicalize_session_key((row or {}).get("session_key"))
+                if row is None or not key or key in seen:
+                    continue
+                seen.add(key)
+                rows.append(row)
+                next_frontier.append(key)
+                if len(seen) >= _SCOPED_LIST_SCAN_CAP:
+                    break
+        frontier = next_frontier
+        if not frontier or len(seen) >= _SCOPED_LIST_SCAN_CAP:
+            break
+    wanted_agent = normalize_agent_id(agent_id) if agent_id else None
+    filtered = [
+        row
+        for row in rows
+        if (status is None or row.get("status") == status)
+        and (wanted_agent is None or row.get("agent_id") == wanted_agent)
+    ]
+    return filtered[:limit]
 
 
 # ---------------------------------------------------------------------------
@@ -793,6 +904,13 @@ async def sessions_history(
 
     try:
         mgr = _get_session_manager()
+        ctx = current_tool_context.get()
+        if private_memory_read_tools_blocked(ctx) and not await _session_in_caller_scope(
+            mgr, ctx, session_key
+        ):
+            # Same answer as a missing session: this context may not learn
+            # which other transcripts exist.
+            raise ToolError(f"Session not found: {session_key}")
         session = await mgr.get_session(session_key)
         if session is None:
             raise ToolError(f"Session not found: {session_key}")
