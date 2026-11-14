@@ -58,6 +58,22 @@ describe('chat markdown renderer', () => {
     expect(root.querySelector('a')?.hasAttribute('href')).toBe(false)
   })
 
+  // AOS-11: the transcript trusts `data-*` hooks in a message body (ticketed
+  // media, delegated downloads). A model-written one must not survive, or a
+  // reply can aim the gateway token at a host of its choosing.
+  it('strips model-written data-* hooks so a reply cannot drive the transcript', () => {
+    const root = fragment(
+      '<img data-ticket-src="https://attacker.invalid/px" alt="r">\n\n' +
+        '<a data-artifact-download="https://attacker.invalid/dl" data-artifact-name="r.pdf">Download</a>\n\n' +
+        '<span data-chart-src="https://attacker.invalid/c" data-target="x">t</span>',
+    )
+
+    expect(root.innerHTML).not.toContain('data-')
+    expect(root.querySelector('[data-ticket-src]')).toBeNull()
+    expect(root.querySelector('[data-artifact-download]')).toBeNull()
+    expect(root.querySelector('[data-chart-src]')).toBeNull()
+  })
+
   it('wraps fenced code with a language label and copy target', () => {
     const root = fragment('```js\nconst answer = 42\n```')
     const block = root.querySelector('.code-block')

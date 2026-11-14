@@ -22,7 +22,7 @@
 // ) is NOT re-ported here — Task 4 already ported it into tools.ts;
 // this module re-exports it from there so there is one definition (DRY).
 
-import { gatewayOrigin, urlBase } from '@/lib/api-origin'
+import { gatewayOrigin, isGatewayUrl, urlBase } from '@/lib/api-origin'
 import {
   TICKET_SRC_ATTR,
   TICKET_VARIANT_ATTR,
@@ -379,30 +379,33 @@ export function artifactPreviewUrl(
   artifact: Artifact | null | undefined,
   ctx: ArtifactUrlContext,
 ): string {
-  const raw = artifactDownloadUrl(artifact)
-  if (!raw) return ''
-  try {
-    const url = new URL(raw, urlBase())
-    if (ctx.sessionKey) url.searchParams.set('sessionKey', ctx.sessionKey)
-    if (ctx.token) url.searchParams.set('token', ctx.token)
-    return gatewayHref(url)
-  } catch {
-    return raw
-  }
+  return withGatewayCredentials(artifactDownloadUrl(artifact), ctx)
 }
 
 // authenticated download href for a raw URL: append
 // sessionKey + token. Same globals→ctx treatment as above.
 export function artifactAuthenticatedDownloadUrl(raw: string, ctx: ArtifactUrlContext): string {
+  return withGatewayCredentials(raw, ctx)
+}
+
+/**
+ * `raw` with sessionKey + token appended — but only when it goes to the
+ * gateway (`isGatewayUrl`: the only place the token may be sent). Any other
+ * URL, or one that does not parse, is returned without credentials: a URL can
+ * come from transcript markup, and a foreign one must never carry them.
+ */
+function withGatewayCredentials(raw: string, ctx: ArtifactUrlContext): string {
   if (!raw) return ''
+  let url: URL
   try {
-    const url = new URL(raw, urlBase())
-    if (ctx.sessionKey) url.searchParams.set('sessionKey', ctx.sessionKey)
-    if (ctx.token) url.searchParams.set('token', ctx.token)
-    return gatewayHref(url)
+    url = new URL(raw, urlBase())
   } catch {
     return raw
   }
+  if (!isGatewayUrl(url.href)) return url.href
+  if (ctx.sessionKey) url.searchParams.set('sessionKey', ctx.sessionKey)
+  if (ctx.token) url.searchParams.set('token', ctx.token)
+  return gatewayHref(url)
 }
 
 /* ── Injected controller dependencies ───────────────────────────────────── */
@@ -717,6 +720,13 @@ export function createArtifactRenderer(deps: ArtifactRendererDeps) {
     let downloadUrl = artifactDownloadUrl(artifact)
     if (!downloadUrl) return
     const name = artifact.name || 'artifact'
+    // The URL can come from a `data-artifact-download` hook in the DOM. Only a
+    // gateway URL gets a ticket or the token; anything else is refused rather
+    // than fetched, so not even the session key or a beacon leaves.
+    if (!isGatewayUrl(downloadUrl)) {
+      toast('Download failed: not a gateway URL', 'warn', 3500)
+      return
+    }
     const sessionKey = deps.getSessionKey() || ''
     let ticketUrl: string | null = null
     if (deps.resolveTicket) {
