@@ -64,6 +64,7 @@ from agentos.paths import default_agentos_home
 from agentos.permissions import configured_cron_default_elevated, configured_default_elevated
 from agentos.router_tiers import DEFAULT_ROUTER_STRATEGY
 from agentos.session.terminal_reply import build_terminal_reply, sanitize_agent_error
+from agentos.tools.ssrf import clear_gateway_listener, set_gateway_listener
 
 log = structlog.get_logger(__name__)
 
@@ -1751,6 +1752,8 @@ class GatewayServer:
                 await asyncio.wait_for(self._task, timeout=UVICORN_STOP_TIMEOUT_S)
             except TimeoutError:
                 self._task.cancel()
+        if self._server is not None:
+            clear_gateway_listener()
 
         if self._services is not None:
             await self._services.close()
@@ -3574,6 +3577,8 @@ async def start_gateway_server(
             setattr(server, "capture_signals", contextlib.nullcontext)
 
         listen_hosts = list(dict.fromkeys([config.host, *extra_listen_hosts]))
+        # Agent HTTP tools refuse this listener (tools.ssrf); publish where it is.
+        set_gateway_listener(listen_hosts, config.port)
         if len(listen_hosts) > 1:
             # One app, several listeners: uvicorn serves pre-bound sockets.
             sockets = [bind_listen_socket(host, config.port) for host in listen_hosts]

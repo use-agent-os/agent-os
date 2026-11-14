@@ -20,6 +20,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   trusted-proxy mode. The gateway already parses `X-Forwarded-For` itself,
   only from a trusted peer; `FORWARDED_ALLOW_IPS` no longer has any effect.
   (AOS-07)
+- Tools: `http_request` refuses the AgentOS gateway's own listener (its port
+  on loopback, `0.0.0.0`, `localhost`, `::1` or this host's addresses), at
+  both the URL check and the connect-time check. In `auth.mode = "none"` the
+  gateway admits loopback callers without credentials, so a prompt-injected
+  model could POST `plan.mode.set off` and lift plan mode during a plan-mode
+  turn. Other local ports stay reachable. `plan.mode.set` with `mode: "off"`
+  is also refused for connections bound to an agent (an agent token, or a
+  connection opened while an agent shell runs); the web console, CLI,
+  desktop app and chat `/plan off` are unaffected. (AOS-17)
 
 ## [2026.11.14] - 2026-11-14
 

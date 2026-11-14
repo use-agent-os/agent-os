@@ -205,8 +205,10 @@ answer, not override tool policy or user instructions.
 
 `http_request` refuses cloud metadata endpoints (`169.254.169.254`,
 `metadata.google.internal`) on every configuration; ordinary private addresses
-stay reachable, so pointing it at a local dev server still works. `web_fetch`
-is stricter and blocks private addresses outright.
+stay reachable, so pointing it at a local dev server still works. The one
+exception is the AgentOS gateway's own listener (its port on loopback, `0.0.0.0`
+or this host's addresses): the agent never gets to call the Control API from
+inside a turn. `web_fetch` is stricter and blocks private addresses outright.
 
 ## Credentials
 
