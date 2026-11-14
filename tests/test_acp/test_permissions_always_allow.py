@@ -52,8 +52,18 @@ def bin_dirs(tmp_path, monkeypatch) -> dict[str, Path]:
     return {"bin": trusted, "evil": evil}
 
 
+def _exe(bin_dirs: dict[str, Path], name: str, *, where: str = "bin") -> Path:
+    """The fake program file as created on disk."""
+    return bin_dirs[where] / (f"{name}.exe" if os.name == "nt" else name)
+
+
+def _key_path(bin_dirs: dict[str, Path], name: str) -> str:
+    """The program as it appears in a remembered key (normcase-d on Windows)."""
+    return os.path.normcase(os.path.normpath(str(_exe(bin_dirs, name))))
+
+
 def _git(bin_dirs: dict[str, Path]) -> str:
-    return os.path.normpath(str(bin_dirs["bin"] / ("git.exe" if os.name == "nt" else "git")))
+    return _key_path(bin_dirs, "git")
 
 
 async def _prompts(bridge: ApprovalQueuePermissionBridge, queue: ApprovalQueue, req: Any) -> bool:
@@ -132,7 +142,7 @@ async def test_finding_payloads_and_variants_reach_the_operator(tmp_path, bin_di
     await _always_allow(bridge, queue, _exec("git status"))
 
     # Forward slashes: a backslash is a shell escape and never matches.
-    evil_git = (bin_dirs["evil"] / ("git.exe" if os.name == "nt" else "git")).as_posix()
+    evil_git = _exe(bin_dirs, "git", where="evil").as_posix()
     payloads = [*BYPASSES, f"{evil_git} status"]
     leaked = [p for p in payloads if not await _prompts(bridge, queue, _exec(p))]
     assert leaked == []
@@ -141,7 +151,7 @@ async def test_finding_payloads_and_variants_reach_the_operator(tmp_path, bin_di
     # The grant still covers the command it was given for.
     assert not await _prompts(bridge, queue, _exec("git status"))
     assert not await _prompts(bridge, queue, _exec("git status --porcelain -- src"))
-    assert not await _prompts(bridge, queue, _exec(f"{Path(_git(bin_dirs)).as_posix()} status"))
+    assert not await _prompts(bridge, queue, _exec(f"{_exe(bin_dirs, 'git').as_posix()} status"))
     assert not await _prompts(bridge, queue, _exec("git 'status' \"--short\""))
     # ... and nothing beyond the subcommand.
     assert await _prompts(bridge, queue, _exec("git push"))
@@ -241,16 +251,15 @@ async def test_shell_wrapped_argv_is_remembered_by_its_inner_command(tmp_path, b
 def test_command_prefix_resolves_the_program(bin_dirs) -> None:
     git = _git(bin_dirs)
     assert command_prefix("git push --force origin") == f"{git} push"
-    assert command_prefix(f"{Path(git).as_posix()} push") == f"{git} push"
-    rm = os.path.normpath(str(bin_dirs["bin"] / ("rm.exe" if os.name == "nt" else "rm")))
-    assert command_prefix("rm -rf /") == rm
+    assert command_prefix(f"{_exe(bin_dirs, 'git').as_posix()} push") == f"{git} push"
+    assert command_prefix("rm -rf /") == _key_path(bin_dirs, "rm")
     assert command_prefix("") is None
     assert command_prefix("git status && id") is None
     assert command_prefix("git") == git
 
 
 def test_remember_key_is_none_when_not_rememberable(bin_dirs) -> None:
-    npm = os.path.normpath(str(bin_dirs["bin"] / ("npm.exe" if os.name == "nt" else "npm")))
+    npm = _key_path(bin_dirs, "npm")
     assert remember_key(perm_request(raw_input={"command": ["npm", "test"]})) == (
         "execute",
         f"{npm} test",
@@ -258,3 +267,28 @@ def test_remember_key_is_none_when_not_rememberable(bin_dirs) -> None:
     assert remember_key(perm_request(raw_input={"command": "npm test | sh"})) is None
     assert remember_key(perm_request(tool_kind="edit", title="x")) == ("edit", "")
     assert remember_key(perm_request(tool_kind=None, title="x", raw_input={})) == ("other", "")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="PATHEXT and case-insensitive paths are Windows")
+def test_windows_key_is_stable_across_pathext_and_path_casing(bin_dirs, monkeypatch) -> None:
+    # PATHEXT is upper-case by default, so a bare ``git`` resolves as ``git.EXE``;
+    # the file on disk is ``git.exe`` and an operator may type either spelling.
+    monkeypatch.setenv("PATHEXT", ".COM;.EXE;.BAT")
+    granted = command_prefix("git status")
+    assert granted == f"{_git(bin_dirs)} status"
+    # Forward slashes: a backslash is a shell escape and never matches.
+    assert command_prefix(f"{_exe(bin_dirs, 'git').as_posix()} status") == granted
+    upper = str(_exe(bin_dirs, "git")).upper()
+    assert command_prefix(f"{Path(upper).as_posix()} status") == granted
+    # Another directory is still another program.
+    assert command_prefix(f"{_exe(bin_dirs, 'git', where='evil').as_posix()} status") != granted
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX paths are case-sensitive")
+def test_posix_key_keeps_path_case(bin_dirs) -> None:
+    other = bin_dirs["bin"] / "Git"
+    if other.exists():
+        pytest.skip("case-insensitive filesystem")
+    _make_exe(bin_dirs["bin"], "Git")
+    assert command_prefix(f"{other} status") == f"{other} status"
+    assert command_prefix(f"{other} status") != command_prefix("git status")

@@ -18,7 +18,7 @@ import pytest
 from agentos.gateway.approval_queue import get_approval_queue, reset_approval_queue
 from agentos.sandbox.integration import reset_runtime
 from agentos.sandbox.intent_cache import reset_intent_cache
-from agentos.tools.builtin import shell
+from agentos.tools.builtin import shell, shell_policy
 from agentos.tools.types import CallerKind, ToolContext, ToolError, current_tool_context
 
 _OPERATOR = "agent:main:operator"
@@ -127,8 +127,17 @@ async def test_exact_retry_is_granted(dirs) -> None:
 
 
 @pytest.mark.asyncio
-async def test_exec_command_env_is_on_the_approval_card(dirs) -> None:
+async def test_exec_command_env_is_on_the_approval_card(
+    dirs, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ws_a, _other = dirs
+    # The default lists differ by platform (Windows hard-blocks ``rm`` and
+    # warns on nothing); pin one that sends ``_CMD`` to the approval card.
+    monkeypatch.setattr(
+        shell_policy,
+        "_policy",
+        shell_policy.SafeBinPolicy(denylist=[], allowlist=[], warnlist=[r"\brm\b"]),
+    )
 
     pending = json.loads(
         await shell.exec_command(_CMD, workdir=str(ws_a), env={"LD_PRELOAD": "/tmp/x.so"})

@@ -10,6 +10,7 @@ workdir is only a chdir inside it, and one outside every mount is refused.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,13 @@ from agentos.sandbox.types import (
 )
 from agentos.tools.builtin import git, shell
 from agentos.tools.types import CallerKind, ToolContext, current_tool_context
+
+#: bubblewrap (Linux) and seatbelt (macOS) model in-sandbox paths as POSIX;
+#: on Windows ``Path("/workspace")`` is not absolute and neither backend runs.
+POSIX_BACKENDS = pytest.mark.skipif(
+    sys.platform.startswith("win"),
+    reason="bubblewrap/seatbelt backends model POSIX sandbox paths",
+)
 
 
 @pytest.fixture
@@ -120,9 +128,18 @@ async def test_exec_workdir_inside_workspace_mounts_root_and_chdirs(sandboxed_ws
 
     assert len(captured) == 1
     request = captured[0]
-    mounts = [(str(m.host_path), str(m.sandbox_path), m.mode) for m in request.policy.mounts]
-    assert mounts == [(str(ws), "/workspace", "rw")]
+    mounts = [(m.host_path, m.sandbox_path, m.mode) for m in request.policy.mounts]
+    assert mounts == [(ws, Path("/workspace"), "rw")]
     assert request.cwd == ws / "sub"
+
+
+@POSIX_BACKENDS
+@pytest.mark.asyncio
+async def test_backends_chdir_inside_the_workspace_mount(sandboxed_ws) -> None:
+    ws, _fakehome, captured = sandboxed_ws
+
+    await shell.exec_command("true", workdir="sub")
+    request = captured[0]
 
     argv = bubblewrap.build_bwrap_argv(request)
     bind = argv.index("--bind")
@@ -171,6 +188,7 @@ async def test_git_sandbox_mount_is_workspace_not_workdir(sandboxed_ws) -> None:
     assert len(captured) == 1
 
 
+@POSIX_BACKENDS
 def test_bwrap_refuses_cwd_outside_every_mount(tmp_path: Path) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -181,6 +199,7 @@ def test_bwrap_refuses_cwd_outside_every_mount(tmp_path: Path) -> None:
         bubblewrap.build_bwrap_argv(request)
 
 
+@POSIX_BACKENDS
 def test_seatbelt_refuses_cwd_outside_every_mount(tmp_path: Path) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()

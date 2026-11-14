@@ -217,6 +217,11 @@ def _resolve_program(token: str) -> str | None:
     Absolute paths are taken as given; bare names are looked up on the
     absolute ``PATH`` entries only (an empty or ``.`` entry would search the
     current directory). Relative paths and unresolvable names give ``None``.
+
+    The path is ``os.path.normcase``-d: on Windows, ``git`` (found as
+    ``git`` + a ``PATHEXT`` entry such as ``.EXE``) and ``C:/bin/git.exe``
+    name the same file and must give the same remembered key. On POSIX
+    ``normcase`` is the identity.
     """
     if not token or any(ch.isspace() or ch in "*?[]~" for ch in token):
         return None
@@ -225,7 +230,7 @@ def _resolve_program(token: str) -> str | None:
         if not os.path.isabs(token):
             return None
         candidate = os.path.normpath(token)
-        return candidate if _is_executable_file(candidate) else None
+        return os.path.normcase(candidate) if _is_executable_file(candidate) else None
     names = [token]
     if os.name == "nt":
         names += [token + ext for ext in os.environ.get("PATHEXT", ".EXE").split(os.pathsep) if ext]
@@ -235,7 +240,7 @@ def _resolve_program(token: str) -> str | None:
         for name in names:
             candidate = os.path.normpath(os.path.join(entry, name))
             if _is_executable_file(candidate):
-                return candidate
+                return os.path.normcase(candidate)
     return None
 
 
