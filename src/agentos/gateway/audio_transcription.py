@@ -12,12 +12,11 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from agentos.gateway.auth import token_matches
+from agentos.gateway.auth import resolve_http_auth
 from agentos.gateway.config import GatewayConfig
 from agentos.gateway.uploads import (
     _MULTIPART_FRAMING_ALLOWANCE,
     RequestBodyTooLargeError,
-    _extract_authorization_token,
     bounded_request,
     declared_content_length,
 )
@@ -94,19 +93,15 @@ def register_audio_transcription_routes(
     """Register POST /api/audio/transcribe for browser-recorded audio."""
 
     async def transcribe_handler(request: Request) -> JSONResponse:
-        if config.auth.mode == "token":
-            if config.auth.token and not token_matches(
-                _extract_authorization_token(request), config.auth.token
-            ):
-                return JSONResponse(
-                    {
-                        "error": (
-                            "Authorization header (Bearer ...) required for /api/audio/transcribe"
-                        ),
-                        "code": "UNAUTHORIZED",
-                    },
-                    status_code=401,
-                )
+        # Shared admission in every auth mode (see uploads.upload_handler).
+        if resolve_http_auth(config, request) is None:
+            return JSONResponse(
+                {
+                    "error": "Authorization header (Bearer ...) required for /api/audio/transcribe",
+                    "code": "UNAUTHORIZED",
+                },
+                status_code=401,
+            )
 
         if not getattr(config.audio, "enabled", False):
             return JSONResponse(

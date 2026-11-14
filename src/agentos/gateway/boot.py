@@ -64,6 +64,7 @@ from agentos.paths import default_agentos_home
 from agentos.permissions import configured_cron_default_elevated, configured_default_elevated
 from agentos.router_tiers import DEFAULT_ROUTER_STRATEGY
 from agentos.session.terminal_reply import build_terminal_reply, sanitize_agent_error
+from agentos.tools.ssrf import clear_gateway_listener, set_gateway_listener
 
 log = structlog.get_logger(__name__)
 
@@ -1375,9 +1376,41 @@ FORCE_DRAIN_TIMEOUT_S = 2.0
 WS_CLOSE_TIMEOUT_S = 2.0
 #: uvicorn's own bound on waiting for open HTTP connections at shutdown.
 UVICORN_GRACEFUL_SHUTDOWN_S = 5
+#: Keep ``scope["client"]`` the real transport peer. uvicorn's default
+#: (``proxy_headers=True``, ``forwarded_allow_ips="127.0.0.1"``) rewrites it
+#: from ``X-Forwarded-For`` for any loopback peer, so a local process could
+#: claim to be a trusted proxy. Admission reads the transport peer, and the
+#: gateway parses ``X-Forwarded-For`` itself, only from a trusted peer
+#: (``access.resolve_client_ip``). ``forwarded_allow_ips`` is pinned empty too
+#: so a ``FORWARDED_ALLOW_IPS`` env var cannot widen it.
+UVICORN_PEER_KWARGS: dict[str, Any] = {"proxy_headers": False, "forwarded_allow_ips": ""}
 #: How long close() waits for uvicorn to finish (its graceful wait included)
 #: before cancelling it.
 UVICORN_STOP_TIMEOUT_S = 10.0
+
+
+def uvicorn_config_kwargs(app: Any, config: GatewayConfig) -> dict[str, Any]:
+    """The ``uvicorn.Config`` keyword arguments ``gateway run`` serves with."""
+
+    kwargs: dict[str, Any] = {
+        "app": app,
+        "host": config.host,
+        "port": config.port,
+        "log_level": "info" if not config.debug else "debug",
+        "access_log": config.debug,
+        # The post-handshake ceiling ``hello-ok.policy.max_payload``
+        # advertises. The protocol class holds every connection to
+        # MAX_PREAUTH_PAYLOAD_BYTES until its handshake succeeds, refusing
+        # a larger pre-auth message before reading it.
+        "ws_max_size": MAX_PAYLOAD_BYTES,
+        "ws": GatewayWebSocketProtocol,
+        "timeout_graceful_shutdown": UVICORN_GRACEFUL_SHUTDOWN_S,
+        **UVICORN_PEER_KWARGS,
+    }
+    if config.tls.keyfile and config.tls.certfile:
+        kwargs["ssl_keyfile"] = config.tls.keyfile
+        kwargs["ssl_certfile"] = config.tls.certfile
+    return kwargs
 
 
 @dataclass
@@ -1719,6 +1752,8 @@ class GatewayServer:
                 await asyncio.wait_for(self._task, timeout=UVICORN_STOP_TIMEOUT_S)
             except TimeoutError:
                 self._task.cancel()
+        if self._server is not None:
+            clear_gateway_listener()
 
         if self._services is not None:
             await self._services.close()
@@ -3544,26 +3579,7 @@ async def start_gateway_server(
         server_handle._restarter = restarter
         set_restarter(restarter)
 
-        uvicorn_kwargs: dict[str, Any] = {
-            "app": app,
-            "host": config.host,
-            "port": config.port,
-            "log_level": "info" if not config.debug else "debug",
-            "access_log": config.debug,
-            # The post-handshake ceiling ``hello-ok.policy.max_payload``
-            # advertises. The protocol class holds every connection to
-            # MAX_PREAUTH_PAYLOAD_BYTES until its handshake succeeds, refusing
-            # a larger pre-auth message before reading it.
-            "ws_max_size": MAX_PAYLOAD_BYTES,
-            "ws": GatewayWebSocketProtocol,
-            "timeout_graceful_shutdown": UVICORN_GRACEFUL_SHUTDOWN_S,
-        }
-        if config.tls.keyfile and config.tls.certfile:
-            uvicorn_kwargs["ssl_keyfile"] = config.tls.keyfile
-            uvicorn_kwargs["ssl_certfile"] = config.tls.certfile
-        uv_config = uvicorn.Config(
-            **uvicorn_kwargs,
-        )
+        uv_config = uvicorn.Config(**uvicorn_config_kwargs(app, config))
         server = uvicorn.Server(uv_config)
         server_handle._server = server
         if server_handle.install_signal_handlers():
@@ -3573,6 +3589,8 @@ async def start_gateway_server(
             setattr(server, "capture_signals", contextlib.nullcontext)
 
         listen_hosts = list(dict.fromkeys([config.host, *extra_listen_hosts]))
+        # Agent HTTP tools refuse this listener (tools.ssrf); publish where it is.
+        set_gateway_listener(listen_hosts, config.port)
         if len(listen_hosts) > 1:
             # One app, several listeners: uvicorn serves pre-bound sockets.
             sockets = [bind_listen_socket(host, config.port) for host in listen_hosts]

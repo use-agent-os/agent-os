@@ -283,11 +283,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return not _is_under(self._ui_prefix + _API_PREFIX, path)
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        # Skip auth for public endpoints and WebSocket upgrades (WS handles own auth)
+        # Skip auth for public endpoints. WebSocket handshakes never reach a
+        # BaseHTTPMiddleware (websocket scopes bypass it and authenticate in
+        # websocket.py), so an ``Upgrade`` header on an http scope is just a
+        # client-controlled header and must never exempt a request.
         if request.url.path in self.PUBLIC_PATHS or self._is_ui_path(request.url.path):
-            return await call_next(request)  # type: ignore[no-any-return]
-
-        if request.headers.get("upgrade", "").lower() == "websocket":
             return await call_next(request)  # type: ignore[no-any-return]
 
         if request.url.path.startswith(_SELF_AUTHENTICATED_PREFIXES):

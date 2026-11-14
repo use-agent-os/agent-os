@@ -15,6 +15,9 @@ from agentos.gateway.config import GatewayConfig
 from agentos.gateway.middleware import ErrorHandlingMiddleware
 from agentos.gateway.rpc.registry import RpcContext
 
+# auth.mode=none admits only a loopback peer (TestClient's default is "testclient").
+_LOOPBACK_PEER = ("127.0.0.1", 50000)
+
 
 def test_error_handling_middleware_production_returns_generic_error_and_error_id() -> None:
     """In production mode (debug=False), unhandled exceptions return generic error + error_id."""
@@ -22,9 +25,7 @@ def test_error_handling_middleware_production_returns_generic_error_and_error_id
     fake_path = "/" + "home/developer/.agentos/db.sqlite"
 
     async def _failing_endpoint(request: Request) -> JSONResponse:
-        raise RuntimeError(
-            f"SQL query failed at {fake_path} with {fake_secret}"
-        )
+        raise RuntimeError(f"SQL query failed at {fake_path} with {fake_secret}")
 
     app = Starlette(
         routes=[Route("/fail", _failing_endpoint, methods=["GET"])],
@@ -52,9 +53,7 @@ def test_error_handling_middleware_debug_returns_redacted_exception() -> None:
     fake_secret = "sk-ant-" + "B" * 32
 
     async def _failing_endpoint(request: Request) -> JSONResponse:
-        raise RuntimeError(
-            f"Connection failed with token {fake_secret} on internal host"
-        )
+        raise RuntimeError(f"Connection failed with token {fake_secret} on internal host")
 
     app = Starlette(
         routes=[Route("/fail", _failing_endpoint, methods=["GET"])],
@@ -79,9 +78,7 @@ def test_audio_transcription_route_production_returns_generic_error() -> None:
 
     class _FailingProvider:
         async def transcribe_audio(self, request: Any) -> Any:
-            raise RuntimeError(
-                f"ElevenLabs auth error at /var/run/secret {fake_secret}"
-            )
+            raise RuntimeError(f"ElevenLabs auth error at /var/run/secret {fake_secret}")
 
     app = Starlette()
     config = GatewayConfig()
@@ -95,7 +92,7 @@ def test_audio_transcription_route_production_returns_generic_error() -> None:
         provider_factory=lambda _cfg: _FailingProvider(),
     )
 
-    with TestClient(app) as client:
+    with TestClient(app, client=_LOOPBACK_PEER) as client:
         resp = client.post(
             "/api/audio/transcribe",
             files={"file": ("test.webm", b"audio-bytes", "audio/webm")},
@@ -130,7 +127,7 @@ def test_audio_transcription_route_debug_redacts_provider_exception() -> None:
         provider_factory=lambda _cfg: _FailingProvider(),
     )
 
-    with TestClient(app) as client:
+    with TestClient(app, client=_LOOPBACK_PEER) as client:
         resp = client.post(
             "/api/audio/transcribe",
             files={"file": ("test.webm", b"audio-bytes", "audio/webm")},

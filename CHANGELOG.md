@@ -107,6 +107,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `sessions_list` and `sessions_send` reach only their own session and the
   sessions it spawned. A cron job that summarized another session's
   transcript through `sessions_history` now gets "Session not found".
+- Gateway: a plain HTTP request carrying an `Upgrade: websocket` header no
+  longer skips authentication. `/api/system/status`, `/metrics`, legacy
+  downloads and, in trusted-proxy mode, file uploads and audio transcription
+  were reachable without a token or trusted-proxy peer. Uploads and
+  transcription now run the same admission check as RPC in every auth mode,
+  so in `auth.mode = "none"` they also require a loopback peer. Real
+  WebSocket connections are unaffected. (AOS-06)
+- Gateway: `agentos gateway run` turns uvicorn's proxy-header rewriting off.
+  uvicorn's default replaced the peer address with `X-Forwarded-For` for any
+  loopback caller, so a local process could pose as a trusted proxy in
+  trusted-proxy mode. The gateway already parses `X-Forwarded-For` itself,
+  only from a trusted peer; `FORWARDED_ALLOW_IPS` no longer has any effect.
+  (AOS-07)
+- Tools: `http_request` refuses the AgentOS gateway's own listener (its port
+  on loopback, `0.0.0.0`, `localhost`, `::1` or this host's addresses), at
+  both the URL check and the connect-time check. In `auth.mode = "none"` the
+  gateway admits loopback callers without credentials, so a prompt-injected
+  model could POST `plan.mode.set off` and lift plan mode during a plan-mode
+  turn. Other local ports stay reachable. `plan.mode.set` with `mode: "off"`
+  is also refused for connections bound to an agent (an agent token, or a
+  connection opened while an agent shell runs); the web console, CLI,
+  desktop app and chat `/plan off` are unaffected. (AOS-17)
 
 ### Changed
 - Editing the config file by hand no longer applies the operator-only
