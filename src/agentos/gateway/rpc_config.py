@@ -524,28 +524,17 @@ def _refuse_agent_trading_paths(ctx: RpcContext, paths: list[str]) -> None:
         )
 
 
-#: Settings a connection the gateway recognizes as an agent's (an agent token
-#: or an open exec window) may not touch at all, not even to clear them.
-_AGENT_FORBIDDEN_ROOTS = ("tools.invoke", "hooks")
-
-
 def _refuse_agent_file_only_paths(ctx: RpcContext, paths: list[str]) -> None:
-    from agentos.gateway.agent_surface import agent_binding
+    """Settings an agent's connection may not touch at all, not even to clear them.
 
-    binding = agent_binding(ctx)
-    if binding is None or binding.via == "unbound":
-        return
-    touched = [
-        p
-        for p in paths
-        for root in _AGENT_FORBIDDEN_ROOTS
-        if p == root or str(p).startswith(f"{root}.") or root.startswith(f"{p}.")
-    ]
-    if touched:
-        raise ValueError(
-            "these settings are the user's to change in agentos.toml; an agent cannot set "
-            + ", ".join(sorted(set(touched)))
-        )
+    The operator-only roots (``config_commit.OPERATOR_ONLY_CONFIG_ROOTS``)
+    for a connection the gateway recognizes as an agent's (token, process or
+    window). Checked on the paths the request names, for a clear error;
+    ``commit_config`` checks the computed diff of every writer again.
+    """
+    from agentos.gateway.config_commit import refuse_agent_operator_only_change
+
+    refuse_agent_operator_only_change(ctx, paths)
 
 
 _BIND_READONLY_PATHS = frozenset({"host", "port"})
@@ -992,6 +981,9 @@ async def _handle_config_apply(params: dict | None, ctx: RpcContext) -> dict[str
     _inherit_runtime_secrets(ctx.config, new_config)
     _clear_runtime_secret_paths(new_config, _collect_paths(config_payload) - redacted_paths)
     changed_paths = diff_paths(old_payload, new_config.model_dump(mode="python"))
+    # The full-replace sibling of config.set/patch: the same refusals, on what
+    # the replacement actually changes.
+    _refuse_agent_trading_paths(ctx, sorted(changed_paths))
     _refuse_agent_file_only_paths(ctx, sorted(changed_paths))
     result = commit_config(
         ctx,

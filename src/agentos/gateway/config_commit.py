@@ -410,6 +410,38 @@ def _prepare_for_persistence(config: Any, changed_paths: set[str]) -> None:
     resolve_llm_runtime_config(config)
 
 
+def _refuse_agent_config_change(
+    ctx: Any, source: Any, new_config: Any, changed_paths: Iterable[str] | None
+) -> None:
+    """The one gate every config writer passes: no agent sets the operator's settings.
+
+    ``config.set`` / ``config.patch`` refused the trading limits by the path
+    the caller *named*, and ``config.apply`` -- the full-replace sibling --
+    did not refuse them at all. The check here runs on what actually changes
+    (the caller's list plus a diff of the two configs), for every RPC writer:
+    set, patch, apply, onboarding, heartbeat and whatever comes next.
+    ``trading`` is refused for any binding, unbound included; the other
+    operator-only roots for a connection the gateway recognizes as an agent's.
+    """
+    from agentos.gateway.agent_surface import agent_binding
+
+    if agent_binding(ctx) is None:
+        return
+    paths = {str(path) for path in (changed_paths or ())}
+    dump_old = getattr(source, "model_dump", None)
+    dump_new = getattr(new_config, "model_dump", None)
+    if callable(dump_old) and callable(dump_new):
+        from agentos.gateway.rpc_config import diff_paths
+
+        paths |= diff_paths(dump_old(mode="python"), dump_new(mode="python"))
+    trading = sorted(p for p in paths if p == "trading" or p.startswith("trading."))
+    if trading:
+        raise ValueError(
+            "trading settings are the user's to change; an agent cannot set " + ", ".join(trading)
+        )
+    refuse_agent_operator_only_change(ctx, paths)
+
+
 def commit_config(
     ctx: RpcContext,
     new_config: Any,
@@ -438,6 +470,7 @@ def commit_config(
         if running_config is not None
         else new_config
     )
+    _refuse_agent_config_change(ctx, source, new_config, changed_paths)
     has_existing_runtime = running_config is not None or source_config is not None
     if new_config.auth.mode == "token" and not new_config.auth.token:
         source_had_missing_token_mode = (
