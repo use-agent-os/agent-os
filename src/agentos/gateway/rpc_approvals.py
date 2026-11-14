@@ -15,10 +15,31 @@ from agentos.application.approval_rpc import (
     approval_snapshot_rpc_payload,
     approval_wait_decision_rpc_payload,
 )
+from agentos.gateway.agent_surface import recognized_agent
 from agentos.gateway.idempotency import run_idempotent
-from agentos.gateway.rpc import RpcContext, get_dispatcher
+from agentos.gateway.rpc import RpcContext, RpcHandlerError, get_dispatcher
 
 _d = get_dispatcher()
+
+
+def require_human(ctx: RpcContext, action: str) -> None:
+    """Refuse a connection the gateway recognizes as an agent's.
+
+    Approving a prompt, changing how prompts are answered and forgetting
+    remembered answers are the user's decisions. A connection that carries an
+    agent token, comes from a process the gateway spawned, or opened while an
+    agent shell was running is refused, as ``tools.invoke`` refuses it.
+    ``unbound`` is not: the user's own web console on loopback is unbound.
+    """
+    binding = recognized_agent(ctx)
+    if binding is not None:
+        raise RpcHandlerError(
+            "approvals.operator_required",
+            f"{action} is the user's decision; an agent cannot make it. "
+            "Ask the user to answer it in the app (an agent's shell, or a "
+            "console opened while one was running, is refused).",
+            details=binding.to_dict(),
+        )
 
 
 @_d.method("exec.approvals.get")
@@ -29,6 +50,7 @@ async def _handle_exec_approvals_get(params: dict | None, ctx: RpcContext) -> di
 
 @_d.method("exec.approvals.set")
 async def _handle_exec_approvals_set(params: dict | None, ctx: RpcContext) -> None:
+    require_human(ctx, "Changing the approval mode")
     if not isinstance(params, dict) or "mode" not in params:
         raise ValueError("params.mode is required")
     queue = get_approval_queue()
@@ -55,6 +77,7 @@ async def _handle_exec_approvals_node_get(params: dict | None, ctx: RpcContext) 
 
 @_d.method("exec.approvals.node.set")
 async def _handle_exec_approvals_node_set(params: dict | None, ctx: RpcContext) -> None:
+    require_human(ctx, "Changing the approval mode")
     if not isinstance(params, dict) or "nodeId" not in params:
         raise ValueError("params.nodeId is required")
     if "mode" not in params:
@@ -117,6 +140,7 @@ async def _handle_exec_approval_forget(params: dict | None, ctx: RpcContext) -> 
     """
     from agentos.application.intent_cache import get_intent_cache
 
+    require_human(ctx, "Forgetting remembered approvals")
     cache = get_intent_cache()
     if isinstance(params, dict):
         target = params.get("target")
@@ -127,6 +151,7 @@ async def _handle_exec_approval_forget(params: dict | None, ctx: RpcContext) -> 
 
 @_d.method("exec.approval.resolve")
 async def _handle_exec_approval_resolve(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    require_human(ctx, "Answering an approval")
     return await run_idempotent(
         "exec.approval.resolve", params, lambda: _exec_approval_resolve(params)
     )
@@ -211,6 +236,7 @@ async def _handle_plugin_approval_wait_decision(
 
 @_d.method("plugin.approval.resolve")
 async def _handle_plugin_approval_resolve(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    require_human(ctx, "Answering an approval")
     return await run_idempotent(
         "plugin.approval.resolve", params, lambda: _plugin_approval_resolve(params)
     )

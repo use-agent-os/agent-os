@@ -472,6 +472,12 @@ def create_gateway_app(
         ctx = _make_ctx(request)
         if not ctx.access.admitted:
             return JSONResponse({"error": "control connection required"}, status_code=403)
+        from agentos.gateway.agent_surface import recognized_agent
+
+        if recognized_agent(ctx) is not None:
+            # Elevating a session (and so auto-approving its pending rows) is
+            # the user's decision, never the agent's (rpc_approvals.require_human).
+            return JSONResponse({"error": "Not available to an agent"}, status_code=403)
         session_key = str(body.get("sessionKey") or body.get("session_key") or "").strip()
         if not session_key:
             return JSONResponse({"error": "sessionKey is required"}, status_code=400)

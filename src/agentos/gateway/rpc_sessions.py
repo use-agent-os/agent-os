@@ -162,7 +162,14 @@ _sniff_mime_from_bytes = _attachment_ingest.sniff_mime_from_bytes
 
 
 def _trusted_elevated_hint(ctx: RpcContext, source_hint: dict[str, Any]) -> str | None:
-    """Return an elevated hint from an admitted Control connection."""
+    """Return an elevated hint from an admitted Control connection.
+
+    Never from one the gateway recognizes as an agent's (token, process,
+    window): ``chat.send`` with ``_source.elevated = "full"`` from an agent's
+    shell would run its own next turn with the sensitive-path floor and
+    approvals off -- the same self-elevation ``/api/elevated-mode`` refuses.
+    """
+    from agentos.gateway.agent_surface import recognized_agent
 
     value = source_hint.get("elevated")
     if (
@@ -171,6 +178,15 @@ def _trusted_elevated_hint(ctx: RpcContext, source_hint: dict[str, Any]) -> str 
         and ctx.access.admitted
         and ctx.access.surface is ConnectionSurface.CONTROL
     ):
+        binding = recognized_agent(ctx)
+        if binding is not None:
+            log.warning(
+                "sessions.elevated_hint_refused",
+                mode=value,
+                via=binding.via,
+                session_key=binding.session_key,
+            )
+            return None
         return value
     return None
 

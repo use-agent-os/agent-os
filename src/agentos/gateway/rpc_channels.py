@@ -87,9 +87,7 @@ def _telegram_pairing_rows(ctx: RpcContext) -> list[dict[str, Any]]:
                 "locked_until": pairing["locked_until"],
                 "groups_enabled": bool(entry.get("groups_enabled", False)),
                 "group_chat_ids": list(entry.get("group_chat_ids") or []),
-                "group_mention_required": bool(
-                    entry.get("group_mention_required", True)
-                ),
+                "group_mention_required": bool(entry.get("group_mention_required", True)),
             }
         rows.append({"name": name, "type": "telegram", **snapshot})
     return rows
@@ -323,9 +321,7 @@ async def _resolve_pairing_request(
     store = getattr(adapter, "pairing_store", None) or ChannelPairingStore()
     snapshot_fn = getattr(adapter, "access_snapshot", None)
     snapshot = snapshot_fn() if callable(snapshot_fn) else store.snapshot(channel_name)
-    pending = {
-        str(item.get("sender_id") or "") for item in snapshot.get("pending", [])
-    }
+    pending = {str(item.get("sender_id") or "") for item in snapshot.get("pending", [])}
     if sender_id not in pending:
         raise KeyError(f"Telegram access request not found: {sender_id}")
 
@@ -334,9 +330,7 @@ async def _resolve_pairing_request(
         request = resolve(sender_id, approved=approved)
     else:
         request_entry = next(
-            item
-            for item in snapshot["pending"]
-            if str(item.get("sender_id") or "") == sender_id
+            item for item in snapshot["pending"] if str(item.get("sender_id") or "") == sender_id
         )
         request = (
             store.approve(channel_name, str(request_entry.get("code") or ""))
@@ -367,6 +361,11 @@ async def _handle_channels_pairing_approve(
     params: dict | None,
     ctx: RpcContext,
 ) -> dict[str, Any]:
+    # Letting a new sender in is the user's decision, like any approval; an
+    # agent's connection may deny, revoke or clear, never admit.
+    from agentos.gateway.rpc_approvals import require_human
+
+    require_human(ctx, "Pairing a channel sender")
     return await _resolve_pairing_request(params, ctx, approved=True)
 
 

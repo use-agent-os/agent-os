@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sqlite3
 import time
@@ -23,6 +24,8 @@ from agentos.application.approval_events import (
 from agentos.application.gateway_pidlock import live_gateway_pid
 from agentos.paths import state_dir
 from agentos.util.bounded_registry import BoundedRegistry
+
+_log = logging.getLogger(__name__)
 
 VALID_APPROVAL_MODES = frozenset({"auto-approve", "auto-deny", "prompt"})
 VALID_ELEVATED_MODES = frozenset({"on", "bypass", "full"})
@@ -75,6 +78,20 @@ def claim_local_approval_surface() -> None:
     """Declare that this process can present approval prompts itself."""
     global _LOCAL_APPROVAL_SURFACE
     _LOCAL_APPROVAL_SURFACE = True
+
+
+#: The approvals this process decided: ``(database, approval_id)`` -> the
+#: params the decision was written with. The queue re-reads its rows from
+#: SQLite on every ``get``/``wait``, and the file is a same-user write away
+#: for an agent's shell, so ``UPDATE approval_queue SET approved = 1`` (or a
+#: forged row carrying ``elevatedMode``) used to approve the agent's own
+#: command without any of the gateway's checks. Every legitimate resolver --
+#: the RPC/HTTP handlers, channel buttons, ACP, policy, the standalone CLI --
+#: resolves through :meth:`ApprovalQueue.resolve` in the process that asked,
+#: so an approval this map does not vouch for, or whose params changed since,
+#: is read as a denial. Module-level so every queue object in the process
+#: shares it; nothing outside the process can add to it.
+_LOCAL_DECISIONS: dict[tuple[str, str], str] = {}
 
 
 class ApprovalQueueOwnedByGatewayError(RuntimeError):
@@ -153,6 +170,11 @@ class ApprovalQueue:
         )
 
         self._db_path = Path(db_path or os.fspath(_DEFAULT_APPROVAL_QUEUE_PATH))
+        self._foreign_logged: set[str] = set()
+        try:
+            self._decision_db = os.fspath(self._db_path.resolve())
+        except (OSError, RuntimeError):
+            self._decision_db = os.fspath(self._db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(
             self._db_path,
@@ -207,6 +229,9 @@ class ApprovalQueue:
             parsed = {}
         return parsed if isinstance(parsed, dict) else {}
 
+    def _decision_key(self, approval_id: str) -> tuple[str, str]:
+        return (self._decision_db, approval_id)
+
     def _row_to_entry(self, row: sqlite3.Row) -> PendingApproval:
         aid = str(row["approval_id"])
         existing = self._pending.get(aid)
@@ -214,13 +239,21 @@ class ApprovalQueue:
         raw_payload = row["payload"] if "payload" in keys else None
         raw_expires = row["expires_at"] if "expires_at" in keys else None
         raw_audience = row["audience"] if "audience" in keys else None
+        approved = bool(row["approved"])
+        if approved and _LOCAL_DECISIONS.get(self._decision_key(aid)) != row["params"]:
+            # Approved on disk, but not by this process (or not on these
+            # params): someone wrote the database directly. Fail closed.
+            if aid not in self._foreign_logged:
+                self._foreign_logged.add(aid)
+                _log.warning("approval_queue.foreign_approval_ignored approval_id=%s", aid)
+            approved = False
         return PendingApproval(
             approval_id=aid,
             namespace=str(row["namespace"]),
             params=self._deserialize_params(row["params"]),
             created_at=float(row["created_at"]),
             resolved=bool(row["resolved"]),
-            approved=bool(row["approved"]),
+            approved=approved,
             consumed=bool(row["consumed"]),
             payload=self._deserialize_params(raw_payload) if raw_payload is not None else None,
             expires_at=float(raw_expires) if raw_expires is not None else None,
@@ -527,12 +560,15 @@ class ApprovalQueue:
         if approved and elevated_mode in VALID_ELEVATED_MODES:
             params["elevatedMode"] = elevated_mode
         payload_json = self._serialize_params(payload) if isinstance(payload, dict) else None
+        params_json = self._serialize_params(params)
         cursor = self._conn.execute(
             "UPDATE approval_queue "
             "SET resolved = 1, approved = ?, params = ?, payload = COALESCE(?, payload) "
             "WHERE approval_id = ? AND resolved = 0",
-            (1 if approved else 0, self._serialize_params(params), payload_json, approval_id),
+            (1 if approved else 0, params_json, payload_json, approval_id),
         )
+        if approved and cursor.rowcount == 1:
+            _LOCAL_DECISIONS[self._decision_key(approval_id)] = params_json
         if cursor.rowcount != 1:
             self._conn.rollback()
             entry = self.get(approval_id)
