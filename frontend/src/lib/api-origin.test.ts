@@ -61,6 +61,24 @@ describe('api-origin', () => {
     expect(gatewayOrigin()).toBe('')
   })
 
+  it('isGatewayUrl compares whole origins, so no look-alike URL passes (AOS-11)', () => {
+    window.__AGENTOS_ENV__ = { apiOrigin: 'http://127.0.0.1:18791' }
+    expect(isGatewayUrl('http://127.0.0.1:18791/api/v1/artifacts/1')).toBe(true)
+    for (const url of [
+      'https://attacker.invalid/px',
+      'http://127.0.0.1:18791.attacker.invalid/px',
+      'http://127.0.0.1:18791@attacker.invalid/px',
+      'http://127.0.0.1:187910/px',
+      'https://127.0.0.1:18791/px',
+      'http://localhost:18791/px',
+      '//attacker.invalid/px',
+      'javascript:alert(1)',
+      'not a url',
+    ]) {
+      expect(isGatewayUrl(url), url).toBe(false)
+    }
+  })
+
   it('a host env (the desktop) wins over the socket', () => {
     window.__AGENTOS_ENV__ = { apiOrigin: 'http://127.0.0.1:18791' }
     const unbind = bindGatewaySocket({ currentUrl: 'ws://127.0.0.1:28812/ws' })

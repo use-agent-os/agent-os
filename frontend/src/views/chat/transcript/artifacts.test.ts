@@ -541,6 +541,22 @@ describe('artifact URLs on an off-gateway host', () => {
     )
   })
 
+  it('never appends the session or token to a URL off the gateway origin (AOS-11)', () => {
+    for (const raw of [
+      'https://attacker.invalid/px',
+      'http://127.0.0.1:18791.attacker.invalid/px',
+      'http://127.0.0.1:18791@attacker.invalid/px',
+      'https://127.0.0.1:18791/px',
+    ]) {
+      const authed = artifactAuthenticatedDownloadUrl(raw, ctx)
+      expect(authed, raw).not.toContain('tok')
+      expect(authed, raw).not.toContain('sessionKey')
+      const preview = artifactPreviewUrl({ download_url: raw }, ctx)
+      expect(preview, raw).not.toContain('tok')
+      expect(preview, raw).not.toContain('sessionKey')
+    }
+  })
+
   it('renders every card URL against the gateway origin', () => {
     const { deps } = chartRendererDeps()
     const container = document.createElement('div')
@@ -830,6 +846,50 @@ describe('downloadArtifact with tickets', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/artifacts/x-1?sessionKey='),
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer tok',
+          'x-agentos-session-key': 'agent:main:webchat:test',
+        },
+      }),
+    )
+  })
+
+  // AOS-11: `data-artifact-download` is read off the DOM, so the URL can be
+  // one a reply wrote. Off gateway (the desktop) it used to be fetched with
+  // the token in the query and an Authorization header.
+  it('refuses a download URL that is not the gateway, sending nothing (AOS-11)', async () => {
+    window.__AGENTOS_ENV__ = { apiOrigin: 'http://127.0.0.1:18791' }
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const resolveTicket = vi.fn().mockResolvedValue(null)
+    const toast = vi.fn()
+    const { deps } = chartRendererDeps({ resolveTicket, toast })
+
+    for (const download_url of [
+      'https://attacker.invalid/dl',
+      'http://127.0.0.1:18791.attacker.invalid/dl',
+      'http://127.0.0.1:18791@attacker.invalid/dl',
+    ]) {
+      await createArtifactRenderer(deps).downloadArtifact({ name: 'r.pdf', download_url })
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(resolveTicket).not.toHaveBeenCalled()
+    expect(clicked).toEqual([])
+    expect(toast).toHaveBeenCalledWith('Download failed: not a gateway URL', 'warn', 3500)
+  })
+
+  it('still sends the token with an unticketed download from the desktop gateway', async () => {
+    window.__AGENTOS_ENV__ = { apiOrigin: 'http://127.0.0.1:18791' }
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(['x']) })
+    vi.stubGlobal('fetch', fetchMock)
+    const { deps } = chartRendererDeps({ resolveTicket: vi.fn().mockResolvedValue(null) })
+
+    await createArtifactRenderer(deps).downloadArtifact(REPORT)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:18791/api/v1/artifacts/x-1?sessionKey=agent%3Amain%3Awebchat%3Atest&token=tok',
       expect.objectContaining({
         headers: {
           Authorization: 'Bearer tok',
