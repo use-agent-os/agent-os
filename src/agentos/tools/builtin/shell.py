@@ -296,6 +296,7 @@ def _sensitive_shell_block(
     command: str,
     *,
     workdir: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> str | None:
     if _context_elevated_mode() == "full":
         return None
@@ -307,7 +308,12 @@ def _sensitive_shell_block(
     checked_text = f"{workdir} {checked_command}" if include_workdir else checked_command
     ctx = current_tool_context.get()
     workspace = ctx.workspace_dir if ctx is not None else None
-    marker = sensitive_path_in_text(checked_text, workspace=workspace)
+    marker = sensitive_path_in_text(checked_text, workspace=workspace, cwd=workdir)
+    if marker is None and env:
+        # ``cat "$F"`` with ``env={"F": "~/.ssh/id_rsa"}``: the path is in a
+        # value the model chose, not in the command text.
+        values = " ".join(str(value) for value in env.values())
+        marker = sensitive_path_in_text(values, workspace=workspace, cwd=workdir)
     if marker is not None:
         return json.dumps(
             build_block_envelope(checked_text, marker, tool_name=tool_name),
@@ -913,7 +919,7 @@ async def exec_command(
         )
         raise ToolError(result.reason)
 
-    sensitive_block = _sensitive_shell_block("exec_command", command, workdir=cwd)
+    sensitive_block = _sensitive_shell_block("exec_command", command, workdir=cwd, env=env)
     if sensitive_block is not None:
         await _record_shell_denial(
             "exec_command", command, cwd, DenialReason.POLICY_DENIED, audit_only=True
