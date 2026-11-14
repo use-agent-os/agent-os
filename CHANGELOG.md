@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+- Gateway: a plain HTTP request carrying an `Upgrade: websocket` header no
+  longer skips authentication. `/api/system/status`, `/metrics`, legacy
+  downloads and, in trusted-proxy mode, file uploads and audio transcription
+  were reachable without a token or trusted-proxy peer. Uploads and
+  transcription now run the same admission check as RPC in every auth mode,
+  so in `auth.mode = "none"` they also require a loopback peer. Real
+  WebSocket connections are unaffected. (AOS-06)
+- Gateway: `agentos gateway run` turns uvicorn's proxy-header rewriting off.
+  uvicorn's default replaced the peer address with `X-Forwarded-For` for any
+  loopback caller, so a local process could pose as a trusted proxy in
+  trusted-proxy mode. The gateway already parses `X-Forwarded-For` itself,
+  only from a trusted peer; `FORWARDED_ALLOW_IPS` no longer has any effect.
+  (AOS-07)
+
 ## [2026.11.14] - 2026-11-14
 
 ### Fixed

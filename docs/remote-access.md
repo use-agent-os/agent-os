@@ -169,6 +169,9 @@ first address your proxies did not add is the client used for rate limiting.
 An address that names the gateway host itself (loopback or one of its own
 interfaces) is treated as spoofed and ignored. List every proxy hop, for
 example `trusted_proxy = "10.0.0.0/8"` behind a load balancer.
+`agentos gateway run` turns uvicorn's own proxy-header handling off, so the
+`FORWARDED_ALLOW_IPS` environment variable has no effect: `X-Forwarded-For`
+never changes which peer admission sees.
 
 If the proxy instead forwards to a gateway in `token` mode on the same host,
 set `auth.trusted_proxy` to the proxy's address anyway: otherwise every client
