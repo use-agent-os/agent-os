@@ -44,6 +44,13 @@ from agentos.session.terminal_reply import (
     is_context_payload_too_large,
     sanitize_agent_error,
 )
+from agentos.tools.authority import (
+    AUTHORITY_METADATA_KEY,
+    authority_from_metadata,
+    authority_to_metadata,
+    narrow_authority,
+)
+from agentos.tools.types import ToolAuthority
 from agentos.util.bounded_registry import BoundedRegistry
 
 log = structlog.get_logger(__name__)
@@ -844,16 +851,23 @@ class TaskRuntime:
         stream_event_sink: TaskStreamEventSink | None = None,
         *,
         idempotency_key: str | None = None,
+        authority: ToolAuthority | None = None,
     ) -> TaskHandle:
         """Queue a follow-up turn on *session_key*.
 
         With *idempotency_key*, a task of the session already carrying that
         key (queued, running or recorded in the ledger) is returned instead,
         marked ``deduplicated``: a retried send does not run the turn twice.
+
+        *authority* is the sending context's tool authority. The queued turn
+        is clipped to it -- tools and elevation -- whatever the target
+        session's own route would grant (see :mod:`agentos.tools.authority`).
         """
         session_key = canonicalize_session_key(session_key)
         if idempotency_key is None:
-            return await self._send(session_key, message, provenance, stream_event_sink)
+            return await self._send(
+                session_key, message, provenance, stream_event_sink, authority=authority
+            )
         async with self._idempotent_send_lock:
             existing = await self._task_with_idempotency_key(session_key, idempotency_key)
             if existing is not None:
@@ -864,6 +878,7 @@ class TaskRuntime:
                 provenance,
                 stream_event_sink,
                 idempotency_key=idempotency_key,
+                authority=authority,
             )
 
     async def _send(
@@ -874,8 +889,36 @@ class TaskRuntime:
         stream_event_sink: TaskStreamEventSink | None,
         *,
         idempotency_key: str | None = None,
+        authority: ToolAuthority | None = None,
     ) -> TaskHandle:
         cached = self._last_envelope_by_session.get(session_key)
+        if authority is not None:
+            # Built from the target's route (reply target, channel admission)
+            # but not its authority: the cached envelope's elevation is the
+            # target's, and the sender's ceiling narrows any it already had.
+            base = cached or RouteEnvelope(
+                source_kind=SourceKind.SYSTEM,
+                source_name="task_runtime",
+                agent_id=parse_agent_id(session_key),
+                session_key=session_key,
+            )
+            metadata = {key: value for key, value in base.metadata.items() if key != "elevated"}
+            metadata[AUTHORITY_METADATA_KEY] = authority_to_metadata(
+                narrow_authority(authority, authority_from_metadata(base.metadata))
+            )
+            bound = replace(
+                base,
+                metadata=metadata,
+                input_provenance=provenance or base.input_provenance or {"kind": "runtime_send"},
+            )
+            return await self.enqueue(
+                bound,
+                message,
+                mode="followup",
+                stream_event_sink=stream_event_sink,
+                update_envelope_cache=False,
+                idempotency_key=idempotency_key,
+            )
         if cached is None:
             envelope = RouteEnvelope(
                 source_kind=SourceKind.SYSTEM,

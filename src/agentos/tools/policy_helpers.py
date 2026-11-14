@@ -9,15 +9,26 @@ from agentos.tools.types import ToolContext
 
 ToolPolicy = policy_config.ToolPolicy
 ToolSurfaceCapabilities = policy_runtime.ToolSurfaceCapabilities
-detect_runtime_tool_surface_capabilities = (
-    policy_runtime.detect_runtime_tool_surface_capabilities
-)
+detect_runtime_tool_surface_capabilities = policy_runtime.detect_runtime_tool_surface_capabilities
 private_memory_read_tool_denied = policy_runtime.private_memory_read_tool_denied
 private_memory_read_tools_blocked = policy_runtime.private_memory_read_tools_blocked
 resolve_runtime_tool_surface = policy_runtime.resolve_runtime_tool_surface
-tool_surface_capabilities_from_runtime = (
-    policy_runtime.tool_surface_capabilities_from_runtime
-)
+tool_surface_capabilities_from_runtime = policy_runtime.tool_surface_capabilities_from_runtime
+
+
+def _narrowed(
+    ctx: ToolContext,
+    allowed_tools: set[str] | None,
+    denied_tools: set[str],
+) -> bool:
+    """Whether a policy layer took tools away from *ctx*."""
+    if ctx.tool_policy_restricted:
+        return True
+    if allowed_tools is not None and (
+        ctx.allowed_tools is None or not set(ctx.allowed_tools) <= allowed_tools
+    ):
+        return True
+    return not denied_tools <= set(ctx.denied_tools)
 
 
 def apply_tool_policy(
@@ -89,6 +100,7 @@ def apply_tool_policy(
         ctx,
         allowed_tools=allowed_tools,
         denied_tools=denied_tools,
+        tool_policy_restricted=_narrowed(ctx, allowed_tools, denied_tools),
         workspace_write_deny_globs=_merged_workspace_write_deny_globs(
             ctx,
             global_policy,
@@ -136,6 +148,7 @@ def apply_tool_policy_layer(
         ctx,
         allowed_tools=allowed_tools,
         denied_tools=denied_tools,
+        tool_policy_restricted=_narrowed(ctx, allowed_tools, denied_tools),
         workspace_write_deny_globs=_merged_workspace_write_deny_globs(ctx, parsed),
     )
 

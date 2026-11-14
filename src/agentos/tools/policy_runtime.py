@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from agentos.tools.authority import apply_authority_ceiling
 from agentos.tools.types import CallerKind, InteractionMode, ToolContext
 
 _PRIVATE_MEMORY_READ_TOOL_NAMES: frozenset[str] = frozenset(
@@ -189,7 +190,12 @@ def resolve_runtime_tool_surface(
         denied_tools |= set(_PRIVATE_MEMORY_READ_TOOL_NAMES)
 
     allowed_tools = _remove_denied_from_allowed(allowed_tools, denied_tools)
-    return replace(ctx, allowed_tools=allowed_tools, denied_tools=denied_tools)
+    # Last, so no earlier layer (config policy for this turn's own agent
+    # included) can widen work past the authority of the context that
+    # started it.
+    return apply_authority_ceiling(
+        replace(ctx, allowed_tools=allowed_tools, denied_tools=denied_tools)
+    )
 
 
 def detect_runtime_tool_surface_capabilities(

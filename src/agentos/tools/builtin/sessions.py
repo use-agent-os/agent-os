@@ -13,10 +13,22 @@ import structlog
 from agentos.agents.limits import MAX_SPAWN_DEPTH
 from agentos.gateway.routing import build_subagent_route_envelope
 from agentos.result_budget import register_persisted_result_budget
-from agentos.session.keys import build_subagent_session_key, is_acp_key, parse_agent_id
+from agentos.session.keys import (
+    build_subagent_session_key,
+    canonicalize_session_key,
+    is_acp_key,
+    parse_agent_id,
+)
 from agentos.session.naming import normalize_session_name
+from agentos.tools.authority import authority_from_context, authority_restricted
 from agentos.tools.registry import tool
-from agentos.tools.types import SafeToolError, ToolError, current_tool_context
+from agentos.tools.types import (
+    CallerKind,
+    SafeToolError,
+    ToolContext,
+    ToolError,
+    current_tool_context,
+)
 
 _log = structlog.get_logger("agentos.tools.sessions")
 
@@ -150,6 +162,49 @@ async def _resolve_subagent_policy(mgr: object, agent_id: str) -> dict:
     return {**global_defaults, **per_agent}
 
 
+async def _check_cross_agent(
+    mgr: object,
+    ctx: ToolContext | None,
+    *,
+    caller_agent_id: str,
+    target_agent_id: str,
+    verb: str,
+) -> None:
+    """Refuse delegating to another agent unless the caller may.
+
+    ``subagents.allow_agents`` decides when it is set. When it is not, an
+    operator session may still reach any agent, but a caller whose own tool
+    surface was narrowed by policy may not: the target agent's workspace,
+    memory and credentials are outside what the operator scoped it to.
+    """
+    if target_agent_id == caller_agent_id:
+        return
+    caller_policy = await _resolve_subagent_policy(mgr, caller_agent_id)
+    allow_agents = caller_policy.get("allow_agents")
+    if allow_agents is not None:
+        if "*" in allow_agents or target_agent_id in allow_agents:
+            return
+    elif not authority_restricted(ctx):
+        return
+    _log.warning(
+        "subagent.allowlist_denied",
+        caller_agent_id=caller_agent_id,
+        target_agent_id=target_agent_id,
+        allow_agents=allow_agents,
+        verb=verb,
+    )
+    if allow_agents is None:
+        raise ToolError(
+            f"Cross-agent {verb} not allowed: '{caller_agent_id}' runs with a restricted tool "
+            f"policy and may not reach '{target_agent_id}' unless subagents.allow_agents "
+            "names it"
+        )
+    raise ToolError(
+        f"Cross-agent {verb} not allowed: '{caller_agent_id}' may not {verb} "
+        f"'{target_agent_id}' (allow_agents={allow_agents})"
+    )
+
+
 async def _count_active_children(mgr: object, parent_session_key: str) -> int:
     """Count running children of ``parent_session_key`` via the storage filter.
 
@@ -281,9 +336,19 @@ def _sessions_spawn_concurrency_key(
 async def sessions_send(session_key: str, message: str, mode: str | None = None) -> str:
     if not message:
         raise SafeToolError("Message must not be empty")
+    ctx = current_tool_context.get()
+    await _check_send_authority(ctx, session_key)
     if is_acp_key(session_key):
+        from agentos.acp.policy import requester_lacks_host_tools
         from agentos.tools.builtin.acp_spawn import send_to_acp_session
 
+        if requester_lacks_host_tools(ctx):
+            # The harness runs its own shell and file tools; no ceiling of
+            # ours reaches it, so a caller without them may not drive one.
+            raise SafeToolError(
+                "This context's tool policy withholds a shell or file writes, so it "
+                "cannot drive an ACP harness session"
+            )
         return await send_to_acp_session(session_key, message, mode=mode or "followup")
 
     try:
@@ -293,19 +358,21 @@ async def sessions_send(session_key: str, message: str, mode: str | None = None)
             raise SafeToolError(f"Session not found: {session_key}")
         status = getattr(session, "status", "unknown")
         if status in _TERMINAL_STATUSES:
-            raise SafeToolError(
-                f"Session '{session_key}' is terminated (status={status})"
-            )
+            raise SafeToolError(f"Session '{session_key}' is terminated (status={status})")
         try:
             runtime = _get_task_runtime()
         except ToolError:
             runtime = None
         if runtime is not None:
             try:
+                # The queued turn runs on the target session but carries the
+                # sender's authority: never more tools or elevation than the
+                # turn that asked for it.
                 handle = await runtime.send(
                     session_key,
                     message,
                     provenance={"kind": "inter_session", "source_tool": "sessions_send"},
+                    authority=authority_from_context(ctx),
                 )
             except Exception as exc:
                 if type(exc).__name__ == "TaskQueueFullError":
@@ -329,6 +396,31 @@ async def sessions_send(session_key: str, message: str, mode: str | None = None)
         raise
     except (ImportError, AttributeError, NotImplementedError) as exc:
         raise _manager_unavailable(exc) from exc
+
+
+async def _check_send_authority(ctx: ToolContext | None, session_key: str) -> None:
+    """Gate which sessions this caller may queue work on."""
+    if ctx is None:
+        return
+    try:
+        mgr = _get_session_manager()
+    except ToolError:
+        return
+    if ctx.caller_kind in (CallerKind.CLI, CallerKind.WEB):
+        # The operator's own console may message any session, as before;
+        # the queued turn still carries the console's authority.
+        return
+    caller_agent_id = ctx.agent_id or parse_agent_id(ctx.session_key or "")
+    try:
+        await _check_cross_agent(
+            mgr,
+            ctx,
+            caller_agent_id=caller_agent_id,
+            target_agent_id=parse_agent_id(canonicalize_session_key(session_key)),
+            verb="send",
+        )
+    except ToolError as exc:
+        raise SafeToolError(str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -514,21 +606,13 @@ async def sessions_spawn(
             parent_session_key
         )
         caller_policy = await _resolve_subagent_policy(mgr, caller_agent_id)
-
-        allow_agents = caller_policy.get("allow_agents")
-        if allow_agents is not None and resolved_agent_id != caller_agent_id:
-            allowed = "*" in allow_agents or resolved_agent_id in allow_agents
-            if not allowed:
-                _log.warning(
-                    "subagent.allowlist_denied",
-                    caller_agent_id=caller_agent_id,
-                    target_agent_id=resolved_agent_id,
-                    allow_agents=allow_agents,
-                )
-                raise ToolError(
-                    f"Cross-agent spawn not allowed: '{caller_agent_id}' may not spawn "
-                    f"'{resolved_agent_id}' (allow_agents={allow_agents})"
-                )
+        await _check_cross_agent(
+            mgr,
+            ctx,
+            caller_agent_id=caller_agent_id,
+            target_agent_id=resolved_agent_id,
+            verb="spawn",
+        )
 
         max_children = caller_policy.get("max_children_per_session")
 
@@ -590,6 +674,9 @@ async def sessions_spawn(
             agent_id=resolved_agent_id,
             parent_task_id=parent_task_id,
             spawn_depth=spawn_depth,
+            # The child is resolved for its own agent later; this keeps it
+            # inside what the parent itself could do.
+            authority=authority_from_context(ctx),
         )
         handle = await task_runtime.enqueue(
             envelope,

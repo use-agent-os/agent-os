@@ -29,6 +29,28 @@ class InteractionMode(StrEnum):
     UNATTENDED = "unattended"
 
 
+@dataclass(frozen=True)
+class ToolAuthority:
+    """The most a piece of derived work may do: its creator's tool authority.
+
+    Work one context starts on another's behalf -- a subagent, a turn queued
+    on another session, an unattended job -- is bounded by the context that
+    created it. The ceiling only ever narrows: config policy resolved later for
+    the derived turn's own agent cannot widen ``allowed_tools`` past it, revive
+    a tool in ``denied_tools``, or raise elevation above ``elevated``.
+    ``restricted`` records that the creator's surface was itself narrowed by
+    policy, which gates cross-agent delegation (see ``agentos.tools.authority``).
+    """
+
+    allowed_tools: frozenset[str] | None = None
+    denied_tools: frozenset[str] = frozenset()
+    elevated: str | None = None
+    restricted: bool = False
+    caller_kind: str | None = None
+    agent_id: str | None = None
+    session_key: str | None = None
+
+
 @dataclass
 class ToolContext:
     """Constructed at the entry point, flows through to tool list building.
@@ -74,6 +96,11 @@ class ToolContext:
     # when exposed_by_default=False). Does NOT relax allowed_tools strict denylist.
     surfaced_tools: set[str] | None = None
     tool_policy: dict[str, Any] | None = None
+    # Creator's authority for derived work (subagent, inter-session send).
+    # Re-applied after every policy layer; see agentos.tools.authority.
+    authority_ceiling: ToolAuthority | None = None
+    # A config/job policy layer narrowed this context's tool surface.
+    tool_policy_restricted: bool = False
     tool_result_budget_policy: Any | None = None
     tool_result_budget_tracker_factory: Callable[[], Any] | None = None
     tool_run_budget_policy: Any | None = None
@@ -154,6 +181,10 @@ CRON_AGENT_DENY: frozenset[str] = frozenset(
         "apply_patch",
         "execute_code",
         "git_commit",
+        # Delegation: a global tool profile can otherwise put these on a cron
+        # turn's surface, and the work they start runs on another session.
+        "sessions_spawn",
+        "sessions_send",
     }
 )
 
@@ -161,9 +192,7 @@ CRON_AGENT_DENY: frozenset[str] = frozenset(
 # a block of shell, so a cron turn that is shown a skill and denied exec_command
 # can read the instructions and never carry them out. These three are what the
 # script skills need: run the script, and stage its inputs/outputs.
-CRON_ELEVATED_EXTRA_ALLOW: frozenset[str] = frozenset(
-    {"exec_command", "write_file", "edit_file"}
-)
+CRON_ELEVATED_EXTRA_ALLOW: frozenset[str] = frozenset({"exec_command", "write_file", "edit_file"})
 
 CRON_ELEVATED_ALLOW: frozenset[str] = CRON_AGENT_ALLOW | CRON_ELEVATED_EXTRA_ALLOW
 
@@ -282,9 +311,7 @@ class ProjectedToolArgumentsError(SafeToolUserMessage, ValueError):
 class UnsupportedSurfaceError(SafeToolError):
     """Raised when a tool needs an interactive surface that is unavailable."""
 
-    user_message = (
-        "This tool requires a live approval surface, but the current run is unattended."
-    )
+    user_message = "This tool requires a live approval surface, but the current run is unattended."
 
 
 class UnsupportedURLSchemeError(SafeToolUserMessage, ValueError):
