@@ -44,9 +44,10 @@ from agentos.sandbox.integration import (
 )
 from agentos.sandbox.policy import build_policy, select_level
 from agentos.sandbox.types import DenialReason, DenialResult, SandboxPolicy, SandboxRequest
+from agentos.skill_stdio import INLINE_ARTIFACT_NONCE_ENV
 from agentos.tools.authority import cap_elevated
 from agentos.tools.batch_slot import wait_for_batch_turn, wait_outside_tool_slot
-from agentos.tools.builtin.artifacts import publish_inline_artifacts
+from agentos.tools.builtin.artifacts import new_inline_artifact_nonce, publish_inline_artifacts
 from agentos.tools.builtin.shell_policy import check_safe_bin
 from agentos.tools.env_passthrough import build_subprocess_env
 from agentos.tools.path_policy import reject_foreign_host_path
@@ -984,6 +985,10 @@ async def _run_exec_subprocess(
     # see tools/env_passthrough.py for why the rest of the environment does.
     merged_env = build_subprocess_env(extra=env)
     _add_session_env(merged_env)
+    # Minted after the model's env overrides are applied, so neither the model
+    # nor anything the command prints can supply it (WAL-20).
+    artifact_nonce = new_inline_artifact_nonce()
+    merged_env[INLINE_ARTIFACT_NONCE_ENV] = artifact_nonce
     effective_timeout = _resolve_exec_timeout(timeout)
 
     # /elevated on|bypass|full — route exec around the sandbox backend so host
@@ -1046,7 +1051,7 @@ async def _run_exec_subprocess(
                 output = redact_terminal_output(
                     stdout_bytes.decode("utf-8", errors="replace"), command
                 )
-                output = await publish_inline_artifacts(output, cwd=cwd)
+                output = await publish_inline_artifacts(output, cwd=cwd, nonce=artifact_nonce)
                 return f"exit_code={proc.returncode}\n{output}"
             except Exception as e:
                 return f"[error] {e}"
@@ -1054,7 +1059,7 @@ async def _run_exec_subprocess(
         if sandbox_result.stderr:
             output += sandbox_result.stderr
         output = _append_sandbox_network_hint(redact_terminal_output(output, command))
-        output = await publish_inline_artifacts(output, cwd=cwd)
+        output = await publish_inline_artifacts(output, cwd=cwd, nonce=artifact_nonce)
         return f"exit_code={sandbox_result.returncode}\n{output}"
 
     if elevated_bypass:
@@ -1097,7 +1102,7 @@ async def _run_exec_subprocess(
             output = redact_terminal_output(
                 output_file.read().decode("utf-8", errors="replace"), command
             )
-            output = await publish_inline_artifacts(output, cwd=cwd)
+            output = await publish_inline_artifacts(output, cwd=cwd, nonce=artifact_nonce)
             return f"exit_code={proc.returncode}\n{output}"
     except Exception as e:
         return f"[error] {e}"

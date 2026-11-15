@@ -52,8 +52,16 @@ def published(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
     return calls
 
 
+#: What exec_command would have put in the command's environment.
+NONCE = "0123456789abcdef0123456789abcdef"
+
+
 def marker(path: str = "apple.cards.json", mime: str = CARDS_MIME) -> str:
-    return f"publish_artifact path={path} mime={mime}"
+    return f"publish_artifact path={path} mime={mime} nonce={NONCE}"
+
+
+async def publish(output: str, cwd: str | None = None) -> str:
+    return await publish_inline_artifacts(output, cwd, nonce=NONCE)
 
 
 # ── The happy path ──────────────────────────────────────────────────────────
@@ -63,7 +71,7 @@ def marker(path: str = "apple.cards.json", mime: str = CARDS_MIME) -> str:
 async def test_marker_publishes_without_the_model_asking(
     ctx: Any, published: list[dict[str, str]]
 ) -> None:
-    out = await publish_inline_artifacts(marker())
+    out = await publish(marker())
     assert published == [{"path": "apple.cards.json", "mime": CARDS_MIME}]
     assert "publish_artifact path=" not in out
 
@@ -72,21 +80,21 @@ async def test_marker_publishes_without_the_model_asking(
 async def test_marker_is_replaced_by_a_do_not_republish_note(
     ctx: Any, published: list[dict[str, str]]
 ) -> None:
-    out = await publish_inline_artifacts(marker())
+    out = await publish(marker())
     assert "already rendered for the user" in out
     assert "Do not call publish_artifact" in out
 
 
 @pytest.mark.asyncio
 async def test_surrounding_output_is_preserved(ctx: Any, published: list[dict[str, str]]) -> None:
-    out = await publish_inline_artifacts(f"looked up 683 tokens\n{marker()}\ndone")
+    out = await publish(f"looked up 683 tokens\n{marker()}\ndone")
     assert out.startswith("looked up 683 tokens\n")
     assert out.endswith("\ndone")
 
 
 @pytest.mark.asyncio
 async def test_several_markers_each_publish(ctx: Any, published: list[dict[str, str]]) -> None:
-    out = await publish_inline_artifacts(f"{marker('a.json')}\n{marker('b.json')}")
+    out = await publish(f"{marker('a.json')}\n{marker('b.json')}")
     assert [c["path"] for c in published] == ["a.json", "b.json"]
     assert "publish_artifact path=" not in out
 
@@ -96,7 +104,7 @@ async def test_marker_with_crlf_line_endings_publishes_and_preserves_crlf(
     ctx: Any, published: list[dict[str, str]]
 ) -> None:
     """Windows processes and Python scripts on Windows emit CRLF line endings."""
-    out = await publish_inline_artifacts(f"looked up 683 tokens\r\n{marker()}\r\ndone\r\n")
+    out = await publish(f"looked up 683 tokens\r\n{marker()}\r\ndone\r\n")
     assert published == [{"path": "apple.cards.json", "mime": CARDS_MIME}]
     assert out.startswith("looked up 683 tokens\r\n")
     assert out.endswith("\r\ndone\r\n")
@@ -108,7 +116,7 @@ async def test_marker_with_crlf_line_endings_publishes_and_preserves_crlf(
 async def test_markers_with_crlf_and_trailing_whitespace(
     ctx: Any, published: list[dict[str, str]]
 ) -> None:
-    out = await publish_inline_artifacts(f"{marker('a.json')}  \r\n{marker('b.json')}\t\r\n")
+    out = await publish(f"{marker('a.json')}  \r\n{marker('b.json')}\t\r\n")
     assert [c["path"] for c in published] == ["a.json", "b.json"]
     assert "publish_artifact path=" not in out
 
@@ -121,7 +129,7 @@ async def test_only_agentos_inline_mimes_auto_publish(
     ctx: Any, published: list[dict[str, str]]
 ) -> None:
     """A plain file still needs a deliberate call, so stray output cannot leak one."""
-    out = await publish_inline_artifacts(marker("secrets.zip", "application/zip"))
+    out = await publish(marker("secrets.zip", "application/zip"))
     assert published == []
     # Left intact: the model may still publish it on purpose.
     assert marker("secrets.zip", "application/zip") in out
@@ -135,7 +143,7 @@ async def test_marker_must_own_its_line(ctx: Any, published: list[dict[str, str]
         f"run `{marker()}` to publish it",
         f"the script prints {marker()} at the end",
     ):
-        assert await publish_inline_artifacts(text) == text
+        assert await publish(text) == text
     assert published == []
 
 
@@ -143,7 +151,7 @@ async def test_marker_must_own_its_line(ctx: Any, published: list[dict[str, str]
 async def test_a_capped_number_publishes_per_command(
     ctx: Any, published: list[dict[str, str]]
 ) -> None:
-    out = await publish_inline_artifacts("\n".join(marker(f"c{i}.json") for i in range(9)))
+    out = await publish("\n".join(marker(f"c{i}.json") for i in range(9)))
     assert len(published) == artifacts_mod._MAX_INLINE_ARTIFACTS_PER_CALL
     # The overflow is reported, not silently dropped.
     assert "too many in one command" in out
@@ -159,7 +167,7 @@ async def test_publish_failure_is_reported_not_raised(
         raise ToolError("artifact path is outside workspace: ../../etc/passwd")
 
     monkeypatch.setattr(artifacts_mod, "publish_artifact", _boom)
-    out = await publish_inline_artifacts(f"ok\n{marker('../../etc/passwd')}")
+    out = await publish(f"ok\n{marker('../../etc/passwd')}")
     assert out.startswith("ok\n")
     assert "not published" in out
     assert "outside workspace" in out
@@ -206,7 +214,7 @@ async def test_an_io_error_while_hashing_is_reported_in_place_of_the_marker(
 
     monkeypatch.setattr(artifacts_mod, "sha256_file", _cannot_read)
 
-    out = await publish_inline_artifacts(f"results ready\n{marker()}\ndone")
+    out = await publish(f"results ready\n{marker()}\ndone")
 
     assert out.startswith("results ready\n")
     assert out.endswith("\ndone")
@@ -229,9 +237,7 @@ async def test_an_io_error_on_one_marker_does_not_stop_the_others(
 
     monkeypatch.setattr(artifacts_mod, "sha256_file", _apple_is_locked)
 
-    out = await publish_inline_artifacts(
-        f"{marker('apple.cards.json')}\n{marker('pear.cards.json')}"
-    )
+    out = await publish(f"{marker('apple.cards.json')}\n{marker('pear.cards.json')}")
 
     assert "not published: [Errno 13] locked" in out
     assert "already rendered for the user: pear.cards.json" in out
@@ -249,7 +255,7 @@ async def test_an_unreadable_file_is_reported_not_raised(
     target = workspace / "apple.cards.json"
     target.chmod(0o000)
     try:
-        out = await publish_inline_artifacts(f"ok\n{marker()}")
+        out = await publish(f"ok\n{marker()}")
     finally:
         target.chmod(0o644)
 
@@ -271,7 +277,7 @@ async def test_a_defect_in_publishing_still_surfaces(
     monkeypatch.setattr(artifacts_mod, "sha256_file", _bug)
 
     with pytest.raises(TypeError):
-        await publish_inline_artifacts(marker())
+        await publish(marker())
 
 
 # ── Cheap exits ─────────────────────────────────────────────────────────────
@@ -282,12 +288,12 @@ async def test_output_without_the_marker_is_returned_unchanged(
     ctx: Any, published: list[dict[str, str]]
 ) -> None:
     for text in ("", "exit_code=0", "no markers here at all"):
-        assert await publish_inline_artifacts(text) == text
+        assert await publish(text) == text
     assert published == []
 
 
 @pytest.mark.asyncio
 async def test_no_tool_context_is_a_no_op(published: list[dict[str, str]]) -> None:
     """CLI/test callers have no workspace; the marker just stays as text."""
-    assert await publish_inline_artifacts(marker()) == marker()
+    assert await publish(marker()) == marker()
     assert published == []

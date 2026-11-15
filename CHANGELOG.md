@@ -7,6 +7,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- Data a command prints can no longer publish an inline artifact.
+  `exec_command` used to auto-publish any stdout line shaped like
+  `publish_artifact path=… mime=application/vnd.agentos.…`, so an ERC-20
+  whose `symbol()` held a newline and that line made a read-only
+  `senior-unilp-manager` lookup push a workspace file at the user as a
+  rendered card. Each command now gets a fresh `AGENTOS_INLINE_ARTIFACT_NONCE`
+  and only a marker carrying it publishes; bundled scripts and
+  `agentos trade` print it through `agentos.skill_stdio.inline_artifact_marker`.
+  **A third-party skill that prints the bare marker no longer auto-renders**:
+  print it with that helper (or append ` nonce=$AGENTOS_INLINE_ARTIFACT_NONCE`),
+  or have the model call `publish_artifact`. The `senior-unilp-manager` and
+  `poolsdotfun-token-launcher` ABI decoders also replace unprintable
+  characters (newlines, ESC, BIDI controls) in on-chain strings, token
+  symbols and names are capped at 64 characters, and invalid UTF-8 no longer
+  aborts a read. See [Inline artifacts](docs/artifacts-and-media.md).
 - `senior-unilp-manager` no longer prints a malformed `UNIV4_LP_PRIVATE_KEY`
   (or the variable `--signer-env` names) in its error message. A key of the
   right length with one non-hex character used to reach `int(…, 16)`, whose

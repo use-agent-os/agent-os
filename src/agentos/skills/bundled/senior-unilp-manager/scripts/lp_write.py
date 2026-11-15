@@ -38,7 +38,10 @@ from agentos.skill_stdio import configure_utf8_stdio  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lp_read import pool_key_for_id  # noqa: E402  (read-only; imports no signing path)
+from lp_read import (  # noqa: E402  (read-only; imports no signing path)
+    MAX_TOKEN_TEXT,
+    pool_key_for_id,
+)
 from unilp.abi_codec import encode_function_data  # noqa: E402
 from unilp.abi_defs import (  # noqa: E402
     ERC20_ABI,
@@ -280,7 +283,8 @@ def token_info(client, chain: dict, address: str) -> dict:
     ])
     return {
         "address": checksummed,
-        "symbol": symbol["result"] if symbol["status"] == "success" else short(checksummed),
+        "symbol": (symbol["result"][:MAX_TOKEN_TEXT] if symbol["status"] == "success"
+                   else short(checksummed)),
         "decimals": int(decimals["result"]) if decimals["status"] == "success" else 18,
         "isNative": False,
     }

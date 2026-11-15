@@ -32,7 +32,7 @@ from typing import Any
 _SRC_ROOT = str(Path(__file__).resolve().parents[5])
 if _SRC_ROOT not in sys.path:
     sys.path.insert(0, _SRC_ROOT)
-from agentos.skill_stdio import configure_utf8_stdio  # noqa: E402
+from agentos.skill_stdio import configure_utf8_stdio, inline_artifact_marker  # noqa: E402
 
 CARDS_MIME = "application/vnd.agentos.cards+json"
 
@@ -123,7 +123,7 @@ def main() -> int:
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    print(f"publish_artifact path={output} mime={CARDS_MIME}")
+    print(inline_artifact_marker(output, CARDS_MIME))
     return 0
 
 
