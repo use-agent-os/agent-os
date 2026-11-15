@@ -3,9 +3,11 @@ import {
   anchorFromPixels,
   defaultAnchor,
   parseStoredAnchor,
+  petClaimsPress,
   petYieldsAt,
   pixelsFromAnchor,
   pointInRect,
+  sheetHitBox,
 } from './logic'
 
 const pet = { w: 64, h: 69 }
@@ -50,11 +52,9 @@ describe('pet anchor', () => {
   })
 })
 
-describe('the pet never takes a click from a control', () => {
-  // The sprite is 192×208 and its artwork fills that box almost edge to edge,
-  // so nothing is won back by clipping the hit area to the drawn pixels. The
-  // pet is `pointer-events: none` and a window listener decides each press;
-  // these are the two questions that listener asks.
+describe('the pet never takes a click from a control beside it', () => {
+  // The pet is `pointer-events: none` and a window listener decides each
+  // press; these are the questions that listener asks.
   function at(html: string): Element {
     document.body.innerHTML = html
     return document.body.firstElementChild as Element
@@ -89,5 +89,58 @@ describe('the pet never takes a click from a control', () => {
     expect(pointInRect(r, 292, 258)).toBe(true)
     expect(pointInRect(r, 99, 150)).toBe(false)
     expect(pointInRect(r, 200, 259)).toBe(false)
+  })
+})
+
+describe('the pet answers a press on its own pixels, even over a control', () => {
+  it('takes anywhere in its box over plain content', () => {
+    expect(petClaimsPress(false, null)).toBe(true)
+    expect(petClaimsPress(false, false)).toBe(true)
+  })
+
+  it('over a control, takes only a press on the drawn sprite', () => {
+    // The sidebar is rows of buttons edge to edge: without this the pet
+    // could not be grabbed anywhere over it.
+    expect(petClaimsPress(true, true)).toBe(true)
+    expect(petClaimsPress(true, false)).toBe(false)
+    // Unreadable pixels: the control wins, as before.
+    expect(petClaimsPress(true, null)).toBe(false)
+  })
+
+  // An 8×11 sheet of 192×208 frames drawn at a third of its size.
+  const natural = { w: 8 * 192, h: 11 * 208 }
+  const drawn = { w: 8 * 64, h: 11 * 69 }
+  const frame = { w: 192, h: 208 }
+
+  it('maps a press into the frame the walk is showing', () => {
+    // Frame 2 of row 3: background stepped two frames left, three rows up.
+    const box = sheetHitBox({ x: 32, y: 34 }, { x: -128, y: -207 }, drawn, natural, frame, 0)
+    // (32 + 128) * 3 = 480, inside column 2 (384..575); (34 + 207) * 3.0144… ≈ 726, row 3.
+    expect(box).not.toBeNull()
+    expect(box!.x).toBe(480)
+    expect(Math.floor(box!.x / 192)).toBe(2)
+    expect(Math.floor(box!.y / 208)).toBe(3)
+    expect(box!.w).toBe(1)
+    expect(box!.h).toBe(1)
+  })
+
+  it('widens by the slop but never into the next frame', () => {
+    const mid = sheetHitBox({ x: 32, y: 34 }, { x: 0, y: 0 }, drawn, natural, frame, 3)!
+    expect(mid.x).toBeLessThan(96)
+    expect(mid.x + mid.w).toBeGreaterThan(97)
+    // Right at the frame's right edge: the patch stops at column 191.
+    const edge = sheetHitBox({ x: 63.9, y: 34 }, { x: 0, y: 0 }, drawn, natural, frame, 3)!
+    expect(edge.x + edge.w - 1).toBe(191)
+    // Top-left corner: clipped at 0, not negative.
+    const corner = sheetHitBox({ x: 0, y: 0 }, { x: 0, y: 0 }, drawn, natural, frame, 3)!
+    expect(corner.x).toBe(0)
+    expect(corner.y).toBe(0)
+  })
+
+  it('is null off the sheet', () => {
+    expect(sheetHitBox({ x: -1, y: 5 }, { x: 0, y: 0 }, drawn, natural, frame, 0)).toBeNull()
+    expect(
+      sheetHitBox({ x: 5, y: 5 }, { x: 0, y: 0 }, { w: 0, h: 0 }, natural, frame, 0),
+    ).toBeNull()
   })
 })

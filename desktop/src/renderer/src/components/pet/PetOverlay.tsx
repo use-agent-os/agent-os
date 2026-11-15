@@ -17,9 +17,11 @@ import {
   anchorFromPixels,
   defaultAnchor,
   parseStoredAnchor,
+  petClaimsPress,
   petYieldsAt,
   pixelsFromAnchor,
   pointInRect,
+  sheetHitBox,
   type PetAnchor,
   type Size,
 } from './logic'
@@ -113,6 +115,55 @@ function measureSheet(img: HTMLImageElement): Sheet | null {
   }
 }
 
+/** Display pixels around a press that still count as the pet: a strand of hair should grab it. */
+const HIT_SLOP = 3
+
+/**
+ * Is the sprite drawn under this press, in the frame showing right now?
+ * Reads the frame the walk is on from the live background-position and one
+ * small patch of the sheet. Null when that cannot be known (unreadable
+ * pixels, a style that is not plain px).
+ */
+function opaqueUnder(
+  el: HTMLElement,
+  img: HTMLImageElement | null,
+  sheet: Sheet | null,
+  size: Size,
+  x: number,
+  y: number,
+): boolean | null {
+  if (!img || !sheet || sheet.tainted) return null
+  const rect = el.getBoundingClientRect()
+  const cs = getComputedStyle(el)
+  const bg = { x: parseFloat(cs.backgroundPositionX), y: parseFloat(cs.backgroundPositionY) }
+  if (!Number.isFinite(bg.x) || !Number.isFinite(bg.y)) return null
+  const box = sheetHitBox(
+    { x: x - rect.left, y: y - rect.top },
+    bg,
+    { w: sheet.cols * size.w, h: sheet.rows * size.h },
+    { w: img.naturalWidth, h: img.naturalHeight },
+    { w: PET_FRAME_W, h: PET_FRAME_H },
+    HIT_SLOP,
+  )
+  if (!box) return false
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = box.w
+    canvas.height = box.h
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    if (!ctx) return null
+    ctx.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h)
+    const alpha = ctx.getImageData(0, 0, box.w, box.h).data
+    for (let i = 3; i < alpha.length; i += 4) if (alpha[i]! > BLANK_ALPHA) return true
+    return false
+  } catch {
+    return null
+  }
+}
+
+/** Events a claimed press must not leave behind on the control under the pet. */
+const SWALLOWED = ['click', 'dblclick', 'dragstart', 'selectstart'] as const
+
 /**
  * The petdex mascot floating over the window: one sheet, one row per state,
  * the row's real frames stepped by CSS the way the petdex web app animates.
@@ -149,6 +200,8 @@ function PetSprite({ slug, scale }: { slug: string; scale: number }) {
   const sizeRef = useRef(size)
   const winRef = useRef(win)
   const pokeRef = useRef(poke)
+  const sheetRef = useRef<Sheet | null>(null)
+  const imgRef = useRef<HTMLImageElement | null>(null)
 
   // Measure the sheet once per pet: the grid says which rows exist, the
   // alpha says how many frames each row really has.
@@ -158,10 +211,14 @@ function PetSprite({ slug, scale }: { slug: string; scale: number }) {
     // Needed to read pixels back in measureSheet; the pet scheme allows it.
     img.crossOrigin = 'anonymous'
     img.onload = () => {
-      if (!cancelled) setSheet(measureSheet(img))
+      if (cancelled) return
+      imgRef.current = img
+      setSheet(measureSheet(img))
     }
     img.onerror = () => {
-      if (!cancelled) setSheet(null)
+      if (cancelled) return
+      imgRef.current = null
+      setSheet(null)
     }
     img.src = url
     return () => {
@@ -176,17 +233,33 @@ function PetSprite({ slug, scale }: { slug: string; scale: number }) {
     sizeRef.current = size
     winRef.current = win
     pokeRef.current = poke
+    sheetRef.current = sheet
   })
 
   // Pointer handling lives on the window, not on the sprite, and the sprite
   // itself is `pointer-events: none` (pet.css). A mascot that takes pointer
   // events is a mascot that silently disables whatever it stands on — the
   // audit found it eating the composer's route button and a ledger card's
-  // "Inspect tx"/"View transaction". Now the press is only ever the pet's when
-  // no control claims that point AND nothing is stacked above the pet there.
+  // "Inspect tx"/"View transaction". Now the press is only the pet's when
+  // nothing is stacked above the pet there AND either no control claims that
+  // point or the press lands on the drawn sprite itself (petClaimsPress).
   useEffect(() => {
     let live: { dx: number; dy: number; moved: boolean } | null = null
     let latest = anchorRef.current
+    // The pet does not take pointer events, so the click, a native drag of a
+    // draggable row, or a text selection would still start on the element
+    // below it. A claimed press swallows them until the gesture is over.
+    let releaseTimer = 0
+    const swallow = (ev: Event) => {
+      ev.preventDefault()
+      ev.stopPropagation()
+    }
+    const guard = (on: boolean) => {
+      for (const type of SWALLOWED) {
+        if (on) window.addEventListener(type, swallow, true)
+        else window.removeEventListener(type, swallow, true)
+      }
+    }
 
     const onMove = (e: PointerEvent) => {
       if (!live) return
@@ -205,6 +278,10 @@ function PetSprite({ slug, scale }: { slug: string; scale: number }) {
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
       if (!d) return
+      // The click (and a second click's dblclick) follows pointerup in the
+      // same task, so dropping the guard on the next one is late enough.
+      clearTimeout(releaseTimer)
+      releaseTimer = window.setTimeout(() => guard(false), 0)
       if (d.moved) saveAnchor(latest)
       else pokeRef.current()
     }
@@ -212,10 +289,13 @@ function PetSprite({ slug, scale }: { slug: string; scale: number }) {
       // Read the node here, not when the listener binds: the sprite only
       // mounts once the sheet has decoded, which is after this effect runs.
       const el = ref.current
-      if (!el || e.button !== 0 || live) return
-      // A real control under the pointer always wins. `e.target` is already the
-      // element BELOW the pet, because the pet does not take pointer events.
-      if (petYieldsAt(e.target as Element | null)) return
+      if (live) return
+      // A new press is a new gesture: anything the last claimed one had to
+      // swallow has been dispatched by now. Do not wait on the release timer,
+      // which a throttled window can run late.
+      clearTimeout(releaseTimer)
+      guard(false)
+      if (!el || e.button !== 0) return
       const rect = el.getBoundingClientRect()
       if (!pointInRect(rect, e.clientX, e.clientY)) return
       // Topmost test: a sheet or menu drawn over the pet must keep the press.
@@ -223,8 +303,18 @@ function PetSprite({ slug, scale }: { slug: string; scale: number }) {
       const top = document.elementFromPoint(e.clientX, e.clientY)
       el.style.pointerEvents = ''
       if (top !== el) return
+      // A control under the see-through part of the box keeps the press.
+      // `e.target` is already the element BELOW the pet, because the pet does
+      // not take pointer events.
+      const onControl = petYieldsAt(e.target as Element | null)
+      const opaque = onControl
+        ? opaqueUnder(el, imgRef.current, sheetRef.current, sizeRef.current, e.clientX, e.clientY)
+        : null
+      if (!petClaimsPress(onControl, opaque)) return
       e.preventDefault()
       e.stopPropagation()
+      clearTimeout(releaseTimer)
+      guard(true)
       live = { dx: e.clientX - rect.left, dy: e.clientY - rect.top, moved: false }
       latest = anchorRef.current
       window.addEventListener('pointermove', onMove)
@@ -237,6 +327,8 @@ function PetSprite({ slug, scale }: { slug: string; scale: number }) {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
+      clearTimeout(releaseTimer)
+      guard(false)
     }
   }, [])
 
