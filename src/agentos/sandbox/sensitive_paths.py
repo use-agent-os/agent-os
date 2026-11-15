@@ -988,6 +988,22 @@ def _recursive_protected_targets() -> list[tuple[str, str]]:
         for candidate in _comparison_path_candidates(entry):
             if candidate.startswith("/") and os.path.lexists(candidate):
                 targets.append((candidate.rstrip("/"), entry))
+    # A config file's backup and staging copies (WAL-17) are the file as far
+    # as the floor is concerned, and they outlive it: a backup left beside a
+    # deleted config.toml still makes its directory's ancestors sensitive.
+    for entry in _protected_config_files():
+        for candidate in _comparison_path_candidates(entry):
+            if not candidate.startswith("/"):
+                continue
+            directory, _, name = candidate.rpartition("/")
+            try:
+                leaves = os.listdir(directory or "/")
+            except OSError:
+                continue
+            for leaf in leaves:
+                folded = leaf.casefold() if os.name == "nt" else leaf
+                if _is_config_copy_name(folded, name):
+                    targets.append((f"{directory}/{folded}", entry))
     return targets
 
 
