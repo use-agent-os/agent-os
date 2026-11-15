@@ -228,7 +228,9 @@ def test_hostile_text_reaches_no_trade_view_raw(client: _FakeClient) -> None:
         assert shown.exit_code == 0, shown.output
         _assert_neutral(shown.output)
     approve = runner.invoke(trade_cmd.app, ["approve", "ord-1"], input="n\n")
-    _assert_neutral(approve.output)
+    # Click styles its own "Aborted." when colour is forced (FORCE_COLOR on
+    # CI); that escape is the framework's, not text from the order.
+    _assert_neutral(approve.output.replace("\x1b[31mAborted.\x1b[0m", "Aborted."))
 
 
 def test_json_output_escapes_what_a_terminal_would_act_on(client: _FakeClient) -> None:
