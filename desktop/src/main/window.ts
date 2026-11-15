@@ -2,6 +2,7 @@ import { BrowserWindow, nativeTheme, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { installContextMenu } from './context-menu'
 
 /** The only schemes a link in the renderer may hand to the OS. */
 const EXTERNAL_SCHEMES = new Set(['http:', 'https:', 'mailto:'])
@@ -158,6 +159,10 @@ export function loadRenderer(win: BrowserWindow, hash?: string): void {
   win.webContents.on('will-navigate', (event, url) => {
     if (!isAppNavigation(url, appOrigin)) event.preventDefault()
   })
+
+  // Electron has no right-click menu of its own: give selections, links and
+  // text fields the native Copy / Paste menu.
+  installContextMenu(win, isAllowedExternalUrl)
 
   if (rendererUrl) {
     void win.loadURL(hash ? `${rendererUrl}#${hash}` : rendererUrl)
