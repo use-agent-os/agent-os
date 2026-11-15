@@ -9,6 +9,11 @@ an operating system secret store:
 * ``manual`` — nothing on disk; ``unlock(password)`` is called per gateway
   session and the decrypted keys live only in this process's memory.
 
+The operator's ``[trading] unlock_mode`` is a policy over both: when it says
+``manual`` the vault never reads or writes ``unlock.key``, whatever its own
+index records, and refuses to be set up or switched to ``auto``. A leftover
+``unlock.key`` is removed only by an explicit ``set_unlock_mode("manual")``.
+
 Nothing in this module logs, returns or serialises a private key except
 :meth:`Vault.export`, which re-verifies the password first.
 """
@@ -21,9 +26,12 @@ import secrets
 import stat
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
+
+import structlog
 
 from agentos.paths import default_agentos_home
 from agentos.trading.chains import checksum_address, normalize_address
@@ -33,6 +41,8 @@ UnlockMode = Literal["auto", "manual"]
 INDEX_FILE = "index.json"
 UNLOCK_FILE = "unlock.key"
 INDEX_VERSION = 1
+
+log = structlog.get_logger(__name__)
 
 
 class VaultError(RuntimeError):
@@ -57,6 +67,12 @@ class BadPasswordError(VaultError):
 
 class WalletNotFoundError(VaultError):
     code = "wallet.not_found"
+
+
+class UnlockModePolicyError(VaultError):
+    """The operator's ``[trading] unlock_mode`` forbids what was asked."""
+
+    code = "wallet.unlock_mode_policy"
 
 
 @dataclass
@@ -123,6 +139,7 @@ class Vault:
         *,
         kdf: Literal["pbkdf2", "scrypt"] | None = None,
         kdf_iterations: int | None = None,
+        configured_mode: Callable[[], str | None] | None = None,
     ) -> None:
         self.root = Path(root) if root is not None else default_vault_root()
         self._kdf = kdf
@@ -130,6 +147,11 @@ class Vault:
         self._lock = threading.RLock()
         self._password: str | None = None
         self._keys: dict[str, bytes] = {}
+        #: Reads the operator's ``[trading] unlock_mode`` at call time (the
+        #: trading service wires it to the live config), so a changed policy
+        #: applies without rebuilding the vault.
+        self.configured_mode = configured_mode
+        self._warned_ignored_unlock_key = False
 
     # ── paths ──────────────────────────────────────────────────────────
 
@@ -195,24 +217,57 @@ class Vault:
     def unlocked(self) -> bool:
         return self._password is not None
 
+    def policy_mode(self) -> UnlockMode | None:
+        """The operator's configured ``unlock_mode``, or ``None`` when not wired."""
+        if self.configured_mode is None:
+            return None
+        value = self.configured_mode()
+        if value == "manual":
+            return "manual"
+        return "auto" if value == "auto" else None
+
     @property
-    def unlock_mode(self) -> UnlockMode:
+    def stored_unlock_mode(self) -> UnlockMode:
+        """The mode the vault's own index records."""
         if not self.initialized:
             return "auto"
         mode = self._read_index().get("unlock_mode")
         return "manual" if mode == "manual" else "auto"
 
+    @property
+    def unlock_mode(self) -> UnlockMode:
+        """The mode in force: ``manual`` whenever the operator configured it."""
+        if self.policy_mode() == "manual":
+            return "manual"
+        if not self.initialized:
+            return self.policy_mode() or "auto"
+        return self.stored_unlock_mode
+
     def status(self) -> dict[str, Any]:
         wallets = self.list() if self.initialized else []
         primary = self.primary_address() if self.initialized else None
+        stored = self.stored_unlock_mode if self.initialized else None
         return {
             "initialized": self.initialized,
             "unlocked": self.unlocked,
             "unlockMode": self.unlock_mode,
+            # What the index records and what the operator configured; they
+            # differ only for a vault set up auto before unlock_mode = manual,
+            # whose unlock.key stays (unused) until `agentos wallet mode manual`.
+            "storedUnlockMode": stored,
+            "configuredUnlockMode": self.policy_mode(),
+            "unlockKeyPresent": self.unlock_path.exists(),
             "walletCount": len(wallets),
             "primary": primary,
             "vaultPath": str(self.root),
         }
+
+    def _refuse_auto_under_manual_policy(self) -> None:
+        if self.policy_mode() == "manual":
+            raise UnlockModePolicyError(
+                "trading.unlock_mode is 'manual': the vault password is never stored. "
+                "Change trading.unlock_mode first to use auto unlock."
+            )
 
     # ── setup / unlock ─────────────────────────────────────────────────
 
@@ -235,11 +290,17 @@ class Vault:
         except ValueError as exc:
             raise BadPasswordError("wrong vault password") from exc
 
-    def setup(self, password: str, unlock_mode: UnlockMode = "auto") -> None:
+    def setup(self, password: str, unlock_mode: UnlockMode | None = None) -> None:
         password = _require_password(password)
+        if unlock_mode is None:
+            unlock_mode = self.policy_mode() or "auto"
+        if unlock_mode not in ("auto", "manual"):
+            raise ValueError("unlock mode must be 'auto' or 'manual'")
         with self._lock:
             if self.initialized:
                 raise VaultAlreadyInitializedError("wallet vault already exists")
+            if unlock_mode == "auto":
+                self._refuse_auto_under_manual_policy()
             _secure_dir(self.root)
             verifier = self._encrypt(secrets.token_bytes(32), password)
             self._write_index(
@@ -289,7 +350,10 @@ class Vault:
         with self._lock:
             if self.unlocked:
                 return True
-            if not self.initialized or self.unlock_mode != "auto":
+            if not self.initialized:
+                return False
+            if self.unlock_mode != "auto":
+                self._warn_ignored_unlock_key()
                 return False
             try:
                 # newline="" for the same reason as the write: the password is
@@ -316,18 +380,42 @@ class Vault:
                 return True
             return False
 
+    def _warn_ignored_unlock_key(self) -> None:
+        """Say once that a stored password is being ignored under a manual policy."""
+        if self._warned_ignored_unlock_key:
+            return
+        if self.stored_unlock_mode == "auto" and self.unlock_path.exists():
+            self._warned_ignored_unlock_key = True
+            log.warning(
+                "vault.unlock_key_ignored",
+                reason="trading.unlock_mode is manual",
+                hint="run `agentos wallet mode manual` to delete the stored password",
+            )
+
     def set_unlock_mode(self, mode: UnlockMode, password: str) -> None:
+        """Switch the vault's unlock mode; the one way ``unlock.key`` is removed."""
         if mode not in ("auto", "manual"):
             raise ValueError("unlock mode must be 'auto' or 'manual'")
         with self._lock:
+            if mode == "auto":
+                self._refuse_auto_under_manual_policy()
             self.verify_password(password)
             index = self._read_index()
+            previous = index.get("unlock_mode")
             index["unlock_mode"] = mode
             self._write_index(index)
+            removed = False
             if mode == "auto":
                 _write_private(self.unlock_path, password)
             else:
+                removed = self.unlock_path.exists()
                 self.unlock_path.unlink(missing_ok=True)
+            log.warning(
+                "vault.unlock_mode_changed",
+                previous=previous,
+                mode=mode,
+                unlock_key_removed=removed,
+            )
             if not self.unlocked:
                 self.unlock(password)
 
@@ -349,7 +437,10 @@ class Vault:
                 )
             index["verifier"] = self._encrypt(secrets.token_bytes(32), new_password)
             self._write_index(index)
-            if index.get("unlock_mode") == "auto":
+            # Under a manual policy the stored password is not refreshed: the
+            # old one no longer opens anything, and writing the new one would
+            # be the very thing the operator configured away.
+            if index.get("unlock_mode") == "auto" and self.policy_mode() != "manual":
                 _write_private(self.unlock_path, new_password)
             self._keys = keys
             self._password = new_password

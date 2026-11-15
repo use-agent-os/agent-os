@@ -224,41 +224,90 @@ def wallet_status(
     table.add_row("initialized", "yes" if result.get("initialized") else "no")
     table.add_row("unlocked", "yes" if result.get("unlocked") else "no")
     table.add_row("unlock mode", str(result.get("unlockMode") or "—"))
+    stored = result.get("storedUnlockMode")
+    if stored and stored != result.get("unlockMode"):
+        note = " (stored password unused; `agentos wallet mode manual` deletes it)"
+        table.add_row("vault records", f"{stored}{note if result.get('unlockKeyPresent') else ''}")
     table.add_row("wallets", str(result.get("walletCount") or 0))
     table.add_row("primary", str(result.get("primary") or "—"))
     table.add_row("vault", markup_escape(str(result.get("vaultPath") or "—")))
     console.print(table)
 
 
+def _unlock_mode_arg(mode: str | None, option: str) -> str | None:
+    if mode is None:
+        return None
+    mode = mode.strip().lower()
+    if mode not in {"auto", "manual"}:
+        raise typer.BadParameter(f"{option} must be 'auto' or 'manual'")
+    return mode
+
+
+def _explain_auto_unlock() -> None:
+    console.print(
+        "The password is kept in ~/.agentos/wallets/unlock.key so the agent can sign "
+        "unattended; anyone who can read that file can spend from these wallets."
+    )
+
+
 @app.command("setup")
 def wallet_setup(
-    mode: str = typer.Option(
-        "auto",
+    mode: str | None = typer.Option(
+        None,
         "--mode",
-        help="auto = password stored in unlock.key (0600), manual = unlock per gateway session",
+        help="auto = password kept (encrypted) for unattended signing, manual = unlock "
+        "per gateway session; default: the [trading] unlock_mode setting",
     ),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Create the vault with a new password (first run only)."""
 
-    mode = mode.strip().lower()
-    if mode not in {"auto", "manual"}:
-        raise typer.BadParameter("--mode must be 'auto' or 'manual'")
+    requested = _unlock_mode_arg(mode, "--mode")
     password = read_password("Vault password", confirm=True, json_output=json_output)
+    params: dict[str, Any] = {"password": password}
+    if requested is not None:
+        params["unlockMode"] = requested
 
     async def _run(client):
-        return await client.call("wallet.setup", {"password": password, "unlockMode": mode})
+        return await client.call("wallet.setup", params)
 
     result = run_gateway_sync(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
-    console.print(f"Vault created ([{ACCENT}]{mode}[/] unlock).")
-    if mode == "auto":
+    # The gateway decides the mode (a manual [trading] unlock_mode wins): print
+    # what it reports, not what was asked for.
+    actual = str((result or {}).get("unlockMode") or requested or "auto")
+    console.print(f"Vault created ([{ACCENT}]{actual}[/] unlock).")
+    if actual == "auto":
+        _explain_auto_unlock()
+
+
+@app.command("mode")
+def wallet_mode(
+    mode: str = typer.Argument(..., help="auto or manual"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Switch how the vault unlocks; `manual` deletes the stored password."""
+
+    target = _unlock_mode_arg(mode, "MODE")
+    password = read_password("Vault password", json_output=json_output)
+
+    async def _run(client):
+        return await client.call("wallet.setUnlockMode", {"mode": target, "password": password})
+
+    result = run_gateway_sync(_run, json_output=json_output)
+    if json_output:
+        print_json(result)
+        return
+    console.print(f"Vault unlock mode is now [{ACCENT}]{target}[/].")
+    if target == "manual":
         console.print(
-            "The password is kept in ~/.agentos/wallets/unlock.key so the agent can sign "
-            "unattended; anyone who can read that file can spend from these wallets."
+            "The stored password was deleted; unlock with `agentos wallet unlock` "
+            "after each gateway start."
         )
+    else:
+        _explain_auto_unlock()
 
 
 @app.command("unlock")

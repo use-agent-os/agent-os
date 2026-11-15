@@ -114,7 +114,8 @@ def test_setup_auto_warns_about_unlock_key(client: _FakeClient) -> None:
     result = runner.invoke(wallet_cmd.app, ["setup"], input="pw\npw\n")
     assert result.exit_code == 0, result.output
     assert "unlock.key" in result.output
-    assert client.calls[0][1]["unlockMode"] == "auto"
+    # No --mode: the gateway's [trading] unlock_mode decides (WAL-25).
+    assert "unlockMode" not in client.calls[0][1]
 
 
 def test_unlock_uses_env_password_without_prompting(

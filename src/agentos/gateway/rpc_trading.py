@@ -316,8 +316,10 @@ async def _wallet_status(params: dict | None, ctx: RpcContext) -> dict[str, Any]
 async def _wallet_setup(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     p = _params(params)
     password = _str(p, "password", required=True) or ""
-    mode = _str(p, "unlockMode") or "auto"
-    if mode not in ("auto", "manual"):
+    # No mode from the client: the operator's [trading] unlock_mode decides
+    # (the vault reads it), and a manual policy refuses an explicit auto.
+    mode = _str(p, "unlockMode")
+    if mode not in (None, "auto", "manual"):
         raise ValueError("params.unlockMode must be 'auto' or 'manual'")
     service = _service(ctx)
     try:

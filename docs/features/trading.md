@@ -153,7 +153,7 @@ approval_ttl_seconds = 900           # unanswered approvals expire
 agent_max_price_impact_pct = 5.0     # agent orders above this wait for approval even under the threshold
 agent_max_slippage_pct = 5.0         # an agent asking for more slippage is refused
 default_slippage_pct = 0.5           # omit to let the provider pick (auto slippage)
-unlock_mode = "auto"                 # or "manual"
+unlock_mode = "auto"                 # or "manual": the vault never stores its password, and auto is refused
 sync_interval_seconds = 60
 price_ttl_seconds = 20
 

@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- `[trading] unlock_mode` (`AGENTOS_TRADING_UNLOCK_MODE`) is honoured; it was
+  documented but read by nothing, so a gateway configured `manual` still
+  stored the vault password and auto-unlocked. `wallet.setup` without
+  `unlockMode` (and `agentos wallet setup` without `--mode`, which no longer
+  sends a default) now uses it. With `manual`, the vault never reads or
+  writes `unlock.key`: auto setup and switching to auto are refused
+  (`wallet.unlock_mode_policy`), a password stored by an earlier auto vault
+  is ignored (logged once as `vault.unlock_key_ignored`) and is deleted only
+  when you run the new `agentos wallet mode manual` (logged as
+  `vault.unlock_mode_changed`). `wallet status` adds `storedUnlockMode`,
+  `configuredUnlockMode` and `unlockKeyPresent` (WAL-25).
 - The verbatim backups AgentOS leaves beside a config file it rewrites
   (`config.toml.backup.<stamp>`, `agentos.toml.backup.<stamp>`) and the
   writer's `.config.toml.*.tmp` staging files are sensitive paths like the
