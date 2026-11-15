@@ -37,6 +37,7 @@ from typing import Any, Literal
 import structlog
 
 from agentos.paths import default_agentos_home
+from agentos.redact import register_secret_values
 from agentos.trading import unlock_key
 from agentos.trading.chains import checksum_address, normalize_address
 
@@ -323,6 +324,7 @@ class Vault:
             else:
                 self._remove_unlock_key()
             self._password = password
+            register_secret_values(password)
             self._keys = {}
 
     def verify_password(self, password: str) -> None:
@@ -364,6 +366,7 @@ class Vault:
                 keys[record.key] = self._decrypt(keystore, password)
             self._keys = keys
             self._password = password
+            register_secret_values(password)
 
     def lock(self) -> None:
         with self._lock:
@@ -548,6 +551,7 @@ class Vault:
                 self._store_unlock_key(new_password)
             self._keys = keys
             self._password = new_password
+            register_secret_values(new_password)
 
     def _require_unlocked(self) -> str:
         if not self.initialized:

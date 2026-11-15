@@ -116,9 +116,7 @@ def test_skill_url_guards_do_not_echo_the_url(relative: str, function: str, url:
 
 
 def test_chain_stocks_and_rwa_guards_do_not_echo_the_url() -> None:
-    stocks = _load(
-        SKILLS / "robinhood-chain-stocks/scripts/chain_stocks.py", "_wal24_chain_stocks"
-    )
+    stocks = _load(SKILLS / "robinhood-chain-stocks/scripts/chain_stocks.py", "_wal24_chain_stocks")
     for url in (WSS, NO_HOST):
         with pytest.raises(ValueError) as caught:
             stocks._validate_http_url(url)

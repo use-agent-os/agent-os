@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- Output redaction now masks wallet material it used to pass to the model and
+  transcript verbatim (WAL-09): a secret the gateway holds — a skill hot-wallet
+  key (`UNIV4_LP_PRIVATE_KEY`, `POOLSFUN_PRIVATE_KEY`, …), the vault password —
+  is registered by value and masked wherever it appears in tool output, so
+  `printenv NAME`, `echo $NAME` and bare prints are covered, not only
+  `NAME=value`. `unlock.key` is masked whole on read, keystore `ciphertext`/
+  `mac`/`salt`/`iv` and BIP-39 mnemonics are masked by shape, and a wallet
+  address or transaction hash (also 64 hex) stays readable.
 - The wallet vault's auto-unlock password is no longer stored in clear. In
   `auto` mode `~/.agentos/wallets/unlock.key` now holds the password sealed
   with AES-256-GCM under a 256-bit key kept **outside** the state directory —
