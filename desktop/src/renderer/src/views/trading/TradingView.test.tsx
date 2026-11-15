@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useGateway } from '~/stores/gateway'
 import { useTradingUi } from '~/stores/trading-ui'
 import { useUi } from '~/stores/ui'
+import type { MissionsApi } from './desk/missions'
 import { holding, renderDesk, USDC, WALLET } from './test-utils'
 import { TradingView } from './TradingView'
 import type { ProviderId } from './types'
@@ -139,6 +140,7 @@ describe('TradingView · Markets and the ticket', () => {
   beforeEach(() => {
     useTradingUi.setState({
       deskMode: true,
+      sheet: null,
       bookTab: 'portfolio',
       bookOpen: false,
       swapRequest: null,
@@ -201,6 +203,7 @@ describe('TradingView · Markets and the ticket', () => {
       'tab-history',
       'tab-orders',
       'tab-approvals',
+      'tab-tools',
     ])
     fireEvent.click(screen.getByTestId('tab-markets'))
     expect(await screen.findByTestId('markets-prompt')).toBeInTheDocument()
@@ -213,5 +216,85 @@ describe('TradingView · Markets and the ticket', () => {
     await waitFor(() => expect(screen.getAllByTestId('token-button')[0]).toHaveTextContent('USDC'))
     expect(screen.getByTestId('tab-holdings')).toHaveAttribute('aria-selected', 'true')
     expect(useTradingUi.getState()).toMatchObject({ bookTab: 'portfolio', bookOpen: false })
+  })
+
+  // The BOOK beside the chat has had Automations and Tools; the full desk
+  // offered neither, so the DCAs running in the background were out of sight.
+  function missions(awaiting = 0): MissionsApi {
+    const actions = { pending: null } as unknown
+    return {
+      missions: [],
+      loading: false,
+      running: new Set<string>(),
+      create: vi.fn(async () => null),
+      update: vi.fn(async () => true),
+      setEnabled: vi.fn(),
+      runNow: vi.fn(),
+      remove: vi.fn(),
+      busy: false,
+      mandates: [],
+      awaitingMandates: Array.from({ length: awaiting }) as MissionsApi['awaitingMandates'],
+      mandate: actions as MissionsApi['mandate'],
+      triggers: [],
+      awaitingTriggers: [],
+      trigger: actions as MissionsApi['trigger'],
+      brackets: [],
+      awaitingBrackets: [],
+      bracket: actions as MissionsApi['bracket'],
+    }
+  }
+
+  it('offers Automations and Tools at the full desk, with the asks counted', async () => {
+    renderDesk(
+      <TradingView
+        automations={{
+          missions: missions(2),
+          sessionKey: 'agent:trading:s1',
+          onOpenSession: vi.fn(),
+        }}
+      />,
+    )
+    await screen.findByTestId('trading-desk')
+    const tabs = screen.getAllByRole('tab').map((tab) => tab.getAttribute('data-testid'))
+    expect(tabs).toEqual([
+      'tab-holdings',
+      'tab-markets',
+      'tab-history',
+      'tab-orders',
+      'tab-approvals',
+      'tab-automations',
+      'tab-tools',
+    ])
+    expect(screen.getByTestId('tab-automations')).toHaveTextContent('Automations2')
+    fireEvent.click(screen.getByTestId('tab-automations'))
+    expect(await screen.findByTestId('automations')).toBeInTheDocument()
+    expect(rpcCall).toHaveBeenCalledWith('cron.list', expect.anything())
+    fireEvent.click(screen.getByTestId('tab-tools'))
+    expect(await screen.findByTestId('tools-panel')).toBeInTheDocument()
+  })
+
+  it("hands Send to the desk's chat, which owns the sheet", async () => {
+    renderDesk(
+      <TradingView
+        automations={{
+          missions: missions(),
+          sessionKey: 'agent:trading:s1',
+          onOpenSession: vi.fn(),
+        }}
+      />,
+    )
+    await screen.findByTestId('trading-desk')
+    fireEvent.click(screen.getByTestId('tab-tools'))
+    fireEvent.click(await screen.findByTestId('tool-send'))
+    expect(useTradingUi.getState()).toMatchObject({ sheet: 'send', deskMode: false })
+  })
+
+  it('opens Inspect in place, without leaving the desk', async () => {
+    renderDesk(<TradingView />)
+    await screen.findByTestId('trading-desk')
+    fireEvent.click(screen.getByTestId('tab-tools'))
+    fireEvent.click(await screen.findByTestId('tool-inspect'))
+    expect(useTradingUi.getState()).toMatchObject({ sheet: null, deskMode: true })
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
   })
 })

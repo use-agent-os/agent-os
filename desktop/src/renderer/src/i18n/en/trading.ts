@@ -114,6 +114,8 @@ export const trading = {
   'trading.tab.approvals': 'Approvals',
   'trading.tab.orders': 'Orders',
   'trading.tab.markets': 'Markets',
+  'trading.tab.automations': 'Automations',
+  'trading.tab.tools': 'Tools',
 
   // History
   'trading.history.empty': 'No activity yet',

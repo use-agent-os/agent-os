@@ -33,6 +33,10 @@ import { EMPTY_TOTALS, errorText, filterHoldings, isAwaitingApproval, sameAddres
 import { Orders } from './Orders'
 import { Overview } from './Overview'
 import { ChainMark } from './ChainMark'
+import { DecodeSheet } from './DecodeSheet'
+import { Automations } from './desk/Automations'
+import type { MissionsApi } from './desk/missions'
+import { ToolsPanel } from './desk/ToolsPanel'
 import { PanelBoundary, Spinner } from './parts'
 import { PriceChart } from './PriceChart'
 import { SwapPanel, type SwapPrefill } from './SwapPanel'
@@ -51,14 +55,32 @@ import { WalletHead } from './WalletHead'
 import { Budget, WalletRail, type WalletAction, type WalletSelection } from './WalletRail'
 import { WalletSheet, type WalletSheetMode } from './WalletSheet'
 
-type Tab = 'holdings' | 'markets' | 'history' | 'orders' | 'approvals'
+type Tab = 'holdings' | 'markets' | 'history' | 'orders' | 'approvals' | 'automations' | 'tools'
+
+/**
+ * What the full desk needs from the frame to show the Automations tab: the
+ * frame's one `useMissions` (a second would bind the cron events twice and
+ * double every write), the desk's chat, and a way to open another one.
+ */
+export interface DeskAutomations {
+  missions: MissionsApi
+  sessionKey: string
+  onOpenSession: (sessionKey: string) => void
+}
 
 /**
  * The desk. Three columns once the vault is open; before that, one message
  * and the single action that gets you to the next state: start the
  * gateway, turn trading on, create the vault, unlock it, add a wallet.
  */
-export function TradingView({ entering }: { entering?: boolean }) {
+export function TradingView({
+  entering,
+  automations,
+}: {
+  entering?: boolean
+  /** The frame's missions; without them the Automations tab is not offered. */
+  automations?: DeskAutomations
+}) {
   const gatewayState = useGateway((s) => s.status.state)
   if (gatewayState !== 'running') {
     return (
@@ -73,10 +95,10 @@ export function TradingView({ entering }: { entering?: boolean }) {
       </div>
     )
   }
-  return <Gate entering={Boolean(entering)} />
+  return <Gate entering={Boolean(entering)} automations={automations} />
 }
 
-function Gate({ entering }: { entering: boolean }) {
+function Gate({ entering, automations }: { entering: boolean; automations?: DeskAutomations }) {
   useTradingInvalidation()
   const status = useTradingStatus()
   const vault = useWalletStatus()
@@ -181,6 +203,7 @@ function Gate({ entering }: { entering: boolean }) {
   return (
     <Desk
       entering={entering}
+      automations={automations}
       provider={provider}
       // Only Uniswap needs a key; the aggregator is ready as soon as it answers.
       providerReady={provider !== 'uniswap' || Boolean(status.data?.apiKeyConfigured)}
@@ -215,12 +238,14 @@ function Desk({
   providerReady,
   needsKey,
   entering,
+  automations,
 }: {
   provider: ProviderId
   providerReady: boolean
   needsKey: boolean
   /** The mode switch is playing: the head counts its value up from zero. */
   entering: boolean
+  automations?: DeskAutomations
 }) {
   const status = useTradingStatus()
   const vault = useWalletStatus()
@@ -233,6 +258,9 @@ function Desk({
   const openMarkets = useTradingUi((s) => s.openMarkets)
   const swapRequest = useTradingUi((s) => s.swapRequest)
   const clearSwapRequest = useTradingUi((s) => s.clearSwapRequest)
+  const openSheet = useTradingUi((s) => s.openSheet)
+  const setDeskMode = useTradingUi((s) => s.setDeskMode)
+  const [inspecting, setInspecting] = useState(false)
   // A swap asked for from anywhere (a Holdings row, a Markets row) fills the
   // ticket, which is always on screen here; the request is cleared once taken.
   const [prefill, setPrefill] = useState<SwapPrefill | null>(null)
@@ -299,6 +327,27 @@ function Desk({
     [portfolio.data, chain],
   )
   const pending = orders.orders.filter(isAwaitingApproval).length
+  // The Automations tab's badge: proposals waiting on the operator, whichever chat made them.
+  const needsCount = automations
+    ? automations.missions.awaitingMandates.length +
+      automations.missions.awaitingTriggers.length +
+      automations.missions.awaitingBrackets.length
+    : 0
+  const tabs: Tab[] = [
+    'holdings',
+    'markets',
+    'history',
+    'orders',
+    'approvals',
+    ...(automations ? (['automations'] as const) : []),
+    'tools',
+  ]
+  // Send, Multisend and Burn post their ask into the desk's chat, which owns
+  // those sheets: leave the full desk for it with the sheet already asked for.
+  function openChatSheet(sheet: 'send' | 'multisend' | 'burn') {
+    openSheet(sheet)
+    setDeskMode(false)
+  }
 
   // Touch ID, when it is on, is asked for inside the decision itself
   // (`useOrderDecision`); a declined prompt has toasted and sent nothing.
@@ -366,6 +415,10 @@ function Desk({
   }
 
   const showWallet = selected === 'all'
+  // The chain the inspector opens on: the primary wallet's first, else the
+  // engine's first — the same pick the chat's Inspect makes.
+  const primaryWallet = wallets.find((w) => sameAddress(w.address, primary)) ?? wallets[0] ?? null
+  const inspectChain = primaryWallet?.chains?.[0] ?? status.data?.chains?.[0]?.chainId ?? 8453
   const totals = portfolio.data?.totals ?? EMPTY_TOTALS
   // A list of one is not a list: with a single wallet the head says everything
   // the rail would, and the column is 232 px the ledger can have instead.
@@ -451,7 +504,7 @@ function Desk({
 
           <div className="trd-panel">
             <div className="trd-tabs" role="tablist" aria-label={t('trading.title')}>
-              {(['holdings', 'markets', 'history', 'orders', 'approvals'] as Tab[]).map((id) => (
+              {tabs.map((id) => (
                 <button
                   key={id}
                   type="button"
@@ -464,11 +517,17 @@ function Desk({
                   {t(`trading.tab.${id}`)}
                   {id === 'approvals' && pending > 0 ? (
                     <span className="trd-tab__count">{pending}</span>
+                  ) : id === 'automations' && needsCount > 0 ? (
+                    <span className="trd-tab__count">{needsCount}</span>
                   ) : null}
                 </button>
               ))}
               <span className="trd-tabs__spacer" />
-              <div className="trd-tabs__tools">
+              {/* Automations and Tools are not filtered by chain. */}
+              <div
+                className="trd-tabs__tools"
+                data-off={tab === 'automations' || tab === 'tools' || undefined}
+              >
                 <div
                   role="radiogroup"
                   aria-label={t('trading.overview.chains')}
@@ -554,6 +613,22 @@ function Desk({
                   </>
                 ) : tab === 'markets' ? (
                   <Markets deskChain={chain} />
+                ) : tab === 'automations' && automations ? (
+                  <Automations
+                    missions={automations.missions}
+                    sessionKey={automations.sessionKey}
+                    pendingApprovals={pending}
+                    enabled
+                    onOpenSession={automations.onOpenSession}
+                  />
+                ) : tab === 'tools' ? (
+                  <ToolsPanel
+                    wallet={walletAddress ?? primary ?? undefined}
+                    onSend={() => openChatSheet('send')}
+                    onMultisend={() => openChatSheet('multisend')}
+                    onInspect={() => setInspecting(true)}
+                    onBurn={() => openChatSheet('burn')}
+                  />
                 ) : tab === 'history' ? (
                   <History
                     entries={history.entries}
@@ -597,6 +672,9 @@ function Desk({
         />
 
         {sheet ? <WalletSheet mode={sheet} onClose={() => setSheet(null)} /> : null}
+        {inspecting ? (
+          <DecodeSheet chainId={inspectChain} onClose={() => setInspecting(false)} />
+        ) : null}
       </div>
     </div>
   )
