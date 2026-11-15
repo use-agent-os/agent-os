@@ -83,6 +83,7 @@ from agentos.trading.evm import (
 from agentos.trading.ledger import (
     LP_ORDER_KINDS,
     ORDER_FINAL_STATUSES,
+    WALLET_REMOVED,
     Ledger,
     local_day,
     new_batch_id,
@@ -1440,10 +1441,71 @@ class TradingService:
         return record.to_dict(primary=(self.vault.primary_address() == record.address))
 
     async def remove_wallet(self, address: str, password: str) -> None:
+        """Remove a wallet; every DCA mandate and trigger bound to it ends with it.
+
+        Standing automation is an approval given for this key. It must not
+        outlive the key and come back when the same key is imported again,
+        with a fresh budget because its orders were deleted. So the key goes
+        first (nothing can sign for the address from here on), then each live
+        mandate and trigger is stopped (``wallet removed``) with whatever it
+        parked rejected, then the ledger forgets the wallet. The DCA and
+        trigger passes are held meanwhile so none is mid-fire for it.
+        """
         record = self.vault.get(address)
-        self.vault.remove(record.address, password)
-        self.ledger.remove_wallet(record.key)
+        async with self._dca_lock, self._trigger_lock, self._wallet_lock(record.key):
+            self.vault.remove(record.address, password)
+            try:
+                await self._end_wallet_automation(record)
+            except Exception as exc:  # the ledger below still stops what is left
+                log.warning("trading.wallet_automation_stop_failed", error=str(exc))
+            # Also the floor under the above: anything still live is stopped here.
+            self.ledger.remove_wallet(record.key, now=self._now())
         await self._emit("trading.changed", {"reason": "wallet", "wallet": record.address})
+
+    async def _end_wallet_automation(self, record: WalletRecord) -> None:
+        now = self._now()
+        for row in self.ledger.list_mandates(statuses=sorted(dca.LIVE_STATUSES), wallet=record.key):
+            mandate_id = str(row["mandate_id"])
+            updated = self.ledger.update_mandate(
+                mandate_id,
+                now=now,
+                expect_status=sorted(dca.LIVE_STATUSES),
+                status="stopped",
+                status_reason=WALLET_REMOVED,
+                next_run_at=None,
+                expires_at=None,
+            )
+            for order in self.ledger.orders_for_mandate(mandate_id):
+                if order["status"] == "awaiting_approval":
+                    with contextlib.suppress(TradingError):
+                        await self.reject(str(order["order_id"]), WALLET_REMOVED)
+            if updated is not None:
+                log.info("trading.dca_stopped", mandate=mandate_id, reason=WALLET_REMOVED)
+                await self._dca_changed(updated)
+        groups: set[str] = set()
+        for row in self.ledger.list_triggers(
+            statuses=sorted(triggers.LIVE_STATUSES), wallet=record.key, legs="all"
+        ):
+            trigger_id = str(row["trigger_id"])
+            updated_trigger = self.ledger.update_trigger(
+                trigger_id,
+                now=now,
+                expect_status=sorted(triggers.LIVE_STATUSES),
+                status="stopped",
+                status_reason=WALLET_REMOVED,
+                expires_at=None,
+            )
+            for order in self.ledger.orders_for_trigger(trigger_id):
+                if order["status"] == "awaiting_approval":
+                    with contextlib.suppress(TradingError):
+                        await self.reject(str(order["order_id"]), WALLET_REMOVED)
+            if updated_trigger is not None:
+                log.info("trading.trigger_stopped", trigger=trigger_id, reason=WALLET_REMOVED)
+                await self._trigger_changed(updated_trigger, bracket=False)
+                if updated_trigger.get("group_id"):
+                    groups.add(str(updated_trigger["group_id"]))
+        for group_id in sorted(groups):
+            await self._bracket_announce(group_id)
 
     def _wallets_for(self, selector: Any) -> list[WalletRecord]:
         if selector in (None, "", "primary"):
@@ -6454,6 +6516,16 @@ class TradingService:
         text = " ".join(str(reason or "").split())[:200]
         return f"user: {text}" if text else "user"
 
+    def _dca_spend(self, row: dict[str, Any]) -> tuple[float, float, int, float]:
+        """:meth:`Ledger.mandate_spend`, its confirmed spend never below the mandate's own record.
+
+        The orders are the source; ``spent_usd`` is what they summed to when
+        the last run settled. A cap must not reopen because order rows went
+        missing (removing a wallet deletes its orders).
+        """
+        spent, reserved, received, gas = self.ledger.mandate_spend(str(row["mandate_id"]))
+        return max(spent, float(row.get("spent_usd") or 0.0)), reserved, received, gas
+
     async def _dca_integrity_stop(self, mandate_id: str, error: TradingError) -> None:
         """End a mandate whose seal failed: terminal, nothing it parked is left to approve."""
         verdict = (error.details or {}).get("verdict", "mismatch")
@@ -6555,7 +6627,7 @@ class TradingService:
         chain = CHAINS[int(row["chain_id"])]
         token = self._token_dict(chain.chain_id, str(row["token_out"])) or {}
         symbol = str(token.get("symbol") or "token")
-        spent, reserved, _, _ = self.ledger.mandate_spend(mandate_id)
+        spent, reserved, _, _ = self._dca_spend(row)
         in_flight = len(self.ledger.open_runs(mandate_id))
         runs_max = int(row["runs_max"]) if row.get("runs_max") is not None else None
         usd_per_run = float(row["usd_per_run"])
@@ -6714,7 +6786,8 @@ class TradingService:
             deltas["runs_failed"] = 1
             deltas["bad_streak"] = 1
         self.ledger.add_mandate_counts(mandate_id, now=now, **deltas)
-        spent = self.ledger.mandate_spend(mandate_id)[0]
+        current = self.ledger.get_mandate(mandate_id) or {"mandate_id": mandate_id}
+        spent = self._dca_spend(current)[0]
         extra: dict[str, Any] = {"spent_usd": spent}
         if status == "filled":
             extra["bad_streak"] = 0
@@ -6749,7 +6822,7 @@ class TradingService:
         if row["status"] not in ("active", "paused"):
             return None
         mandate_id = str(row["mandate_id"])
-        spent, reserved, _, _ = self.ledger.mandate_spend(mandate_id)
+        spent, reserved, _, _ = self._dca_spend(row)
         why = dca.completion_reason(
             usd_per_run=float(row["usd_per_run"]),
             cap_usd=float(row["cap_usd"]),
@@ -6798,7 +6871,7 @@ class TradingService:
         quote = self._token_dict(chain.chain_id, str(row["token_in"])) or {}
         token_price = await self._dca_price(chain, str(row["token_out"]))
         quote_price = await self._dca_price(chain, str(row["token_in"]))
-        spend = self.ledger.mandate_spend(mandate_id)
+        spend = self._dca_spend(row)
         rows = self.ledger.list_runs(mandate_id, limit=dca.HISTORY_LIMIT)
         order_ids = [str(r["order_id"]) for r in rows if r.get("order_id")]
         orders = {oid: self.ledger.get_order(oid) for oid in order_ids}

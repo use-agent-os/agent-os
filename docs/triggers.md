@@ -264,7 +264,8 @@ slippage ceiling. Approving a trigger (or creating one as the operator) seals
 its terms with the vault key, so it needs an unlocked vault; a trigger whose
 row was changed outside the engine is stopped (`"integrity check failed (…)"`)
 instead of firing. While you have locked the vault, trading triggers wait
-(alerts still ring).
+(alerts still ring); removing the wallet stops its triggers
+(`"wallet removed"`).
 
 Events: every state change emits `trading.changed {reason: "trigger",
 triggerId}` and `trading.trigger.changed {trigger}` (full `Trigger`

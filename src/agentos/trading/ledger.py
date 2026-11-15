@@ -27,7 +27,9 @@ import structlog
 from agentos.paths import state_dir
 from agentos.trading import integrity
 from agentos.trading.chains import NATIVE_ADDRESS
+from agentos.trading.dca import LIVE_STATUSES as MANDATE_LIVE_STATUSES
 from agentos.trading.pnl import Lot
+from agentos.trading.triggers import LIVE_STATUSES as TRIGGER_LIVE_STATUSES
 
 log = structlog.get_logger(__name__)
 
@@ -82,6 +84,8 @@ ORDER_STATUSES = (
 )
 ORDER_OPEN_STATUSES = frozenset({"awaiting_approval", "approved", "submitted"})
 ORDER_FINAL_STATUSES = frozenset({"rejected", "expired", "confirmed", "failed"})
+#: Why a mandate or trigger ended when its wallet left the vault.
+WALLET_REMOVED = "wallet removed"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
@@ -901,11 +905,57 @@ class Ledger:
             )
             self._commit()
 
-    def remove_wallet(self, address: str) -> None:
+    def remove_wallet(self, address: str, *, now: float | None = None) -> None:
+        """Forget a wallet: its history and orders go, its automation ends for good.
+
+        A re-import of the same address must not inherit stale orders (which
+        sync would re-book), spend, or a standing authorization. Mandates and
+        triggers are kept as history but end ``stopped`` (``wallet removed``)
+        with their open runs and fires closed and their seals dropped, so no
+        remove / re-import cycle can bring one back or hand it a fresh budget.
+        :meth:`TradingService.remove_wallet` stops them through the engine
+        first; this is the floor under it.
+        """
         key = address.lower()
-        with self._lock:
-            # Every wallet-keyed table: a re-import of the same address must
-            # not inherit stale orders (which sync would re-book) or spend.
+        ts = time.time() if now is None else float(now)
+        with self.transaction():
+            for kind, (table, column) in integrity.TABLES.items():
+                ids = [
+                    str(r[0])
+                    for r in self._conn.execute(
+                        f"SELECT {column} FROM {table} WHERE wallet = ?",  # noqa: S608
+                        (key,),
+                    ).fetchall()
+                ]
+                for ident in ids:
+                    self._write_seal(kind, ident, None)
+            live_mandates = sorted(MANDATE_LIVE_STATUSES)
+            marks = ", ".join("?" for _ in live_mandates)
+            self._conn.execute(
+                "UPDATE mandates SET status = 'stopped', status_reason = ?, next_run_at = NULL, "  # noqa: S608
+                f"expires_at = NULL, updated_at = ? WHERE wallet = ? AND status IN ({marks})",
+                (WALLET_REMOVED, ts, key, *live_mandates),
+            )
+            live_triggers = sorted(TRIGGER_LIVE_STATUSES)
+            marks = ", ".join("?" for _ in live_triggers)
+            self._conn.execute(
+                "UPDATE triggers SET status = 'stopped', status_reason = ?, expires_at = NULL, "  # noqa: S608
+                f"updated_at = ? WHERE wallet = ? AND status IN ({marks})",
+                (WALLET_REMOVED, ts, key, *live_triggers),
+            )
+            for table, parent, column in (
+                ("mandate_runs", "mandates", "mandate_id"),
+                ("trigger_fires", "triggers", "trigger_id"),
+            ):
+                self._conn.execute(
+                    f"UPDATE {table} SET status = 'failed', reason = ? "  # noqa: S608
+                    f"WHERE status IN ('pending', 'parked') AND {column} IN "
+                    f"(SELECT {column} FROM {parent} WHERE wallet = ?)",
+                    (WALLET_REMOVED, key),
+                )
+            for day_key in [k for k in self._spend_floor if k[0] == key]:
+                del self._spend_floor[day_key]
+            # Every wallet-keyed table of history and accounting.
             for table in (
                 "wallets",
                 "entries",
@@ -924,9 +974,6 @@ class Ledger:
             ):
                 column = "address" if table == "wallets" else "wallet"
                 self._conn.execute(f"DELETE FROM {table} WHERE {column} = ?", (key,))  # noqa: S608
-            for day_key in [k for k in self._spend_floor if k[0] == key]:
-                del self._spend_floor[day_key]
-            self._commit()
 
     # ── integrity seals (agentos.trading.integrity) ────────────────────
 

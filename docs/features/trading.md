@@ -202,6 +202,9 @@ Trading** pane has a *Test key* button (`trading.probe`).
 - Export (keystore or raw private key) and wallet removal always ask for
   the vault password, whatever the mode. Private keys never appear in logs,
   RPC responses (other than `wallet.export`), or the ledger.
+- Removing a wallet stops every DCA mandate, trigger and bracket bound to it
+  (`wallet removed`) and rejects what they parked. Importing the same key
+  again is a new wallet as far as approvals go: nothing comes back.
 - **Ledger seals.** The engine does not sign what it merely reads back from
   `state/trading.sqlite`. Every order is sealed when the engine writes it,
   and every mandate, trigger and bracket when you approve it (or create it

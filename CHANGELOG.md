@@ -66,6 +66,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   armed triggers wait (no failed runs, no auto-pause; alerts keep ringing),
   approving an order is refused with the order left parked, and buy-now /
   fire-now are refused. `wallet.status` carries `lockedByOperator`.
+- Trading: removing a wallet ends its automation. Every DCA mandate,
+  trigger and bracket bound to it is stopped (`wallet removed`) and what it
+  parked is rejected, so importing the same key again revives nothing; a
+  re-import is a new incarnation of the wallet, which no old seal matches.
+  A mandate's spent budget no longer drops when its orders are deleted.
 - Approvals are yours alone: answering a prompt, changing the approval mode,
   forgetting remembered answers, `POST /api/elevated-mode`, an `elevated`
   hint on `chat.send` and approving a channel pairing are refused
