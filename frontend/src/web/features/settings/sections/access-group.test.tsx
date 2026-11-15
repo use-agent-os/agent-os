@@ -85,6 +85,58 @@ describe('Channels', () => {
     )
   })
 
+  it.each([
+    ['dc', 'discord'],
+    ['sl', 'slack'],
+    ['teams', 'msteams'],
+  ])(
+    'lists a pending %s (%s) pairing request next to Telegram and approves it',
+    async (name, type) => {
+      const rpc = shellRpc()
+        .handle('channels.status', {
+          channels: [
+            { name: 'tg', type: 'telegram', status: 'running', connected: true },
+            { name, type, status: 'running', connected: true },
+          ],
+        })
+        .handle('channels.pairing.list', {
+          channels: [
+            { name: 'tg', type: 'telegram', pending: [], paired: [{ sender_id: 7 }] },
+            { name, type, pending: [{ sender_id: 'U99', display_name: 'Bob' }], paired: [] },
+          ],
+        })
+        .handle('config.snapshot', { revision: 'r1', config: {}, catalog: { channels: [] } })
+        .handle('channels.pairing.approve', {})
+      renderShell('/settings/channels', rpc)
+      const card = await screen.findByRole('article', { name: `Channel ${name}` })
+      await within(card).findByText('Bob')
+      expect(within(card).getByText(/must pair first/)).toBeInTheDocument()
+      expect(within(card).queryByText(/Group messaging/)).toBeNull()
+      const telegram = await screen.findByRole('article', { name: 'Channel tg' })
+      expect(within(telegram).getByRole('heading', { name: 'Pairing' })).toBeInTheDocument()
+      await userEvent.setup().click(within(card).getByRole('button', { name: 'Approve' }))
+      await waitFor(() =>
+        expect(rpc.callsTo('channels.pairing.approve')).toEqual([
+          { channel: name, senderId: 'U99' },
+        ]),
+      )
+    },
+  )
+
+  it('shows no pairing panel for a channel the gateway does not pair', async () => {
+    const rpc = shellRpc()
+      .handle('channels.status', {
+        channels: [{ name: 'mail', type: 'email', status: 'running', connected: true }],
+      })
+      .handle('channels.pairing.list', {
+        channels: [{ name: 'mail', type: 'email', pending: [{ sender_id: 1 }], paired: [] }],
+      })
+      .handle('config.snapshot', { revision: 'r1', config: {}, catalog: { channels: [] } })
+    renderShell('/settings/channels', rpc)
+    const card = await screen.findByRole('article', { name: 'Channel mail' })
+    expect(within(card).queryByRole('heading', { name: 'Pairing' })).toBeNull()
+  })
+
   it('opens the setup dialog from ?setup=1', async () => {
     renderShell('/settings/channels?setup=1', channelsRpc())
     const dialog = await screen.findByRole('dialog', { name: 'Add a channel' })

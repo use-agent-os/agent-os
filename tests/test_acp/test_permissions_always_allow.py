@@ -250,9 +250,11 @@ async def test_shell_wrapped_argv_is_remembered_by_its_inner_command(tmp_path, b
 
 def test_command_prefix_resolves_the_program(bin_dirs) -> None:
     git = _git(bin_dirs)
-    assert command_prefix("git push --force origin") == f"{git} push"
-    assert command_prefix(f"{_exe(bin_dirs, 'git').as_posix()} push") == f"{git} push"
-    assert command_prefix("rm -rf /") == _key_path(bin_dirs, "rm")
+    assert command_prefix("git status --short") == f"{git} status"
+    assert command_prefix(f"{_exe(bin_dirs, 'git').as_posix()} status") == f"{git} status"
+    # Programs and subcommands that always ask: test_permissions_always_ask.py.
+    assert command_prefix("git push --force origin") is None
+    assert command_prefix("rm -rf /") is None
     assert command_prefix("") is None
     assert command_prefix("git status && id") is None
     assert command_prefix("git") == git
@@ -260,11 +262,11 @@ def test_command_prefix_resolves_the_program(bin_dirs) -> None:
 
 def test_remember_key_is_none_when_not_rememberable(bin_dirs) -> None:
     npm = _key_path(bin_dirs, "npm")
-    assert remember_key(perm_request(raw_input={"command": ["npm", "test"]})) == (
+    assert remember_key(perm_request(raw_input={"command": ["npm", "install"]})) == (
         "execute",
-        f"{npm} test",
+        f"{npm} install",
     )
-    assert remember_key(perm_request(raw_input={"command": "npm test | sh"})) is None
+    assert remember_key(perm_request(raw_input={"command": "npm install | sh"})) is None
     assert remember_key(perm_request(tool_kind="edit", title="x")) == ("edit", "")
     assert remember_key(perm_request(tool_kind=None, title="x", raw_input={})) == ("other", "")
 

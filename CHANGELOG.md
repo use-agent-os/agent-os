@@ -7,6 +7,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- `env.reveal` from an agent's connection refuses every name any catalog
+  source classifies as secret. The catalog used the first source's
+  classification, so a skill manifest (which an agent can write) declaring
+  `secret: false` unmasked another skill's key, a provider key it listed
+  first, or a token only the operator's `.env` held; `env.list` showed the
+  same value in full. A name is now secret if any source says so, and an
+  agent never reads a credential-shaped, `AGENTOS_*`, gateway-reserved or
+  runtime-steering name whatever a skill declares (`env.list` masks the same
+  set for an agent). The operator and the web console are unchanged.
+- A connection the gateway recognizes as an agent's (agent token, spawned
+  process, exec window) can no longer change where model and embedding calls
+  go, the spend ceilings or the agent definitions. Refused on every config
+  writer (`config.set`/`patch`/`apply`, onboarding): `llm.base_url`,
+  `llm.proxy`, `agentos_router.judge_base_url`/`jev.base_url`,
+  `memory.embedding.*base_url`, `memory.provider.mem0.*_base_url`, the image,
+  audio and X search `base_url`s, `search_proxy`/`search_use_env_proxy`, a
+  provider profile's `base_url`/`proxy`/`router.judge_base_url`, a channel's
+  `api_base`/`webhook_url`/`gateway_url`/`command_request_url`/IMAP and SMTP
+  host and port (a new channel keeps the defaults), `budgets.*` and `agents`.
+  `agents.create`, `agents.update` and `agents.delete`, which wrote the agent
+  list without `commit_config`, now refuse an agent's connection with
+  `agent.operator_required`. The list lives in `agentos.config_roots`
+  (`AGENT_REFUSED_CONFIG_ROOTS`, `OPERATOR_ONLY_ENTRY_FIELDS`). The web
+  console (unbound on loopback), the desktop app and the operator's CLI are
+  unchanged, and a file edit of these settings applies as before.
+- An ACP **Always allow** no longer covers programs that delete data or run
+  code they are handed. `rm`, `rmdir`, `dd`, `mkfs*`, `shred`, `truncate`,
+  recursive `chmod`/`chown`/`chgrp`, interpreters (`python*`, `py`, `node`,
+  `deno`, `bun`, `ruby`, `perl`, `php`, ...), shells, `uv run`, `uvx`,
+  `pipx run`, `npx`, `npm exec`/`run`/`test`, `pnpm dlx`/`exec`, `yarn dlx`,
+  `make`, `cargo run`, `go run`, `docker`, `podman`, `kubectl`, `curl`,
+  `wget`, `find -delete`/`-exec` and `git push`/`reset`/`clean`/`checkout`/
+  `restore` always ask, matched on the program's file name (case-insensitive,
+  `.exe`/`.cmd`/`.bat`/`.ps1` dropped, links followed) with the subcommand
+  found anywhere in the command, so a flag in front of it does not hide it.
+  Grants remembered for these before the upgrade stop matching. Operators
+  will see more prompts for interpreters and runners; `git log`, `git status`,
+  `ls`, `npm install`, `cargo build` and the like are still remembered.
 - Output redaction now masks wallet material it used to pass to the model and
   transcript verbatim (WAL-09): a secret the gateway holds — a skill hot-wallet
   key (`UNIV4_LP_PRIVATE_KEY`, `POOLSFUN_PRIVATE_KEY`, …), the vault password —
@@ -312,6 +350,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   instead of the caller's unparsed `amountIn`. (WAL-13)
 
 ### Fixed
+- Settings › Channels lists pairing requests for Discord, Slack and MS Teams
+  channels with `pairing_enabled`, next to Telegram, with Approve, Deny and
+  Revoke. The gateway already reported and accepted them; the panel showed
+  Telegram only, so a waiting Discord sender was counted but could not be
+  approved from the console.
 - Desktop: "Update all" in Settings › About no longer asks for a second
   "Update" on the Engine card. It still runs the engine preflight first and
   goes ahead on its own when nothing would be interrupted; running sessions,

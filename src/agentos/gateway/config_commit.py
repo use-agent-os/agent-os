@@ -19,8 +19,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from agentos.config_roots import (
+    AGENT_REFUSED_CONFIG_ROOTS,
+    UNBOUND_REFUSED_CONFIG_ROOTS,
+    touches_root,
+)
 from agentos.config_roots import OPERATOR_ONLY_CONFIG_ROOTS as _OPERATOR_ONLY_CONFIG_ROOTS
-from agentos.config_roots import UNBOUND_REFUSED_CONFIG_ROOTS, touches_root
 from agentos.gateway.config_persist import persist_config, prepare_persist_payload
 
 if TYPE_CHECKING:
@@ -441,7 +445,83 @@ def _refuse_agent_config_change(
         paths |= diff_paths(dump_old(mode="python"), dump_new(mode="python"))
     refuse_any_agent_binding_change(ctx, paths)
     refuse_agent_operator_only_change(ctx, paths)
+    refuse_agent_entry_endpoint_change(ctx, source, new_config)
     refuse_agent_channel_admission(ctx, source, new_config)
+
+
+_MISSING: Any = object()
+
+
+def _keyed_entries(config: Any, collection: str) -> dict[str, Any]:
+    """The entries of a keyed collection: a dict by key, a list by ``name``."""
+    node = config
+    for part in collection.split("."):
+        node = getattr(node, part, None)
+    if isinstance(node, dict):
+        return {str(key): value for key, value in node.items()}
+    if isinstance(node, list):
+        return {str(getattr(entry, "name", "")): entry for entry in node}
+    return {}
+
+
+def _entry_field(entry: Any, dotted: str) -> Any:
+    node = entry
+    for part in dotted.split("."):
+        node = getattr(node, part, _MISSING)
+        if node is _MISSING:
+            return _MISSING
+    return node
+
+
+def _entry_field_default(entry: Any, dotted: str) -> Any:
+    """The value a new entry of *entry*'s type would hold for *dotted*.
+
+    ``_MISSING`` for a required field: then any value is a choice someone made.
+    """
+    head, _, rest = dotted.partition(".")
+    info = getattr(type(entry), "model_fields", {}).get(head)
+    if info is None or info.is_required():
+        return _MISSING
+    value = info.get_default(call_default_factory=True)
+    return _entry_field(value, rest) if rest else value
+
+
+def refuse_agent_entry_endpoint_change(ctx: Any, source: Any, new_config: Any) -> None:
+    """Refuse a config write by which an agent would re-point a provider or channel.
+
+    A provider profile's ``base_url`` or a channel's ``api_base`` /
+    ``smtp_host`` sits inside a dict or list that diffs as one path, so no
+    root check sees it (``config_roots.OPERATOR_ONLY_ENTRY_FIELDS``). An
+    existing entry must keep its value; a new entry must keep the field's
+    default. Removing an entry stays allowed.
+    """
+    from agentos.config_roots import OPERATOR_ONLY_ENTRY_FIELDS
+    from agentos.gateway.agent_surface import recognized_agent
+
+    if recognized_agent(ctx) is None:
+        return
+    touched: list[str] = []
+    for collection, fields in OPERATOR_ONLY_ENTRY_FIELDS.items():
+        before = _keyed_entries(source, collection)
+        for key, entry in _keyed_entries(new_config, collection).items():
+            old = before.get(key)
+            for field in fields:
+                value = _entry_field(entry, field)
+                if value is _MISSING:
+                    continue
+                if old is not None:
+                    reference = _entry_field(old, field)
+                    if reference is _MISSING:
+                        reference = _entry_field_default(entry, field)
+                else:
+                    reference = _entry_field_default(entry, field)
+                if value != reference:
+                    touched.append(f"{collection}.{key}.{field}")
+    if touched:
+        raise ValueError(
+            "these settings are the user's to change; an agent cannot set "
+            + ", ".join(sorted(touched))
+        )
 
 
 def _admitted_user_ids(config: Any) -> dict[str, set[str]]:
@@ -644,14 +724,19 @@ def refuse_agent_operator_only_change(ctx: Any, changed_paths: Iterable[str]) ->
     Applied to the *computed* diff of every config writer (``commit_config``),
     so a full-replace (``config.apply``), a merge patch or an onboarding
     mutation cannot carry what a ``config.set`` of the same path would be
-    refused. ``trading`` is refused for an unbound connection too
-    (``rpc_config._refuse_agent_trading_paths``).
+    refused. Covers ``config_roots.AGENT_REFUSED_CONFIG_ROOTS`` too (model and
+    embedding endpoints, budgets, agent definitions). ``trading`` is refused
+    for an unbound connection too (``rpc_config._refuse_agent_trading_paths``).
     """
     from agentos.gateway.agent_surface import recognized_agent
 
     if recognized_agent(ctx) is None:
         return
-    touched = operator_only_paths(changed_paths)
+    paths = {str(p) for p in changed_paths}
+    touched = sorted(
+        set(operator_only_paths(paths))
+        | {p for p in paths if p and touches_root(p, AGENT_REFUSED_CONFIG_ROOTS)}
+    )
     if touched:
         raise ValueError(
             "these settings are the user's to change; an agent cannot set " + ", ".join(touched)

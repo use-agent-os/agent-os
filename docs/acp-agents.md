@@ -240,8 +240,8 @@ permission_mode` decides who answers:
 
 Answering an `ask` prompt with **Always allow** skips later prompts of the
 same kind in that harness session. For commands the grant covers one
-program and subcommand: Always allow on `git push origin main` covers
-`git push --force` but not `git reset`. The program is matched by the
+program and subcommand: Always allow on `git log --oneline` covers
+`git log -p` but not `git status`. The program is matched by the
 absolute path it resolves to on the gateway's `PATH`, so `/tmp/x/git push`
 or `./git push` still asks. These commands always ask, even after Always
 allow:
@@ -254,7 +254,30 @@ allow:
 - shells and wrappers that run another command (`bash`, `sh`, `env`,
   `sudo`, `xargs`, `eval`, `nohup`, `timeout`, ...). `bash -lc '<command>'`
   is matched by the one command inside;
+- programs that delete data or run whatever code they are handed, under any
+  arguments: `rm`, `rmdir`, `unlink`, `dd`, `mkfs*`, `shred`, `truncate`;
+  interpreters (`python`, `python3*`, `py`, `node`, `deno`, `bun`, `ruby`,
+  `perl`, `php`, ...); every shell (`sh`, `bash`, `zsh`, `fish`, `dash`,
+  `pwsh`, `powershell`, `cmd`, ...); package runners and build tools that run
+  a file the harness can edit (`uvx`, `npx`, `make`, `just`); `docker`,
+  `podman`, `kubectl`, `curl`, `wget`;
+- subcommands that run a package or script, or publish or discard work,
+  wherever they appear in the command (`uv --quiet run` counts): `uv run`,
+  `uv tool run`, `pipx run`, `poetry`/`pdm`/`hatch`/`pixi`/`conda run`,
+  `npm exec`/`run`/`test`/`start`, `pnpm dlx`/`exec`/`run`, `yarn dlx`/
+  `exec`/`run`, `cargo run`, `go run`/`generate`, `git push`, `reset`,
+  `clean`, `checkout` (a path checkout discards changes; `git switch` stays
+  rememberable), `restore`, `rm`, `stash drop`/`clear`, `switch -f`, and `git
+  -c`/`--config-env`/`--exec-path`;
+- `chmod`, `chown` or `chgrp` with `-R`/`--recursive`, and `find` with
+  `-delete`, `-exec`, `-execdir`, `-ok` or `-fprint*`;
 - a command that does not parse (an unbalanced quote).
+
+The program is recognised by its file name, lower-cased and without an
+`.exe`, `.cmd`, `.bat`, `.ps1` or `.com` suffix, and by the name of the file a
+link points to, so `C:/Tools/Python.EXE`, `npx.cmd` and a link named `ls` to
+`python3` all ask. A grant remembered before this rule never answers one of
+these prompts.
 
 With `ask` and nobody able to answer (cron, unattended runs),
 `non_interactive_permissions = "fail"` fails the turn with
