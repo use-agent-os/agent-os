@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.15] - 2026-11-15
+
 ### Security
 - **Breaking default — Discord and Slack channels now refuse senders you have
   not admitted.** Before, any Discord user who could DM or @mention the bot,
