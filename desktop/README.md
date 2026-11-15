@@ -357,6 +357,15 @@ button that asked reads "Touch ID…" and a second click is ignored. The setting
 itself never needs Touch ID to change. Tool approvals are not gated: they are
 file and command gates, not money.
 
+**Copy** on an exported private key puts it on the clipboard and asks main
+(`app.scrubClipboard`, `main/clipboard-scrub.ts`) to blank it a minute later
+if the clipboard still holds exactly that key; anything copied over it is
+left alone. Only the key's SHA-256 digest crosses IPC. The timer is main's,
+so closing the sheet, navigating away or reloading the window cannot cancel
+it, and quitting the app blanks it first (the quit waits at most a second
+for the clipboard). It is not cleared when the window loses focus: that is
+when the key gets pasted into a password manager.
+
 ## Quick Ask
 
 A system-wide shortcut, **⌥ Space** by default, opens a small floating prompt

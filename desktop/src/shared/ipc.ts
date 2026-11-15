@@ -58,6 +58,7 @@ export const IPC = {
     loginItem: 'app:loginItem',
     biometrics: 'app:biometrics',
     authenticate: 'app:authenticate',
+    scrubClipboard: 'app:scrubClipboard',
   },
   notify: {
     supported: 'notify:supported',
@@ -146,6 +147,13 @@ export interface DesktopApi {
      * `reason` (≤ 120 characters). Biometrics only: never a password fallback.
      */
     authenticate(reason: string): Promise<AuthResult>
+    /**
+     * Blank the clipboard in `afterMs` (clamped to 1 s – 10 min), and at
+     * once if the app quits first, when it still holds the text whose
+     * SHA-256 hex is `digest`. Owned by main: it outlives the view that
+     * copied. False when the arguments were refused.
+     */
+    scrubClipboard(digest: string, afterMs: number): Promise<boolean>
   }
   settings: {
     get(): Promise<DesktopSettings>
