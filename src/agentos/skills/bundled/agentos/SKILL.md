@@ -765,7 +765,7 @@ agentos trade probe --provider uniswap  # reachable? key valid? (exit 1 when not
 agentos trade tokens --chain robinhood AAPL --json     # verified Stock Tokens are flagged
 agentos trade quote --chain base --in ETH --out USDC --amount 0.01 --json
 agentos trade swap --chain base --in ETH --out USDC --amount 0.01 --wait --json
-agentos trade orders --status awaiting_approval [--kind swap|send|revoke|bridge|lp_collect|lp_remove|lp_add] / approve <id> / reject <id>
+agentos trade orders --status awaiting_approval [--kind swap|send|revoke|bridge|lp_collect|lp_remove|lp_add] / approve <id> [--yes] / reject <id>   # approve (operator-only) shows the order — every leg of a multisend — and asks; --yes is required with --json
 agentos trade send --chain base --token USDC --to <addr> --amount 25 --json   # several --to = one batch; agent sends always wait for approval
 agentos trade allowances --json / revoke --chain base --token <addr> --spender <addr>   # live ERC-20 allowances; approve(spender, 0)
 agentos trade decode --chain base <txhash> --json / network --json   # explain a tx; head block, gas, RPC health

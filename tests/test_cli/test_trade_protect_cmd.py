@@ -275,7 +275,7 @@ SELL_DEFAULTS = {"chainId": 8453, "kind": "sell", "token": "ETH", "initiator": "
             {"all": True, "wallet": "0x1"},
         ),
         (["bracket", "show", BID], "trading.bracket.get", {"bracketId": BID}),
-        (["bracket", "approve", BID], "trading.bracket.approve", {"bracketId": BID}),
+        (["bracket", "approve", BID, "--yes"], "trading.bracket.approve", {"bracketId": BID}),
         (["bracket", "reject", BID], "trading.bracket.reject", {"bracketId": BID}),
         (
             ["bracket", "reject", BID, "--reason", "too tight"],
@@ -512,7 +512,7 @@ def test_operator_required_is_json_exit_1_and_no_card(
 
     monkeypatch.setattr(trade_cmd, "run_gateway_sync", failing)
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(trade_cmd.app, ["bracket", "approve", BID, "--json"])
+    result = runner.invoke(trade_cmd.app, ["bracket", "approve", BID, "--yes", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.stderr)["error"]["code"] == "trading.operator_required"
     assert "publish_artifact" not in result.stdout

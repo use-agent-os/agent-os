@@ -186,6 +186,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   out. `agentos trade approve` and the desktop app send the digest; a
   script that approves a multisend with a bare `orderId` must read the
   batch first. (WAL-12)
+- CLI: `agentos trade approve` is an honest approval surface. It reads the
+  order first and shows everything the approval releases — both token
+  contracts in full with a verified/UNVERIFIED mark, the full recipient and
+  wallet, the chain id, slippage, provider and value, and for a multisend
+  leg every leg of the batch with the total (and a warning when it is
+  unpriced, so the daily cap does not bound it) — then asks before it acts.
+  **`--yes` skips the question and is now required with `--json`** (without
+  it: `CONFIRMATION_REQUIRED`, exit 2), so scripts that approve with
+  `--json` need `--yes`. `trade dca|trigger|bracket approve` likewise show
+  the automation and ask first (`--yes`). `trade orders` names a parked
+  order's recipient and wallet in full and marks unverified tokens;
+  `trade order` prints token contracts and, for a parked multisend leg, every
+  leg. Mandate, trigger and bracket token payloads carry `verified`.
+  (WAL-08)
 
 ### Changed
 - Editing the config file by hand no longer applies the operator-only
