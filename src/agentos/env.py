@@ -6,6 +6,15 @@ Precedence (highest to lowest):
 3. ~/.agentos/.env (global user config)
 
 Existing environment variables are NEVER overridden.
+
+The working directory's ``.env`` cannot set a name ``agentos.env_policy``
+protects (loader and interpreter variables, AgentOS posture and state
+location, the operator-only config roots) or one that steers the runtime
+(``PYTHON*``, the signer's crypto backends, TLS trust):
+that directory is whatever the gateway was started from, often writable by an
+agent's shell, and the values would land in the process that holds the vault
+keys. ``~/.agentos/.env`` -- the operator's own file, on the sensitive-path
+floor -- is read as before.
 """
 
 from __future__ import annotations
@@ -94,25 +103,45 @@ def parse_env_file(path: Path) -> dict[str, str]:
     return _parse_env_file(path)
 
 
+def _same_file(left: Path, right: Path) -> bool:
+    try:
+        return os.path.normcase(str(left.resolve())) == os.path.normcase(str(right.resolve()))
+    except OSError:
+        return False
+
+
 def load_env(cwd: str | Path | None = None) -> int:
     """Load .env files into os.environ with precedence rules.
 
     Returns the number of new variables injected.
     """
-    candidates = []
+    from agentos.env_policy import is_protected_name, is_runtime_steering_name
+
+    candidates: list[tuple[Path, bool]] = []
 
     # 1. cwd/.env (or cwd/.env.test as alias for dev)
     work_dir = Path(cwd) if cwd else Path.cwd()
     for name in (".env", ".env.test"):
-        candidates.append(work_dir / name)
+        candidates.append((work_dir / name, True))
 
     # 2. ~/.agentos/.env (global)
-    candidates.append(default_agentos_home() / ".env")
+    home_env = default_agentos_home() / ".env"
+    candidates.append((home_env, False))
 
     # Merge: first file wins per key, but os.environ always wins
     merged: dict[str, str] = {}
-    for path in candidates:
+    for path, project_local in candidates:
+        if project_local and _same_file(path, home_env):
+            project_local = False
         for key, value in _parse_env_file(path).items():
+            if project_local and (is_protected_name(key) or is_runtime_steering_name(key)):
+                log.warning(
+                    "env.project_env_name_ignored",
+                    key=key,
+                    source=str(path),
+                    hint="set it in ~/.agentos/.env or export it before starting AgentOS",
+                )
+                continue
             if key not in merged:
                 merged[key] = value
                 log.debug("env.loaded", key=key, source=str(path))

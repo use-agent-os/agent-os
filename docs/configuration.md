@@ -53,7 +53,14 @@ something to discover through a confusing hour. To make the file authoritative,
 remove the export and restart.
 
 Likewise, a `.env` in the directory the gateway was started from wins over
-`~/.agentos/.env`.
+`~/.agentos/.env` -- except for the names below and the runtime-steering ones
+(`PYTHON*`, `ECC_BACKEND_CLASS`, `ETH_HASH_BACKEND`, `ETH_ACCOUNT_KDF`,
+`SSL_CERT_FILE`, `SSL_CERT_DIR`, `SSLKEYLOGFILE`, `REQUESTS_CA_BUNDLE`,
+`CURL_CA_BUNDLE`, `PYTHON_KEYRING_BACKEND`), which a project `.env` cannot set:
+that directory is often writable by an agent's shell, and the values would
+land in the process that holds the wallet keys. AgentOS logs
+`env.project_env_name_ignored` for each one it skips. Put them in
+`~/.agentos/.env` or export them before starting AgentOS.
 
 ### What cannot be written through AgentOS
 
@@ -79,6 +86,18 @@ every AgentOS surface — the Web UI, the CLI, the RPC, and the agent tool:
   decides whether the ambient `*_PROXY` names are honoured at all, is refused
   for the same reason. Configure a proxy through `llm.proxy` in the config
   file, or export it in the shell that starts the gateway.
+
+**An agent's own connection is held to an allowlist.** A connection the
+gateway recognizes as an agent's (agent token, a process the gateway spawned,
+an open exec window) may `env.set`, `env.unset` or `env.import` only a name
+the catalog marks agent-settable: a credential-shaped name (`*_API_KEY`,
+`*_TOKEN`, ...) that an installed skill's `requires.env` or a built-in tool
+declares. Provider keys, names only your `.env` holds, `AGENTOS_*` names, the
+wallet's own `RPC_BASE_URL` / `RPC_ROBINHOOD_URL` / `UNISWAP_API_KEY`, and the
+runtime-steering names above are refused with `env.protected`; so is
+`env.reveal` of any secret (or uncatalogued) name. Your own connections -- the
+console, the desktop app, the CLI outside an agent's session -- are not
+affected. The agent's `env_set` tool still asks for your approval per write.
 
 Tools AgentOS spawns inherit most of `os.environ`, and several AgentOS guards
 are themselves read from it, so a surface that could write these names could

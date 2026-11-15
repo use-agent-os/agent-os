@@ -14,6 +14,14 @@ and audited so it cannot be used as a bulk export.
 Everything writable goes through :mod:`agentos.env_policy`, so the gate that
 stops this surface from rewriting PATH or the sandbox switches is the same one
 the CLI and the agent tool answer to.
+
+A connection the gateway recognizes as an agent's (agent token, descendant
+process, exec window) is held to more than that denylist: it may write only a
+name the catalog marks ``agent_settable`` -- a skill's or a built-in tool's
+credential -- and may not reveal anything the catalog treats as a secret.
+Every other name is refused with ``env.protected``. The values written here
+land in the gateway's own ``os.environ``, the process that holds the vault
+keys; a name such as ``ECC_BACKEND_CLASS`` picks the code that signs.
 """
 
 from __future__ import annotations
@@ -26,7 +34,8 @@ import structlog
 
 from agentos import credential_sources, env_catalog, env_policy, env_store
 from agentos.gateway.access import CONTROL_ONLY
-from agentos.gateway.rpc import RpcContext, get_dispatcher, require_params_dict
+from agentos.gateway.agent_surface import recognized_agent
+from agentos.gateway.rpc import RpcContext, RpcHandlerError, get_dispatcher, require_params_dict
 
 log = structlog.get_logger(__name__)
 
@@ -90,6 +99,53 @@ def _catalog_for(ctx: RpcContext) -> dict[str, env_catalog.EnvVarSpec]:
     return env_catalog.build_catalog(getattr(ctx, "skill_loader", None), present_names=present)
 
 
+def _uniswap_key_env(ctx: RpcContext) -> str:
+    trading = getattr(getattr(ctx, "config", None), "trading", None)
+    return str(getattr(trading, "uniswap_api_key_env", "") or "").strip().upper()
+
+
+def _refuse_agent_write(ctx: RpcContext, name: str, action: str) -> None:
+    """An agent's connection may write only an ``agent_settable`` catalog name.
+
+    The operator's own connections (and ``unbound`` ones -- the web console
+    on loopback is unbound) keep the denylist alone.
+    """
+    binding = recognized_agent(ctx)
+    if binding is None:
+        return
+    spec = _catalog_for(ctx).get(name)
+    if (
+        spec is not None
+        and spec.agent_settable
+        and env_policy.agent_may_own(name)
+        and name.upper() != _uniswap_key_env(ctx)
+    ):
+        return
+    log.warning("env.agent_write_refused", key=name, action=action, via=binding.via)
+    raise RpcHandlerError(
+        "env.protected",
+        f"{name} is not a skill or tool credential an agent may {action}. "
+        "Ask the user to set it in Settings > Environment or with `agentos env set`.",
+        details={**binding.to_dict(), "name": name},
+    )
+
+
+def _refuse_agent_reveal(ctx: RpcContext, name: str) -> None:
+    """An agent's connection may not read back a secret (or an unknown name)."""
+    binding = recognized_agent(ctx)
+    if binding is None:
+        return
+    spec = _catalog_for(ctx).get(name)
+    if spec is not None and not spec.secret:
+        return
+    log.warning("env.agent_reveal_refused", key=name, via=binding.via)
+    raise RpcHandlerError(
+        "env.protected",
+        f"{name} is a secret; an agent cannot read it back. Ask the user if it is needed.",
+        details={**binding.to_dict(), "name": name},
+    )
+
+
 def _require_name(params: dict | None) -> str:
     if not isinstance(params, dict) or not params.get("name"):
         raise ValueError("params.name is required")
@@ -130,6 +186,7 @@ async def _handle_env_set(params: dict | None, ctx: RpcContext) -> dict[str, Any
     value = params["value"]
     if not isinstance(value, str):
         raise ValueError("params.value must be a string")
+    _refuse_agent_write(ctx, name, "set")
 
     try:
         env_store.set_env_var(name, value)
@@ -148,6 +205,7 @@ async def _handle_env_set(params: dict | None, ctx: RpcContext) -> dict[str, Any
 async def _handle_env_unset(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     """Remove one variable from the AgentOS .env."""
     name = _require_name(params)
+    _refuse_agent_write(ctx, name, "unset")
     try:
         removed = env_store.unset_env_var(name)
     except env_policy.EnvPolicyError as exc:
@@ -173,6 +231,7 @@ async def _handle_env_import(params: dict | None, ctx: RpcContext) -> dict[str, 
     source_id = str(params.get("sourceId") or "").strip()
     if not source_id:
         raise ValueError("params.sourceId is required")
+    _refuse_agent_write(ctx, name, "import")
 
     try:
         value = credential_sources.read_from(name, source_id)
@@ -208,6 +267,8 @@ async def _handle_env_reveal(params: dict | None, ctx: RpcContext) -> dict[str, 
     copy of them.
     """
     name = _require_name(params)
+    # Before the budget: an agent's refused reveal must not use it up.
+    _refuse_agent_reveal(ctx, name)
 
     now = time.monotonic()
     while _reveal_times and now - _reveal_times[0] > _REVEAL_WINDOW_SECONDS:

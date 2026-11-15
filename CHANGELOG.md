@@ -48,6 +48,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   a parked order is refused with `trading.disabled`, and the signing step
   itself refuses. The Relay client also follows a changed
   `trading.relay_base_url`.
+- **An agent's connection may set only skill and tool credentials through
+  `env.*` (WAL-18).** `env.set` applies a value live to the gateway process,
+  and names such as `ECC_BACKEND_CLASS` (the class eth-keys imports to sign)
+  were writable from an agent-bound connection. A connection the gateway
+  recognizes as an agent's may now `env.set`/`unset`/`import` only a
+  credential-shaped name that a skill's `requires.env` or a built-in tool
+  declares; provider keys, names only your `.env` holds, `AGENTOS_*`, the
+  wallet's `RPC_BASE_URL`/`RPC_ROBINHOOD_URL`/`UNISWAP_API_KEY` and
+  runtime-steering names are refused with `env.protected`, and so is
+  `env.reveal` of any secret. Your own connections are unchanged and the
+  write denylist still applies to everyone. A project-local `.env` (the
+  directory the gateway starts in) can no longer set `PYTHON*`, the signer's
+  crypto backends, TLS trust or any denylisted name; put those in
+  `~/.agentos/.env` or the environment.
 - **Breaking default — Discord and Slack channels now refuse senders you have
   not admitted.** Before, any Discord user who could DM or @mention the bot,
   and any Slack workspace member or guest, started an agent turn with the

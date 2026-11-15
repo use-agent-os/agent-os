@@ -860,6 +860,14 @@ used to widen what the agent is allowed to do. Edit `~/.agentos/.env` by hand
 if you genuinely need one of them. Variables already
 set that way keep working; only writing through AgentOS is gated.
 
+From an agent's own session (`agentos env` run by the agent's shell, or any
+connection the gateway recognizes as an agent's) `set`, `unset` and `import`
+accept only an agent-settable name -- a skill's or a built-in tool's declared
+credential, such as `FIRECRAWL_API_KEY` -- and `get --reveal` refuses every
+secret; anything else fails with `env.protected`. Run the command yourself
+for those. See
+[What cannot be written through AgentOS](configuration.md#what-cannot-be-written-through-agentos).
+
 What `agentos env list` knows about comes from three places: the setup specs
 of providers the runtime can actually drive (a provider catalogued for the
 setup UI with no client behind it -- Exa, Perplexity, and a number of LLM
