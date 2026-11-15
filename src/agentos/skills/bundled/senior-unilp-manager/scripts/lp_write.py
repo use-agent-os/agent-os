@@ -3,8 +3,11 @@
 
 EVERY subcommand is a dry run unless BOTH ``--broadcast`` and ``--confirm <PLAN_HASH>``
 are given. The dry run prints a parameter table plus a PLAN_HASH; broadcasting requires
-echoing that hash back, so the transaction that gets signed is provably the one the
-human approved.
+echoing that hash back, so the transaction that gets signed is provably the plan that was
+shown. The hash is an integrity check, not an approval: whoever ran the dry run can read
+it back. Under AgentOS the human step is the gateway's -- the signing key is withheld from
+the agent's shell and released to a ``--broadcast`` run only after the operator approves
+that exact command (``agentos/tools/skill_signing.py``).
 
     python3 scripts/lp_write.py approve  --token <addr>
     python3 scripts/lp_write.py create-pool --token0 <addr> --token1 <addr> --fee 3000 \\

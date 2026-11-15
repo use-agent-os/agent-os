@@ -866,6 +866,11 @@ class ApprovalQueue:
             entry = self._row_to_entry(row)
             if str(entry.params.get("sessionKey") or "").strip() != key:
                 continue
+            if approved and entry.params.get("signing"):
+                # A skill command that signs with a hot-wallet key and moves
+                # funds is approved one by one (tools/skill_signing.py), never
+                # by elevating the session it was asked from.
+                continue
             self.resolve(
                 entry.approval_id,
                 approved,

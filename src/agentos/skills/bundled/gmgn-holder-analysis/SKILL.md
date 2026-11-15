@@ -27,11 +27,11 @@ metadata:
       - kind: npm
         id: gmgn-cli
         label: Install gmgn-cli (npm)
-        package: gmgn-cli
+        package: gmgn-cli@1.7.1
         bins: [gmgn-cli]
 ---
 
-**BEFORE RUNNING ANY COMMAND: Run `gmgn-cli config --check`. If exit code is 0, proceed normally. If exit code is 1, run `gmgn-cli config` and show output, then apply the key with `gmgn-cli config --apply <KEY>`. If unknown option, tell user to run `npm install -g gmgn-cli`.**
+**BEFORE RUNNING ANY COMMAND: Run `gmgn-cli config --check`. If exit code is 0, proceed normally. If exit code is 1, run `gmgn-cli config` and show output, then apply the key with `gmgn-cli config --apply <KEY>`. If unknown option, tell user to run `npm install -g --ignore-scripts gmgn-cli@1.7.1`.**
 
 **IMPORTANT: Always use `gmgn-cli` commands. Do NOT use curl, WebFetch, or visit gmgn.ai.**
 

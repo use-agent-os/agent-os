@@ -399,10 +399,30 @@ async def run_job_script(
     # Imported here, not at module scope: the tool package imports this module
     # to validate script paths, so a top-level import would close a cycle.
     from agentos.gateway.agent_surface import AGENT_TOKEN_ENV, get_agent_surface
+    from agentos.tools import skill_signing
     from agentos.tools.env_passthrough import build_subprocess_env
 
     cwd = _resolve_workdir(workdir, path.parent)
     env = build_subprocess_env(extra=env_overlay)
+    # A skill's signing key is not in the environment above. A script that is
+    # nothing but one skill entry point (the ratchet's tick.sh) runs through
+    # the same gate exec_command uses; cron cannot ask the operator, so one
+    # that needs an approval is refused instead (WAL-10).
+    signing: skill_signing.SigningInvocation | None = None
+    if not args:
+        try:
+            signing = skill_signing.script_signing_invocation(path)
+        except skill_signing.SigningRefusedError as exc:
+            return False, f"Script refused: {exc}"
+    if signing is not None:
+        if signing.needs_approval:
+            return False, (
+                f"Script refused: {signing.action} That needs the operator's approval, which a "
+                "cron job cannot ask for. Run it from a chat instead."
+            )
+        argv = list(signing.argv)
+        env = skill_signing.invocation_env(signing, env)
+        cwd = signing.cwd or cwd
     surface = get_agent_surface()
     env[AGENT_TOKEN_ENV] = surface.mint_token(session_key, agent_id)
     popen_kwargs = _platform_popen_kwargs()
@@ -442,6 +462,10 @@ async def run_job_script(
             # group (a detached ``agentos`` that would connect later, once
             # the window has closed) goes with it.
             await _kill_process_group(proc)
+            if signing is not None:
+                skill_signing.finish_invocation(
+                    signing, env, proc.returncode if proc.returncode is not None else 1
+                )
 
     stdout = _redact((raw_stdout or b"").decode("utf-8", errors="replace").strip())
     stderr = _redact((raw_stderr or b"").decode("utf-8", errors="replace").strip())

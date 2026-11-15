@@ -53,6 +53,10 @@ from agentos.tools.types import current_tool_context
 
 log = structlog.get_logger(__name__)
 
+#: Tells a skill script its key is held back on purpose; the name is mirrored
+#: as ``agentos.tools.skill_signing.KEYS_HELD_ENV``.
+SIGNING_KEYS_HELD_ENV = "AGENTOS_SIGNING_KEYS_HELD"
+
 __all__ = [
     "agentos_managed_credentials",
     "build_subprocess_env",
@@ -224,6 +228,12 @@ def register_env_passthrough(names: Iterable[str], *, trusted: bool = False) -> 
             refused.append(name)
             log.warning("env_passthrough.refused_runtime_posture", name=name)
             continue
+        if name in env_policy.SKILL_SIGNING_KEY_ENV:
+            # A hot-wallet key reaches only its skill's gated entry point
+            # (tools/skill_signing.py), never a sandbox the model writes code in.
+            refused.append(name)
+            log.warning("env_passthrough.refused_signing_key", name=name)
+            continue
         if name in managed and not trusted:
             refused.append(name)
             log.warning("env_passthrough.refused_managed_credential", name=name)
@@ -248,8 +258,8 @@ def clear_env_passthrough(*, all_sessions: bool = False) -> None:
 def stripped_from_subprocess_env() -> frozenset[str]:
     """Return the names withheld from child processes under the current policy."""
     if strip_provider_env():
-        return agentos_managed_credentials()
-    return _RUNTIME_POSTURE_NAMES
+        return agentos_managed_credentials() | env_policy.SKILL_SIGNING_KEY_ENV
+    return _RUNTIME_POSTURE_NAMES | env_policy.SKILL_SIGNING_KEY_ENV
 
 
 def own_cli_dir() -> str | None:
@@ -333,4 +343,13 @@ def build_subprocess_env(
     result = {key: value for key, value in source.items() if key not in stripped}
     if extra:
         result.update({key: value for key, value in extra.items() if key not in stripped})
+    if base is None:
+        # Present but empty, not absent: gmgn-cli's dotenv loader (it reads
+        # ~/.config/gmgn/.env) only fills a variable that is unset, so an empty
+        # one keeps a key kept in that file from riding along with an ungated
+        # command. The other skills' own loaders never read a signing key from
+        # a file. Only for the full environment: an allowlisted *base* is
+        # already exactly what the caller wants the child to see.
+        result["GMGN_PRIVATE_KEY"] = ""
+        result[SIGNING_KEYS_HELD_ENV] = "1"
     return _with_own_cli_first(result)

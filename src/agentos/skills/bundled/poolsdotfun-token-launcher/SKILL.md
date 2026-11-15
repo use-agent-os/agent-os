@@ -42,6 +42,14 @@ S="{baseDir}/scripts"
 There is no RPC to configure. The chain is fixed (Robinhood Chain, 4663) and the
 endpoint is built in.
 
+**The signing key is not in your shell.** AgentOS holds `POOLSFUN_PRIVATE_KEY` back from
+every command you run and passes it only to a **direct** run of `pools_read.py` or
+`pools_write.py`: one command — `S="{baseDir}/scripts"; python3 "$S/pools_write.py" ...` (each
+command starts a fresh shell, so keep the `S=` on the same line), or the full path spelled
+out — with no pipe, redirect (`2>&1` is fine), `cd`, `VAR=` prefix or second command. AgentOS
+runs its own packaged copy of the script. Any other shape runs without the key and stops with
+"held back from the agent's shell"; rewrite it as one direct command.
+
 **Environment.** `POOLSFUN_PRIVATE_KEY` is required to send anything; read
 commands work without it if you pass `--from 0x…`. `PINATA_JWT` is **optional**
 and needed only to attach a token image — set it in the agent environment (or
@@ -113,10 +121,17 @@ python3 "$S/pools_write.py" launch --name "My Token" --symbol MYT --image ./logo
   --broadcast --confirm 0x3f9a2c11
 ```
 
+Show the user the plan and get an explicit yes first. AgentOS then asks the user to
+approve the `--broadcast` command itself, in its own approval prompt, before the key is
+released; `/elevated`, `bypass` and auto-approve do not answer that prompt. On
+`approval_pending`, wait for the user — never retry it in another form. The same holds for
+every write below (`claim`, `set-fee-recipient`, ...).
+
 **Never invent a PLAN_HASH.** It comes from the dry run and covers every field
 that determines what lands on-chain. If the price feed moved between the two
 steps the hash changes and the broadcast refuses — that is the mechanism working,
-not a bug. Re-read the new plan and confirm that.
+not a bug. Re-read the new plan and confirm that. The hash binds the broadcast to the
+plan; it is not the approval — the user's answer to AgentOS's prompt is.
 
 ### The defaults
 

@@ -38,7 +38,7 @@ from typing import Any
 
 import structlog
 
-from agentos.env_policy import GATEWAY_CREDENTIAL_ENV
+from agentos.env_policy import GATEWAY_CREDENTIAL_ENV, SKILL_SIGNING_KEY_ENV
 
 log = structlog.get_logger(__name__)
 
@@ -60,7 +60,9 @@ CONFIG_KEYS: dict[str, str] = {
 
 #: Environment a lifecycle command never inherits: the shared gateway
 #: credential list (``env_policy.GATEWAY_CREDENTIAL_ENV``) plus an agent token.
-_CREDENTIAL_ENV = GATEWAY_CREDENTIAL_ENV | frozenset({"AGENTOS_AGENT_TOKEN"})
+_CREDENTIAL_ENV = (
+    GATEWAY_CREDENTIAL_ENV | SKILL_SIGNING_KEY_ENV | frozenset({"AGENTOS_AGENT_TOKEN"})
+)
 
 
 @dataclass(frozen=True, slots=True)

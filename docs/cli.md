@@ -1365,8 +1365,9 @@ position is valued at its own pool's price, and a warning says so.
 With `--json`, the JSON is the first line of stdout; unless `--no-card` is
 also given, the result is written to `lp-cards/<kind>-…json` in the working
 directory (the 20 newest cards there are kept) and the last line on stdout is
-`publish_artifact path=<file> mime=application/vnd.agentos.lp+json`, which an
-agent's shell turns into a card in the chat. Without `--json` the command
+`publish_artifact path=<file> mime=application/vnd.agentos.lp+json` (run from an
+agent's shell, followed by ` nonce=<value>` from `AGENTOS_INLINE_ARTIFACT_NONCE`), which
+that shell turns into a card in the chat. Without `--json` the command
 prints a table and writes nothing. An error writes no card; with `--json`
 every error, including a bad or missing option, is `{"error": {"code", …}}`
 on stderr, and input errors (`INVALID_ARGUMENT`, `trading.invalid`,
@@ -1783,6 +1784,7 @@ agentos sandbox reset
 - `agentos sandbox on`: Restores the default sandboxed posture (`sandbox = true`, `security_grading = true`, `permissions.default_mode = "off"`).
 - `agentos sandbox bypass`: Disables runtime sandboxing and auto-grants approvals except for sensitive paths (`permissions.default_mode = "bypass"`).
 - `agentos sandbox full`: Disables runtime sandboxing and skips approval and sensitive-path gates (`permissions.default_mode = "full"`).
+- Neither mode answers a skill signing prompt: a bundled skill command that signs with its hot-wallet key and moves funds always waits for you (see [Skill signing prompts](approvals-and-permissions.md#skill-signing-prompts)).
 - `agentos sandbox reset`: Resets sandbox posture to AgentOS defaults (`bypass`).
 
 Pass `--config <path>` to target an explicit configuration file. Changes require a gateway restart (`agentos gateway restart`) to apply to running processes.

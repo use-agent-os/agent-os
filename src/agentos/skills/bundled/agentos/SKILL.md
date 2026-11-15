@@ -858,7 +858,7 @@ agentos diagnostics on         # runtime diagnostics logging
 agentos sandbox status         # inspect current sandbox posture
 agentos sandbox on             # restore standard sandboxed posture
 agentos sandbox bypass         # disable sandboxing with sensitive path protection
-agentos sandbox full           # disable sandboxing and all approval gates
+agentos sandbox full           # disable sandboxing and all approval gates (not skill signing prompts)
 agentos sandbox reset          # reset posture to defaults
 agentos migrate hermes --source <dir> [--profile <name>] [--preset full] [--apply]   # dry-run first, then --apply
 ```

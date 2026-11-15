@@ -52,6 +52,13 @@ from agentos.tools.builtin.shell_policy import check_safe_bin
 from agentos.tools.env_passthrough import build_subprocess_env
 from agentos.tools.path_policy import reject_foreign_host_path
 from agentos.tools.registry import tool
+from agentos.tools.skill_signing import (
+    SigningInvocation,
+    SigningRefusedError,
+)
+from agentos.tools.skill_signing import classify_command as classify_signing_command
+from agentos.tools.skill_signing import finish_invocation as signing_finish_invocation
+from agentos.tools.skill_signing import invocation_env as signing_invocation_env
 from agentos.tools.types import (
     CallerKind,
     InteractionMode,
@@ -948,6 +955,15 @@ async def exec_command(
         )
         return json.dumps(deny_block, ensure_ascii=False)
 
+    # A skill's hot-wallet key is never in a child's environment; this is the
+    # one path that hands it out, to the skill's own entry point (WAL-10).
+    try:
+        signing = classify_signing_command(command, cwd)
+    except SigningRefusedError as exc:
+        return json.dumps({"status": "signing_refused", "command": command, "message": str(exc)})
+    if signing is not None:
+        return await _exec_signing_invocation(signing, command, cwd, env, timeout, approval_id)
+
     # Warnlist: two-step approval flow
     if result.needs_approval:
         approval_response = await _check_exec_approval(
@@ -976,6 +992,120 @@ async def exec_command(
     # is the operator's counts as this agent's (gateway.agent_surface).
     with get_agent_surface().exec_window(_window_session_key()):
         return await _run_exec_subprocess(command, cwd, env, timeout)
+
+
+async def _exec_signing_invocation(
+    signing: SigningInvocation,
+    command: str,
+    cwd: str | None,
+    env: dict[str, str] | None,
+    timeout: float | int | None,
+    approval_id: str | None,
+) -> str:
+    """Run a recognised skill-signing command with its key, after any approval.
+
+    ``env`` overrides are refused rather than merged: they are how a child is
+    made to load other code (``PYTHONPATH``, ``NODE_OPTIONS``), and nothing a
+    skill entry point needs comes from the model's environment.
+    """
+    if env:
+        return json.dumps(
+            {
+                "status": "signing_refused",
+                "command": command,
+                "message": (
+                    f"{signing.key_env} is only passed to a command run with AgentOS's own "
+                    "environment; drop the env overrides."
+                ),
+            }
+        )
+    if signing.needs_approval:
+        response = await _check_exec_approval(
+            tool_name="exec_command",
+            command=command,
+            workdir=cwd,
+            warning=signing.action,
+            approval_id=approval_id,
+            background=False,
+            human_only=True,
+        )
+        if response is not None:
+            if response.get("status") == "approval_denied":
+                await _record_shell_denial(
+                    "exec_command", command, cwd, DenialReason.HUMAN_REJECTED
+                )
+            return json.dumps(response)
+    await wait_for_batch_turn()
+    with get_agent_surface().exec_window(_window_session_key()):
+        return await _run_signing_subprocess(signing, command, cwd, timeout)
+
+
+async def _run_signing_subprocess(
+    signing: SigningInvocation, command: str, cwd: str | None, timeout: float | int | None
+) -> str:
+    """Exec the invocation's argv directly -- no shell -- with its key in the env.
+
+    Not routed through the sandbox backend: what runs is AgentOS's own packaged
+    entry point under an isolated interpreter (or the pinned ``gmgn-cli``), not
+    agent-written code, and it has to reach its RPC endpoint.
+    """
+    base = build_subprocess_env()
+    _add_session_env(base)
+    child_env = signing_invocation_env(signing, base)
+    effective_timeout = _resolve_exec_timeout(timeout)
+    run_dir = signing.cwd or cwd
+    log.info(
+        "skill_signing_key_released",
+        skill=signing.skill,
+        entry=signing.entry,
+        key=signing.key_env,
+        approved=signing.needs_approval,
+        unattended=signing.unattended_fire,
+        command=_audit_command(command),
+    )
+    kwargs: dict[str, Any] = {"stdin": asyncio.subprocess.DEVNULL, "cwd": run_dir}
+    if os.name == "posix":
+        kwargs["start_new_session"] = True
+    else:
+        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        if creationflags:
+            kwargs["creationflags"] = creationflags
+    returncode: int | None = None
+    try:
+        with tempfile.TemporaryFile() as output_file:
+            proc = await asyncio.create_subprocess_exec(
+                *signing.argv,
+                stdout=output_file,
+                stderr=asyncio.subprocess.STDOUT,
+                env=child_env,
+                **kwargs,
+            )
+            try:
+                finished = await _wait_exec_process(proc, effective_timeout)
+            except asyncio.CancelledError:
+                await _cleanup_after_cancellation(proc)
+                raise
+            if not finished:
+                await _terminate_exec_process_tree(proc)
+                return f"[timeout after {effective_timeout}s]\ncommand: {command}"
+            await _reap_exec_process_tree(proc)
+            returncode = proc.returncode
+            output_file.flush()
+            output_file.seek(0)
+            raw = output_file.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        return f"[error] {e}"
+    finally:
+        signing_finish_invocation(signing, child_env, returncode if returncode is not None else 1)
+    key = child_env.get(signing.key_env) or ""
+    if len(key) >= 16:
+        # The entry points never print it; this is so a regression cannot either.
+        # Longest form first, so a 0x-prefixed key is not left half-masked.
+        for form in (key, key.replace("\n", "\\n"), key.removeprefix("0x")):
+            raw = raw.replace(form, "[REDACTED]")
+    # No inline-artifact publishing: nothing here announces one, and the
+    # output carries on-chain strings (WAL-20).
+    return f"exit_code={returncode}\n{redact_terminal_output(raw, command)}"
 
 
 async def _run_exec_subprocess(
@@ -1655,7 +1785,15 @@ async def _check_exec_approval(
     approval_id: str | None,
     background: bool,
     env: dict[str, str] | None = None,
+    human_only: bool = False,
 ) -> dict[str, object] | None:
+    """Ask for (or check) the operator's approval of one command.
+
+    ``human_only`` is for a command that hands a skill its signing key and
+    moves funds: ``/elevated``, ``bypass``, ``auto-approve`` and a cached
+    intent are all ways of *not* asking, so none of them answers it. Only an
+    operator resolving this exact command does.
+    """
     queue = get_approval_queue()
     settings = queue.get_settings()
     ctx = current_tool_context.get()
@@ -1665,7 +1803,7 @@ async def _check_exec_approval(
         # they are part of what the operator approves, shown on the card and
         # matched on retry like the command and workdir.
         args["env"] = {str(k): str(v) for k, v in sorted(env.items())}
-    params = {
+    params: dict[str, object] = {
         "toolName": tool_name,
         "command": command,
         "args": args,
@@ -1673,8 +1811,11 @@ async def _check_exec_approval(
         "agent": ctx.agent_id if ctx is not None else "",
         "mode": "background" if background else "foreground",
     }
+    if human_only:
+        params["warning"] = warning
+        params["signing"] = True
 
-    elevated_mode = _context_elevated_mode()
+    elevated_mode = "" if human_only else _context_elevated_mode()
     elevated_full = elevated_mode == "full"
     elevated_bypass = elevated_mode == "bypass"
     sandbox_off_requires_approval = (
@@ -1765,7 +1906,7 @@ async def _check_exec_approval(
             elevated_mode=elevated_mode,
         )
 
-    if settings.mode == "auto-approve" and not sandbox_off_requires_approval:
+    if settings.mode == "auto-approve" and not sandbox_off_requires_approval and not human_only:
         _elevate_current_call.set(True)
         return None
 
@@ -1779,7 +1920,7 @@ async def _check_exec_approval(
     # Intent-level short-circuit: if the user already approved the same
     # destructive intent recently (e.g. rm /x, and now os.remove("/x")),
     # skip the queue entirely. Keeps paraphrased retries from re-prompting.
-    if approval_id is None and not sandbox_off_requires_approval:
+    if approval_id is None and not sandbox_off_requires_approval and not human_only:
         from agentos.sandbox.intent_cache import get_intent_cache
 
         if get_intent_cache().check(

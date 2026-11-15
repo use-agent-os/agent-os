@@ -161,6 +161,16 @@ GATEWAY_CREDENTIAL_ENV: frozenset[str] = frozenset(
     }
 )
 
+#: Hot-wallet signing keys that bundled skills sign with outside the trading
+#: engine (``senior-unilp-manager``, ``poolsdotfun-token-launcher``, the
+#: ``gmgn-*`` CLI). They never cross into a child process the agent can drive;
+#: ``agentos.tools.skill_signing`` hands one to a single direct invocation of
+#: the skill's own entry point, and only after the operator approved it when
+#: that invocation moves funds.
+SKILL_SIGNING_KEY_ENV: frozenset[str] = frozenset(
+    {"UNIV4_LP_PRIVATE_KEY", "POOLSFUN_PRIVATE_KEY", "GMGN_PRIVATE_KEY"}
+)
+
 # Group 5 — egress steering. A proxy name is a posture name: whoever sets it
 # chooses the machine every outbound request is handed to, credentials and all.
 # ``AGENTOS_LLM_PROXY`` is read at ``gateway/llm_runtime.py``,

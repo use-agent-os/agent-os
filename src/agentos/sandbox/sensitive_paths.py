@@ -128,6 +128,12 @@ def runtime_sensitive_prefixes() -> tuple[str, ...]:
     try:
         home = default_agentos_home()
         entries = [str(home / "wallets"), str(home / "config.toml")]
+        # What makes a skill's hot-wallet key reachable (tools/skill_signing.py):
+        # the operator's approval rows -- one rewritten to "approved" releases
+        # the key -- and the store of operator-approved ratchet mandates.
+        queue = home / "state" / "approval_queue.sqlite"
+        entries.extend(str(queue) + tail for tail in ("", "-wal", "-shm", "-journal"))
+        entries.append(str(home / "skill-signing"))
     except (OSError, RuntimeError):
         entries = []
     entries.extend(sorted(_protected_config_paths - set(entries)))

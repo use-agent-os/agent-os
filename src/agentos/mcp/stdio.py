@@ -10,6 +10,7 @@ import sys
 from typing import Any, cast
 
 from agentos import __version__
+from agentos.env_policy import SKILL_SIGNING_KEY_ENV
 from agentos.mcp.client import MCPClient
 from agentos.mcp.types import MCPServerConfig, MCPToolDef, MCPToolResult
 
@@ -157,12 +158,18 @@ class MCPStdioClient(MCPClient):
         """Spawn the subprocess and perform MCP initialization handshake."""
         assert self.config.command is not None, "stdio transport requires command"
 
-        env: dict[str, str] | None = None
+        # Never the skills' hot-wallet keys: an MCP server is code the gateway
+        # runs for the agent, and those keys reach only their own gated entry
+        # point (tools/skill_signing.py).
+        env: dict[str, str] = {
+            key: value for key, value in os.environ.items() if key not in SKILL_SIGNING_KEY_ENV
+        }
         if self.config.env:
-            env = {**os.environ, **self.config.env}
+            env = {**env, **self.config.env}
 
         self._process = await asyncio.create_subprocess_exec(
-            self._launchable_command(env),
+            # Unconfigured, the child's PATH is this process's: let which() read it.
+            self._launchable_command(env if self.config.env else None),
             *self.config.args,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,

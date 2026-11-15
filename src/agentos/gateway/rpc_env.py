@@ -208,6 +208,13 @@ async def _handle_env_reveal(params: dict | None, ctx: RpcContext) -> dict[str, 
     copy of them.
     """
     name = _require_name(params)
+    if name in env_policy.SKILL_SIGNING_KEY_ENV:
+        # A skill's hot-wallet key reaches only its gated entry point
+        # (tools/skill_signing.py); reading it here would let an agent sign
+        # whatever it likes without the operator ever seeing the transaction.
+        from agentos.gateway.rpc_approvals import require_human
+
+        require_human(ctx, f"Revealing {name}")
 
     now = time.monotonic()
     while _reveal_times and now - _reveal_times[0] > _REVEAL_WINDOW_SECONDS:

@@ -46,6 +46,23 @@ def state_root() -> Path:
     return Path.home() / ".agentos" / "state" / "unilp"
 
 
+#: Set by AgentOS for a command it runs through its signing gate.
+_GATED_ENV = "AGENTOS_SKILL_SIGNING_GATED"
+#: Set by AgentOS in every child environment it builds.
+_KEYS_HELD_ENV = "AGENTOS_SIGNING_KEYS_HELD"
+
+
+def _never_from_file(name: str) -> bool:
+    """A signing key comes from the process environment or nowhere.
+
+    Under AgentOS the key is held back from the agent's shell and handed only to
+    a gated command; reading it back out of ``~/.agentos/.env`` here would undo
+    that for any script the agent runs. Outside AgentOS, export it.
+    """
+    upper = name.upper()
+    return "PRIVATE_KEY" in upper or upper.endswith(("_KEY", "_SECRET", "_MNEMONIC"))
+
+
 def load_env() -> None:
     """Load a dotenv file if one is configured, without overriding the environment.
 
@@ -57,6 +74,11 @@ def load_env() -> None:
     if _env_loaded:
         return
     _env_loaded = True
+    if os.environ.get(_GATED_ENV):
+        # AgentOS ran this as a gated signing command: the environment is the
+        # gateway's own, and a .env in the working directory is something the
+        # agent may have written (an RPC endpoint that lies to the simulation).
+        return
 
     candidates = [
         os.environ.get("UNILP_ENV"),
@@ -85,6 +107,8 @@ def load_env() -> None:
                 name = name[7:].strip()
             if name in os.environ:
                 continue  # never override an explicit value
+            if _never_from_file(name):
+                continue
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
                 value = value[1:-1]
@@ -223,6 +247,15 @@ def resolve_private_key(signer_env: str = ENV_SIGNER) -> str:
     """
     load_env()
     raw = os.environ.get(signer_env)
+    if not raw and os.environ.get(_KEYS_HELD_ENV):
+        raise RuntimeError(
+            f"{signer_env} is held back from the agent's shell by AgentOS. It is passed "
+            "only to a direct run of this skill's own script: one command, "
+            '`python3 "<skill dir>/scripts/<script>.py" <command> ...` (an optional leading '
+            'S="<skill dir>/scripts" is fine), with no pipe, redirect, `cd` or second '
+            "command. A --broadcast also needs the user's approval, which AgentOS asks "
+            "for itself."
+        )
     if not raw:
         raise RuntimeError(
             f"env var {signer_env} is not set. Set it in the agent environment "
