@@ -195,8 +195,11 @@ the harness continue. Questions are always declined when nobody can answer.
 
 Choosing **Always** (or **Bypass**) on an `acp` prompt remembers the grant for
 that harness session only, per tool kind and, for commands, per program and
-subcommand (`git push`): it never changes the session's elevated mode and is
-forgotten when the harness session closes. Forms are asked at most three
+subcommand (`git log`): it never changes the session's elevated mode and is
+forgotten when the harness session closes. Interpreters, shells, package
+runners (`npx`, `uvx`, `uv run`), `make`, `docker`, `curl`, `rm`-style
+programs and `git push`/`reset`/`clean`/`checkout`/`restore` are never
+remembered and always ask ([ACP agents](acp-agents.md#permission-modes)). Forms are asked at most three
 questions at a time, a secret field always on its own; answers are cleared from
 the queue as soon as the harness has them and are never logged. Questions time
 out after 15 minutes.

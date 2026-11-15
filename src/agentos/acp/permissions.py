@@ -170,6 +170,90 @@ _COMMAND_RUNNERS = frozenset(
 _WRAPPING_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
 _SHELL_SCRIPT_FLAGS = frozenset({"-c", "-lc", "-cl"})
 
+#: Programs "Always allow" never covers, whatever their arguments: they
+#: delete or overwrite data, or run whatever code they are handed (an
+#: interpreter, a shell, a package runner, a build tool reading a file the
+#: harness can edit, a container or cluster client, a downloader). Each run
+#: goes back to the operator, and a grant remembered for one never matches.
+#: Matched on the lower-cased basename with any ``.exe``/``.cmd``/``.bat``/
+#: ``.ps1``/``.com`` suffix dropped (see :func:`_program_family`).
+_ALWAYS_ASK_PROGRAMS = frozenset(
+    {
+        # delete or overwrite
+        "rm", "rmdir", "unlink", "dd", "shred", "truncate", "wipefs", "mke2fs", "newfs",
+        # interpreters
+        "python", "py", "pyw", "pythonw", "pypy", "node", "nodejs", "deno", "bun", "bunx",
+        "ruby", "irb", "perl", "php", "lua", "luajit", "rscript", "julia", "tclsh", "wish",
+        "ts-node", "tsx", "osascript", "cscript", "wscript", "mshta", "wsl",
+        # shells
+        "sh", "bash", "zsh", "fish", "dash", "ksh", "mksh", "ash", "csh", "tcsh", "nu",
+        "elvish", "xonsh", "pwsh", "powershell", "powershell_ise", "cmd",
+        # package runners, build tools, containers, clusters, downloaders
+        "uvx", "npx", "pnpx", "make", "gmake", "nmake", "just", "docker", "docker-compose",
+        "podman", "nerdctl", "kubectl", "curl", "wget",
+    }
+)  # fmt: skip
+
+#: ``python3``, ``python3.12``, ``pythonw3``, ``pypy3``, ``mkfs.ext4``, ...
+_ALWAYS_ASK_PROGRAM_PATTERN = re.compile(r"(?:python|pythonw|pypy)\d[\d.]*w?|mkfs(?:\..*)?")
+
+#: Subcommands (anywhere in the argv, so a global flag in front of one does
+#: not hide it) that make an otherwise rememberable program always ask: they
+#: run a package, a script named in a file the harness can edit, or discard
+#: work. ``git checkout`` always asks because ``git checkout <path>`` (or
+#: ``--``, ``.``) discards changes and a path cannot be told from a branch.
+_ALWAYS_ASK_SUBCOMMANDS: dict[str, frozenset[str]] = {
+    "uv": frozenset({"run"}),  # uv run, uv tool run
+    "pipx": frozenset({"run"}),
+    "poetry": frozenset({"run"}),
+    "pdm": frozenset({"run"}),
+    "hatch": frozenset({"run"}),
+    "pixi": frozenset({"run"}),
+    "conda": frozenset({"run"}),
+    "npm": frozenset(
+        {
+            "exec",
+            "x",
+            "run",
+            "run-script",
+            "rum",
+            "urn",
+            "test",
+            "t",
+            "tst",
+            "start",
+            "stop",
+            "restart",
+            "explore",
+            "create",
+            "init",
+        }
+    ),  # fmt: skip
+    "pnpm": frozenset({"dlx", "exec", "run", "test", "t", "start", "create"}),
+    "yarn": frozenset({"dlx", "exec", "run", "test", "start", "create", "node"}),
+    "cargo": frozenset({"run", "r"}),
+    "go": frozenset({"run", "generate"}),
+    "git": frozenset(
+        {"push", "reset", "clean", "checkout", "restore", "rm", "filter-branch", "update-ref"}
+    ),
+}
+
+#: ``git`` global options that run or redirect to other code (``-c
+#: alias.x=!cmd``, ``-c core.sshCommand=...``).
+_GIT_CODE_OPTIONS = ("-c", "--config-env", "--exec-path")
+
+#: ``find`` actions that delete, run a command or write a file.
+_FIND_ACTIONS = frozenset(
+    {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
+)
+
+_RECURSIVE_OWNERSHIP = frozenset({"chmod", "chown", "chgrp"})
+_SHORT_RECURSIVE_FLAG = re.compile(r"-[A-Za-z]*R[A-Za-z]*")
+
+#: Executable suffixes dropped before matching a program family, on every OS
+#: (a Windows ``python.exe`` and a POSIX ``python`` are the same family).
+_PROGRAM_SUFFIXES = (".exe", ".cmd", ".bat", ".ps1", ".com")
+
 _ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 _SUBCOMMAND = re.compile(r"[A-Za-z][\w.:-]*")
 
@@ -244,6 +328,49 @@ def _resolve_program(token: str) -> str | None:
     return None
 
 
+def _program_family(path: str) -> str:
+    """Lower-cased basename of ``path`` without an executable suffix."""
+    name = os.path.normcase(os.path.basename(path)).lower()
+    for suffix in _PROGRAM_SUFFIXES:
+        if name.endswith(suffix) and len(name) > len(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def _always_asks(program: str, args: list[str]) -> bool:
+    """Whether "Always allow" may never cover running ``program`` with ``args``.
+
+    ``program`` is the resolved path. Its own name and the name of the file
+    it links to are both checked, so a ``python3`` symlink named ``ls`` is
+    still Python. (``busybox`` is not in the list: its applets are links to
+    it and act as the name they are called by; the bare ``busybox`` is a
+    command runner.)
+    """
+    names = {_program_family(program), _program_family(os.path.realpath(program))}
+    for name in names:
+        if name in _ALWAYS_ASK_PROGRAMS or _ALWAYS_ASK_PROGRAM_PATTERN.fullmatch(name):
+            return True
+        if not _ALWAYS_ASK_SUBCOMMANDS.get(name, frozenset()).isdisjoint(args):
+            return True
+        if name in _RECURSIVE_OWNERSHIP and any(
+            a == "--recursive" or _SHORT_RECURSIVE_FLAG.fullmatch(a) for a in args
+        ):
+            return True
+        if name == "find" and not _FIND_ACTIONS.isdisjoint(args):
+            return True
+        if name == "git" and _git_always_asks(args):
+            return True
+    return False
+
+
+def _git_always_asks(args: list[str]) -> bool:
+    if any(a == opt or a.startswith(f"{opt}=") for a in args for opt in _GIT_CODE_OPTIONS):
+        return True
+    if "switch" in args and not {"-f", "--force", "--discard-changes"}.isdisjoint(args):
+        return True
+    return "stash" in args and not {"drop", "clear"}.isdisjoint(args)
+
+
 def _argv_prefix(argv: list[str], *, unwrap_shell: bool = True) -> str | None:
     """``"<resolved program> [<subcommand>]"`` for one argv, or ``None``."""
     if not argv or not all(isinstance(a, str) and _is_safe_command_text(a) for a in argv):
@@ -263,7 +390,7 @@ def _argv_prefix(argv: list[str], *, unwrap_shell: bool = True) -> str | None:
         inner = _split_simple_command(argv[2])
         inner_prefix = _argv_prefix(inner, unwrap_shell=False) if inner else None
         return f"{program} {argv[1]} {inner_prefix}" if inner_prefix else None
-    if name in _COMMAND_RUNNERS:
+    if name in _COMMAND_RUNNERS or _always_asks(program, argv[1:]):
         return None
     if len(argv) > 1 and _SUBCOMMAND.fullmatch(argv[1]):
         return f"{program} {argv[1]}"
@@ -273,14 +400,18 @@ def _argv_prefix(argv: list[str], *, unwrap_shell: bool = True) -> str | None:
 def command_prefix(command: str) -> str | None:
     """Resolved program plus subcommand, the unit an "always" covers.
 
-    ``git push --force`` remembers ``/usr/bin/git push``; ``rm -rf /``
-    remembers ``/usr/bin/rm``. The second token is kept only when it looks
-    like a subcommand (no flag, no path).
+    ``git status --short`` remembers ``/usr/bin/git status``; ``ls -la``
+    remembers ``/bin/ls``. The second token is kept only when it looks like a
+    subcommand (no flag, no path).
 
     ``None`` -- never remember, never match -- unless ``command`` is one
     simple command whose program resolves to an absolute path: no control
     operator, pipe, redirection, substitution, newline or ``VAR=`` prefix, no
-    relative program path, no shell or exec wrapper, and it parses.
+    relative program path, no shell or exec wrapper, it parses, and it is not
+    a program (or subcommand) that always asks: ``rm``, ``dd``, an
+    interpreter, ``npx``/``uvx``/``uv run``, ``make``, ``docker``, ``curl``,
+    ``git push``/``reset``/``clean``/``checkout``/``restore``, ``chmod -R``,
+    ... (``_ALWAYS_ASK_PROGRAMS``, ``_ALWAYS_ASK_SUBCOMMANDS``).
     """
     argv = _split_simple_command(command)
     return _argv_prefix(argv) if argv else None
@@ -327,15 +458,31 @@ def remember_key(request: PermissionRequest) -> tuple[str, str] | None:
     ``execute`` prompts (and ``other`` prompts that carry a shell command) are
     remembered per :func:`command_prefix`; any other kind is remembered for
     the whole kind (the harness's own "allow edits this session"
-    granularity). ``None`` means the prompt can be neither remembered nor
-    answered from memory.
+    granularity) -- except an ``other`` prompt with no command input whose
+    title names a program that always asks. ``None`` means the prompt can be
+    neither remembered nor answered from memory.
     """
     kind = str(request.tool_kind or "other").lower()
     if kind == "execute" or (kind == "other" and _has_command(request.raw_input)):
         argv = _execute_argv(request.raw_input, request.title)
         prefix = _argv_prefix(argv) if argv else None
         return (kind, prefix) if prefix else None
+    if kind == "other" and _title_always_asks(request.title):
+        return None
     return kind, ""
+
+
+def _title_always_asks(title: str) -> bool:
+    """Whether a display title reads as a command that always asks.
+
+    Split on whitespace, not parsed: a title that chains or pipes more
+    commands is still caught by the program it starts with.
+    """
+    words = str(title or "").split()
+    program = _resolve_program(words[0]) if words else None
+    return program is not None and (
+        _program_name(program) in _COMMAND_RUNNERS or _always_asks(program, words[1:])
+    )
 
 
 def _pick(options: list[PermissionOptionInfo], *kinds: str) -> PermissionDecision | None:

@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- An ACP **Always allow** no longer covers programs that delete data or run
+  code they are handed. `rm`, `rmdir`, `dd`, `mkfs*`, `shred`, `truncate`,
+  recursive `chmod`/`chown`/`chgrp`, interpreters (`python*`, `py`, `node`,
+  `deno`, `bun`, `ruby`, `perl`, `php`, ...), shells, `uv run`, `uvx`,
+  `pipx run`, `npx`, `npm exec`/`run`/`test`, `pnpm dlx`/`exec`, `yarn dlx`,
+  `make`, `cargo run`, `go run`, `docker`, `podman`, `kubectl`, `curl`,
+  `wget`, `find -delete`/`-exec` and `git push`/`reset`/`clean`/`checkout`/
+  `restore` always ask, matched on the program's file name (case-insensitive,
+  `.exe`/`.cmd`/`.bat`/`.ps1` dropped, links followed) with the subcommand
+  found anywhere in the command, so a flag in front of it does not hide it.
+  Grants remembered for these before the upgrade stop matching. Operators
+  will see more prompts for interpreters and runners; `git log`, `git status`,
+  `ls`, `npm install`, `cargo build` and the like are still remembered.
 - Output redaction now masks wallet material it used to pass to the model and
   transcript verbatim (WAL-09): a secret the gateway holds — a skill hot-wallet
   key (`UNIV4_LP_PRIVATE_KEY`, `POOLSFUN_PRIVATE_KEY`, …), the vault password —

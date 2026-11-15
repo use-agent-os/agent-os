@@ -221,25 +221,25 @@ async def test_queue_owned_by_foreign_gateway_counts_as_no_surface(tmp_path, mon
 
 async def test_always_is_remembered_per_session_kind_and_prefix(tmp_path) -> None:
     bridge, queue = _bridge(tmp_path)
-    task = asyncio.create_task(bridge.decide(perm_request(title="git push origin main")))
+    task = asyncio.create_task(bridge.decide(perm_request(title="git log --oneline")))
     row = await next_pending(queue, ACP_APPROVAL_NAMESPACE)
     queue.resolve(row["id"], True, allow_always=True)
     assert await task == "allow_once"
 
     # Same prefix, same session: no prompt.
-    assert await bridge.decide(perm_request(title="git push --force")) == "allow_once"
+    assert await bridge.decide(perm_request(title="git log -p")) == "allow_once"
     assert queue.list_pending(ACP_APPROVAL_NAMESPACE) == []
 
     # Different prefix prompts again.
     seen = {row["id"]}
-    task = asyncio.create_task(bridge.decide(perm_request(title="git reset --hard")))
+    task = asyncio.create_task(bridge.decide(perm_request(title="git status")))
     row2 = await next_pending(queue, ACP_APPROVAL_NAMESPACE, seen=seen)
     queue.resolve(row2["id"], False)
     assert await task == "reject_once"
 
     # Other session prompts again.
     task = asyncio.create_task(
-        bridge.decide(perm_request(session_key="agent:main:acp:ffff0000", title="git push"))
+        bridge.decide(perm_request(session_key="agent:main:acp:ffff0000", title="git log"))
     )
     row3 = await next_pending(queue, ACP_APPROVAL_NAMESPACE, seen=seen)
     queue.resolve(row3["id"], True)
