@@ -46,6 +46,7 @@ from agentos.cli.wallet_cmd import (
     short_address,
     token_symbol,
 )
+from agentos.display_text import display_safe, terminal_text
 
 
 class _JsonUsageGroup(TyperGroup):
@@ -78,6 +79,19 @@ AGENT_ENV_MARKERS = ("AGENTOS_SESSION_KEY", "AGENTOS_AGENT")
 PROVIDERS: dict[str, str] = {"aggregator": "AgentOS Aggregator", "uniswap": "Uniswap"}
 # Statuses that still move on their own after ``trading.swap`` returns.
 _PENDING_STATUSES = frozenset({"awaiting_approval", "approved", "submitted", "quoted"})
+
+
+def _gateway(action: Callable[[Any], Any], *, json_output: bool = False) -> Any:
+    """``run_gateway_sync`` for a view: in human mode every string is terminal-safe.
+
+    Token symbols come from contracts, order fields from the agent, errors
+    from providers; a control or bidi character in any of them is shown as an
+    escape, never sent to the operator's terminal (WAL-13). ``--json`` output
+    is the payload as served (``print_json`` escapes what a terminal could act
+    on without changing the data).
+    """
+    result = run_gateway_sync(action, json_output=json_output)
+    return result if json_output else display_safe(result)
 
 
 class TokenResolutionError(Exception):
@@ -515,7 +529,7 @@ def trade_status(
     async def _run(client):
         return await client.call("trading.status", {})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -600,7 +614,7 @@ def trade_probe(
     async def _run(client):
         return await client.call("trading.probe", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         if isinstance(result, dict) and not result.get("ok"):
@@ -631,7 +645,7 @@ def trade_provider(
         async def _show(client):
             return await client.call("trading.status", {})
 
-        result = _dict(run_gateway_sync(_show, json_output=json_output))
+        result = _dict(_gateway(_show, json_output=json_output))
         current = result.get("provider")
         if json_output:
             print_json({"provider": current, "providers": result.get("providers", [])})
@@ -644,7 +658,7 @@ def trade_provider(
     async def _set(client):
         return await client.call("config.set", {"path": "trading.provider", "value": provider})
 
-    result = _dict(run_gateway_sync(_set, json_output=json_output))
+    result = _dict(_gateway(_set, json_output=json_output))
     if json_output:
         print_json({"provider": provider, **result})
         return
@@ -671,7 +685,7 @@ def trade_tokens(
     async def _run(client):
         return await client.call("trading.tokens.search", {"chainId": chain_id, "query": query})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -707,7 +721,7 @@ def _set_hidden(chain: str, address: str, hidden: bool, json_output: bool) -> No
             "trading.tokens.hide", {"chainId": chain_id, "address": address, "hidden": hidden}
         )
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -782,7 +796,7 @@ def trade_quote(
         return await client.call("trading.quote", params)
 
     try:
-        result = run_gateway_sync(_run, json_output=json_output)
+        result = _gateway(_run, json_output=json_output)
     except TokenResolutionError as exc:
         _exit_token_error(exc, json_output=json_output)
         return
@@ -924,7 +938,7 @@ def trade_swap(
         return {"orders": settled}
 
     try:
-        result = run_gateway_sync(_run, json_output=json_output)
+        result = _gateway(_run, json_output=json_output)
     except TokenResolutionError as exc:
         _exit_token_error(exc, json_output=json_output)
         return
@@ -1090,7 +1104,7 @@ def trade_send(
         return {"orders": settled, "batchId": result.get("batchId")}
 
     try:
-        result = run_gateway_sync(_run, json_output=json_output)
+        result = _gateway(_run, json_output=json_output)
     except TokenResolutionError as exc:
         _exit_token_error(exc, json_output=json_output)
         return
@@ -1148,7 +1162,7 @@ def trade_allowances(
             result = await client.call("trading.allowances.list", again)
         return result
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1240,7 +1254,7 @@ def trade_revoke(
         return result
 
     try:
-        result = run_gateway_sync(_run, json_output=json_output)
+        result = _gateway(_run, json_output=json_output)
     except TokenResolutionError as exc:
         _exit_token_error(exc, json_output=json_output)
         return
@@ -1279,7 +1293,7 @@ def trade_decode(
     async def _run(client):
         return await client.call("trading.decode", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1366,7 +1380,7 @@ def trade_network(
     async def _run(client):
         return await client.call("trading.network", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1428,7 +1442,7 @@ def trade_orders(
     async def _run(client):
         return await client.call("trading.orders.list", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1457,7 +1471,7 @@ def trade_order(
             )
         return await client.call("trading.orders.get", {"orderId": order_id})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1469,7 +1483,7 @@ def trade_order(
         async def _batch(client):
             return await client.call("trading.orders.batch", {"batchId": batch_id})
 
-        approval = _dict(_dict(run_gateway_sync(_batch, json_output=False)).get("approval"))
+        approval = _dict(_dict(_gateway(_batch, json_output=False)).get("approval"))
         if approval:
             _print_batch_legs(approval)
 
@@ -1520,7 +1534,7 @@ def trade_approve(
     async def _show(client):
         return await _approval_view(client, order_id)
 
-    view = run_gateway_sync(_show, json_output=json_output)
+    view = _gateway(_show, json_output=json_output)
     order = _dict(_dict(view).get("order"))
     approval = _dict(_dict(view).get("approval"))
     if order.get("status") != "awaiting_approval":
@@ -1542,7 +1556,7 @@ def trade_approve(
     async def _run(client):
         return await client.call("trading.orders.approve", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1564,7 +1578,7 @@ def trade_reject(
     async def _run(client):
         return await client.call("trading.orders.reject", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1600,7 +1614,7 @@ def trade_history(
     async def _run(client):
         return await client.call("trading.history", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1659,7 +1673,7 @@ def trade_portfolio(
     async def _run(client):
         return await client.call("trading.portfolio", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1731,7 +1745,7 @@ def trade_sync(
     async def _run(client):
         return await client.call("trading.sync", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1754,7 +1768,7 @@ def trade_limits(
                 _bad_argument("No primary wallet; pass a wallet address", json_output=json_output)
         return await client.call("trading.limits", {"wallet": target})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1903,7 +1917,7 @@ def _bridge_call(
         return result
 
     try:
-        return _dict(run_gateway_sync(_run, json_output=json_output))
+        return _dict(_gateway(_run, json_output=json_output))
     except TokenResolutionError as exc:
         _exit_token_error(exc, json_output=json_output)
         raise typer.Exit(2) from exc
@@ -2053,7 +2067,7 @@ def trade_bridge_status(
             emit_error(exc.message, json_output=json_output, code=exc.code, details=exc.data)
             raise typer.Exit(2) from exc
 
-    result = _dict(run_gateway_sync(_run, json_output=json_output))
+    result = _dict(_gateway(_run, json_output=json_output))
     if json_output:
         print_json(result)
         return
@@ -2096,7 +2110,7 @@ def _lp_call(method: str, params: dict[str, Any], *, json_output: bool) -> Any:
             emit_error(exc.message, json_output=json_output, code=exc.code, details=exc.data)
             raise typer.Exit(2) from exc
 
-    return run_gateway_sync(_run, json_output=json_output)
+    return _gateway(_run, json_output=json_output)
 
 
 def _usd(value: Any) -> str:
@@ -2506,7 +2520,7 @@ async def _lp_card_after(client: Any, order: dict[str, Any]) -> dict[str, Any] |
                 "trading.lp.position", {"chainId": chain_id, "tokenId": str(token_id)}
             )
     except Exception as exc:  # noqa: BLE001 - the order is confirmed; the card is a bonus
-        typer.echo(f"[card not refreshed: {exc}]", err=True)
+        typer.echo(f"[card not refreshed: {terminal_text(exc)}]", err=True)
         return None
     return payload if isinstance(payload, dict) and payload.get("kind") else None
 
@@ -2554,7 +2568,7 @@ def _lp_write(
             card = await _lp_card_after(client, _dict(order))
         return {"result": result, "card": card}
 
-    out = run_gateway_sync(_run, json_output=json_output)
+    out = _gateway(_run, json_output=json_output)
     result = _dict(out).get("result")
     if json_output:
         print_json(result)
@@ -3036,10 +3050,10 @@ def trade_markets(
                 line = "  ".join(
                     str(x) for x in (c.get("symbol"), c.get("name"), c.get("address")) if x
                 )
-                typer.echo(f"  {line}", err=True)
+                typer.echo(f"  {terminal_text(line)}", err=True)
             raise typer.Exit(rpc_error_exit_code(exc.code)) from exc
 
-    result = _dict(run_gateway_sync(_run, json_output=json_output))
+    result = _dict(_gateway(_run, json_output=json_output))
     if not json_output:
         _render_markets(result)
         return
@@ -3167,7 +3181,7 @@ def _dca_call(method: str, params: dict[str, Any], *, json_output: bool) -> Any:
     async def _run(client):
         return await _dca_rpc(client, method, params, json_output=json_output)
 
-    return run_gateway_sync(_run, json_output=json_output)
+    return _gateway(_run, json_output=json_output)
 
 
 async def _dca_rpc(client: Any, method: str, params: dict[str, Any], *, json_output: bool) -> Any:
@@ -3686,7 +3700,7 @@ def dca_run(
         )
         return {**fresh, "run": settled}
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     _dca_emit(result, json_output=json_output, no_card=no_card)
 
 
@@ -3876,7 +3890,7 @@ def _trigger_call(method: str, params: dict[str, Any], *, json_output: bool) -> 
     async def _run(client):
         return await _trigger_rpc(client, method, params, json_output=json_output)
 
-    return run_gateway_sync(_run, json_output=json_output)
+    return _gateway(_run, json_output=json_output)
 
 
 async def _trigger_rpc(
@@ -4399,7 +4413,7 @@ def trigger_fire(
         )
         return {**fresh, "fire": settled}
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     _trigger_emit(result, json_output=json_output, no_card=no_card)
 
 
@@ -4456,7 +4470,7 @@ def _bracket_call(method: str, params: dict[str, Any], *, json_output: bool) -> 
             client, method, params, json_output=json_output, usage_codes=_BRACKET_USAGE_CODES
         )
 
-    return run_gateway_sync(_run, json_output=json_output)
+    return _gateway(_run, json_output=json_output)
 
 
 def _bracket_leg_word(leg: str, trigger: dict[str, Any]) -> str:
@@ -4971,5 +4985,5 @@ def bracket_fire(
         )
         return {**fresh, "fire": settled}
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     _trigger_emit(result, json_output=json_output, no_card=no_card)

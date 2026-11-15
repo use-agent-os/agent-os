@@ -674,3 +674,31 @@ class TestApprovalBindsToTheSignedTransaction:
         done = await service.approve(order_id, wait=True)
         assert done["status"] == "confirmed"
         assert _transfers(base_chain) == [(ALICE, 100 * 10**6)]
+
+
+# ── WAL-13: no control character from a contract or a caller is stored or served ──
+
+ESC_TOKEN = "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+
+
+class TestNoControlCharactersStored:
+    async def test_a_contract_symbol_with_escapes_is_stored_plain(
+        self, funded_service: TradingService, base_chain: FakeChain, fake_prices: FakePrices
+    ) -> None:
+        service = funded_service
+        base_chain.tokens[ESC_TOKEN] = ("TKN\x1b[31mRED‮", "Evil\x9b Token​", 18)
+        fake_prices.spot[("base", ESC_TOKEN)] = 1.0
+        order = await _agent_swap(service, token_out=ESC_TOKEN, amount_in="120")
+        symbol = order["tokenOut"]["symbol"]
+        assert symbol == "TKN[31mRED"
+        assert order["tokenOut"]["name"] == "Evil Token"
+        stored = service.ledger.get_token(8453, ESC_TOKEN)
+        assert stored is not None
+        assert "\x1b" not in str(stored["symbol"]) and "‮" not in str(stored["symbol"])
+
+    async def test_a_failed_order_never_stores_the_callers_raw_amount(
+        self, funded_service: TradingService
+    ) -> None:
+        order = await _agent_swap(funded_service, amount_in="7 \x1b[31mRED")
+        assert order["status"] == "failed"
+        assert order["amountIn"] == "0"

@@ -310,6 +310,15 @@ def _local_tx_hash(raw: str) -> str:
     return "0x" + keccak(bytes.fromhex(raw.removeprefix("0x"))).hex()
 
 
+_DECIMAL_RE = re.compile(r"^\d{1,40}(\.\d{1,40})?$")
+
+
+def _amount_text(value: str | None) -> str:
+    """A caller's amount as it may be stored: a plain decimal, else ``"0"``."""
+    text = str(value or "").strip()
+    return text if _DECIMAL_RE.match(text) else "0"
+
+
 def _client_order_id(value: str | None) -> str | None:
     """Validate a caller's idempotency key; ``None`` when none was given."""
     text = (value or "").strip()
@@ -4160,7 +4169,9 @@ class TradingService:
                             "token_in": meta_in.address,
                             "token_out": meta_out.address,
                             "amount_raw": "0",
-                            "amount_human": amount_in or "0",
+                            # Shown to whoever reviews the order: never the
+                            # caller's unparsed text (WAL-13).
+                            "amount_human": _amount_text(amount_in),
                             "status": "failed",
                             "reason": f"{error.code}: {error}",
                             "initiator": initiator,

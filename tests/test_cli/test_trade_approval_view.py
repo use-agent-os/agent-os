@@ -186,3 +186,66 @@ def test_an_unpriced_batch_says_the_cap_does_not_bound_it(client: _FakeClient) -
     shown = runner.invoke(trade_cmd.app, ["order", "ord-1"])
     assert "the daily cap does not bound this batch" in shown.output
     assert TWIN_RECIPIENT in shown.output
+
+
+# ── WAL-13: control characters are shown as escapes, never sent ────────────────
+
+ESC_SYMBOL = {
+    "symbol": "TKN\x1b[31mRED‮",
+    "address": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    "verified": False,
+}
+_RAW = ("\x1b", "\x9b", "‮", "​", "\x07")
+
+
+def _assert_neutral(output: str) -> None:
+    for char in _RAW:
+        assert char not in output, repr(char)
+
+
+def test_hostile_text_reaches_no_trade_view_raw(client: _FakeClient) -> None:
+    failed = _order(
+        orderId="ord-f",
+        status="failed",
+        amountIn="7 \x1b[31mRED",
+        reason="trading.invalid: amount is not a number: '7 \x1b[31mRED'‮",
+        txHash=None,
+    )
+    parked = _send(
+        tokenIn=ESC_SYMBOL,
+        note="pay‮evil",
+        recipientLabel="Label\x9b2J",
+    )
+    client.payloads["trading.orders.list"] = {"orders": [failed, parked], "pendingApprovals": 1}
+    listing = runner.invoke(trade_cmd.app, ["orders"])
+    assert listing.exit_code == 0, listing.output
+    _assert_neutral(listing.output)
+    # Visible, so the operator sees something is off.
+    assert "TKN\\x1b[31mRED\\u202e" in listing.output
+    for order in (failed, parked):
+        client.payloads["trading.orders.get"] = {"order": order}
+        shown = runner.invoke(trade_cmd.app, ["order", str(order["orderId"])])
+        assert shown.exit_code == 0, shown.output
+        _assert_neutral(shown.output)
+    approve = runner.invoke(trade_cmd.app, ["approve", "ord-1"], input="n\n")
+    _assert_neutral(approve.output)
+
+
+def test_json_output_escapes_what_a_terminal_would_act_on(client: _FakeClient) -> None:
+    order = _send(tokenIn=ESC_SYMBOL, note="a\x9bb‮c")
+    client.payloads["trading.orders.get"] = {"order": order}
+    result = runner.invoke(trade_cmd.app, ["order", "ord-1", "--json"])
+    assert result.exit_code == 0
+    _assert_neutral(result.stdout)
+    # Same data once parsed: only the encoding changed.
+    assert json.loads(result.stdout)["order"]["note"] == "a\x9bb‮c"
+    assert json.loads(result.stdout)["order"]["tokenIn"]["symbol"] == ESC_SYMBOL["symbol"]
+
+
+def test_a_server_error_is_printed_neutralised(monkeypatch) -> None:
+    from agentos.cli import output
+
+    lines: list[str] = []
+    monkeypatch.setattr(output.typer, "secho", lambda text, **_kw: lines.append(text))
+    output.emit_error("holds 5 TKN\x1b[2J‮\nsecond line")
+    assert lines == ["Error: holds 5 TKN\\x1b[2J\\u202e\nsecond line"]

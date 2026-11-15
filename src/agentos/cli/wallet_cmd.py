@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from rich.table import Table
 from agentos.cli.gateway_rpc import run_gateway_sync
 from agentos.cli.output import emit_error, print_json
 from agentos.cli.ui import ACCENT, ACCENT_HEADER, console, markup_escape
+from agentos.display_text import display_safe
 
 app = typer.Typer(help="Manage the trading wallet vault (create, import, export, unlock).")
 
@@ -33,6 +35,19 @@ CHAIN_KEYS: dict[int, str] = {chain_id: key for key, chain_id in CHAIN_IDS.items
 NATIVE_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 _ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+
+
+def _gateway(action: Callable[[Any], Any], *, json_output: bool = False) -> Any:
+    """``run_gateway_sync`` for a view: in human mode every string is terminal-safe.
+
+    Token symbols come from contracts, order fields from the agent, errors
+    from providers; a control or bidi character in any of them is shown as an
+    escape, never sent to the operator's terminal (WAL-13). ``--json`` output
+    is the payload as served (``print_json`` escapes what a terminal could act
+    on without changing the data).
+    """
+    result = run_gateway_sync(action, json_output=json_output)
+    return result if json_output else display_safe(result)
 
 
 # ── shared helpers (also used by ``agentos trade``) ─────────────────────────
@@ -149,7 +164,7 @@ def wallet_status(
     async def _run(client):
         return await client.call("wallet.status", {})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -185,7 +200,7 @@ def wallet_setup(
     async def _run(client):
         return await client.call("wallet.setup", {"password": password, "unlockMode": mode})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -208,7 +223,7 @@ def wallet_unlock(
     async def _run(client):
         return await client.call("wallet.unlock", {"password": password})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -224,7 +239,7 @@ def wallet_lock(
     async def _run(client):
         return await client.call("wallet.lock", {})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -240,7 +255,7 @@ def wallet_list(
     async def _run(client):
         return await client.call("wallet.list", {})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -275,7 +290,7 @@ def wallet_create(
     async def _run(client):
         return await client.call("wallet.create", {"label": label})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -322,7 +337,7 @@ def wallet_import(
     async def _run(client):
         return await client.call("wallet.import", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -384,7 +399,7 @@ def wallet_rename(
     async def _run(client):
         return await client.call("wallet.rename", {"address": address, "label": label})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -413,7 +428,7 @@ def wallet_remove(
     async def _run(client):
         return await client.call("wallet.remove", {"address": address, "password": password})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -430,7 +445,7 @@ def wallet_primary(
     async def _run(client):
         return await client.call("wallet.setPrimary", {"address": address})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -462,7 +477,7 @@ def wallet_balances(
     async def _run(client):
         return await client.call("wallet.balances", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return

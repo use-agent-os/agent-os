@@ -541,3 +541,16 @@ def test_approve_shows_the_mandate_and_asks_first(client: _Client) -> None:
     approved = runner.invoke(trade_cmd.app, ["dca", "approve", MID], input="y\n")
     assert approved.exit_code == 0, approved.output
     assert [m for m, _ in client.calls][-1] == "trading.dca.approve"
+
+
+def test_hostile_symbols_reach_no_mandate_view_raw(client: _Client) -> None:
+    """WAL-13: a mandate panel prints a contract's control bytes as escapes."""
+    payload = _fixture("mandate-awaiting")
+    payload["mandate"]["token"]["symbol"] = "WETH\x1b[31m‮"
+    payload["mandate"]["name"] = "buy\x9b2J"
+    client.responses["trading.dca.get"] = payload
+    shown = runner.invoke(trade_cmd.app, ["dca", "show", MID])
+    assert shown.exit_code == 0, shown.output
+    for char in ("\x1b", "\x9b", "‮"):
+        assert char not in shown.output
+    assert "WETH\\x1b[31m\\u202e" in shown.output

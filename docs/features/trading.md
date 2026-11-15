@@ -304,7 +304,14 @@ the running gateway: the watcher holds it until the user runs
 simply fail inside an agent turn. `wallet.status` and `trading.status`
 answer an agent without `vaultPath`. A `note` on a swap, send or revoke is
 stored as the approver will see it: control and bidi characters are
-dropped, whitespace is collapsed, and it is cut at 240 characters.
+dropped, whitespace is collapsed, and it is cut at 240 characters. Token
+symbols and names (whatever a contract's `symbol()`/`name()` or a feed
+returns) are stored the same way, without control, bidi or zero-width
+characters, and a failed order never keeps the caller's unparsed amount.
+`agentos trade` and `agentos wallet` show any such character left in what
+they print as a visible escape (`\x1b`, `\u202e`), never send it to your
+terminal; `--json` output `\u`-escapes C1, bidi and invisible characters
+(the parsed data is unchanged).
 `trading.swap` and `trading.send` take a `clientOrderId`: a repeat call with
 the same id returns the existing order instead of placing a second one
 (`agentos trade swap|send --client-id`). Swap targets and approval spenders

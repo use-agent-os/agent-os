@@ -200,6 +200,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `trade order` prints token contracts and, for a parked multisend leg, every
   leg. Mandate, trigger and bracket token payloads carry `verified`.
   (WAL-08)
+- CLI and trading: control characters from contracts, agents and providers
+  no longer reach your terminal. `agentos trade` and `agentos wallet` print
+  every C0/C1 control, ANSI escape, bidi override and zero-width character
+  in what they show as a visible escape (`\x1b`, `\u202e`) — table cells,
+  panels, approval prompts and server error messages alike; `--json` output
+  `\u`-escapes C1, bidi and invisible characters (same data once parsed).
+  The engine stores token symbols and names without such characters
+  (existing rows are cleaned when read), and a failed swap records `0`
+  instead of the caller's unparsed `amountIn`. (WAL-13)
 
 ### Changed
 - Editing the config file by hand no longer applies the operator-only
