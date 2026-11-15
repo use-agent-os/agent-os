@@ -182,6 +182,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   shared key parser in both hot-wallet skills (`unilp`, `poolsfun`) refuses
   non-hex input — including whitespace and `_`, which `int()` used to accept
   as a silently different key — before `int()` sees it.
+- **Desktop: Touch ID now stands in front of every click that trades or may
+  spend (WAL-16).** With Settings › Security on, a trigger's **Fire now** and
+  a DCA's **Buy now** (desk and chat cards alike) went out with no
+  fingerprint, though both trade at once like a bracket's **Sell now**. Every
+  trading and vault write now goes through one door in the desktop store
+  (`gatedCall` / `TRADING_WRITE_GATES`), which also asks before a resume, a
+  swap, send or burn typed at the desk, your own new DCA, and an edit that
+  may make a DCA spend more. `High-risk approvals` asks when the click moves
+  $500 or more or its worth is unknown; `Every approval` asks for all of
+  them. Reject, pause and stop never ask; `Off` (the default) is unchanged.
+- **Desktop: an exported private key now leaves the clipboard even when the
+  Export sheet is closed (WAL-15).** The one-minute clear was the sheet's own
+  timer and was cancelled by Close, so the natural copy-then-close left the
+  key on the clipboard indefinitely. The clear now runs in the main process
+  (only the key's SHA-256 digest crosses IPC), survives closing the sheet or
+  reloading the window, runs at once when the app quits, and still leaves
+  alone anything copied over the key.
 - **Breaking default — Discord and Slack channels now refuse senders you have
   not admitted.** Before, any Discord user who could DM or @mention the bot,
   and any Slack workspace member or guest, started an agent turn with the

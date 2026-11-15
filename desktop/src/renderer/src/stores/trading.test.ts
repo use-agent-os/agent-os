@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { createElement, type ReactNode } from 'react'
@@ -7,12 +10,16 @@ import type { AuthResult } from '@shared/app'
 import { DEFAULT_SETTINGS, type TouchIdMode } from '@shared/settings'
 import { isTouchIdDeclined, resetBiometricGateForTests } from '~/lib/biometric-gate'
 import { desktopApi } from '~/lib/desktop-api'
+import { DESKTOP_REQUIRED_METHODS } from '~/lib/required-methods'
+import { REQUIRED_METHODS } from '@/lib/required-methods'
 import { order } from '~/views/trading/test-utils'
 import type { Bracket, Mandate, Trigger } from '~/views/trading/types'
 import { useSettings } from './settings'
 import {
+  gatedCall,
   TRADING_EVENTS,
   TRADING_KEYS,
+  TRADING_WRITE_GATES,
   useBracketActions,
   useBrackets,
   useMandateActions,
@@ -20,6 +27,8 @@ import {
   useTriggers,
   useOrderDecision,
   useOrders,
+  useSend,
+  useSwap,
   useWalletMutation,
 } from './trading'
 
@@ -368,5 +377,215 @@ describe('Touch ID in front of every approval and vault write', () => {
     })
     expect(authenticate).toHaveBeenCalledTimes(2)
     expect(rpcCall).toHaveBeenCalledWith('wallet.rename', { address })
+  })
+
+  // WAL-16: "Fire now" and "Buy now" trade at once, exactly like a bracket's
+  // Sell now; they used to go out with no fingerprint in every mode.
+  const MANDATE = {
+    id: 'dca_1',
+    name: 'DCA ETH',
+    status: 'active',
+    chain: { id: 8453, key: 'base', name: 'Base' },
+    budget: { usdPerRun: 5, capUsd: 50 },
+    runs: { max: null },
+  } as unknown as Mandate
+  const TRIGGER = {
+    id: 'trg_1',
+    name: 'Stop-loss ETH',
+    kind: 'sell',
+    chain: { id: 8453, key: 'base', name: 'Base' },
+    token: { symbol: 'ETH' },
+    condition: { direction: 'below', priceUsd: 3800, label: 'under $3,800' },
+    action: { kind: 'sell', amountPct: 100, amountUsd: null, amount: null, estimatedUsd: 776 },
+  } as unknown as Trigger
+
+  it('asks before a trigger’s Fire now, and a decline sends nothing (WAL-16)', async () => {
+    setMode('high')
+    rpcCall.mockResolvedValue({ kind: 'trigger', trigger: TRIGGER })
+    const { result } = renderHook(() => useTriggerActions(), { wrapper })
+    authenticate.mockResolvedValueOnce({ ok: false, reason: 'cancelled' } satisfies AuthResult)
+    let res: unknown = 'unset'
+    await act(async () => {
+      res = await result.current.fire(TRIGGER)
+    })
+    expect(res).toBeNull()
+    expect(authenticate).toHaveBeenCalledWith(
+      'fire the trigger “Stop-loss ETH” now: sell 100 % of ETH when under $3,800, on Base',
+    )
+    expect(rpcCall).not.toHaveBeenCalledWith('trading.trigger.fire', expect.anything())
+    authenticate.mockResolvedValueOnce({ ok: true } satisfies AuthResult)
+    await act(async () => {
+      await result.current.fire(TRIGGER)
+    })
+    expect(rpcCall).toHaveBeenCalledWith('trading.trigger.fire', { triggerId: 'trg_1' })
+    // Resume re-arms what was approved: asked the same way.
+    authenticate.mockClear()
+    authenticate.mockResolvedValueOnce({ ok: false, reason: 'cancelled' } satisfies AuthResult)
+    await act(async () => {
+      await result.current.resume(TRIGGER)
+    })
+    expect(authenticate).toHaveBeenCalledTimes(1)
+    expect(rpcCall).not.toHaveBeenCalledWith('trading.trigger.resume', expect.anything())
+  })
+
+  it('asks before a DCA’s Buy now on Every approval, and a decline sends nothing (WAL-16)', async () => {
+    setMode('all')
+    rpcCall.mockResolvedValue({ kind: 'mandate', mandate: MANDATE })
+    const { result } = renderHook(() => useMandateActions(), { wrapper })
+    authenticate.mockResolvedValueOnce({ ok: false, reason: 'cancelled' } satisfies AuthResult)
+    let res: unknown = 'unset'
+    await act(async () => {
+      res = await result.current.run(MANDATE)
+    })
+    expect(res).toBeNull()
+    expect(authenticate).toHaveBeenCalledWith('buy now with the DCA “DCA ETH”: $5.00, on Base')
+    expect(rpcCall).not.toHaveBeenCalledWith('trading.dca.run', expect.anything())
+    authenticate.mockResolvedValueOnce({ ok: true } satisfies AuthResult)
+    await act(async () => {
+      await result.current.run(MANDATE)
+    })
+    expect(rpcCall).toHaveBeenCalledWith('trading.dca.run', { mandateId: 'dca_1' })
+    // Pause and stop only take permission away: never asked.
+    authenticate.mockClear()
+    await act(async () => {
+      await result.current.pause(MANDATE)
+      await result.current.stop(MANDATE)
+    })
+    expect(authenticate).not.toHaveBeenCalled()
+  })
+
+  it('asks before an operator’s own DCA and an edit that may spend more, not a rename', async () => {
+    setMode('high')
+    rpcCall.mockResolvedValue({ kind: 'mandate', mandate: MANDATE })
+    const { result } = renderHook(() => useMandateActions(), { wrapper })
+    authenticate.mockResolvedValue({ ok: false, reason: 'cancelled' } satisfies AuthResult)
+    await act(async () => {
+      // No cap and no run limit: what it may spend is unknown, so high-risk.
+      await result.current.create({ chainId: 8453, name: 'Buy ETH', usdPerRun: 10 })
+      await result.current.update(MANDATE, { capUsd: 5000 })
+    })
+    expect(authenticate.mock.calls.map(([r]) => r)).toEqual([
+      'start the DCA “Buy ETH”, up to —, on Base',
+      'change the DCA “DCA ETH” to up to $5,000.00, on Base',
+    ])
+    expect(rpcCall).not.toHaveBeenCalledWith('trading.dca.create', expect.anything())
+    expect(rpcCall).not.toHaveBeenCalledWith('trading.dca.update', expect.anything())
+    await act(async () => {
+      await result.current.update(MANDATE, { name: 'DCA ETH weekly' })
+    })
+    expect(authenticate).toHaveBeenCalledTimes(2)
+    expect(rpcCall).toHaveBeenCalledWith('trading.dca.update', {
+      mandateId: 'dca_1',
+      name: 'DCA ETH weekly',
+    })
+  })
+
+  it('asks before a swap or a send typed at the desk; the sheet’s words are never sent', async () => {
+    setMode('all')
+    const swap = renderHook(() => useSwap(), { wrapper })
+    const send = renderHook(() => useSend(), { wrapper })
+    authenticate.mockResolvedValue({ ok: false, reason: 'cancelled' } satisfies AuthResult)
+    const errs = await act(async () => [
+      await swap.result.current
+        .mutateAsync({
+          chainId: 8453,
+          tokenIn: '0xin',
+          tokenOut: '0xout',
+          amountIn: '1',
+          touchId: { what: '1 ETH → USDC', valueUsd: 3000 },
+        })
+        .catch((e: unknown) => e),
+      await send.result.current
+        .mutateAsync({
+          chainId: 8453,
+          token: '0xusdc',
+          recipients: [{ to: '0xabc', amount: '5' }],
+          touchId: { what: '5 USDC → 0xabc', valueUsd: 5 },
+        })
+        .catch((e: unknown) => e),
+    ])
+    expect(errs.every(isTouchIdDeclined)).toBe(true)
+    expect(authenticate.mock.calls.map(([r]) => r)).toEqual([
+      'swap 1 ETH → USDC on Base',
+      'send 5 USDC → 0xabc on Base',
+    ])
+    expect(rpcCall).not.toHaveBeenCalledWith('trading.swap', expect.anything())
+    expect(rpcCall).not.toHaveBeenCalledWith('trading.send', expect.anything())
+    authenticate.mockResolvedValue({ ok: true } satisfies AuthResult)
+    await act(async () => {
+      await send.result.current.mutateAsync({
+        chainId: 8453,
+        token: '0xusdc',
+        recipients: [{ to: '0xabc', amount: '5' }],
+        touchId: { what: '5 USDC', valueUsd: 5 },
+      })
+    })
+    expect(rpcCall).toHaveBeenCalledWith('trading.send', {
+      chainId: 8453,
+      token: '0xusdc',
+      recipients: [{ to: '0xabc', amount: '5' }],
+      initiator: 'manual',
+    })
+  })
+
+  it('asks for a write nobody classified as high-risk, rather than letting it through', async () => {
+    setMode('high')
+    authenticate.mockResolvedValueOnce({ ok: false, reason: 'cancelled' } satisfies AuthResult)
+    const call = vi.fn(async () => ({}))
+    await expect(gatedCall(call, 'trading.lp.add', { tokenId: '1' })).rejects.toSatisfy(
+      isTouchIdDeclined,
+    )
+    expect(authenticate).toHaveBeenCalledWith('send trading.lp.add')
+    expect(call).not.toHaveBeenCalled()
+  })
+})
+
+describe('TRADING_WRITE_GATES covers every write (WAL-16)', () => {
+  // What the renderer reads; everything else under trading.* / wallet.* is a
+  // write and must say how Touch ID stands in front of it.
+  const READ =
+    /\.(list|get|status|balances|batch|chart|decode|history|limits|network|portfolio|quote|resolve|search|markets|pool|position|positions|ranges)$/
+  const src = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+
+  it('classifies every trading/wallet write the desktop calls', () => {
+    const writes = [...new Set([...REQUIRED_METHODS, ...DESKTOP_REQUIRED_METHODS])].filter(
+      (m) => /^(trading|wallet)\./.test(m) && !READ.test(m),
+    )
+    expect(writes.length).toBeGreaterThan(20)
+    expect(writes.filter((m) => !Object.hasOwn(TRADING_WRITE_GATES, m))).toEqual([])
+    for (const m of [
+      'trading.orders.approve',
+      'trading.swap',
+      'trading.send',
+      'trading.dca.approve',
+      'trading.dca.run',
+      'trading.dca.create',
+      'trading.trigger.approve',
+      'trading.trigger.fire',
+      'trading.bracket.approve',
+      'trading.bracket.fire',
+      'wallet.export',
+      'wallet.remove',
+    ])
+      expect(TRADING_WRITE_GATES[m], m).toBeTypeOf('function')
+  })
+
+  it('sends no gated write past gatedCall in the store or the chat cards', () => {
+    for (const file of ['stores/trading.ts', 'views/chat/ChatView.tsx']) {
+      const text = readFileSync(resolve(src, file), 'utf8')
+      // A method built at runtime can only reach the RPC through gatedCall.
+      const dynamic = [...text.matchAll(/\brpc\.call(?:<[^>]*>)?\(\s*([A-Za-z_][\w.]*)\s*[,)]/g)]
+        .map((m) => m[1])
+        .filter((arg) => arg !== 'm')
+      expect(dynamic, file).toEqual([])
+      const literal = [
+        ...text.matchAll(/\brpc\.call(?:<(?:[^<>]|<[^<>]*>)*>)?\(\s*'([^']+)'/g),
+      ].map((m) => m[1] as string)
+      expect(literal.length, file).toBeGreaterThan(0)
+      expect(
+        literal.filter((m) => typeof TRADING_WRITE_GATES[m] === 'function'),
+        file,
+      ).toEqual([])
+    }
   })
 })

@@ -173,6 +173,33 @@ describe('ChatView · DCA card actions', () => {
       useSettings.setState({ settings: structuredClone(DEFAULT_SETTINGS) })
     }
   })
+
+  it('asks before a card’s "Buy now" and "Fire now", which trade at once (WAL-16)', async () => {
+    resetBiometricGateForTests()
+    useSettings.setState({
+      loaded: true,
+      settings: { ...structuredClone(DEFAULT_SETTINGS), security: { touchId: 'all' } },
+    })
+    const authenticate = vi
+      .spyOn(desktopApi().app, 'authenticate')
+      .mockResolvedValue({ ok: false, reason: 'cancelled' })
+    try {
+      mount({ entering: false, onFirstSend: vi.fn() } as unknown as DeskProps)
+      rpc.call.mockClear()
+      await expect(
+        seen.dcaActions!.call('trading.dca.run', { mandateId: 'dca_1a2b3c4d' }),
+      ).rejects.toBeInstanceOf(TouchIdDeclined)
+      await expect(
+        seen.lpActions!.call('trading.trigger.fire', { triggerId: 'trg_1a2b3c4d' }),
+      ).rejects.toBeInstanceOf(TouchIdDeclined)
+      expect(authenticate).toHaveBeenCalledTimes(2)
+      expect(rpc.call).not.toHaveBeenCalledWith('trading.dca.run', expect.anything())
+      expect(rpc.call).not.toHaveBeenCalledWith('trading.trigger.fire', expect.anything())
+    } finally {
+      authenticate.mockRestore()
+      useSettings.setState({ settings: structuredClone(DEFAULT_SETTINGS) })
+    }
+  })
 })
 
 describe('ChatView · the approvals region and the composer chips', () => {

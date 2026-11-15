@@ -1,3 +1,5 @@
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import type { AppInfo } from '@shared/app'
 import type { DesktopApi } from '@shared/ipc'
 import { STOPPED_GATEWAY, type GatewayStatus } from '@shared/gateway'
@@ -82,6 +84,7 @@ function createFallbackApi(): DesktopApi {
       // No sensor reaches a browser tab: Touch ID is never available here.
       biometrics: async () => ({ available: false }),
       authenticate: async () => ({ ok: false, reason: 'unavailable' }),
+      scrubClipboard: async (digest, afterMs) => scheduleTabScrub(digest, afterMs),
     },
     settings: {
       get: async () => structuredClone(settings),
@@ -231,6 +234,35 @@ function createFallbackApi(): DesktopApi {
 }
 
 const activationListeners = new Set<(target: NotifyTarget) => void>()
+
+/**
+ * A browser tab's stand-in for main's clipboard scrub: a module-level timer
+ * (it outlives any view, as main's does) that blanks the clipboard if it
+ * still holds the text with `digest`. Same bounds as main.
+ */
+const tabScrubs = new Map<string, ReturnType<typeof setTimeout>>()
+function scheduleTabScrub(digest: string, afterMs: number): boolean {
+  if (!/^[0-9a-f]{64}$/.test(digest) || !Number.isFinite(afterMs)) return false
+  const previous = tabScrubs.get(digest)
+  if (previous !== undefined) clearTimeout(previous)
+  const ms = Math.min(Math.max(afterMs, 1_000), 10 * 60_000)
+  tabScrubs.set(
+    digest,
+    setTimeout(() => {
+      tabScrubs.delete(digest)
+      void (async () => {
+        try {
+          const current = await navigator.clipboard.readText()
+          if (current && bytesToHex(sha256(utf8ToBytes(current))) === digest)
+            await navigator.clipboard.writeText('')
+        } catch {
+          /* clipboard unreadable: nothing to do */
+        }
+      })()
+    }, ms),
+  )
+  return true
+}
 
 let cached: DesktopApi | null = null
 

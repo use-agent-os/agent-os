@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
+import { isTouchIdDeclined } from '~/lib/biometric-gate'
 import { useBalances, useSend } from '~/stores/trading'
 import {
   chainName,
@@ -155,6 +156,11 @@ export function BurnSheet({
         token: form.token.trim(),
         recipients: [{ to: BURN_ADDRESS, amount: form.amount.trim() }],
         note: form.note.trim() || `burn ${form.amount.trim()} ${held.symbol}`,
+        // Names the burn in the Touch ID sheet (Settings › Security); never sent.
+        touchId: {
+          what: `${form.amount.trim()} ${held.symbol} → ${shortAddress(BURN_ADDRESS)}`,
+          valueUsd: burningAll ? held.valueUsd : null,
+        },
       },
       {
         onSuccess: (res) => {
@@ -174,8 +180,11 @@ export function BurnSheet({
           })
           onClose()
         },
-        onError: (err) =>
-          toast.error(`${t('trading.burn.failed')}: ${errorText(err)}`, { id: 'trd-burn' }),
+        onError: (err) => {
+          // Declined: the gate has said why, and nothing was sent.
+          if (isTouchIdDeclined(err)) return
+          toast.error(`${t('trading.burn.failed')}: ${errorText(err)}`, { id: 'trd-burn' })
+        },
       },
     )
   }

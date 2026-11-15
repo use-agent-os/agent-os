@@ -1,7 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import type { AppInfo, BiometricsInfo, ChooseFileOptions } from '@shared/app'
 import { IPC } from '@shared/ipc'
 import { appCalver } from '../app-version'
+import { ClipboardScrub, scrubBeforeQuit } from '../clipboard-scrub'
 import { authenticate, biometricsAvailable } from '../security'
 import { findMainWindow } from '../window'
 import type { SettingsStore } from '../settings/store'
@@ -77,6 +78,21 @@ export function registerAppIpc(settings: SettingsStore): void {
   // anything but a short non-blank string is a failure, never a prompt.
   ipcMain.handle(IPC.app.biometrics, (): BiometricsInfo => ({ available: biometricsAvailable() }))
   ipcMain.handle(IPC.app.authenticate, (_e, reason: unknown) => authenticate(reason))
+
+  // A copied private key leaves the clipboard on a timer main owns, so
+  // closing the Export sheet (or reloading the window) cannot cancel it,
+  // and quitting scrubs it at once. Only the secret's digest crosses IPC.
+  const scrub = new ClipboardScrub({
+    readText: () => clipboard.readText(),
+    clear: () => clipboard.clear(),
+    setTimer: (fn, ms) => setTimeout(fn, ms),
+    clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  })
+  ipcMain.handle(IPC.app.scrubClipboard, (_e, digest: unknown, afterMs: unknown) =>
+    scrub.schedule(digest, afterMs),
+  )
+  // Quitting with a key still on the clipboard blanks it first.
+  app.on('will-quit', (event) => scrubBeforeQuit(scrub, event, () => app.quit()))
 }
 
 /** Push "open settings" to the main window (never the Quick Ask panel). */
