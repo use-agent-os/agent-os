@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Desktop: "Update all" in Settings › About no longer asks for a second
+  "Update" on the Engine card. It still runs the engine preflight first and
+  goes ahead on its own when nothing would be interrupted; running sessions,
+  jobs due soon, a pending approval or a failed check still stop at the
+  preflight for you to decide.
+
+## [2026.11.15] - 2026-11-15
+
 ### Security
 - Output redaction now masks wallet material it used to pass to the model and
   transcript verbatim (WAL-09): a secret the gateway holds — a skill hot-wallet

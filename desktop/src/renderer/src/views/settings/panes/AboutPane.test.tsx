@@ -394,19 +394,74 @@ describe('AboutPane · app', () => {
     expect(appCard().textContent).not.toContain('Latest')
   })
 
-  it('offers Update all when both are outdated, through the engine preflight', async () => {
+  function bothOutdated() {
     const updateAll = vi.fn(async () => {})
     useUpdates.setState({
       updateAll,
       engine: { ...IDLE_ENGINE, latest: '2026.9.12', availability: 'outdated' },
       app: { ...idleAppState('2026.9.9'), phase: 'available', latest: '2026.9.12' },
     })
+    return updateAll
+  }
+
+  it('Update all goes ahead without a second confirm when the preflight is clean', async () => {
+    const updateAll = bothOutdated()
     renderPane()
     fireEvent.click(screen.getByRole('button', { name: 'Update all' }))
+    // The preflight still runs before anything restarts…
     expect(updateAll).not.toHaveBeenCalled()
-    await within(await screen.findByTestId('engine-preflight')).findByText('0 sessions are running')
-    fireEvent.click(screen.getByTestId('engine-preflight-confirm'))
+    await waitFor(() => expect(rpcCall).toHaveBeenCalledWith('sessions.list', { limit: 200 }))
+    // …and with nothing to interrupt, "Update all" was the confirmation.
+    await waitFor(() => expect(updateAll).toHaveBeenCalledTimes(1))
+    expect(screen.queryByTestId('engine-preflight')).toBeNull()
+    expect(applyEngine).not.toHaveBeenCalled()
+  })
+
+  it('Update all still stops at the preflight when the restart would interrupt work', async () => {
+    rpcCall.mockImplementation(async (method: string) => {
+      if (method === 'status') return { version: '2026.8.23', uptime_ms: 1, active_sessions: 1 }
+      if (method === 'sessions.list')
+        return { sessions: [{ key: 'a', active_task: { status: 'running' } }] }
+      if (method === 'cron.list') return []
+      return {}
+    })
+    const updateAll = bothOutdated()
+    renderPane()
+    fireEvent.click(screen.getByRole('button', { name: 'Update all' }))
+    const notice = await screen.findByTestId('engine-preflight')
+    await within(notice).findByText('1 session is running')
+    expect(updateAll).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Update anyway' }))
     expect(updateAll).toHaveBeenCalledTimes(1)
     expect(applyEngine).not.toHaveBeenCalled()
+  })
+
+  it('Update all stays blocked while an approval is pending', async () => {
+    useApprovals.setState({ pending: [{ id: 'x', namespace: 'exec', command: 'ls' }], count: 1 })
+    try {
+      const updateAll = bothOutdated()
+      renderPane()
+      fireEvent.click(screen.getByRole('button', { name: 'Update all' }))
+      const notice = await screen.findByTestId('engine-preflight')
+      await within(notice).findByText('1 approval is pending')
+      expect(screen.getByTestId('engine-preflight-confirm')).toBeDisabled()
+      expect(updateAll).not.toHaveBeenCalled()
+    } finally {
+      useApprovals.setState({ pending: [], count: 0 })
+    }
+  })
+
+  it('Update all stops at the preflight when its reads fail', async () => {
+    rpcCall.mockImplementation(async (method: string) => {
+      if (method === 'status') return { version: '2026.8.23', uptime_ms: 1, active_sessions: 0 }
+      if (method === 'sessions.list') throw new Error('gateway unreachable')
+      return {}
+    })
+    const updateAll = bothOutdated()
+    renderPane()
+    fireEvent.click(screen.getByRole('button', { name: 'Update all' }))
+    const notice = await screen.findByTestId('engine-preflight')
+    await within(notice).findByText('gateway unreachable')
+    expect(updateAll).not.toHaveBeenCalled()
   })
 })

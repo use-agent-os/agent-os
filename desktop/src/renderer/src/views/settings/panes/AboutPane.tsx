@@ -69,6 +69,22 @@ export function AboutPane() {
     setPendingUpdate(which)
     preflight.run()
   }
+  // "Update all" is already the confirmation: once its preflight comes back
+  // clean (nothing running, no job due, no approval waiting, no read error)
+  // it goes ahead without a second "Update". Anything the restart would
+  // interrupt, or a block, still stops at the preflight notice.
+  const clean =
+    !preflight.loading &&
+    !preflight.error &&
+    !!preflight.preflight &&
+    !preflight.preflight.warn &&
+    !preflight.gate.disabled
+  useEffect(() => {
+    if (pendingUpdate !== 'all' || !clean) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- consumes the pending "Update all" once the preflight's async reads land clean
+    setPendingUpdate(null)
+    void updateAll()
+  }, [pendingUpdate, clean, updateAll])
 
   useEffect(() => {
     let cancelled = false
