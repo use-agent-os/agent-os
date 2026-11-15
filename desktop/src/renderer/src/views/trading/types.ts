@@ -204,6 +204,32 @@ export interface LpPlan {
   createdAtBlock?: number
 }
 
+/**
+ * What approving a parked order releases (the engine's `approval` block).
+ * `digest` must be echoed as `approvalDigest` on `trading.orders.approve`: a
+ * single order carries it; a multisend's comes only from
+ * `trading.orders.batch`, beside every leg, and the engine refuses a batch
+ * approval without it.
+ */
+export interface OrderApproval {
+  digest: string | null
+  batchId?: string | null
+  orderIds?: string[]
+  legCount?: number
+  totalRaw?: string | null
+  total?: string | null
+  totalUsd?: number | null
+  /** No USD price: the daily cap does not bound this approval. */
+  unpriced?: boolean
+  legs?: {
+    orderId: string
+    recipient: string | null
+    amountRaw: string
+    amount: string
+    valueUsd: number | null
+  }[]
+}
+
 export interface Order {
   orderId: string
   createdAt: number
@@ -259,6 +285,8 @@ export interface Order {
   bridge?: BridgeInfo | null
   /** A swap a price trigger fired carries the trigger's id (docs/triggers.md); null otherwise. */
   triggerId?: string | null
+  /** While it waits: what one approval of it releases, and the digest to echo. */
+  approval?: OrderApproval | null
 }
 
 /* ── DCA mandates (docs/dca.md) ──────────────────────────────────────────── */

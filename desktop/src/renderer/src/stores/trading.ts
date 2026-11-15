@@ -42,6 +42,7 @@ import type {
   MarketsPayload,
   NetworkStatus,
   Order,
+  OrderApproval,
   OrderKind,
   OrderStatus,
   Portfolio,
@@ -333,6 +334,8 @@ export function useOrders(
 interface BatchResult {
   orders?: Order[]
   batchId?: string
+  /** The batch's approval: every leg and the digest an approve must echo. */
+  approval?: OrderApproval | null
 }
 
 const NO_BATCHES: ReadonlyMap<string, Order[]> = new Map()
@@ -646,22 +649,32 @@ export function useOrderDecision() {
     // A reject carries no reason here: the engine records the bare "user"
     // itself, and a placeholder reason was stored as "user: user".
     mutationFn: async ({ orderId, approve, order, legs }: OrderDecision) => {
-      if (approve) {
-        const batchId = order?.batchId
-        const cached = batchId
-          ? queryClient.getQueryData<BatchResult>(['trading', 'batch', batchId])?.orders
-          : undefined
-        const ask = order
-          ? orderTouchId(order, legs?.length ? legs : cached)
-          : {
-              kind: 'approve-high' as const,
-              reason: t('trading.touchId.reason.orderId').replace('{id}', orderId),
-            }
-        await requireBiometric(ask.kind, ask.reason, orderId)
+      if (!approve) return rpc.call<{ order: Order }>('trading.orders.reject', { orderId })
+      const batchId = order?.batchId
+      let batch = batchId
+        ? queryClient.getQueryData<BatchResult>(['trading', 'batch', batchId])
+        : undefined
+      if (batchId && !batch?.approval?.digest) {
+        // One approve runs every leg, so the engine takes it only with the
+        // digest it serves beside all of them (trading.orders.batch).
+        batch = await queryClient.fetchQuery({
+          queryKey: ['trading', 'batch', batchId] as const,
+          queryFn: () => rpc.call<BatchResult>('trading.orders.batch', { batchId }),
+          staleTime: 0,
+        })
       }
+      const cached = batch?.orders
+      const ask = order
+        ? orderTouchId(order, legs?.length ? legs : cached)
+        : {
+            kind: 'approve-high' as const,
+            reason: t('trading.touchId.reason.orderId').replace('{id}', orderId),
+          }
+      await requireBiometric(ask.kind, ask.reason, orderId)
+      const digest = batchId ? batch?.approval?.digest : order?.approval?.digest
       return rpc.call<{ order: Order }>(
-        approve ? 'trading.orders.approve' : 'trading.orders.reject',
-        { orderId },
+        'trading.orders.approve',
+        digest ? { orderId, approvalDigest: digest } : { orderId },
       )
     },
     onSettled: () => invalidateTrading(queryClient),

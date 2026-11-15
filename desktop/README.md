@@ -340,7 +340,9 @@ password fallback, and never attempted when `canPromptTouchID()` says no
 is mapped to `cancelled`, `unavailable` or `failed`. In the renderer one gate,
 `lib/biometric-gate.ts`, reads the setting at call time and sits in front of
 the RPC rather than in the buttons: inside `useOrderDecision` (every
-`trading.orders.approve`: the desk's cards, the BOOK, the Trading tab),
+`trading.orders.approve`: the desk's cards, the BOOK, the Trading tab; it
+also sends the `approvalDigest` the engine requires — a multisend leg's
+from `trading.orders.batch`, beside every leg, fetched when not cached),
 `useMandateActions().approve` and the chat DCA card's `trading.dca.approve`,
 and `useWalletMutation` for `wallet.export` / `wallet.remove` (before the
 password leaves the renderer). A cancelled, unavailable or failed prompt
