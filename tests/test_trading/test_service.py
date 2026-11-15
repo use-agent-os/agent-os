@@ -557,8 +557,11 @@ class TestSwapFlow:
     ) -> None:
         service = funded_service
         service.config.provider = "uniswap"  # this asserts Uniswap's own headers
+        # Uniswap's own priceImpact is cross-checked against the feed (WAL-06):
+        # the quote has to add up, 10 USDC for 0.005 WETH at $2,000.
+        fake_uniswap.amount_out = 5 * 10**15
         wallet = service.test_wallet  # type: ignore[attr-defined]
-        _wire_swap_effects(base_chain, wallet)
+        _wire_swap_effects(base_chain, wallet, out_amount=5 * 10**15)
         orders = await service.swap(
             chain=BASE,
             wallets=None,

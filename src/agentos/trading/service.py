@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import math
 import re
 import sqlite3
 import time
@@ -856,7 +857,9 @@ class TradingService:
             threshold_usd=self.config.approval_threshold_usd,
             daily_cap_usd=self.config.daily_cap_usd,
             spent_today_usd=self._spent_today(record, exclude_order_id=order_id),
-            price_impact_pct=quote.price_impact_pct,
+            # Only an impact the engine's own feed could check decides
+            # anything; a provider's figure alone is "unknown" (WAL-06).
+            price_impact_pct=quote.price_impact_pct if quote.impact_checked else None,
             max_price_impact_pct=self._agent_max_price_impact(),
         )
 
@@ -1931,10 +1934,51 @@ class TradingService:
     # ── quotes ─────────────────────────────────────────────────────────
 
     async def _value_usd(self, chain: ChainSpec, token: TokenMeta, amount_raw: int) -> float | None:
-        price = await self.prices.price(chain, token.address)
+        """``amount_raw`` of ``token`` in dollars; ``None`` when the feed has no usable price.
+
+        A zero, negative or non-finite price is no price: read as a number it
+        would value any amount at ~$0, the one answer a guardrail must never
+        get by accident.
+        """
+        price = await self._price_usd(chain, token)
         if price is None:
             return None
         return float(to_human(amount_raw, token.decimals)) * price
+
+    async def _price_usd(self, chain: ChainSpec, token: TokenMeta) -> float | None:
+        price = await self.prices.price(chain, token.address)
+        if price is None:
+            return None
+        try:
+            number = float(price)
+        except (TypeError, ValueError):
+            return None
+        return number if math.isfinite(number) and number > 0 else None
+
+    async def _bridge_value_usd(
+        self,
+        origin: ChainSpec,
+        destination: ChainSpec,
+        meta_in: TokenMeta,
+        meta_out: TokenMeta,
+        amount_raw: int,
+    ) -> float | None:
+        """A bridge's size in dollars, from the engine's own feed only.
+
+        A bridge moves one asset (ETH, or the USD stable) between chains, so
+        when the origin chain's feed has no price the destination chain's
+        price of the same asset values it honestly. Relay's own ``amountUsd``
+        is never the figure the guardrails read: it is the provider grading
+        its own order, and a low one would book a large bridge as ~$0
+        against the daily cap. ``None`` when neither chain prices the asset.
+        """
+        value = await self._value_usd(origin, meta_in, amount_raw)
+        if value is not None:
+            return value
+        price = await self._price_usd(destination, meta_out)
+        if price is None:
+            return None
+        return float(to_human(amount_raw, meta_in.decimals)) * price
 
     async def _order_value_usd(
         self,
@@ -1951,12 +1995,20 @@ class TradingService:
         sell side would let a large order through the approval threshold
         and the daily cap as if it were small. Taking the larger side means
         a bad price can only make an order look bigger, never smaller.
-        ``None`` only when neither side has a price at all.
+
+        That only holds while the sell side is priced. The buy side is the
+        caller's choice — any token, with whatever price its own pool
+        reports — so it can bound the order from below but never stand in
+        for the sell side: an unpriced sell valued from the buy side alone
+        let a large holding leave as a "$0" order, past the threshold and
+        the cap (WAL-06). ``None`` (unknown, so an agent order waits for a
+        human) whenever the sell side has no price.
         """
         in_usd = await self._value_usd(chain, meta_in, amount_in_raw)
+        if in_usd is None:
+            return None
         out_usd = await self._value_usd(chain, meta_out, amount_out_raw)
-        sides = [v for v in (in_usd, out_usd) if v is not None]
-        return max(sides) if sides else None
+        return max(in_usd, out_usd) if out_usd is not None else in_usd
 
     async def _priced(
         self,
@@ -1978,6 +2030,13 @@ class TradingService:
         agent guardrails and the ledger read the same numbers whichever
         provider routed the swap — in particular, ``agent_max_price_impact_pct``
         keeps biting when the route is thin.
+
+        A provider's own impact figure (Uniswap's ``priceImpact``) is data,
+        not a check: it is cross-checked against the engine's feed and the
+        stricter of the two kept. When the feed cannot price a side, the
+        provider's figure is still shown but ``impact_checked`` stays false,
+        and the guardrails treat the impact as unknown — on every provider,
+        not only on the one that happens to leave it blank (WAL-06).
         """
         quote = await provider.quote(
             chain=chain,
@@ -1992,11 +2051,19 @@ class TradingService:
             native_price = await self.prices.price(chain, NATIVE_ADDRESS)
             if native_price:
                 quote.gas_usd = float(quote.gas_native) * float(native_price)
-        if quote.price_impact_pct is None:
-            in_usd = await self._value_usd(chain, meta_in, quote.amount_in_raw)
-            out_usd = await self._value_usd(chain, meta_out, quote.amount_out_raw)
-            if in_usd and out_usd is not None and in_usd > 0:
-                quote.price_impact_pct = max(0.0, (1 - out_usd / in_usd) * 100.0)
+        in_usd = await self._value_usd(chain, meta_in, quote.amount_in_raw)
+        out_usd = await self._value_usd(chain, meta_out, quote.amount_out_raw)
+        quote.impact_checked = False
+        if in_usd is not None and out_usd is not None and in_usd > 0:
+            own = max(0.0, (1 - out_usd / in_usd) * 100.0)
+            given = quote.price_impact_pct
+            if given is None:
+                quote.price_impact_pct = own
+            elif math.isfinite(float(given)):
+                quote.price_impact_pct = max(float(given), own)
+            # A non-finite provider figure is left as it came: the guardrails
+            # already read it as unknown.
+            quote.impact_checked = given is None or math.isfinite(float(given))
         return quote
 
     async def _raw_for_usd(self, chain: ChainSpec, token: TokenMeta, amount_usd: float) -> int:
@@ -2659,9 +2726,7 @@ class TradingService:
             raise _err(exc) from exc
         if quote.expected_out_raw is None:
             raise TradingError("trading.bridge.provider", "Relay quoted no destination amount")
-        value = await self._value_usd(origin, meta_in, amount_raw)
-        if value is None:
-            value = quote.amount_in_usd
+        value = await self._bridge_value_usd(origin, destination, meta_in, meta_out, amount_raw)
         return route, record, meta_in, meta_out, amount_raw, balance, quote, value
 
     @staticmethod
@@ -4549,9 +4614,10 @@ class TradingService:
                 raise TradingError("trading.price_moved", reason)
             value = row.get("value_usd")
             if value is None:
-                value = await self._value_usd(chain, meta_in, amount_raw)
-                if value is None:
-                    value = quote.amount_in_usd
+                meta_out = await self.token_meta(route.destination, route.token_out.address)
+                value = await self._bridge_value_usd(
+                    chain, route.destination, meta_in, meta_out, amount_raw
+                )
             plan["quote"] = quote.to_dict()
             plan["execution"] = {
                 "requestId": quote.request_id,

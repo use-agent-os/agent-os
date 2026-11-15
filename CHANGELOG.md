@@ -147,6 +147,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   parked the over-cap swap for approval instead, so an approval could run it
   past the cap. A swap parked for a stale client quote now also names the
   threshold or impact reason it would have waited for anyway. (WAL-23)
+- Trading: an agent swap whose sell side has no usable feed price now waits
+  for your approval on every provider, and shows its value as unknown
+  rather than $0. Before, on the Uniswap route, the order was valued by the
+  token it buys alone (a price the caller can choose), and Uniswap's own
+  `priceImpact` was trusted, so the whole balance of an unpriced holding
+  could be swapped with no approval and without touching the daily cap. A
+  provider's price impact is now cross-checked against the engine's feed
+  (the larger counts) and is "unknown" — so the order parks — when the
+  feed cannot price a side. A zero or non-finite feed price counts as no
+  price. Bridges are sized from the engine's feed on either chain, never
+  from Relay's own `amountUsd`. Expect more agent swaps on Robinhood Chain
+  (no USD feed) to wait for you. (WAL-06)
 
 ### Changed
 - Editing the config file by hand no longer applies the operator-only
