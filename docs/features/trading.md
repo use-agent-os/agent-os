@@ -51,7 +51,15 @@ gateway RPC surface (`wallet.*`, `trading.*`).
   reads. A full resync drops and rebuilds the ledger.
 - **Swaps** — quote, approve (a plain ERC-20 approval to the provider's
   spender: 0x's AllowanceHolder or Uniswap's proxy, no Permit2 signatures),
-  sign and broadcast, then confirm from the receipt.
+  sign and broadcast, then confirm from the receipt. A Uniswap quote that
+  carries `permitData` anyway is untrusted input: it is signed only when it
+  is a Permit2 `PermitSingle` / `PermitTransferFrom` on the order's chain and
+  the canonical Permit2 contract, for the order's sell token and at most its
+  amount, to a Universal Router pinned for the chain, with every deadline
+  under an hour away — and what is signed is rebuilt from those checked
+  fields. Anything else (an EIP-3009 transfer, a DAI or EIP-2612 permit,
+  another spender, an unlimited amount) fails the order with
+  `trading.permit_refused` before a signature exists.
   A swap can target one wallet, several, or all of them as a batch; one
   wallet failing never blocks the others.
 - **Agent trading** — the agent signs on its own within code-enforced limits

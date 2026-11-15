@@ -3,8 +3,11 @@
 Base URL ``https://trade-api.gateway.uniswap.org/v1``. The client uses the
 no-Permit2 workflow (``x-permit2-disabled: true``): approvals are a plain
 ERC-20 ``approve`` to Uniswap's proxy, ``/quote`` returns no ``permitData``
-and ``/swap`` targets the proxy. If a ``permitData`` ever comes back the
-service still signs it (EIP-712) and forwards it with the swap request.
+and ``/swap`` targets the proxy. A ``permitData`` that comes back anyway is
+untrusted input: the service signs it (EIP-712) only when it is a Permit2
+permit bound to the order -- the order's chain, sell token and amount, a
+pinned Universal Router, a short deadline (``agentos.trading.permits``) --
+and otherwise fails the order without signing anything.
 """
 
 from __future__ import annotations

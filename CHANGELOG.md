@@ -159,6 +159,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   price. Bridges are sized from the engine's feed on either chain, never
   from Relay's own `amountUsd`. Expect more agent swaps on Robinhood Chain
   (no USD feed) to wait for you. (WAL-06)
+- Trading: the vault key no longer signs a Uniswap quote's `permitData`
+  blind. Before, any EIP-712 typed data in the Trading API response was
+  signed and sent back to `/swap`, so a hostile or tampered response could
+  obtain an EIP-3009 transfer of the whole USDC balance, an unlimited
+  Permit2 allowance to any spender, or a permit on another chain. Now only
+  a Permit2 `PermitSingle`/`PermitTransferFrom` bound to the order (its
+  chain, the canonical Permit2, its sell token, at most its amount, a pinned
+  Universal Router, deadlines under an hour) is signed, rebuilt from the
+  checked fields; anything else fails the order with
+  `trading.permit_refused` and nothing is sent. The default no-Permit2 flow
+  is unchanged. (WAL-07)
 
 ### Changed
 - Editing the config file by hand no longer applies the operator-only

@@ -30,7 +30,7 @@ import httpx
 import structlog
 
 from agentos import __version__
-from agentos.trading import dca, guardrails, triggers
+from agentos.trading import dca, guardrails, permits, triggers
 from agentos.trading.aggregator import AGGREGATOR_BASE, AggregatorClient, AggregatorProvider
 from agentos.trading.bridge import (
     BRIDGE_FILL_GIVE_UP_S,
@@ -117,6 +117,7 @@ from agentos.trading.providers import (
 from agentos.trading.spam import MIN_LIQUIDITY_USD, TokenCurator
 from agentos.trading.sync import WalletSyncer
 from agentos.trading.uniswap import (
+    UNIVERSAL_ROUTERS,
     DecisionOrigin,
     UniswapAuthError,
     UniswapClient,
@@ -4386,7 +4387,15 @@ class TradingService:
             tx = await provider.build(
                 quote,
                 deadline=int(self._now()) + 600,
-                sign_permit=lambda permit: self._sign_permit(permit, key),
+                sign_permit=lambda permit: self._sign_order_permit(
+                    permit,
+                    key,
+                    chain=chain,
+                    meta_in=meta_in,
+                    amount_raw=amount_raw,
+                    provider_id=provider.id,
+                    order_id=order_id,
+                ),
                 decision_origin=origin,
             )
             if quote.fetched_at != fetched_before:
@@ -4419,6 +4428,47 @@ class TradingService:
         await self._watch(
             order_id, tx_hash, {"in": pre_in, "out": pre_out, "native": pre_native}, wait=wait
         )
+
+    def _sign_order_permit(
+        self,
+        permit: Any,
+        key: bytes,
+        *,
+        chain: ChainSpec,
+        meta_in: TokenMeta,
+        amount_raw: int,
+        provider_id: str,
+        order_id: str,
+    ) -> str:
+        """Sign a provider's ``permitData`` only once it binds to this order (WAL-07).
+
+        :func:`permits.check_permit` decides; what is signed is its rebuilt
+        typed data, not the provider's object. A refusal fails the order
+        before anything is sent to the provider: the signature never exists.
+        Only Uniswap routes use permits, and only to a Universal Router
+        pinned for the chain.
+        """
+        spenders: frozenset[str] = (
+            UNIVERSAL_ROUTERS.get(chain.chain_id, frozenset())
+            if provider_id == "uniswap"
+            else frozenset()
+        )
+        try:
+            checked = permits.check_permit(
+                permit,
+                chain_id=chain.chain_id,
+                token=meta_in.address,
+                native=meta_in.native,
+                amount_raw=amount_raw,
+                spenders=frozenset(s.lower() for s in spenders),
+                now=int(self._now()),
+            )
+        except permits.PermitRefusedError as exc:
+            log.warning("trading.permit_refused", order=order_id, error=str(exc))
+            raise TradingError(
+                "trading.permit_refused", f"refused to sign the provider's permit: {exc}"
+            ) from exc
+        return self._sign_permit(checked, key)
 
     async def _enforce_floor(self, row: dict[str, Any], quote: ProviderQuote) -> bool:
         """Refuse or park an order whose fresh quote fell too far below the judged one.
