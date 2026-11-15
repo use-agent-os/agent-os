@@ -389,3 +389,40 @@ describe('ProjectFolders: collapse / expand all', () => {
     expect(screen.getByRole('button', { name: 'New project' })).toBeInTheDocument()
   })
 })
+
+describe('ProjectFolders: "N more" in a long folder', () => {
+  const MANY: SessionRow[] = Array.from({ length: 13 }, (_, i) => ({
+    key: `agent:main:webchat:s${i}`,
+    title: `Chat ${i}`,
+    updatedAt: 0,
+    live: false,
+    raw: { key: `agent:main:webchat:s${i}`, project_id: 'p1' },
+  }))
+
+  beforeEach(() => {
+    useUi.setState({ openFolders: new Set(['p1']), expandedFolders: new Set() })
+  })
+
+  it('shows the older chats in place, without leaving the page', () => {
+    mount({ rows: MANY })
+    expect(screen.queryByRole('link', { name: 'Chat 12' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '7 more' }))
+    expect(screen.getByRole('link', { name: 'Chat 12' })).toBeInTheDocument()
+    expect(screen.getByTestId('where')).toHaveTextContent('/sessions')
+    expect(screen.queryByRole('button', { name: '7 more' })).toBeNull()
+  })
+
+  it('folds back to the preview with "Show less"', () => {
+    mount({ rows: MANY })
+    fireEvent.click(screen.getByRole('button', { name: '7 more' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show less' }))
+    expect(screen.queryByRole('link', { name: 'Chat 12' })).toBeNull()
+    expect(screen.getByRole('button', { name: '7 more' })).toBeInTheDocument()
+  })
+
+  it('offers neither control when everything fits', () => {
+    mount({ rows: MANY.slice(0, 6) })
+    expect(screen.queryByRole('button', { name: /more$/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Show less' })).toBeNull()
+  })
+})

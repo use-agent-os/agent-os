@@ -165,6 +165,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   proposals waiting on you. In Tools, Inspect opens in place; Send, Multisend
   and Burn go back to the desk's chat, which owns those sheets, and open there.
 
+### Fixed
+- Desktop: "N more" under a project folder in the sidebar now lists the
+  folder's older chats in place, with "Show less" to fold them back. Before,
+  it opened the project page, where the chats sit below the brief, so the
+  older sessions never appeared where you clicked.
+
 ## [2026.11.14] - 2026-11-14
 
 ### Fixed
