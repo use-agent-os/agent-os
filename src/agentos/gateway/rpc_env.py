@@ -18,7 +18,9 @@ the CLI and the agent tool answer to.
 A connection the gateway recognizes as an agent's (agent token, descendant
 process, exec window) is held to more than that denylist: it may write only a
 name the catalog marks ``agent_settable`` -- a skill's or a built-in tool's
-credential -- and may not reveal anything the catalog treats as a secret.
+credential -- and may not reveal (or see in ``env.list``) anything any
+catalog source treats as a secret, nor a credential-shaped, ``AGENTOS_*`` or
+gateway-reserved name whatever a skill manifest declares.
 Every other name is refused with ``env.protected``. The values written here
 land in the gateway's own ``os.environ``, the process that holds the vault
 keys; a name such as ``ECC_BACKEND_CLASS`` picks the code that signs.
@@ -65,9 +67,17 @@ def _available_from(name: str, is_set: bool) -> dict[str, str] | None:
     return {"id": source.id, "label": source.label}
 
 
-def _entry_payload(name: str, spec: env_catalog.EnvVarSpec) -> dict[str, Any]:
-    """Return the wire form of one variable — description and state, no value."""
-    entry = env_store.resolve_entry(name, secret=spec.secret)
+def _entry_payload(
+    name: str, spec: env_catalog.EnvVarSpec, *, for_agent: bool = False
+) -> dict[str, Any]:
+    """Return the wire form of one variable — description and state, no value.
+
+    *for_agent*: the caller is an agent's connection, which sees a value only
+    where it could :func:`_agent_may_read` it (a non-secret is otherwise shown
+    in full here, which would be ``env.reveal`` by another name).
+    """
+    masked = spec.secret or (for_agent and not _agent_may_read(name, spec))
+    entry = env_store.resolve_entry(name, secret=masked)
     return {
         "name": name,
         "isSet": entry.is_set,
@@ -130,20 +140,37 @@ def _refuse_agent_write(ctx: RpcContext, name: str, action: str) -> None:
     )
 
 
+def _agent_may_read(name: str, spec: env_catalog.EnvVarSpec | None) -> bool:
+    """Whether an agent's connection may see the value of *name*.
+
+    Only a catalog entry no source classifies as secret, and only when the
+    name itself is not one the classification could be wrong about: a skill
+    manifest (which an agent can write) is what declares a name non-secret,
+    so it must not be able to unmask a credential-shaped name, an
+    ``AGENTOS_*`` setting, one the gateway reads for its own wallet or to
+    load code, or a skill's hot-wallet key -- which reaches only its gated
+    entry point (tools/skill_signing.py; WAL-10/WAL-04).
+    """
+    if spec is None or spec.secret:
+        return False
+    upper = name.upper()
+    return not (
+        upper in env_policy.SKILL_SIGNING_KEY_ENV
+        or upper.startswith("AGENTOS_")
+        or upper in env_policy.GATEWAY_RESERVED_NAMES
+        or env_policy.is_secret_name(name)
+        or env_policy.is_protected_name(name)
+        or env_policy.is_runtime_steering_name(name)
+    )
+
+
 def _refuse_agent_reveal(ctx: RpcContext, name: str) -> None:
     """An agent's connection may not read back a secret (or an unknown name)."""
     binding = recognized_agent(ctx)
     if binding is None:
         return
-    # A skill's hot-wallet key reaches only its gated entry point
-    # (tools/skill_signing.py): reading it here would let an agent sign
-    # whatever it likes without the operator ever seeing the transaction. It
-    # is refused whatever the catalog says, since a skill manifest (which an
-    # agent can write) is what declares a name non-secret (WAL-10/WAL-04).
-    if name.upper() not in env_policy.SKILL_SIGNING_KEY_ENV:
-        spec = _catalog_for(ctx).get(name)
-        if spec is not None and not spec.secret:
-            return
+    if _agent_may_read(name, _catalog_for(ctx).get(name)):
+        return
     log.warning("env.agent_reveal_refused", key=name, via=binding.via)
     raise RpcHandlerError(
         "env.protected",
@@ -168,7 +195,10 @@ async def _handle_env_list(params: dict | None, ctx: RpcContext) -> dict[str, An
         raise ValueError("params must be an object")
 
     catalog = _catalog_for(ctx)
-    entries = [_entry_payload(name, spec) for name, spec in sorted(catalog.items())]
+    for_agent = recognized_agent(ctx) is not None
+    entries = [
+        _entry_payload(name, spec, for_agent=for_agent) for name, spec in sorted(catalog.items())
+    ]
     return {
         "envFilePath": str(env_store.env_file_path()),
         "vars": entries,
@@ -202,7 +232,7 @@ async def _handle_env_set(params: dict | None, ctx: RpcContext) -> dict[str, Any
         raise ValueError(str(exc)) from exc
 
     spec = env_catalog.describe(name, _catalog_for(ctx))
-    payload = _entry_payload(name, spec)
+    payload = _entry_payload(name, spec, for_agent=recognized_agent(ctx) is not None)
     log.info("env.rpc_set", key=name, restart_required=payload["restartRequired"])
     return payload
 
@@ -218,7 +248,7 @@ async def _handle_env_unset(params: dict | None, ctx: RpcContext) -> dict[str, A
         raise ValueError(str(exc)) from exc
 
     spec = env_catalog.describe(name, _catalog_for(ctx))
-    payload = _entry_payload(name, spec)
+    payload = _entry_payload(name, spec, for_agent=recognized_agent(ctx) is not None)
     payload["removed"] = removed
     log.info("env.rpc_unset", key=name, removed=removed)
     return payload
@@ -252,7 +282,7 @@ async def _handle_env_import(params: dict | None, ctx: RpcContext) -> dict[str, 
         raise ValueError(str(exc)) from exc
 
     spec = env_catalog.describe(name, _catalog_for(ctx))
-    payload = _entry_payload(name, spec)
+    payload = _entry_payload(name, spec, for_agent=recognized_agent(ctx) is not None)
     payload["importedFrom"] = source_id
     # A copy does not follow the source's own rotation; say so once, here,
     # rather than letting it become a mystery 401 later.

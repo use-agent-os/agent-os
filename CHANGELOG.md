@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- `env.reveal` from an agent's connection refuses every name any catalog
+  source classifies as secret. The catalog used the first source's
+  classification, so a skill manifest (which an agent can write) declaring
+  `secret: false` unmasked another skill's key, a provider key it listed
+  first, or a token only the operator's `.env` held; `env.list` showed the
+  same value in full. A name is now secret if any source says so, and an
+  agent never reads a credential-shaped, `AGENTOS_*`, gateway-reserved or
+  runtime-steering name whatever a skill declares (`env.list` masks the same
+  set for an agent). The operator and the web console are unchanged.
 - A connection the gateway recognizes as an agent's (agent token, spawned
   process, exec window) can no longer change where model and embedding calls
   go, the spend ceilings or the agent definitions. Refused on every config

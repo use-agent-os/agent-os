@@ -841,7 +841,11 @@ should get. The copy does not follow that tool's own rotation, so re-run the
 import after rotating.
 
 Values are never printed unless you ask for them with `--reveal`, which
-prompts first. Prefer `--stdin` or the interactive prompt over `--value`: a
+prompts first. From an agent's session `--reveal` (and the value `env list`
+shows for a non-secret) works only for a setting no source calls secret and
+whose name does not look like a credential, start with `AGENTOS_` or belong
+to the gateway: a skill manifest declaring `secret: false` cannot make
+`GITHUB_TOKEN` or another skill's key readable to an agent. Prefer `--stdin` or the interactive prompt over `--value`: a
 value passed as a flag lands in your shell history and in the process list.
 
 When the gateway is running, the change applies to it immediately, so a skill

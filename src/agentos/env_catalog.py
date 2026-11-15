@@ -279,9 +279,12 @@ def build_catalog(
         # Same name from a second source: keep the first description, but let a
         # later source fill blanks and record co-ownership. ``agent_settable``
         # stays the first source's: a skill declaring a provider's key does
-        # not make it an agent's to set.
+        # not make it an agent's to set. ``secret`` is any source's: a skill
+        # (which an agent can write) declaring a name non-secret does not
+        # unmask what another source calls a credential.
         catalog[entry.name] = replace(
             existing,
+            secret=existing.secret or entry.secret,
             description=existing.description or entry.description,
             url=existing.url or entry.url,
             owner=existing.owner or entry.owner,
