@@ -702,3 +702,16 @@ class TestNoControlCharactersStored:
         order = await _agent_swap(funded_service, amount_in="7 \x1b[31mRED")
         assert order["status"] == "failed"
         assert order["amountIn"] == "0"
+
+
+async def test_an_approved_native_send_signs_its_pinned_transaction(
+    funded_service: TradingService, base_chain: FakeChain
+) -> None:
+    service = funded_service
+    _wire_send_effects(base_chain, service.test_wallet)  # type: ignore[attr-defined]
+    orders = await _agent_send(service, [{"to": ALICE, "amount": "0.01"}], token="ETH")
+    digest = orders[0]["approval"]["digest"]
+    done = await service.approve(orders[0]["orderId"], wait=True, approval_digest=digest)
+    assert done["status"] == "confirmed"
+    sent = decode_fake_raw(base_chain.sent[-1])
+    assert str(sent["to"]).lower() == ALICE and int(sent["value"]) == 10**16
