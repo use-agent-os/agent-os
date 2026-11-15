@@ -46,7 +46,8 @@ class TestSetupAndUnlock:
         _assert_private(vault_root, 0o700)
         _assert_private(vault.index_path, 0o600)
         _assert_private(vault.unlock_path, 0o600)
-        assert vault.unlock_path.read_text() == PASSWORD
+        assert PASSWORD not in vault.unlock_path.read_text()  # sealed (WAL-01)
+        assert _stored_password(vault) == PASSWORD
         with pytest.raises(VaultAlreadyInitializedError):
             vault.setup(PASSWORD, "auto")
 
@@ -85,7 +86,17 @@ class TestSetupAndUnlock:
         with pytest.raises(BadPasswordError):
             vault.set_unlock_mode("auto", "not the password")
         vault.set_unlock_mode("auto", PASSWORD)
-        assert vault.unlock_path.read_text() == PASSWORD
+        assert _stored_password(vault) == PASSWORD
+
+
+def _stored_password(vault: Vault) -> str:
+    """What ``unlock.key`` opens to: it holds the password sealed, never in clear."""
+    from agentos.trading import unlock_key
+
+    with vault.unlock_path.open(encoding="utf-8", newline="") as handle:
+        envelope = unlock_key.parse_envelope(handle.read())
+    assert envelope is not None
+    return unlock_key.open_password(envelope)
 
 
 class TestWallets:
@@ -162,7 +173,7 @@ class TestWallets:
         record = vault.create("A")
         key = vault.private_key(record.address)
         vault.change_password(PASSWORD, "brand new password")
-        assert vault.unlock_path.read_text() == "brand new password"
+        assert _stored_password(vault) == "brand new password"
         fresh = Vault(vault_root, **FAST_KDF)
         with pytest.raises(BadPasswordError):
             fresh.unlock(PASSWORD)

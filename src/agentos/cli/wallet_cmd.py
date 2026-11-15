@@ -245,8 +245,10 @@ def _unlock_mode_arg(mode: str | None, option: str) -> str | None:
 
 def _explain_auto_unlock() -> None:
     console.print(
-        "The password is kept in ~/.agentos/wallets/unlock.key so the agent can sign "
-        "unattended; anyone who can read that file can spend from these wallets."
+        "The password is kept in the vault's unlock.key, sealed with a key stored apart "
+        "from it, so the agent can sign unattended. Anyone who can run code as this OS "
+        "user can still spend from these wallets: `agentos sandbox` or manual unlock "
+        "keeps the agent out."
     )
 
 

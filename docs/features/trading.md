@@ -187,10 +187,16 @@ Trading** pane has a *Test key* button (`trading.probe`).
   one vault password. A random *verifier* keystore in `index.json` lets the
   engine check a password without touching any wallet key.
 - **Unlock modes**, both OS-independent (no Keychain, no Electron store):
-  - `auto` — the password sits in `~/.agentos/wallets/unlock.key` (`0600`)
-    and the gateway unlocks at first use. This is what unattended agent
-    missions need. Anyone who can read the directory can spend: same trust
-    level as an SSH key without a passphrase.
+  - `auto` — the password sits in `~/.agentos/wallets/unlock.key` (`0600`),
+    sealed with AES-256-GCM under a key kept **outside** the state directory
+    (`AGENTOS_VAULT_KEK`, else Windows DPAPI, else a `0600` file under the
+    OS state dir; `AGENTOS_VAULT_KEK_DIR` relocates it), and the gateway
+    unlocks at first use. This is what unattended agent missions need. The
+    file and its key are both needed, but a process running code as this OS
+    user can read both, exactly as the gateway does — `agentos sandbox` or
+    `manual` unlock is the real boundary against that. A legacy plain-text
+    `unlock.key` still works and is sealed in place on first unlock. The key
+    is injected with `[trading] unlock_mode = "auto"` the default.
   - `manual` — nothing on disk; unlock per gateway session from the app or
     `agentos wallet unlock`. Keys live only in the gateway's memory.
 - Export (keystore or raw private key) and wallet removal always ask for
@@ -205,8 +211,11 @@ Trading** pane has a *Test key* button (`trading.probe`).
   (zero for an ERC-20 sale), and not be addressed to the wallet or the sold
   token itself. Anything else is refused unsigned.
 - `~/.agentos/wallets/` (and any `unlock.key`) is a sandbox *sensitive
-  path*: the agent's file tools cannot read it. The agent trades through
-  the gateway, which is the only thing that needs the keys.
+  path*: the agent's file tools cannot read it, and a recursive read, copy
+  or archive of a *parent* directory (`grep -r ~/.agentos`, `cp -r ~`,
+  `tar` of the state root, the `execute_code` equivalents) is refused too,
+  so the vault cannot be swept up from above. The agent trades through the
+  gateway, which is the only thing that needs the keys.
 - Token metadata from third-party APIs is data, not instructions: the skill
   tells the agent to ignore anything in a token name that reads like a
   command, and genuine Robinhood Stock Tokens are preferred over lookalikes

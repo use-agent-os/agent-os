@@ -13,6 +13,9 @@ _PYTEST_STATE_ROOT = Path(tempfile.gettempdir()) / f"agentos-pytest-{os.getpid()
 
 os.environ.setdefault("AGENTOS_STATE_DIR", str(_PYTEST_STATE_ROOT / "state"))
 os.environ.setdefault("AGENTOS_LOG_DIR", str(_PYTEST_STATE_ROOT / "logs"))
+# The vault seals unlock.key with a key kept outside the state root, by
+# default under the real home; tests must never write there.
+os.environ.setdefault("AGENTOS_VAULT_KEK_DIR", str(_PYTEST_STATE_ROOT / "vault-keys"))
 os.environ.setdefault("AGENTOS_TURN_CALL_LOG", "0")
 # OpenCAP, Surplus and OpenRouter price lookups refresh their catalogs over the
 # network when the cache is cold. Default tests must stay offline; tests that

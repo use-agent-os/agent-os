@@ -11,6 +11,7 @@ Precedence:
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 
@@ -39,6 +40,27 @@ def default_agentos_home() -> Path:
     if override:
         return _expand_user(override)
     return _home_dir() / ".agentos"
+
+
+def vault_kek_dir() -> Path:
+    """Where the key that seals the vault's ``unlock.key`` lives.
+
+    Deliberately outside the state root, so one copy or recursive read of it
+    does not carry both the sealed password and the key that opens it
+    (``agentos.trading.unlock_key``). ``AGENTOS_VAULT_KEK_DIR`` overrides it.
+    """
+    override = os.environ.get("AGENTOS_VAULT_KEK_DIR", "").strip()
+    if override:
+        return _expand_user(override)
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA", "").strip()
+        root = Path(base) if base else _home_dir() / "AppData" / "Local"
+        return root / "AgentOS" / "vault-keys"
+    if sys.platform == "darwin":
+        return _home_dir() / "Library" / "Application Support" / "AgentOS" / "vault-keys"
+    xdg = os.environ.get("XDG_STATE_HOME", "").strip()
+    root = Path(xdg) if xdg and Path(xdg).is_absolute() else _home_dir() / ".local" / "state"
+    return root / "agentos" / "vault-keys"
 
 
 def state_dir(*parts: str) -> Path:

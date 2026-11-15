@@ -123,13 +123,19 @@ def runtime_sensitive_prefixes() -> tuple[str, ...]:
     state root's ``config.toml`` and the active config file (which may be a
     project-local ``agentos.toml``) are on it too.
     """
-    from agentos.paths import default_agentos_home
+    from agentos.paths import default_agentos_home, vault_kek_dir
 
     try:
         home = default_agentos_home()
         entries = [str(home / "wallets"), str(home / "config.toml")]
     except (OSError, RuntimeError):
         entries = []
+    # The key that seals the vault's unlock.key, kept outside the state root
+    # (agentos.trading.unlock_key); just as off-limits as the file it opens.
+    try:
+        entries.append(str(vault_kek_dir()))
+    except (OSError, RuntimeError):
+        pass
     entries.extend(sorted(_protected_config_paths - set(entries)))
     return tuple(entries)
 
@@ -567,7 +573,10 @@ def sensitive_path_in_text(
     marker = _literal_marker_in_text(text, workspace=workspace)
     if marker is not None or _DISABLED or not text:
         return marker
-    return _shell_marker(text, workspace=workspace, cwd=cwd)
+    marker = _shell_marker(text, workspace=workspace, cwd=cwd)
+    if marker is not None:
+        return marker
+    return _recursive_ancestor_marker(text, workspace=workspace, cwd=cwd)
 
 
 def _literal_marker_in_text(
@@ -874,6 +883,199 @@ def _shell_marker(
             if absolute is None:
                 continue
             marker = sensitive_path_marker(absolute, workspace=workspace)
+            if marker is not None:
+                return marker
+    return None
+
+
+# ── recursive reads of an ANCESTOR of a protected directory ─────────────────
+#
+# The literal and shell scans above ask "does a path here name a protected
+# file?". They cannot see that ``grep -r . ~/.agentos``, ``cp -r ~/.agentos
+# dst`` or ``tar -C ~ -cf a.tar .agentos`` read every protected file *under* a
+# directory that is itself unprotected: ~/.agentos is the parent of the vault,
+# ~ is the parent of ~/.ssh. For a recursive read/copy/archive, the ancestor
+# is as sensitive as the target it descends into (WAL-01). A non-recursive
+# ``cat ~/.agentos`` is still fine -- a directory is not a secret, only its
+# protected contents are, and those are reached only by recursing.
+
+#: Tools that walk a directory tree whatever their flags.
+_ALWAYS_RECURSIVE_COMMANDS: frozenset[str] = frozenset(
+    {"tar", "rsync", "tree", "find", "fd", "fdfind", "rg", "ag", "ack", "jar", "cpio", "7z", "7za"}
+)
+#: Tools where a bare ``-r`` means "recurse" (``cp -r``, ``grep -r``). ``ls``
+#: and ``sort`` are absent: there ``-r`` is reverse order and only ``-R`` walks.
+_LOWER_R_RECURSIVE_COMMANDS: frozenset[str] = frozenset(
+    {"cp", "grep", "egrep", "fgrep", "du", "chmod", "chown", "chgrp", "rsync", "scp", "zip"}
+)
+_RECURSION_FLAG_WORDS: frozenset[str] = frozenset({"--recursive", "--archive"})
+#: Options that consume the following token, so a directory after one of them
+#: is the option's value, not an operand to read (``tar -C DIR``, ``-f FILE``).
+_RECURSIVE_OPTION_TAKES_ARG: frozenset[str] = frozenset(
+    {"-C", "--directory", "-f", "--file", "-T", "--files-from", "-X", "--exclude-from"}
+)
+_DIRECTORY_OPTIONS: frozenset[str] = frozenset({"-C", "--directory"})
+
+
+def _segment_is_recursive(command_name: str, tokens: list[str]) -> bool:
+    if command_name in _ALWAYS_RECURSIVE_COMMANDS:
+        return True
+    for token in tokens:
+        if not token.startswith("-") or token in ("-", "--"):
+            continue
+        if token in _RECURSION_FLAG_WORDS:
+            return True
+        if token.startswith("--"):
+            continue
+        cluster = token[1:]
+        if "R" in cluster:
+            return True
+        if "r" in cluster and command_name in _LOWER_R_RECURSIVE_COMMANDS:
+            return True
+    return False
+
+
+def _recursive_protected_targets() -> list[tuple[str, str]]:
+    """``(absolute_dir, marker)`` for each credential location worth guarding.
+
+    The system prefixes (``/etc``, ``/usr/lib/systemd``) are left out: they are
+    write/delete protections, and a recursive *read* of ``/usr`` is ordinary
+    work, not an exfiltration. Only existing locations count -- a recursion
+    cannot read what is not there -- which also keeps ``tree ~`` fast.
+    """
+    entries = (
+        *_BASE_SENSITIVE_PREFIXES,
+        *(f"~/{name}" for name in _HOST_CREDENTIAL_FILES),
+        *runtime_sensitive_prefixes(),
+    )
+    targets: list[tuple[str, str]] = []
+    for entry in entries:
+        for candidate in _comparison_path_candidates(entry):
+            if candidate.startswith("/") and os.path.lexists(candidate):
+                targets.append((candidate.rstrip("/"), entry))
+    return targets
+
+
+def _ancestor_marker(absolute: str | None, targets: list[tuple[str, str]]) -> str | None:
+    """Marker when *absolute* is a strict ancestor of a protected directory."""
+    if not absolute:
+        return None
+    normalized = absolute.rstrip("/")
+    if os.name == "nt":
+        normalized = normalized.casefold()
+    for target, marker in targets:
+        comparison = target.casefold() if os.name == "nt" else target
+        if comparison.startswith(normalized + "/"):
+            return marker
+    return None
+
+
+def _recursive_ancestor_marker(
+    text: str,
+    *,
+    workspace: str | Path | None,
+    cwd: str | Path | None,
+) -> str | None:
+    if _DISABLED or not text:
+        return None
+    targets = _recursive_protected_targets()
+    if not targets:
+        return None
+    start = (
+        _expanduser(cwd)
+        if cwd is not None
+        else (_expanduser(workspace) if workspace is not None else None)
+    )
+
+    # One pass over the whole line, so a ``cd`` or an assignment in one command
+    # still shapes the next (``cd ~/.agentos && grep -r . .``; ``D=~/.agentos;
+    # cp -r $D x``). ``shlex`` keeps the operators (``&&``, ``;``, ``|``) as
+    # their own tokens, which is where one command ends and the next begins.
+    base = start
+    assigned: dict[str, str] = {}
+    command: list[str] = []
+
+    def flush() -> str | None:
+        nonlocal base
+        if not command:
+            return None
+        name = PurePosixPath(command[0].replace("\\", "/")).name.lower()
+        if name in _CD_COMMANDS:
+            if len(command) > 1 and command[1] not in _SHELL_OPERATORS:
+                absolute = _absolute_text(command[1], base)
+                if absolute is not None:
+                    base = Path(absolute)
+            return None
+        return _recursive_marker_for_command(name, command[1:], base, targets)
+
+    for word in _shell_words(text):
+        if word in _SHELL_OPERATORS:
+            marker = flush()
+            if marker is not None:
+                return marker
+            command = []
+            continue
+        if not command:
+            match = _ASSIGNMENT_RE.match(word)
+            if match is not None:  # leading ``NAME=value`` sets a variable
+                assigned[match.group(1)] = _expand_assignments(match.group(2), assigned)
+                continue
+        command.append(_expand_assignments(word, assigned))
+    return flush()
+
+
+def recursive_read_ancestor_marker(path: str) -> str | None:
+    """A protected-dir marker when a recursive read of *path* would reach one.
+
+    For the ``execute_code`` scanner: ``shutil.copytree('~/.agentos', …)`` or
+    ``os.walk(Path.home())`` reads every protected file below a directory that
+    is not itself protected (WAL-01). A plain ``open('~/.agentos')`` does not,
+    so the caller gates this on the code actually doing a recursive read.
+    """
+    if _DISABLED or not path:
+        return None
+    targets = _recursive_protected_targets()
+    if not targets:
+        return None
+    for candidate in _comparison_path_candidates(path):
+        marker = _ancestor_marker(candidate, targets)
+        if marker is not None:
+            return marker
+    return None
+
+
+def _recursive_marker_for_command(
+    name: str,
+    arguments: list[str],
+    base: Path | None,
+    targets: list[tuple[str, str]],
+) -> str | None:
+    if not _segment_is_recursive(name, arguments):
+        return None
+    bases: list[Path | None] = [base]
+    operands: list[str] = []
+    skip_next = False
+    for token in arguments:
+        if token in _SHELL_OPERATORS:
+            break
+        if skip_next:
+            skip_next = False
+            option_dir = _absolute_text(token, base)
+            if option_dir is not None:
+                bases.append(Path(option_dir))
+            continue
+        if token in _RECURSIVE_OPTION_TAKES_ARG:
+            skip_next = token in _DIRECTORY_OPTIONS
+            continue
+        if token.startswith("-"):
+            continue
+        operands.append(token)
+
+    # A recursive command with no path operand walks its own directory.
+    for operand in operands or ["."]:
+        anchors: list[Path | None] = [None] if operand.startswith(("/", "~")) else list(bases)
+        for anchor in anchors:
+            marker = _ancestor_marker(_absolute_text(operand, anchor), targets)
             if marker is not None:
                 return marker
     return None

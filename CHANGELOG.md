@@ -7,6 +7,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- The wallet vault's auto-unlock password is no longer stored in clear. In
+  `auto` mode `~/.agentos/wallets/unlock.key` now holds the password sealed
+  with AES-256-GCM under a 256-bit key kept **outside** the state directory —
+  `AGENTOS_VAULT_KEK` (64 hex, for containers/service managers), else the
+  Windows Data Protection API, else a `0600` file under the OS state dir
+  (`AGENTOS_VAULT_KEK_DIR` overrides the location). The file and its key are
+  each useless alone. A pre-existing plain-text `unlock.key` still unlocks and
+  is sealed in place on the next unlock; `manual` mode and `wallet mode
+  manual` delete the key. This is defence in depth, not an OS boundary: code
+  running as the same user can read both, so enable `agentos sandbox` or use
+  `manual` unlock for a real boundary.
+- A recursive read, copy or archive of a directory that is an **ancestor** of
+  a protected one is refused by the sensitive-path floor, closing the gap
+  where `grep -r ~/.agentos`, `cp -r ~`, `tar` of the state root (and the
+  `execute_code` equivalents `shutil.copytree`/`os.walk`/`Path.rglob`) read
+  `unlock.key` and every keystore from above without naming `wallets/`.
+  `/elevated full` still lifts it, and recursive work inside the workspace is
+  unaffected (WAL-01).
 - `[trading] unlock_mode` (`AGENTOS_TRADING_UNLOCK_MODE`) is honoured; it was
   documented but read by nothing, so a gateway configured `manual` still
   stored the vault password and auto-unlocked. `wallet.setup` without

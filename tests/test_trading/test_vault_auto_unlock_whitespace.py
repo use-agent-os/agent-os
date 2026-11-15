@@ -55,16 +55,35 @@ def test_a_password_with_surrounding_whitespace_auto_unlocks(tmp_path: Path, pas
 
 @pytest.mark.parametrize("password", SURROUNDED)
 def test_the_stored_file_still_holds_exactly_what_was_set(tmp_path: Path, password: str) -> None:
-    """Nothing rewrites the user's password: the file holds those bytes.
+    """Nothing rewrites the user's password: the file opens to those bytes.
 
-    Read with ``newline=""`` on purpose -- ``read_text`` translates line
-    endings, which is the very thing that used to corrupt a password holding
-    one on Windows.
+    The file holds it sealed (WAL-01); what it opens to must still be exactly
+    what was set. Read with ``newline=""`` on purpose -- ``read_text``
+    translates line endings, which is the very thing that used to corrupt a
+    password holding one on Windows.
     """
+    from agentos.trading import unlock_key
+
     _set_up(tmp_path, password)
 
     with (tmp_path / "wallets" / "unlock.key").open(encoding="utf-8", newline="") as handle:
-        assert handle.read() == password
+        envelope = unlock_key.parse_envelope(handle.read())
+    assert envelope is not None
+    assert unlock_key.open_password(envelope) == password
+
+
+@pytest.mark.parametrize("password", SURROUNDED)
+def test_a_legacy_plaintext_file_with_whitespace_still_unlocks(
+    tmp_path: Path, password: str
+) -> None:
+    """A file written before sealing holds the raw bytes; it still opens, then is sealed."""
+    _set_up(tmp_path, password)
+    with (tmp_path / "wallets" / "unlock.key").open("w", encoding="utf-8", newline="") as handle:
+        handle.write(password)
+
+    vault = _vault(tmp_path)
+    assert vault.try_auto_unlock() is True
+    assert vault.status()["unlockKeyProtection"].startswith("sealed:")
 
 
 @pytest.mark.parametrize("password", SURROUNDED)

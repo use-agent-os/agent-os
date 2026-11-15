@@ -4,8 +4,11 @@ One vault password encrypts every wallet. Two unlock modes, neither tied to
 an operating system secret store:
 
 * ``auto``   — the password sits in ``unlock.key`` (mode 0600) next to the
-  keystores and the gateway reads it at first use. Same trust level as an
-  SSH key without a passphrase: whoever can read the directory can spend.
+  keystores, sealed under a key kept outside the state directory
+  (:mod:`agentos.trading.unlock_key`), and the gateway opens it at first use.
+  Neither file opens the vault alone, but anyone who can run code as this OS
+  user can read both and spend: the OS sandbox or ``manual`` mode is the
+  boundary against that.
 * ``manual`` — nothing on disk; ``unlock(password)`` is called per gateway
   session and the decrypted keys live only in this process's memory.
 
@@ -34,6 +37,7 @@ from typing import Any, Literal
 import structlog
 
 from agentos.paths import default_agentos_home
+from agentos.trading import unlock_key
 from agentos.trading.chains import checksum_address, normalize_address
 
 UnlockMode = Literal["auto", "manual"]
@@ -152,6 +156,7 @@ class Vault:
         #: applies without rebuilding the vault.
         self.configured_mode = configured_mode
         self._warned_ignored_unlock_key = False
+        self._warned_unlock_key_unavailable = False
 
     # ── paths ──────────────────────────────────────────────────────────
 
@@ -257,6 +262,7 @@ class Vault:
             "storedUnlockMode": stored,
             "configuredUnlockMode": self.policy_mode(),
             "unlockKeyPresent": self.unlock_path.exists(),
+            "unlockKeyProtection": self._unlock_key_protection(),
             "walletCount": len(wallets),
             "primary": primary,
             "vaultPath": str(self.root),
@@ -313,9 +319,9 @@ class Vault:
                 }
             )
             if unlock_mode == "auto":
-                _write_private(self.unlock_path, password)
+                self._store_unlock_key(password)
             else:
-                self.unlock_path.unlink(missing_ok=True)
+                self._remove_unlock_key()
             self._password = password
             self._keys = {}
 
@@ -327,6 +333,25 @@ class Vault:
         self._decrypt(verifier, password)
 
     def unlock(self, password: str) -> None:
+        """Unlock with the operator's password.
+
+        In ``auto`` mode a stored password that no longer opens (its key was
+        lost with a container's home, a legacy plain-text file the gateway
+        could not re-seal) is sealed again, so the next restart unlocks on
+        its own. A deliberately deleted ``unlock.key`` is left deleted.
+        """
+        with self._lock:
+            self._unlock(password)
+            if self.unlock_mode == "auto" and self.unlock_path.exists():
+                if not self._unlock_key_opens_to(password):
+                    try:
+                        self._store_unlock_key(password)
+                    except (OSError, VaultError) as exc:
+                        log.warning("vault.unlock_key_reseal_failed", error=type(exc).__name__)
+                    else:
+                        log.warning("vault.unlock_key_resealed")
+
+    def _unlock(self, password: str) -> None:
         password = _require_password(password)
         with self._lock:
             self.verify_password(password)
@@ -355,14 +380,19 @@ class Vault:
             if self.unlock_mode != "auto":
                 self._warn_ignored_unlock_key()
                 return False
-            try:
-                # newline="" for the same reason as the write: the password is
-                # bytes the user chose, not lines to be normalised.
-                with self.unlock_path.open(encoding="utf-8", newline="") as handle:
-                    stored = handle.read()
-            except OSError:
+            stored = self._read_unlock_key()
+            if stored is None:
                 return False
-            # Verbatim first, then stripped. ``setup`` writes the password
+            try:
+                envelope = unlock_key.parse_envelope(stored)
+                if envelope is not None:
+                    self._unlock(unlock_key.open_password(envelope))
+                    return True
+            except (unlock_key.UnlockKeyError, VaultError, ValueError) as exc:
+                self._warn_unlock_key_unavailable(exc)
+                return False
+            # A legacy plain-text file (written before the password was
+            # sealed). Verbatim first, then stripped. ``setup`` writes the password
             # exactly as it was set, so surrounding whitespace -- a trailing
             # newline, most often -- is part of it, and reading it back
             # stripped meant such a vault never auto-unlocked and never said
@@ -371,14 +401,89 @@ class Vault:
             candidates = [stored, stored.strip()]
             for password in dict.fromkeys(c for c in candidates if c):
                 try:
-                    self.unlock(password)
+                    self._unlock(password)
                 except (VaultError, ValueError):
                     # ValueError as well: ``_require_password`` raises it for
                     # anything under 8 characters, and this method is
                     # documented never to raise.
                     continue
+                self._migrate_plaintext_unlock_key(password)
                 return True
             return False
+
+    # ── the stored password (auto mode) ────────────────────────────────
+
+    def _read_unlock_key(self) -> str | None:
+        try:
+            # newline="": the password is bytes the user chose, not lines to
+            # be normalised (#3504).
+            with self.unlock_path.open(encoding="utf-8", newline="") as handle:
+                return handle.read()
+        except OSError:
+            return None
+
+    def _store_unlock_key(self, password: str) -> None:
+        """Seal *password* into ``unlock.key`` under a fresh key; drop the old key."""
+        previous = self._read_unlock_key()
+        try:
+            sealed = unlock_key.seal_password(password)
+        except unlock_key.UnlockKeyError as exc:  # a malformed AGENTOS_VAULT_KEK
+            raise VaultError(f"cannot store the vault password: {exc}") from exc
+        try:
+            _write_private(self.unlock_path, sealed)
+        except BaseException:
+            unlock_key.discard_kek(sealed)
+            raise
+        unlock_key.discard_kek(previous)
+
+    def _remove_unlock_key(self) -> bool:
+        """Delete ``unlock.key`` and the key that seals it. Returns whether it existed."""
+        previous = self._read_unlock_key()
+        existed = self.unlock_path.exists()
+        self.unlock_path.unlink(missing_ok=True)
+        unlock_key.discard_kek(previous)
+        return existed
+
+    def _migrate_plaintext_unlock_key(self, password: str) -> None:
+        try:
+            self._store_unlock_key(password)
+        except (OSError, VaultError) as exc:
+            # Still unlocked from the old file, which stays as it was: an
+            # unwritable key directory must not cost the operator auto unlock.
+            log.warning("vault.unlock_key_migration_failed", error=type(exc).__name__)
+            return
+        log.warning("vault.unlock_key_migrated", protection=self._unlock_key_protection())
+
+    def _unlock_key_opens_to(self, password: str) -> bool:
+        stored = self._read_unlock_key()
+        if stored is None:
+            return False
+        try:
+            envelope = unlock_key.parse_envelope(stored)
+            return envelope is not None and unlock_key.open_password(envelope) == password
+        except unlock_key.UnlockKeyError:
+            return False
+
+    def _unlock_key_protection(self) -> str | None:
+        """``sealed:<store>``, ``plaintext`` (pre-migration), ``damaged`` or ``None``."""
+        stored = self._read_unlock_key()
+        if stored is None:
+            return None
+        try:
+            envelope = unlock_key.parse_envelope(stored)
+        except unlock_key.UnlockKeyError:
+            return "damaged"
+        return "plaintext" if envelope is None else f"sealed:{envelope.backend}"
+
+    def _warn_unlock_key_unavailable(self, exc: Exception) -> None:
+        if self._warned_unlock_key_unavailable:
+            return
+        self._warned_unlock_key_unavailable = True
+        log.warning(
+            "vault.unlock_key_unavailable",
+            reason=str(exc) if isinstance(exc, unlock_key.UnlockKeyError) else type(exc).__name__,
+            hint="unlock once with `agentos wallet unlock` to seal the password again",
+        )
 
     def _warn_ignored_unlock_key(self) -> None:
         """Say once that a stored password is being ignored under a manual policy."""
@@ -406,10 +511,9 @@ class Vault:
             self._write_index(index)
             removed = False
             if mode == "auto":
-                _write_private(self.unlock_path, password)
+                self._store_unlock_key(password)
             else:
-                removed = self.unlock_path.exists()
-                self.unlock_path.unlink(missing_ok=True)
+                removed = self._remove_unlock_key()
             log.warning(
                 "vault.unlock_mode_changed",
                 previous=previous,
@@ -417,7 +521,7 @@ class Vault:
                 unlock_key_removed=removed,
             )
             if not self.unlocked:
-                self.unlock(password)
+                self._unlock(password)
 
     def change_password(self, password: str, new_password: str) -> None:
         new_password = _require_password(new_password)
@@ -441,7 +545,7 @@ class Vault:
             # old one no longer opens anything, and writing the new one would
             # be the very thing the operator configured away.
             if index.get("unlock_mode") == "auto" and self.policy_mode() != "manual":
-                _write_private(self.unlock_path, new_password)
+                self._store_unlock_key(new_password)
             self._keys = keys
             self._password = new_password
 
