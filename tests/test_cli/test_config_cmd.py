@@ -180,6 +180,10 @@ def test_config_reload_asks_the_gateway(monkeypatch: pytest.MonkeyPatch) -> None
         return asyncio.run(action(_Client()))
 
     monkeypatch.setattr(gateway_rpc, "run_gateway_sync", fake_sync)
+    # A gateway owns the state: it applies the file (and decides who asks).
+    from agentos.gateway import config_approval
+
+    monkeypatch.setattr(config_approval, "owning_gateway_pid", lambda _payload: 4242)
     result = runner.invoke(app, ["config", "reload"])
     assert result.exit_code == 0, result.output
     assert calls == [("config.reload", {})]

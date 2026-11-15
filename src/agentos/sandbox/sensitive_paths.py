@@ -121,13 +121,18 @@ def runtime_sensitive_prefixes() -> tuple[str, ...]:
     container image, whose ``$HOME`` is elsewhere. Resolved at check time, so
     the floor follows the state root the running process actually uses. The
     state root's ``config.toml`` and the active config file (which may be a
-    project-local ``agentos.toml``) are on it too.
+    project-local ``agentos.toml``) are on it too, and so is the operator's
+    approval of the operator-only settings in it (``gateway.config_approval``).
     """
     from agentos.paths import default_agentos_home
 
     try:
         home = default_agentos_home()
-        entries = [str(home / "wallets"), str(home / "config.toml")]
+        entries = [
+            str(home / "wallets"),
+            str(home / "config.toml"),
+            str(home / "config-approval.toml"),
+        ]
     except (OSError, RuntimeError):
         entries = []
     entries.extend(sorted(_protected_config_paths - set(entries)))

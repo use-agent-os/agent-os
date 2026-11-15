@@ -18,8 +18,8 @@ Changes to the operator-only settings (``config_commit.OPERATOR_ONLY_CONFIG_ROOT
 trading, hooks, tools, permissions, sandbox, auth, ...) are *held*: the file
 is a same-user write away for an agent's shell, so the watcher never makes
 them live. They are reported (``held``, ``status: "held"`` when nothing else
-changed) and wait for ``agentos config reload`` from the operator or a
-restart.
+changed) and wait for ``agentos config reload`` from the operator; a
+restart keeps them held (``gateway.config_approval``).
 """
 
 from __future__ import annotations
@@ -261,6 +261,12 @@ class ConfigWatcher:
             log.debug("config.changed_emit_failed", exc_info=True)
 
 
+def note_boot_held(held: list[str]) -> None:
+    """Record operator-only settings boot kept at their approved values."""
+    global _last_status
+    _last_status = ReloadStatus(status="held", at=time.time(), held=list(held))
+
+
 def note_operator_reload(result: Any) -> None:
     """Record an operator's ``config.reload`` as the watcher's last verdict."""
     global _last_status
@@ -294,5 +300,6 @@ __all__ = [
     "broadcast_to_control",
     "file_signature",
     "last_reload_status",
+    "note_boot_held",
     "note_operator_reload",
 ]

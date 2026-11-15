@@ -86,6 +86,27 @@ def _load_config_or_exit(config_path: str | None, *, exit_code: int = 2) -> Gate
         raise typer.Exit(exit_code) from exc
 
 
+def _enforce_config_approval_or_exit(config: GatewayConfig) -> None:
+    from agentos.gateway.config import GatewayConfigError
+    from agentos.gateway.config_approval import enforce_approval
+
+    try:
+        held = enforce_approval(config)
+    except GatewayConfigError as exc:
+        console.print(f"[red]Gateway could not start:[/red] {escape(str(exc))}", soft_wrap=True)
+        _service_config_backoff()
+        raise typer.Exit(code=EX_CONFIG) from exc
+    if held:
+        console.print(
+            "[yellow]Held operator-only settings:[/yellow] "
+            + escape(", ".join(held))
+            + " differ in the config file from what you last approved, so the gateway runs "
+            "on the approved values. Run `agentos config reload` from your own terminal "
+            "to apply the file.",
+            soft_wrap=True,
+        )
+
+
 def resolve_cli_bind(
     config: GatewayConfig,
     *,
@@ -162,6 +183,10 @@ def run_gateway(
         raise
     if config_path and not config.config_path:
         config.config_path = str(config_path)
+    # Operator-only settings the file holds unapproved stay at the approved
+    # values (gateway.config_approval) before the bind, auth and anything else
+    # below reads them; start_gateway_server checks again for other launchers.
+    _enforce_config_approval_or_exit(config)
     # Treat the CLI ``--bind`` default as "not explicitly supplied" so the
     # env vars + toml get a chance to participate when the operator only
     # sets one of them.

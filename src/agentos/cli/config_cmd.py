@@ -81,6 +81,12 @@ def config_set(
         console.print(f"[{ACCENT_MARKUP}]Config:[/] {persist.path}")
         if persist.backup_path:
             console.print(f"[dim]Backup:[/dim] {persist.backup_path}")
+        if persist.held:
+            # Operator-only and not approved by this write (a gateway is
+            # running, or the file already held an edit nobody approved).
+            for warning in persist.warnings:
+                console.print(f"[yellow]{escape(warning)}[/yellow]", soft_wrap=True)
+            return
         console.print("[yellow]Restart the gateway to apply this setting.[/yellow]")
         return
 
@@ -114,18 +120,27 @@ def config_set(
 @app.command("reload")
 def config_reload(
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+    config_path: Path | None = typer.Option(
+        None, "--config", help="Config file to approve while no gateway runs."
+    ),
 ) -> None:
-    """Apply the config file to the running gateway, operator-only settings included.
+    """Apply the config file, operator-only settings included.
 
     The gateway applies most edits of its config file by itself, but never a
     change to an operator-only setting (trading limits, hooks, tool policy,
-    permissions, sandbox, auth, safety, workspace confinement, ACP permission
-    mode): an agent's
-    shell could have written it. Run this from your own terminal after editing
-    those by hand. An agent's session is refused.
+    permissions, sandbox, auth, safety, workspace confinement, ACP
+    launch settings, gateway_control, ...): an agent's shell could have
+    written it. A restart does not apply one either; the gateway keeps running
+    on the values you last approved. Run this from your own terminal after
+    editing those by hand. With a gateway running it applies the file there;
+    with none it records the file's values as approved for the next start.
+    An agent's session is refused.
     """
     from agentos.cli.gateway_rpc import run_gateway_sync
     from agentos.cli.output import print_json
+
+    if _approve_offline(config_path, json_output=json_output):
+        return
 
     async def _run(client: Any) -> Any:
         return await client.call("config.reload", {})
@@ -146,6 +161,59 @@ def config_reload(
             + escape(", ".join(restart)),
             soft_wrap=True,
         )
+
+
+def _approve_offline(config_path: Path | None, *, json_output: bool) -> bool:
+    """Approve the config file directly when no gateway owns the state.
+
+    Returns ``False`` when a gateway is running: it applies the file itself
+    (``config.reload``) and decides there whether the caller is the operator.
+    """
+    from agentos.cli.output import print_json
+    from agentos.gateway.config import GatewayConfig
+    from agentos.gateway.config_approval import (
+        approve_payload,
+        held_roots,
+        in_agent_session,
+        load_approval,
+        owning_gateway_pid,
+        read_file_payload,
+    )
+    from agentos.onboarding.config_store import resolve_config_path
+
+    target, _source = resolve_config_path(config_path)
+    try:
+        payload = read_file_payload(target)
+        GatewayConfig.model_validate(payload)
+    except (OSError, ValueError) as exc:
+        console.print(f"[red]Cannot approve {escape(str(target))}:[/red] {escape(str(exc))}")
+        raise typer.Exit(1) from exc
+    if owning_gateway_pid(payload) is not None:
+        return False
+    if in_agent_session():
+        console.print(
+            "[red]Refused:[/red] approving operator-only settings is the user's action; "
+            "this command runs in an agent's session."
+        )
+        raise typer.Exit(1)
+    try:
+        approval = load_approval()
+    except ValueError:
+        approval = None
+    pending = held_roots(payload, approval) if approval is not None else []
+    approve_payload(payload, target)
+    if json_output:
+        print_json({"path": str(target), "approved": pending, "gatewayRunning": False})
+        return True
+    if pending:
+        console.print(
+            f"[{ACCENT_MARKUP}]Approved for the next gateway start:[/] "
+            + escape(", ".join(pending)),
+            soft_wrap=True,
+        )
+    else:
+        console.print("The operator-only settings in the config file were already approved.")
+    return True
 
 
 def _validated_config(data: dict[str, Any], key: str) -> Any:

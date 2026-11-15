@@ -1502,7 +1502,11 @@ chat_restart = false   # /restart from paired channels and the agent's gateway t
 
 `chat_restart` defaults to `false`. Changing it requires one restart of the
 gateway (`agentos gateway restart`, or `/restart` from the web console), after
-which chat restarts are accepted. Environment override:
+which chat restarts are accepted. `gateway_control` is an operator-only
+setting: no agent connection (bound or unbound) may write it through a config
+RPC, and a file edit of it is held like the trading limits (see
+[Editing the file while the gateway runs](#editing-the-file-while-the-gateway-runs)), so an agent
+cannot switch on its own restart. Environment override:
 `AGENTOS_GATEWAY_GATEWAY_CONTROL__CHAT_RESTART=true`. In-place restart is not
 available on Windows.
 
@@ -1673,16 +1677,37 @@ event listing `hot` and `restartRequired` paths. Restart to apply those.
 
 **Operator-only settings are held.** A change to `trading`, `hooks`,
 `tools` (including `tools.invoke`), `permissions`, `sandbox`, `auth`,
-`safety`, `workspace_dir`, `workspace_strict`, `acp.permission_mode` or
-`acp.non_interactive_permissions` is never applied from a file
+`safety`, `workspace_dir`, `workspace_strict`, `acp.permission_mode`,
+`acp.non_interactive_permissions`, `acp.agents`, `acp.allowed_agents`,
+`acp.allowed_cwds`, `acp.install_missing_adapters`, `gateway_control`,
+`skills.install_policy`, `browser.binary_path`, `browser.cdp_port`,
+`browser.attach_confirmed`, `browser.allow_unsafe_evaluate`, `cors`,
+`control_ui.allowed_origins`, `gateway.bind`, `gateway.public_origin`,
+`state_dir` or `observability.otlp_*` is never applied from a file
 edit alone: the file is one same-user write away for an agent's shell on a
 host without the OS sandbox, and the config RPCs refuse an agent those
 settings. The running values stay, the gateway logs `config.reload_held`,
 `config.changed` carries the paths under `held` (`status: "held"` when
 nothing else changed), and `agentos doctor` reports
 `gateway.config.reload_held`. Apply them yourself with
-`agentos config reload` (refused from an agent's session) or by restarting
-the gateway. The active config file and `<state dir>/config.toml` are also
+`agentos config reload` (refused from an agent's session).
+
+**A restart does not apply them either.** The gateway keeps the values of
+the operator-only settings as you last approved them in
+`~/.agentos/config-approval.toml` (`0600`, a sensitive path the agent cannot
+touch). At boot, a setting the file holds differently from that approval
+runs on the approved value, the gateway logs `config.boot_held_operator_only`
+and `agentos gateway run` prints the held settings; they stay held across any
+number of restarts until you run `agentos config reload` from your own
+terminal. With a gateway running that applies the file there; with none
+running it records the file's values as approved for the next start
+(`agentos config reload --config <path>` names another file). The approval
+moves forward on its own when you change a setting through a config RPC, the
+console, or `agentos config set` / onboarding while no gateway runs; a write
+never approves an edit somebody else had already left in the file. The first
+boot without an approval file adopts the file as it is. An unreadable approval
+file stops the gateway at boot (restore it, or delete it to approve the file
+as it is now). The active config file and `<state dir>/config.toml` are also
 sensitive paths: an agent's shell and file tools cannot read or write them.
 The same settings cannot be written into `.env` through `agentos env set`,
 the console or an agent tool (`AGENTOS_TRADING_*`,

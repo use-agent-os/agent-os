@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from agentos.config_roots import OPERATOR_ONLY_CONFIG_ROOTS as _OPERATOR_ONLY_CONFIG_ROOTS
+from agentos.config_roots import UNBOUND_REFUSED_CONFIG_ROOTS, touches_root
 from agentos.gateway.config_persist import persist_config, prepare_persist_payload
 
 if TYPE_CHECKING:
@@ -250,7 +252,8 @@ def _assert_expected_revision(config: Any, expected: str | None) -> None:
     state = config_disk_state(config)
     if state.write_blocked:
         raise ValueError(
-            "config file diverged from the running gateway; reload or restart before writing"
+            "config file diverged from the running gateway; apply it with "
+            "`agentos config reload` from your own terminal before writing"
         )
     if expected is None:
         return
@@ -422,6 +425,8 @@ def _refuse_agent_config_change(
     set, patch, apply, onboarding, heartbeat and whatever comes next.
     ``trading`` is refused for any binding, unbound included; the other
     operator-only roots for a connection the gateway recognizes as an agent's.
+    ``gateway_control`` is refused like ``trading``: ``chat_restart`` is what
+    lets an agent's connection restart the gateway at all.
     """
     from agentos.gateway.agent_surface import agent_binding
 
@@ -434,11 +439,7 @@ def _refuse_agent_config_change(
         from agentos.gateway.rpc_config import diff_paths
 
         paths |= diff_paths(dump_old(mode="python"), dump_new(mode="python"))
-    trading = sorted(p for p in paths if p == "trading" or p.startswith("trading."))
-    if trading:
-        raise ValueError(
-            "trading settings are the user's to change; an agent cannot set " + ", ".join(trading)
-        )
+    refuse_any_agent_binding_change(ctx, paths)
     refuse_agent_operator_only_change(ctx, paths)
     refuse_agent_channel_admission(ctx, source, new_config)
 
@@ -585,29 +586,13 @@ class ConfigReloadError(ValueError):
     """The file on disk cannot become the running config (it stays as it was)."""
 
 
-#: Settings that are the operator's alone: the trading guardrails, commands
-#: the gateway itself runs (``hooks``), the tool policy (allow/deny, the HTTP
-#: ``tools.invoke`` surface, SSRF exceptions), the default elevation, the
-#: sandbox, authentication, the prompt-injection guards, the workspace
-#: confinement and how ACP harness prompts are answered (the same decision
-#: ``exec.approvals.set`` makes for exec prompts). An agent-bound connection
-#: may not write them through any config RPC
-#: (:func:`refuse_agent_operator_only_change`), and an edit of the config file
-#: -- which an agent shell can reach on a host without the OS sandbox -- does
-#: not go live by itself (:func:`reload_config_from_disk`).
-OPERATOR_ONLY_CONFIG_ROOTS: tuple[str, ...] = (
-    "trading",
-    "hooks",
-    "tools",
-    "permissions",
-    "sandbox",
-    "auth",
-    "safety",
-    "workspace_dir",
-    "workspace_strict",
-    "acp.permission_mode",
-    "acp.non_interactive_permissions",
-)
+#: Settings that are the operator's alone (``agentos.config_roots``, the one
+#: list every gate reads). An agent-bound connection may not write them
+#: through any config RPC (:func:`refuse_agent_operator_only_change`), an edit
+#: of the config file -- which an agent shell can reach on a host without the
+#: OS sandbox -- does not go live by itself (:func:`reload_config_from_disk`),
+#: and a restart does not apply one either (``gateway.config_approval``).
+OPERATOR_ONLY_CONFIG_ROOTS: tuple[str, ...] = _OPERATOR_ONLY_CONFIG_ROOTS
 
 
 def _root_of(path: str) -> str | None:
@@ -627,6 +612,30 @@ def operator_only_paths(paths: Iterable[str]) -> list[str]:
         elif not text or any(root.startswith(f"{text}.") for root in OPERATOR_ONLY_CONFIG_ROOTS):
             touched.add(text)
     return sorted(touched)
+
+
+def refuse_any_agent_binding_change(ctx: Any, changed_paths: Iterable[str]) -> None:
+    """Refuse a write to ``trading`` / ``gateway_control`` from any agent binding.
+
+    ``unbound`` included (``config_roots.UNBOUND_REFUSED_CONFIG_ROOTS``):
+    raising the trading cap, or switching on the restart that a chat sender or
+    the agent itself may trigger, is never an anonymous connection's to do.
+    """
+    from agentos.gateway.agent_surface import agent_binding
+
+    if agent_binding(ctx) is None:
+        return
+    paths = sorted({str(p) for p in changed_paths})
+    trading = [p for p in paths if touches_root(p, ("trading",)) and p]
+    if trading:
+        raise ValueError(
+            "trading settings are the user's to change; an agent cannot set " + ", ".join(trading)
+        )
+    touched = [p for p in paths if p and touches_root(p, UNBOUND_REFUSED_CONFIG_ROOTS)]
+    if touched:
+        raise ValueError(
+            "these settings are the user's to change; an agent cannot set " + ", ".join(touched)
+        )
 
 
 def refuse_agent_operator_only_change(ctx: Any, changed_paths: Iterable[str]) -> None:
@@ -661,7 +670,7 @@ class ConfigReloadResult:
     restart_reasons: tuple[str, ...]
     applied_now: bool
     #: Operator-only paths the file changed that were *not* applied: they wait
-    #: for ``config.reload`` from the operator, or a restart.
+    #: for ``config.reload`` from the operator (a restart keeps them held).
     held_paths: tuple[str, ...] = ()
 
     @property
@@ -715,7 +724,9 @@ def reload_config_from_disk(
     operator's ``config.reload``), changes under
     :data:`OPERATOR_ONLY_CONFIG_ROOTS` are not applied, hot or otherwise: the
     running values stay and the paths come back as ``held_paths``. A restart
-    reads the file as the operator's, as it always has.
+    does not apply them either: boot runs on the values the operator last
+    approved (``gateway.config_approval``), which only
+    *include_operator_only* moves forward.
 
     Raises :class:`ConfigReloadError` when the file cannot be read, parsed or
     validated; the running config is untouched then.
@@ -784,12 +795,14 @@ def reload_config_from_disk(
         if held:
             log.warning(
                 "config.reload_held_operator_only paths=%s; apply with `agentos config reload` "
-                "as the operator, or restart the gateway",
+                "as the operator (a restart keeps them held)",
                 ",".join(held),
             )
             changed = diff_paths(old_payload, new_config.model_dump(mode="python"))
     leaves = _leaf_paths(changed)
     if not leaves:
+        if include_operator_only:
+            _approve_reloaded_file(migrated, path)
         return ConfigReloadResult(
             path=path,
             revision=config_revision(running),
@@ -829,6 +842,8 @@ def reload_config_from_disk(
     if restart_paths and not reasons:
         reasons.add("config")
 
+    if include_operator_only:
+        _approve_reloaded_file(migrated, path)
     update_config_in_place(running, new_config)
     applied_now = True
     for name, apply_step in _runtime_steps(ctx, changed):
@@ -849,6 +864,20 @@ def reload_config_from_disk(
         applied_now=applied_now,
         held_paths=tuple(held),
     )
+
+
+def _approve_reloaded_file(payload: dict[str, Any], path: Path) -> None:
+    """The operator applied the file: a restart runs on these values from now on.
+
+    Recorded before the running config changes, so a failure leaves both the
+    approval and the running config as they were.
+    """
+    from agentos.gateway.config_approval import approve_payload
+
+    try:
+        approve_payload(payload, path)
+    except OSError as exc:
+        raise ConfigReloadError(f"cannot record the operator approval: {exc}") from exc
 
 
 def _short_error(exc: BaseException) -> str:
@@ -878,6 +907,7 @@ __all__ = [
     "pending_restart_metadata",
     "refuse_agent_channel_admission",
     "refuse_agent_operator_only_change",
+    "refuse_any_agent_binding_change",
     "sync_media",
     "sync_provider_selector",
     "sync_search",

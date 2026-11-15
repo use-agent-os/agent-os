@@ -7,6 +7,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- **A restart no longer applies an operator-only config edit you did not
+  approve (WAL-02).** An agent's connection could switch on
+  `[gateway_control] chat_restart` through `config.set` and then restart the
+  gateway itself, and the restarted gateway read the whole config file as
+  yours, so a `[trading]` cap the watcher had held became the running limit.
+  `gateway_control` is now refused to every agent binding (unbound
+  included), and the gateway keeps the values of every operator-only setting
+  as you last approved them in `~/.agentos/config-approval.toml` (`0600`, on
+  the sensitive-path floor): at boot a setting the file holds differently
+  runs on the approved value and stays held, across restarts, until you run
+  `agentos config reload` from your own terminal (with no gateway running it
+  records the file as approved for the next start; `--config` names the
+  file). Writes through a config RPC, the console, or `agentos config set` /
+  onboarding while no gateway runs approve what they change; the first boot
+  after upgrading adopts the file as it is, so nothing changes for an
+  existing install. The operator-only list also gains the ACP launch
+  settings (`acp.agents`, `acp.allowed_agents`, `acp.allowed_cwds`,
+  `acp.install_missing_adapters`), `skills.install_policy`, the browser
+  binary/CDP settings, `cors`, `control_ui.allowed_origins`, `gateway.bind`,
+  `gateway.public_origin`, `state_dir` and `observability.otlp_*`, and one
+  list (`agentos.config_roots`) now feeds every gate.
 - **Breaking default — Discord and Slack channels now refuse senders you have
   not admitted.** Before, any Discord user who could DM or @mention the bot,
   and any Slack workspace member or guest, started an agent turn with the
