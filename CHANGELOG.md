@@ -170,6 +170,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   folder's older chats in place, with "Show less" to fold them back. Before,
   it opened the project page, where the chats sit below the brief, so the
   older sessions never appeared where you clicked.
+- Desktop: right-clicking now opens the native menu. Selected chat text gets
+  Copy, text fields get Cut / Copy / Paste / Select All (with spelling
+  suggestions), links get Open Link in Browser and Copy Link, and images get
+  Copy Image. Before, a right-click showed nothing, so a selection could only
+  be copied with ⌘C.
 
 ## [2026.11.14] - 2026-11-14
 
