@@ -27,6 +27,7 @@ os.environ.setdefault("AGENTOS_OPENCAP_LIVE_PRICING", "0")
 os.environ.setdefault("AGENTOS_SURPLUS_LIVE_PRICING", "0")
 os.environ.setdefault("AGENTOS_OPENROUTER_LIVE_PRICING", "0")
 
+
 import pytest  # noqa: E402
 
 
@@ -43,3 +44,19 @@ def _reset_redaction_secret_registry():
     clear_registered_secret_values()
     yield
     clear_registered_secret_values()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_config_approval():
+    """Each test starts with no operator config approval on file.
+
+    The state directory is shared by the whole run, and the approval
+    (``gateway.config_approval``) is per state directory: a gateway booted by
+    one test would otherwise hold the config of the next test's gateway.
+    """
+    from agentos.gateway.config_approval import approval_path
+
+    target = approval_path()
+    target.unlink(missing_ok=True)
+    yield
+    target.unlink(missing_ok=True)

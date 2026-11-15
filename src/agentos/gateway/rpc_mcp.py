@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from agentos.gateway.rpc import RpcContext, get_dispatcher
+from agentos.gateway.agent_surface import recognized_agent
+from agentos.gateway.rpc import RpcContext, RpcHandlerError, get_dispatcher
 from agentos.mcp.discovery import (
     active_clients_snapshot,
     disconnect_and_unregister,
@@ -32,6 +33,26 @@ class _PendingOAuth:
 
 _pending_by_state: dict[str, _PendingOAuth] = {}
 _pending_by_server: dict[str, _PendingOAuth] = {}
+
+
+def _require_operator(ctx: RpcContext, action: str) -> None:
+    """Refuse a connection the gateway recognizes as an agent's.
+
+    Connecting a stdio server makes the gateway fork the configured command,
+    with the gateway's own environment, outside the sandbox and the approval
+    queue -- the same property that makes ``hooks.lifecycle`` operator-only.
+    ``mcp`` is an operator-only config root, so an agent cannot register a
+    server; it cannot launch, stop or authorize one either. ``unbound`` is not
+    refused: the user's own web console on loopback is unbound.
+    """
+    binding = recognized_agent(ctx)
+    if binding is not None:
+        raise RpcHandlerError(
+            "mcp.operator_required",
+            f"{action} is the user's action; an agent cannot do it. "
+            "Ask the user to do it in the app.",
+            details=binding.to_dict(),
+        )
 
 
 def _require_mcp_enabled(ctx: RpcContext) -> None:
@@ -146,6 +167,7 @@ async def _handle_mcp_status(params: dict | None, ctx: RpcContext) -> dict[str, 
 
 @_d.method("mcp.connect")
 async def _handle_mcp_connect(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    _require_operator(ctx, "mcp.connect")
     _require_mcp_enabled(ctx)
     name = str((params or {}).get("name") or "").strip()
     if not name:
@@ -160,6 +182,7 @@ async def _handle_mcp_connect(params: dict | None, ctx: RpcContext) -> dict[str,
 
 @_d.method("mcp.disconnect")
 async def _handle_mcp_disconnect(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    _require_operator(ctx, "mcp.disconnect")
     name = str((params or {}).get("name") or "").strip()
     if not name:
         raise ValueError("params.name is required")
@@ -171,6 +194,7 @@ async def _handle_mcp_disconnect(params: dict | None, ctx: RpcContext) -> dict[s
 
 @_d.method("mcp.oauth.start")
 async def _handle_mcp_oauth_start(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    _require_operator(ctx, "mcp.oauth.start")
     _require_mcp_enabled(ctx)
     values = params or {}
     name = str(values.get("name") or "").strip()
@@ -224,7 +248,7 @@ async def _handle_mcp_oauth_start(params: dict | None, ctx: RpcContext) -> dict[
 
 @_d.method("mcp.oauth.complete")
 async def _handle_mcp_oauth_complete(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
-    del ctx
+    _require_operator(ctx, "mcp.oauth.complete")
     values = params or {}
     code = str(values.get("code") or "").strip()
     state = str(values.get("state") or "").strip()
@@ -245,6 +269,7 @@ async def _handle_mcp_oauth_complete(params: dict | None, ctx: RpcContext) -> di
 
 @_d.method("mcp.oauth.clear")
 async def _handle_mcp_oauth_clear(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    _require_operator(ctx, "mcp.oauth.clear")
     name = str((params or {}).get("name") or "").strip()
     if not name:
         raise ValueError("params.name is required")

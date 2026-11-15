@@ -2950,6 +2950,13 @@ async def start_gateway_server(
     # ── Gateway-specific config handling ─────────────────────────────
     if config is None:
         config = GatewayConfig.load(os.environ.get("AGENTOS_GATEWAY_CONFIG_PATH"))
+    # A restart never applies an operator-only edit the operator has not
+    # approved: those settings run on their approved values until
+    # ``agentos config reload`` (gateway.config_approval). Before every check
+    # below, which reads the auth posture among them.
+    from agentos.gateway.config_approval import enforce_approval
+
+    boot_held = enforce_approval(config)
 
     # Apply runtime port override
     if port is not None:
@@ -2974,6 +2981,10 @@ async def start_gateway_server(
         from agentos.sandbox.sensitive_paths import protect_config_path
 
         protect_config_path(config.config_path)
+    if boot_held:
+        from agentos.gateway.config_watcher import note_boot_held
+
+        note_boot_held(boot_held)
 
     if subscription_manager is None:
         from agentos.gateway.websocket import SubscriptionManager

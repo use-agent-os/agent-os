@@ -234,8 +234,8 @@ async def test_apply_spawns_a_detached_runner_and_records_the_job(
 
     argv = spawned["argv"]
     assert isinstance(argv, list)
-    assert argv[0] == rpc_updates.sys.executable and argv[1] == "-c"
-    runner_job = json.loads(argv[3])
+    assert argv[0] == rpc_updates.sys.executable and argv[1:3] == ["-P", "-c"]
+    runner_job = json.loads(argv[4])
     assert runner_job["command"][-4:] == ["upgrade", "--json", "--source", "github"]
     assert runner_job["env"]["AGENTOS_NO_UPDATE_NOTICE"] == "1"
     assert runner_job["log"] == str(rpc_updates.log_path())
@@ -319,4 +319,4 @@ def test_agentos_command_prefers_the_sibling_console_script(
 
     script.unlink()
     monkeypatch.setattr(rpc_updates.shutil, "which", lambda name: None)
-    assert rpc_updates.agentos_command() == [str(python), "-m", "agentos.cli.main"]
+    assert rpc_updates.agentos_command() == [str(python), "-P", "-m", "agentos.cli.main"]

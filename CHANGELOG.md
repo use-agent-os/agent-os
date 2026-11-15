@@ -63,6 +63,68 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   with `trading.rpc` naming the host only. The bundled LP, pools.fun,
   chain-stocks and RWA-lookup skills' URL checks no longer quote the URL they
   refuse (WAL-24).
+- **A restart no longer applies an operator-only config edit you did not
+  approve (WAL-02).** An agent's connection could switch on
+  `[gateway_control] chat_restart` through `config.set` and then restart the
+  gateway itself, and the restarted gateway read the whole config file as
+  yours, so a `[trading]` cap the watcher had held became the running limit.
+  `gateway_control` is now refused to every agent binding (unbound
+  included), and the gateway keeps the values of every operator-only setting
+  as you last approved them in `~/.agentos/config-approval.toml` (`0600`, on
+  the sensitive-path floor): at boot a setting the file holds differently
+  runs on the approved value and stays held, across restarts, until you run
+  `agentos config reload` from your own terminal (with no gateway running it
+  records the file as approved for the next start; `--config` names the
+  file). Writes through a config RPC, the console, or `agentos config set` /
+  onboarding while no gateway runs approve what they change; the first boot
+  after upgrading adopts the file as it is, so nothing changes for an
+  existing install. The operator-only list also gains the ACP launch
+  settings (`acp.agents`, `acp.allowed_agents`, `acp.allowed_cwds`,
+  `acp.install_missing_adapters`), `skills.install_policy`, the browser
+  binary/CDP settings, `cors`, `control_ui.allowed_origins`, `gateway.bind`,
+  `gateway.public_origin`, `state_dir` and `observability.otlp_*`, and one
+  list (`agentos.config_roots`) now feeds every gate.
+- **AgentOS's own Python launches no longer import from the working
+  directory (WAL-03).** The in-place restart re-exec'd `python -m
+  agentos.cli.main`, which puts the working directory (`$HOME` for the
+  service units) first on `sys.path`, so a file such as `eth_account.py`
+  dropped there by an agent's shell ran inside the gateway that holds the
+  wallet keys. The restart, `agentos gateway start`, the generated service
+  units, the update runner, `start.sh`/`start.ps1` and the pip upgrade path
+  now pass `-P`, and a restarted or spawned gateway gets the `PYTHON*`
+  variables the first launch had rather than any a `.env` added since.
+- **Switching trading off, or lowering a limit, now stops the engine's own
+  loop at its next tick (WAL-11).** The trading service held the `[trading]`
+  section it was built with, so after `config set trading.enabled false`,
+  `daily_cap_usd = 0` or a lower threshold (reported as applied, no restart)
+  approved DCA buys and trigger fires kept being signed on the old settings
+  until some wallet/trading request happened to refresh it. The service now
+  reads the live config on every decision; while trading is off DCA buys and
+  trigger checks are skipped (their schedules and arming are kept), approving
+  a parked order is refused with `trading.disabled`, and the signing step
+  itself refuses. The Relay client also follows a changed
+  `trading.relay_base_url`.
+- **An agent's connection may set only skill and tool credentials through
+  `env.*` (WAL-18).** `env.set` applies a value live to the gateway process,
+  and names such as `ECC_BACKEND_CLASS` (the class eth-keys imports to sign)
+  were writable from an agent-bound connection. A connection the gateway
+  recognizes as an agent's may now `env.set`/`unset`/`import` only a
+  credential-shaped name that a skill's `requires.env` or a built-in tool
+  declares; provider keys, names only your `.env` holds, `AGENTOS_*`, the
+  wallet's `RPC_BASE_URL`/`RPC_ROBINHOOD_URL`/`UNISWAP_API_KEY` and
+  runtime-steering names are refused with `env.protected`, and so is
+  `env.reveal` of any secret. Your own connections are unchanged and the
+  write denylist still applies to everyone. A project-local `.env` (the
+  directory the gateway starts in) can no longer set `PYTHON*`, the signer's
+  crypto backends, TLS trust or any denylisted name; put those in
+  `~/.agentos/.env` or the environment.
+- **Registering or launching an MCP server is the operator's action
+  (WAL-19).** A stdio MCP server is a command the gateway forks itself; `mcp`
+  is now an operator-only setting (an agent's connection cannot register or
+  enable one, a file edit of `[mcp]` is held, `AGENTOS_MCP_*` cannot be
+  written through `agentos env`), and `mcp.connect`, `mcp.disconnect` and
+  `mcp.oauth.*` fail for an agent's connection with `mcp.operator_required`.
+  Settings › MCP in the console works as before.
 - **Breaking default — Discord and Slack channels now refuse senders you have
   not admitted.** Before, any Discord user who could DM or @mention the bot,
   and any Slack workspace member or guest, started an agent turn with the

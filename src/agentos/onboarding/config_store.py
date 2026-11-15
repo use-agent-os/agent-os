@@ -33,6 +33,9 @@ class PersistResult:
     backup_path: Path | None
     restart_required: bool
     warnings: list[str] = field(default_factory=list)
+    #: Operator-only roots the file now holds that are not approved
+    #: (``gateway.config_approval``); empty for an ordinary write.
+    held: tuple[str, ...] = ()
 
 
 def resolve_config_path(path: str | Path | None = None) -> tuple[Path, str]:
@@ -131,6 +134,14 @@ def persist_config(
     target = _resolve_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
 
+    from agentos.gateway.config_approval import read_file_payload, record_write
+
+    try:
+        before = read_file_payload(target)
+    except (OSError, ValueError):
+        # An unreadable file approves nothing this write did not set itself.
+        before = {}
+
     backup_path: Path | None = None
     if backup and target.exists():
         backup_path = make_config_backup(target)
@@ -152,6 +163,11 @@ def persist_config(
 
     os.chmod(target, 0o600)
 
+    # The operator-only settings this write changed become the approved ones
+    # when this process may approve them (gateway.config_approval); the rest
+    # stay held until ``agentos config reload``, a restart included.
+    held = record_write(before, payload, target)
+
     log.debug(
         "onboarding.config_persisted path=%s backup=%s restart_required=%s",
         str(target),
@@ -159,9 +175,18 @@ def persist_config(
         restart_required,
     )
 
+    warnings: list[str] = []
+    if held:
+        warnings.append(
+            "Not applied until you approve them: "
+            + ", ".join(held)
+            + ". Run `agentos config reload` from your own terminal (a restart alone "
+            "does not apply operator-only settings)."
+        )
     return PersistResult(
         path=target,
         backup_path=backup_path,
         restart_required=restart_required,
-        warnings=[],
+        warnings=warnings,
+        held=tuple(held),
     )

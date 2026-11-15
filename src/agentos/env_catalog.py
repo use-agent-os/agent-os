@@ -71,6 +71,14 @@ class EnvVarSpec:
     category: Category = CATEGORY_CUSTOM
     owner: str = ""
     required: bool = False
+    #: An agent's own connection may set this name (``env.set``/``unset``/
+    #: ``import`` from an agent-bound connection; ``gateway.rpc_env``). Only a
+    #: credential a skill or a built-in tool declares, and only when
+    #: :func:`agentos.env_policy.agent_may_own` allows the name: every other
+    #: variable -- provider keys, a name only the operator's ``.env`` holds,
+    #: anything the gateway reads to load code or reach the chain -- is the
+    #: operator's to set.
+    agent_settable: bool = False
 
     @property
     def restart_required(self) -> bool:
@@ -180,6 +188,7 @@ def _builtin_tool_specs() -> list[EnvVarSpec]:
             category=CATEGORY_SEARCH,
             owner="web_fetch",
             required=False,
+            agent_settable=env_policy.agent_may_own("FIRECRAWL_API_KEY"),
         ),
         EnvVarSpec(
             name="TYPESAFE_API_KEY",
@@ -226,6 +235,7 @@ def _skill_specs(loader: SkillLoader | None) -> list[EnvVarSpec]:
                     category=CATEGORY_SKILL,
                     owner=skill.name,
                     required=bool(getattr(declared, "required", True)),
+                    agent_settable=env_policy.agent_may_own(name),
                 )
             )
     return entries
@@ -267,7 +277,9 @@ def build_catalog(
             catalog[entry.name] = entry
             continue
         # Same name from a second source: keep the first description, but let a
-        # later source fill blanks and record co-ownership.
+        # later source fill blanks and record co-ownership. ``agent_settable``
+        # stays the first source's: a skill declaring a provider's key does
+        # not make it an agent's to set.
         catalog[entry.name] = replace(
             existing,
             description=existing.description or entry.description,

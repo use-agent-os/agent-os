@@ -132,7 +132,8 @@ def _installed_version_via(executable: str, *, env: dict[str, str]) -> str | Non
     code = "import importlib.metadata as m; print(m.version('use-agent-os'))"
     try:
         proc = subprocess.run(  # noqa: S603 - argv built internally
-            [executable, "-c", code],
+            # ``-P``: no module from the working directory in this interpreter.
+            [executable, "-P", "-c", code],
             capture_output=True,
             text=True,
             timeout=15.0,

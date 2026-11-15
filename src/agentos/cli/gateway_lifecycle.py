@@ -6,7 +6,6 @@ import json
 import os
 import signal
 import subprocess
-import sys
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -18,6 +17,7 @@ from urllib.request import Request, urlopen
 
 from agentos.cli.url_utils import normalize_gateway_url
 from agentos.paths import default_agentos_home, state_dir
+from agentos.safe_python import launch_env, python_argv
 
 UNMANAGED_GATEWAY_RUNNING = "UNMANAGED_GATEWAY_RUNNING"
 MANAGED_GATEWAY_TARGET_MISMATCH = "MANAGED_GATEWAY_TARGET_MISMATCH"
@@ -502,10 +502,10 @@ class GatewayLifecycleManager:
         return value if isinstance(value, str) else None
 
     def _gateway_run_argv(self) -> list[str]:
+        # ``-P``: the gateway must not import from the directory this command
+        # was run in (``agentos.safe_python``).
         argv = [
-            sys.executable,
-            "-m",
-            "agentos.cli.main",
+            *python_argv("-m", "agentos.cli.main"),
             "gateway",
             "run",
             *(["--bind-mode", self.bind_mode] if self.bind_mode else ["--listen", self.host]),
@@ -518,7 +518,7 @@ class GatewayLifecycleManager:
 
     def _spawn_gateway(self, argv: list[str]) -> subprocess.Popen[Any]:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        env = os.environ.copy()
+        env = launch_env(os.environ)
         if self.config_path:
             env["AGENTOS_GATEWAY_CONFIG_PATH"] = self.config_path
 

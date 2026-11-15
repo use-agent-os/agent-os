@@ -24,7 +24,7 @@ available without `uv tool list` or `pip show`.
 | `agentos onboard` | Run or inspect first-run setup. |
 | `agentos auth` | Provider logins that are not API keys (`login`/`status`/`logout`; xAI today). |
 | `agentos configure` | Reconfigure provider, router, channels, search, x-search, image generation, or memory embedding. |
-| `agentos config` | Get or set configuration keys (`get`/`set`); `reload` applies the config file to the running gateway, including the operator-only settings (trading, hooks, tools, permissions, sandbox, auth, safety, workspace, ACP permission mode) that a file edit never applies by itself. `reload` is refused from an agent's session. |
+| `agentos config` | Get or set configuration keys (`get`/`set`); `reload [--config PATH]` applies the config file, including the operator-only settings (trading, hooks, tools, permissions, sandbox, auth, safety, workspace, ACP launch and permission settings, MCP servers, `gateway_control`, ...) that neither a file edit nor a restart applies by itself: with a gateway running it applies the file there, with none it records the file's values as approved for the next start. `reload` is refused from an agent's session. |
 | `agentos env` | Read or write `~/.agentos/.env` credentials (`list`/`get`/`set`/`import`/`unset`). |
 | `agentos gateway` | Run and manage the gateway server. |
 | `agentos chat` | Start interactive terminal chat. |
@@ -860,6 +860,14 @@ used to widen what the agent is allowed to do. Edit `~/.agentos/.env` by hand
 if you genuinely need one of them. Variables already
 set that way keep working; only writing through AgentOS is gated.
 
+From an agent's own session (`agentos env` run by the agent's shell, or any
+connection the gateway recognizes as an agent's) `set`, `unset` and `import`
+accept only an agent-settable name -- a skill's or a built-in tool's declared
+credential, such as `FIRECRAWL_API_KEY` -- and `get --reveal` refuses every
+secret; anything else fails with `env.protected`. Run the command yourself
+for those. See
+[What cannot be written through AgentOS](configuration.md#what-cannot-be-written-through-agentos).
+
 What `agentos env list` knows about comes from three places: the setup specs
 of providers the runtime can actually drive (a provider catalogued for the
 setup UI with no client behind it -- Exa, Perplexity, and a number of LLM
@@ -1578,7 +1586,11 @@ balance read still tries the chain's public node first),
 auto setup or `wallet mode auto` is refused, `wallet.unlock_mode_policy`, and
 a stored password from an earlier auto vault is ignored until
 `agentos wallet mode manual` deletes it), `sync_interval_seconds`,
-`price_ttl_seconds`.
+`price_ttl_seconds`. A change applied without a restart (`config set`,
+`agentos config reload`) is what the engine's own loop enforces from its next
+tick: `enabled = false` stops DCA buys and trigger fires and refuses to sign
+anything, an order already waiting for approval included, and a new cap or
+threshold judges the next automated buy.
 
 Read: [`features/trading.md`](features/trading.md)
 

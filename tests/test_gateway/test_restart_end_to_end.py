@@ -138,7 +138,7 @@ async def test_restart_from_a_telegram_topic_round_trip(wired: Any) -> None:
     wired.restarter.exec_if_pending()
     assert wired.released == ["released"]
     (argv,) = wired.execs
-    assert argv[1:3] == ["-m", "agentos.cli.main"]
+    assert argv[1:4] == ["-P", "-m", "agentos.cli.main"]
 
     stored = json.loads(restart_request_path(wired.config).read_text(encoding="utf-8"))
     assert stored["origin"] == {

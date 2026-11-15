@@ -622,7 +622,7 @@ def test_start_scripts_use_bundled_python_runtime() -> None:
     assert '"${PYTHON_BIN}" -m venv --without-pip "${VENV_DIR}"' in sh_script
     assert "-m pip install" not in sh_script
     assert "Installing AgentOS from bundled wheels..." in sh_script
-    assert 'AGENTOS_MODULE=( "-m" "agentos.cli.main" )' in sh_script
+    assert 'AGENTOS_MODULE=( "-P" "-m" "agentos.cli.main" )' in sh_script
     assert (
         'if [[ ! -f "${AGENTOS_GATEWAY_CONFIG_PATH}" && '
         '-n "${OPENROUTER_API_KEY:-}" ]]; then' in sh_script
@@ -677,7 +677,7 @@ def test_start_scripts_use_bundled_python_runtime() -> None:
     assert "-c $WheelInstallScript" not in ps_script
     assert "$WheelInstallScript | & $PythonBin - $PackageDir $SitePackages" in ps_script
     assert "Installing AgentOS from bundled wheels..." in ps_script
-    assert '$AgentOSArgs = @("-m", "agentos.cli.main")' in ps_script
+    assert '$AgentOSArgs = @("-P", "-m", "agentos.cli.main")' in ps_script
     assert (
         "if ((-not (Test-Path $env:AGENTOS_GATEWAY_CONFIG_PATH)) "
         "-and $env:OPENROUTER_API_KEY) {" in ps_script

@@ -227,6 +227,7 @@ def test_program_resolution_prefers_the_running_script(tmp_path: Path) -> None:
     ]
     assert gs.resolve_agentos_program(argv0="", which=lambda _: None, executable="/py") == [
         "/py",
+        "-P",
         "-m",
         "agentos.cli.main",
     ]

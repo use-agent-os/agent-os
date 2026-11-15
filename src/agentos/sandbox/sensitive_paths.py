@@ -128,7 +128,8 @@ def runtime_sensitive_prefixes() -> tuple[str, ...]:
     container image, whose ``$HOME`` is elsewhere. Resolved at check time, so
     the floor follows the state root the running process actually uses. The
     state root's ``config.toml`` and the active config file (which may be a
-    project-local ``agentos.toml``) are on it too.
+    project-local ``agentos.toml``) are on it too, and so is the operator's
+    approval of the operator-only settings in it (``gateway.config_approval``).
 
     So is the trading ledger with its sidecars: it holds the parked orders the
     operator approves by id, the approved mandates and triggers the engine
@@ -147,6 +148,7 @@ def runtime_sensitive_prefixes() -> tuple[str, ...]:
         entries = [
             str(home / "wallets"),
             str(home / "config.toml"),
+            str(home / "config-approval.toml"),
             ledger,
             *(ledger + suffix for suffix in TRADING_LEDGER_SIDECARS),
             str(home / "state" / "snapshots"),

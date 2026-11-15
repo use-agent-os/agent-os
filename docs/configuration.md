@@ -53,7 +53,14 @@ something to discover through a confusing hour. To make the file authoritative,
 remove the export and restart.
 
 Likewise, a `.env` in the directory the gateway was started from wins over
-`~/.agentos/.env`.
+`~/.agentos/.env` -- except for the names below and the runtime-steering ones
+(`PYTHON*`, `ECC_BACKEND_CLASS`, `ETH_HASH_BACKEND`, `ETH_ACCOUNT_KDF`,
+`SSL_CERT_FILE`, `SSL_CERT_DIR`, `SSLKEYLOGFILE`, `REQUESTS_CA_BUNDLE`,
+`CURL_CA_BUNDLE`, `PYTHON_KEYRING_BACKEND`), which a project `.env` cannot set:
+that directory is often writable by an agent's shell, and the values would
+land in the process that holds the wallet keys. AgentOS logs
+`env.project_env_name_ignored` for each one it skips. Put them in
+`~/.agentos/.env` or export them before starting AgentOS.
 
 ### What cannot be written through AgentOS
 
@@ -79,6 +86,18 @@ every AgentOS surface — the Web UI, the CLI, the RPC, and the agent tool:
   decides whether the ambient `*_PROXY` names are honoured at all, is refused
   for the same reason. Configure a proxy through `llm.proxy` in the config
   file, or export it in the shell that starts the gateway.
+
+**An agent's own connection is held to an allowlist.** A connection the
+gateway recognizes as an agent's (agent token, a process the gateway spawned,
+an open exec window) may `env.set`, `env.unset` or `env.import` only a name
+the catalog marks agent-settable: a credential-shaped name (`*_API_KEY`,
+`*_TOKEN`, ...) that an installed skill's `requires.env` or a built-in tool
+declares. Provider keys, names only your `.env` holds, `AGENTOS_*` names, the
+wallet's own `RPC_BASE_URL` / `RPC_ROBINHOOD_URL` / `UNISWAP_API_KEY`, and the
+runtime-steering names above are refused with `env.protected`; so is
+`env.reveal` of any secret (or uncatalogued) name. Your own connections -- the
+console, the desktop app, the CLI outside an agent's session -- are not
+affected. The agent's `env_set` tool still asks for your approval per write.
 
 Tools AgentOS spawns inherit most of `os.environ`, and several AgentOS guards
 are themselves read from it, so a surface that could write these names could
@@ -941,6 +960,12 @@ oauth = true
 tool_timeout_seconds = 30
 ```
 
+`mcp` is an operator-only setting: a stdio server is a command the gateway
+itself runs, so an agent's connection cannot register or enable one through a
+config RPC, a file edit of `[mcp]` is held until `agentos config reload`, and
+`mcp.connect` / `mcp.disconnect` / `mcp.oauth.*` fail for an agent's connection
+with `mcp.operator_required`. Settings › MCP in the console works as before.
+
 Supported transports are `stdio`, `sse`, and `streamable_http`. The MCP SDK is
 included in the standard AgentOS installation, so Streamable HTTP and OAuth work
 without installing an additional package extra.
@@ -1503,7 +1528,11 @@ chat_restart = false   # /restart from paired channels and the agent's gateway t
 
 `chat_restart` defaults to `false`. Changing it requires one restart of the
 gateway (`agentos gateway restart`, or `/restart` from the web console), after
-which chat restarts are accepted. Environment override:
+which chat restarts are accepted. `gateway_control` is an operator-only
+setting: no agent connection (bound or unbound) may write it through a config
+RPC, and a file edit of it is held like the trading limits (see
+[Editing the file while the gateway runs](#editing-the-file-while-the-gateway-runs)), so an agent
+cannot switch on its own restart. Environment override:
 `AGENTOS_GATEWAY_GATEWAY_CONTROL__CHAT_RESTART=true`. In-place restart is not
 available on Windows.
 
@@ -1674,16 +1703,37 @@ event listing `hot` and `restartRequired` paths. Restart to apply those.
 
 **Operator-only settings are held.** A change to `trading`, `hooks`,
 `tools` (including `tools.invoke`), `permissions`, `sandbox`, `auth`,
-`safety`, `workspace_dir`, `workspace_strict`, `acp.permission_mode` or
-`acp.non_interactive_permissions` is never applied from a file
+`safety`, `workspace_dir`, `workspace_strict`, `acp.permission_mode`,
+`acp.non_interactive_permissions`, `acp.agents`, `acp.allowed_agents`,
+`acp.allowed_cwds`, `acp.install_missing_adapters`, `gateway_control`, `mcp`,
+`skills.install_policy`, `browser.binary_path`, `browser.cdp_port`,
+`browser.attach_confirmed`, `browser.allow_unsafe_evaluate`, `cors`,
+`control_ui.allowed_origins`, `gateway.bind`, `gateway.public_origin`,
+`state_dir` or `observability.otlp_*` is never applied from a file
 edit alone: the file is one same-user write away for an agent's shell on a
 host without the OS sandbox, and the config RPCs refuse an agent those
 settings. The running values stay, the gateway logs `config.reload_held`,
 `config.changed` carries the paths under `held` (`status: "held"` when
 nothing else changed), and `agentos doctor` reports
 `gateway.config.reload_held`. Apply them yourself with
-`agentos config reload` (refused from an agent's session) or by restarting
-the gateway. The active config file and `<state dir>/config.toml` are also
+`agentos config reload` (refused from an agent's session).
+
+**A restart does not apply them either.** The gateway keeps the values of
+the operator-only settings as you last approved them in
+`~/.agentos/config-approval.toml` (`0600`, a sensitive path the agent cannot
+touch). At boot, a setting the file holds differently from that approval
+runs on the approved value, the gateway logs `config.boot_held_operator_only`
+and `agentos gateway run` prints the held settings; they stay held across any
+number of restarts until you run `agentos config reload` from your own
+terminal. With a gateway running that applies the file there; with none
+running it records the file's values as approved for the next start
+(`agentos config reload --config <path>` names another file). The approval
+moves forward on its own when you change a setting through a config RPC, the
+console, or `agentos config set` / onboarding while no gateway runs; a write
+never approves an edit somebody else had already left in the file. The first
+boot without an approval file adopts the file as it is. An unreadable approval
+file stops the gateway at boot (restore it, or delete it to approve the file
+as it is now). The active config file and `<state dir>/config.toml` are also
 sensitive paths: an agent's shell and file tools cannot read or write them,
 nor the `<name>.backup.<stamp>` copies a config write leaves beside them.
 The same settings cannot be written into `.env` through `agentos env set`,

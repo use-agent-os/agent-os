@@ -509,19 +509,14 @@ def _refuse_agent_trading_paths(ctx: RpcContext, paths: list[str]) -> None:
     """The trading limits are the user's to set; an agent's connection may not.
 
     Raising the cap or the approval threshold from inside a turn would make
-    every other trading guardrail decorative. The binding comes from
-    ``gateway.agent_surface``, not from anything the caller sent.
+    every other trading guardrail decorative; switching on
+    ``gateway_control.chat_restart`` would let the agent restart the gateway.
+    Both are refused to every binding, unbound included. The binding comes
+    from ``gateway.agent_surface``, not from anything the caller sent.
     """
-    from agentos.gateway.agent_surface import agent_binding
+    from agentos.gateway.config_commit import refuse_any_agent_binding_change
 
-    if agent_binding(ctx) is None:
-        return
-    touched = [p for p in paths if p == "trading" or str(p).startswith("trading.")]
-    if touched:
-        raise ValueError(
-            "trading settings are the user's to change; an agent cannot set "
-            + ", ".join(sorted(touched))
-        )
+    refuse_any_agent_binding_change(ctx, [str(p) for p in paths])
 
 
 def _refuse_agent_file_only_paths(ctx: RpcContext, paths: list[str]) -> None:
@@ -1024,8 +1019,7 @@ async def _handle_config_reload(params: dict | None, ctx: RpcContext) -> dict[st
         raise RpcHandlerError(
             "config.operator_required",
             "Reloading the config file applies settings that are the user's to change; "
-            "an agent cannot do it. Run `agentos config reload` from your own terminal, "
-            "or restart the gateway.",
+            "an agent cannot do it. Run `agentos config reload` from your own terminal.",
             details=binding.to_dict(),
         )
     try:
