@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- A keyed RPC URL (`trading.rpc_urls`, `RPC_BASE_URL`, `RPC_ROBINHOOD_URL`)
+  no longer reaches a caller in a `wallet.*` / `trading.*` error. Every
+  handler now cuts a configured RPC URL in an error message or its details
+  down to its host, and the LP reads answer a non-`http(s)` or hostless URL
+  with `trading.rpc` naming the host only. The bundled LP, pools.fun,
+  chain-stocks and RWA-lookup skills' URL checks no longer quote the URL they
+  refuse (WAL-24).
 - **Breaking default — Discord and Slack channels now refuse senders you have
   not admitted.** Before, any Discord user who could DM or @mention the bot,
   and any Slack workspace member or guest, started an agent turn with the

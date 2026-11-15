@@ -119,6 +119,19 @@ def load_env() -> None:
         return
 
 
+def _url_host(parsed: urllib.parse.SplitResult) -> str:
+    """``scheme://host`` of a URL, for an error message.
+
+    Provider keys live in an RPC URL's path (Alchemy, Infura) or query (dRPC),
+    and an error is read by the agent, the model and the transcript: name the
+    endpoint by its host, never in full.
+    """
+    host = parsed.hostname or ""
+    if host and parsed.port:
+        host = f"{host}:{parsed.port}"
+    return f"{parsed.scheme}://{host}" if parsed.scheme else host or "the URL"
+
+
 def require_http_url(url: str, label: str) -> str:
     """Return *url* if it is an ``http(s)`` URL with a host, else raise ValueError.
 
@@ -133,14 +146,15 @@ def require_http_url(url: str, label: str) -> str:
         raise ValueError(f"empty {label}")
     try:
         parsed = urllib.parse.urlsplit(cleaned)
-    except ValueError as exc:
-        raise ValueError(f"invalid {label} {url!r}: {exc}") from exc
+    except ValueError:
+        raise ValueError(f"invalid {label}: not a URL; must be http:// or https://") from None
     if parsed.scheme.lower() not in ("http", "https"):
         raise ValueError(
-            f"invalid {label} scheme {parsed.scheme!r} in {url!r}: must be http:// or https://"
+            f"invalid {label} scheme {parsed.scheme!r} for {_url_host(parsed)}: "
+            "must be http:// or https://"
         )
     if not parsed.netloc:
-        raise ValueError(f"{label} {url!r} has no host: must be http:// or https://")
+        raise ValueError(f"{label} has no host: must be http:// or https://")
     return cleaned
 
 
