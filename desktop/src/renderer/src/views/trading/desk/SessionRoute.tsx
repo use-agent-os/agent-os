@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
-import { useLocation, useParams } from 'react-router'
+import { useLocation, useNavigate, useParams } from 'react-router'
+import { sessionPath } from '~/components/sidebar/SessionRow'
 import { canonicalSessionKey } from '@/views/chat/logic'
 import { useGateway } from '~/stores/gateway'
 import { ChatView } from '~/views/chat/ChatView'
@@ -21,6 +22,7 @@ import { useEntrance } from './useEntrance'
 export function SessionRoute() {
   const { key: rawParam } = useParams()
   const location = useLocation()
+  const navigate = useNavigate()
   const paramKey = rawParam ? canonicalSessionKey(decodeURIComponent(rawParam)) : ''
   const mode: DeskMode = deriveMode(paramKey)
   const requested = Boolean((location.state as { enterDesk?: boolean } | null)?.enterDesk)
@@ -62,7 +64,18 @@ export function SessionRoute() {
       {active && frame.fullDesk ? null : frame.banner}
       {active && frame.fullDesk ? (
         <div className="trd-page__desk">
-          <TradingView entering={enter === 'trading'} />
+          <TradingView
+            entering={enter === 'trading'}
+            automations={
+              frame.desk
+                ? {
+                    missions: frame.desk.missions,
+                    sessionKey: paramKey,
+                    onOpenSession: (key) => void navigate(sessionPath(key)),
+                  }
+                : undefined
+            }
+          />
         </div>
       ) : (
         <div

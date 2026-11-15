@@ -158,6 +158,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `AGENTOS_SANDBOX_*`, `AGENTOS_AUTH_*`, `AGENTOS_GATEWAY_<SECTION>__*`) and
   the gateway credentials into `.env`; edit `.env` by hand if you mean it.
 
+### Added
+- Desktop Trade tab: the full-width **Desk** now has the **Automations** and
+  **Tools** tabs the panel beside the chat already had. Automations lists every
+  DCA, trigger and bracket with their controls, and its tab counts the
+  proposals waiting on you. In Tools, Inspect opens in place; Send, Multisend
+  and Burn go back to the desk's chat, which owns those sheets, and open there.
+
 ## [2026.11.14] - 2026-11-14
 
 ### Fixed

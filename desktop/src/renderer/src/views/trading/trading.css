@@ -931,6 +931,10 @@
   gap: 4px;
   padding: 4px 0;
 }
+.trd-tabs__tools[data-off] {
+  /* Kept in the row so switching tabs does not reflow the strip. */
+  visibility: hidden;
+}
 .trd-chainpick {
   margin-right: 6px;
 }
