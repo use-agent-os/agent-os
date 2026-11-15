@@ -73,14 +73,15 @@ export function parseStoredAnchor(raw: unknown, size: Size, win: Size): PetAncho
 }
 
 /**
- * What the mascot must never take a click away from.
+ * What the mascot must not take a click away from when the press lands on a
+ * see-through part of its box.
  *
- * The pet is a 192×208 sprite floating at the top of the stacking order, and
- * its artwork fills that box almost edge to edge — so nothing can be won back
- * by clipping the hit area to the drawn pixels. Anything it happens to stand
- * over simply stopped responding: the composer's route button, the "Inspect
- * tx" and "View transaction" buttons on a ledger card. It is decoration; the
- * app's controls outrank it everywhere.
+ * The pet is a 192×208 sprite floating at the top of the stacking order. When
+ * its whole box took presses, anything it stood over stopped responding: the
+ * composer's route button, the "Inspect tx" and "View transaction" buttons on
+ * a ledger card. So over a control the pet only answers a press on its own
+ * drawn pixels (see petClaimsPress); the transparent rest of the box belongs
+ * to whatever is underneath.
  */
 export const PET_YIELDS_TO =
   'button, a[href], input, select, textarea, summary, label, [role="button"],' +
@@ -99,4 +100,57 @@ export function petYieldsAt(target: Element | null): boolean {
 /** Is this point inside the pet's box? */
 export function pointInRect(rect: DOMRect, x: number, y: number): boolean {
   return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+}
+
+/**
+ * Does the pet take this press?
+ *
+ * Over plain content, anywhere in its box will do. Over a control, only a
+ * press on the drawn sprite counts: yielding there too made the pet
+ * ungrabbable wherever every pixel is a control, such as the sidebar's
+ * project and session rows. `opaque` is null when the sheet's pixels cannot
+ * be read; the control wins then, as it always did.
+ */
+export function petClaimsPress(onControl: boolean, opaque: boolean | null): boolean {
+  return !onControl || opaque === true
+}
+
+/** A rectangle of sprite-sheet pixels. */
+export interface SheetBox {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/**
+ * The patch of the sprite sheet under a press, `slop` display pixels either
+ * side of it, clipped to the frame the press landed in. Null when the press
+ * maps outside the sheet.
+ *
+ * `local` is the press relative to the pet's box, `bg` the current
+ * background-position (the walk steps its x), `drawn` the background-size,
+ * `natural` the sheet's real size and `frame` one frame's real size.
+ */
+export function sheetHitBox(
+  local: Point,
+  bg: Point,
+  drawn: Size,
+  natural: Size,
+  frame: Size,
+  slop: number,
+): SheetBox | null {
+  if (drawn.w <= 0 || drawn.h <= 0) return null
+  const kx = natural.w / drawn.w
+  const ky = natural.h / drawn.h
+  const cx = Math.floor((local.x - bg.x) * kx)
+  const cy = Math.floor((local.y - bg.y) * ky)
+  if (cx < 0 || cy < 0 || cx >= natural.w || cy >= natural.h) return null
+  const fx = Math.floor(cx / frame.w) * frame.w
+  const fy = Math.floor(cy / frame.h) * frame.h
+  const x0 = Math.max(fx, Math.floor(cx - slop * kx))
+  const y0 = Math.max(fy, Math.floor(cy - slop * ky))
+  const x1 = Math.min(fx + frame.w - 1, Math.ceil(cx + slop * kx))
+  const y1 = Math.min(fy + frame.h - 1, Math.ceil(cy + slop * ky))
+  return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 }
 }

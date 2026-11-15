@@ -317,6 +317,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   goes ahead on its own when nothing would be interrupted; running sessions,
   jobs due soon, a pending approval or a failed check still stop at the
   preflight for you to decide.
+- Desktop: the mascot can be clicked and dragged again while it stands over
+  the sidebar, or over any other button. A press on the drawn mascot now
+  belongs to the mascot; a press on the see-through part of its box still
+  reaches the control underneath. Before, the mascot gave way to every
+  control, and the sidebar is rows of controls edge to edge, so it could not
+  be grabbed there at all.
 
 ## [2026.11.15] - 2026-11-15
 
