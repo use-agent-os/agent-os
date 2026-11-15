@@ -112,6 +112,13 @@ def reset_protected_config_paths() -> None:
     _protected_config_paths.clear()
 
 
+#: The trading ledger (``agentos.trading.ledger.default_ledger_path``) and the
+#: files SQLite keeps beside it. An agent never needs them: it trades, reads
+#: its orders and history through the gateway RPC.
+TRADING_LEDGER_NAME = "trading.sqlite"
+TRADING_LEDGER_SIDECARS: tuple[str, ...] = ("-wal", "-shm", "-journal")
+
+
 def runtime_sensitive_prefixes() -> tuple[str, ...]:
     """AgentOS's own operator proof and config, wherever the state root really is.
 
@@ -122,12 +129,28 @@ def runtime_sensitive_prefixes() -> tuple[str, ...]:
     the floor follows the state root the running process actually uses. The
     state root's ``config.toml`` and the active config file (which may be a
     project-local ``agentos.toml``) are on it too.
+
+    So is the trading ledger with its sidecars: it holds the parked orders the
+    operator approves by id, the approved mandates and triggers the engine
+    runs unattended, and the daily-cap accounting. An agent that rewrote it
+    could redirect an approved send to itself. The engine also seals those rows
+    (``agentos.trading.integrity``) and refuses one that was edited, since
+    this floor is a text scan; it is the first line, not the only one. The
+    pre-upgrade snapshots (``state/snapshots``) carry copies of the ledger and
+    of ``config.toml``, and a restore puts them back: they are on it as well.
     """
     from agentos.paths import default_agentos_home
 
     try:
         home = default_agentos_home()
-        entries = [str(home / "wallets"), str(home / "config.toml")]
+        ledger = str(home / "state" / TRADING_LEDGER_NAME)
+        entries = [
+            str(home / "wallets"),
+            str(home / "config.toml"),
+            ledger,
+            *(ledger + suffix for suffix in TRADING_LEDGER_SIDECARS),
+            str(home / "state" / "snapshots"),
+        ]
     except (OSError, RuntimeError):
         entries = []
     entries.extend(sorted(_protected_config_paths - set(entries)))
@@ -164,6 +187,10 @@ _BASE_SENSITIVE_SUFFIXES: tuple[str, ...] = (
     # token written outside home. The leading dot is part of the match, so a
     # file merely named ``vault-token`` is left alone.
     "/.vault-token",
+    # The trading ledger's prefix entries (``runtime_sensitive_prefixes``)
+    # guard it where it lives; these guard a copy of it (and its sidecars).
+    f"/{TRADING_LEDGER_NAME}",
+    *(f"/{TRADING_LEDGER_NAME}{suffix}" for suffix in TRADING_LEDGER_SIDECARS),
 )
 
 # The same credential filenames are blocked as tails too, so moving one out of

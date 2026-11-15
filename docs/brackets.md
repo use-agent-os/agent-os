@@ -217,8 +217,11 @@ Errors: `trading.bracket.not_found`, `trading.bracket.bad_state`,
 both of `stopLoss` / `trailPct`; a size on `alert`; more than one size;
 `tpPct` without `amountPct`, over it, or ≤ 0; take-profit not above the
 stop; the trigger's price/percent/trail/validFor/quote/wallet refusals,
-same wording), `trading.operator_required` (RPC), plus `trading.disabled`,
+same wording), `trading.operator_required` (RPC), `trading.integrity` (a leg
+failed its seal: both legs are stopped), plus `trading.disabled`,
 `wallet.locked`, `trading.unsupported_chain`, `trading.token_not_found`.
+Approving or creating a bracket as the operator seals both legs and needs an
+unlocked vault.
 
 Events: every leg change emits the trigger's events **and**
 `trading.changed {reason: "bracket", bracketId}` +

@@ -29,7 +29,7 @@ import httpx
 import structlog
 
 from agentos import __version__
-from agentos.trading import dca, guardrails, triggers
+from agentos.trading import dca, guardrails, integrity, triggers
 from agentos.trading.aggregator import AGGREGATOR_BASE, AggregatorClient, AggregatorProvider
 from agentos.trading.bridge import (
     BRIDGE_FILL_GIVE_UP_S,
@@ -395,6 +395,12 @@ class TradingService:
         self.config = getattr(config, "trading", config)
         self.vault = vault or Vault()
         self.ledger = ledger or Ledger()
+        # Every order, and every mandate or trigger the operator approved, is
+        # sealed with the vault's key; nothing signs a row whose seal fails.
+        self.sealer = integrity.Sealer(
+            lambda: self.vault.ledger_seal_key(), lambda wallet: self.vault.incarnation(wallet)
+        )
+        self.ledger.sealer = self.sealer
         self._http = http or httpx.AsyncClient(timeout=15.0)
         self.prices = prices or PriceService(
             http=self._http, ttl_s=float(getattr(self.config, "price_ttl_seconds", 20))
@@ -608,9 +614,98 @@ class TradingService:
             return await self._priced(self.provider("uniswap"), **kwargs)
 
     def ensure_unlocked(self) -> bool:
-        if self.vault.unlocked:
-            return True
-        return self.vault.try_auto_unlock()
+        """Unlock in ``auto`` mode if needed; ``False`` while locked."""
+        unlocked = self.vault.unlocked or self.vault.try_auto_unlock()
+        if unlocked:
+            self._seal_ready()
+        return unlocked
+
+    # ── row seals (agentos.trading.integrity) ──────────────────────────
+
+    def _seal_ready(self) -> bool:
+        """Whether rows can be sealed and checked now (the vault is unlocked).
+
+        The first unlock of a vault from before sealing vouches, once, for the
+        rows that were already live: parked orders, active mandates, armed
+        triggers. Nothing could be sealed before that point; from here on a
+        live row without a seal is one the engine never wrote.
+        """
+        if self.vault.ledger_seal_key() is None:
+            return False
+        if self.vault.take_new_seal():
+            adopted = 0
+            with self.ledger.transaction():
+                for kind, statuses in (
+                    ("order", ("awaiting_approval", "approved")),
+                    ("mandate", ("active", "paused")),
+                    ("trigger", ("armed", "paused", "triggered")),
+                ):
+                    for ident in self.ledger.unsealed_ids(kind, statuses):
+                        adopted += int(self.ledger.seal_row(kind, ident))
+            log.info("trading.ledger_seal_adopted", rows=adopted)
+        return True
+
+    def _require_seal(self, action: str) -> None:
+        """An operator's approval is sealed with the vault key: refuse it while locked."""
+        if not self.ensure_unlocked() or not self._seal_ready():
+            raise TradingError(
+                "wallet.locked",
+                f"Wallet vault is locked; unlock it to {action} "
+                "(an approval is sealed with the vault key)",
+            )
+
+    def _seal_or_raise(self, kind: str, ident: str, action: str) -> None:
+        if not self.ledger.seal_row(kind, ident):
+            raise TradingError("wallet.locked", f"Wallet vault is locked; cannot {action}")
+
+    def _check_sealed(
+        self, kind: str, ident: str
+    ) -> tuple[dict[str, Any] | None, integrity.Verdict | None]:
+        """A row with its seal's verdict, read together; ``None`` verdict while locked.
+
+        Unlocks an ``auto`` vault first (as the order this check guards would),
+        unless the operator locked it.
+        """
+        unlocked = self.ensure_unlocked()
+        row, seal = self.ledger.sealed_row(kind, ident)
+        if row is None or not unlocked or not self._seal_ready():
+            return row, None
+        return row, self.sealer.check(kind, row, seal)
+
+    async def _integrity_alert(
+        self, kind: str, ident: str, verdict: str, row: dict[str, Any] | None
+    ) -> TradingError:
+        """Log and broadcast a row that failed its seal; the error the caller raises."""
+        what = {"order": "order", "mandate": "DCA mandate", "trigger": "trigger"}[kind]
+        if verdict == "missing":
+            why = f"{what} {ident} carries no engine seal"
+        else:
+            why = f"{what} {ident} was changed outside the engine since it was sealed"
+        message = f"{why}; refusing to act on it. Check what can write the trading ledger."
+        wallet = str(row.get("wallet") or "") if row else None
+        log.error(
+            "trading.integrity_violation", kind=kind, id=ident, verdict=verdict, wallet=wallet
+        )
+        await self._emit(
+            "trading.integrity.alert",
+            {"kind": kind, "id": ident, "verdict": verdict, "wallet": wallet, "message": message},
+        )
+        return TradingError(
+            "trading.integrity",
+            message,
+            details={"kind": kind, "id": ident, "verdict": verdict},
+        )
+
+    async def _sealed_order(self, order_id: str) -> dict[str, Any]:
+        """The order as the engine sealed it, or ``trading.integrity`` (alerted): nothing signs."""
+        row, verdict = self._check_sealed("order", order_id)
+        if row is None:
+            raise TradingError("trading.invalid", f"no order {order_id}")
+        if verdict is None:
+            raise TradingError("wallet.locked", "Wallet vault is locked")
+        if verdict != "ok":
+            raise await self._integrity_alert("order", order_id, verdict, row)
+        return row
 
     def ensure_started(self) -> None:
         """Start the sync/expiry loop once an event loop is running."""
@@ -913,9 +1008,10 @@ class TradingService:
             self._remember_token(meta)
             return meta
         key = normalize_address(address)
-        row = self.ledger.get_token(chain.chain_id, key)
+        row, seal = self.ledger.sealed_token(chain.chain_id, key)
+        cached: TokenMeta | None = None
         if row and (row["symbol"] or row["verified"]):
-            return TokenMeta(
+            cached = TokenMeta(
                 chain_id=chain.chain_id,
                 address=key,
                 symbol=str(row["symbol"]),
@@ -925,6 +1021,14 @@ class TradingService:
                 verified=bool(row["verified"]),
                 stock_token=is_stock_token_name(str(row["name"])),
             )
+            # The cached decimals size every amount and value the guardrails
+            # judge: used as cached only when the engine's seal still holds.
+            # Locked (``None``), nothing can sign; the next unlocked use checks.
+            verdict = self.sealer.check(integrity.TOKEN_KIND, row, seal)
+            if verdict in (None, "ok"):
+                return cached
+            if verdict == "mismatch":
+                log.warning("trading.token_seal_mismatch", chain=chain.chain_id, token=key)
         known = await self.prices.known_token(chain, key)
         if known is not None:
             self._remember_token(known)
@@ -933,7 +1037,11 @@ class TradingService:
         try:
             symbol, name, decimals = await self.evm(chain).erc20_metadata(key)
         except (EvmRpcError, EvmTransportError):
-            pass
+            if cached is not None:
+                # The chain could not be asked: keep the cached row rather than
+                # overwrite it with a guess (nothing can be quoted from an
+                # unreachable node anyway).
+                return cached
         if not symbol:
             # Nobody names it. Either it is a contract that does not implement
             # symbol(), or there is nothing here — most often an address pasted
@@ -4180,8 +4288,9 @@ class TradingService:
         await self._execute(row["order_id"], quote, wait=wait)
 
     async def _execute(self, order_id: str, quote: ProviderQuote | None, *, wait: bool) -> None:
-        row = self.ledger.get_order(order_id)
-        assert row is not None
+        # The transaction is built from this row and nothing else: it must be
+        # the row the engine sealed, not one rewritten in the ledger file since.
+        row = await self._sealed_order(order_id)
         kind = str(row.get("kind") or "swap")
         if kind == "send":
             await self._execute_send(row, wait=wait)
@@ -5162,6 +5271,10 @@ class TradingService:
             "maxPriorityFeePerGas": max_priority,
             "type": 2,
         }
+        if order_id is not None:
+            # Last look before the key is used: the order's terms in the ledger
+            # are still the ones the engine sealed (an edit since is refused).
+            await self._sealed_order(order_id)
         raw = self._sign_tx(full_tx, key)
         local_hash = _local_tx_hash(raw)
         # Record before send: from here on the ledger knows a transaction
@@ -6076,7 +6189,12 @@ class TradingService:
         else:
             row["anchor_at"], row["next_run_at"] = self._dca_schedule(now, every, start_now)
             row["approved_at"] = now
-        self.ledger.insert_mandate(row)
+            self._require_seal("create a DCA mandate")
+        with self.ledger.transaction():
+            self.ledger.insert_mandate(row)
+            if not agent:
+                # The operator's own mandate is approved as it is created.
+                self._seal_or_raise("mandate", mandate_id, "create a DCA mandate")
         log.info("trading.dca_created", mandate=mandate_id, status=row["status"])
         mandate, warnings = await self._dca_changed(self._dca_row(mandate_id))
         return dca.mandate_payload(mandate, fetched_at=self._now(), warnings=warnings)
@@ -6115,18 +6233,24 @@ class TradingService:
         if row.get("expires_at") is not None and float(row["expires_at"]) <= now:
             await self._dca_expire(row, now)
             raise self._dca_bad_state(self._dca_row(mandate_id), "approve")
+        self._require_seal("approve a DCA mandate")
         anchor, first = self._dca_schedule(now, int(row["every_seconds"]), bool(row["start_now"]))
-        updated = self.ledger.update_mandate(
-            row["mandate_id"],
-            now=now,
-            expect_status="awaiting_approval",
-            status="active",
-            status_reason=None,
-            approved_at=now,
-            anchor_at=anchor,
-            next_run_at=first,
-            expires_at=None,
-        )
+        # Activation and seal land together: the terms sealed are the terms
+        # that were approved, and an ``active`` row without a seal is no approval.
+        with self.ledger.transaction():
+            updated = self.ledger.update_mandate(
+                row["mandate_id"],
+                now=now,
+                expect_status="awaiting_approval",
+                status="active",
+                status_reason=None,
+                approved_at=now,
+                anchor_at=anchor,
+                next_run_at=first,
+                expires_at=None,
+            )
+            if updated is not None:
+                self._seal_or_raise("mandate", mandate_id, "approve a DCA mandate")
         if updated is None:
             raise self._dca_bad_state(self._dca_row(mandate_id), "approve")
         return await self._dca_answer(updated)
@@ -6262,6 +6386,12 @@ class TradingService:
         if "every_seconds" in sets and row["status"] != "awaiting_approval":
             sets["anchor_at"] = now
             sets["next_run_at"] = now + every
+        if row["status"] != "awaiting_approval" and integrity.terms_touched("mandate", sets):
+            # New terms on an approved mandate are re-sealed by the ledger, but
+            # only over a seal that still holds: never on top of an edit
+            # someone made in the file.
+            self._require_seal("change a DCA mandate")
+            await self._dca_require_sealed(mandate_id)
         updated = self.ledger.update_mandate(
             row["mandate_id"], now=now, expect_status=row["status"], **sets
         )
@@ -6305,6 +6435,34 @@ class TradingService:
     def _dca_user_reason(reason: str | None) -> str:
         text = " ".join(str(reason or "").split())[:200]
         return f"user: {text}" if text else "user"
+
+    async def _dca_integrity_stop(self, mandate_id: str, error: TradingError) -> None:
+        """End a mandate whose seal failed: terminal, nothing it parked is left to approve."""
+        verdict = (error.details or {}).get("verdict", "mismatch")
+        updated = self.ledger.update_mandate(
+            mandate_id,
+            now=self._now(),
+            expect_status=sorted(dca.LIVE_STATUSES),
+            status="stopped",
+            status_reason=f"integrity check failed ({verdict}): not run",
+            next_run_at=None,
+            expires_at=None,
+        )
+        for order in self.ledger.orders_for_mandate(mandate_id):
+            if order["status"] == "awaiting_approval":
+                with contextlib.suppress(TradingError):
+                    await self.reject(str(order["order_id"]), "DCA mandate failed its seal")
+        if updated is not None:
+            await self._dca_changed(updated)
+
+    async def _dca_require_sealed(self, mandate_id: str) -> None:
+        row, verdict = self._check_sealed("mandate", mandate_id)
+        if verdict is None:
+            raise TradingError("wallet.locked", "Wallet vault is locked")
+        if verdict != "ok":
+            error = await self._integrity_alert("mandate", mandate_id, verdict, row)
+            await self._dca_integrity_stop(mandate_id, error)
+            raise error
 
     async def _dca_expire(self, row: dict[str, Any], now: float) -> None:
         updated = self.ledger.update_mandate(
@@ -6366,7 +6524,16 @@ class TradingService:
             )
             if claimed is None:
                 return None
-        row = claimed
+        # Everything this run does is read from the sealed row: the terms the
+        # operator approved, not whatever the ledger file says now.
+        sealed, verdict = self._check_sealed("mandate", mandate_id)
+        if verdict is not None and verdict != "ok":
+            error = await self._integrity_alert("mandate", mandate_id, verdict, sealed)
+            await self._dca_integrity_stop(mandate_id, error)
+            if manual:
+                raise error
+            return None
+        row = sealed or claimed
         chain = CHAINS[int(row["chain_id"])]
         token = self._token_dict(chain.chain_id, str(row["token_out"])) or {}
         symbol = str(token.get("symbol") or "token")
@@ -6424,6 +6591,13 @@ class TradingService:
                 f"{record.label} holds {format_amount(have, meta_in.decimals)} "
                 f"{meta_in.symbol or 'tokens'}, needs {format_amount(need, meta_in.decimals)}",
             )
+        if verdict is None:
+            # Locked when the run began: its terms could not be checked, so it
+            # buys nothing even if the vault is unlocked by now.
+            await self._dca_settle_run(
+                run_id, "failed", dca.reason("wallet.locked", "Wallet vault is locked")
+            )
+            return self.ledger.get_run(run_id)
         buy = int(row["runs_done"]) + in_flight + 1
         try:
             orders = await self.swap(
@@ -6893,7 +7067,11 @@ class TradingService:
         else:
             row.update(self._trigger_arming(direction_, current, now))
             row["approved_at"] = now
-        self.ledger.insert_trigger(row)
+            self._require_seal("create a trigger")
+        with self.ledger.transaction():
+            self.ledger.insert_trigger(row)
+            if not agent:
+                self._seal_or_raise("trigger", trigger_id, "create a trigger")
         log.info("trading.trigger_created", trigger=trigger_id, kind=kind_, status=row["status"])
         return await self._trigger_answer(self._trigger_row(trigger_id))
 
@@ -6932,17 +7110,21 @@ class TradingService:
         if row.get("expires_at") is not None and float(row["expires_at"]) <= now:
             await self._trigger_expire(row, now, "no decision within 24 h")
             raise self._trigger_bad_state(self._trigger_row(trigger_id), "approve")
+        self._require_seal("approve a trigger")
         chain = CHAINS[int(row["chain_id"])]
         current = await self._dca_price(chain, str(row["token"]))
-        updated = self.ledger.update_trigger(
-            row["trigger_id"],
-            now=now,
-            expect_status="awaiting_approval",
-            status_reason=None,
-            approved_at=now,
-            expires_at=None,
-            **self._trigger_arming(str(row["direction"]), current, now),
-        )
+        with self.ledger.transaction():
+            updated = self.ledger.update_trigger(
+                row["trigger_id"],
+                now=now,
+                expect_status="awaiting_approval",
+                status_reason=None,
+                approved_at=now,
+                expires_at=None,
+                **self._trigger_arming(str(row["direction"]), current, now),
+            )
+            if updated is not None:
+                self._seal_or_raise("trigger", trigger_id, "approve a trigger")
         if updated is None:
             raise self._trigger_bad_state(self._trigger_row(trigger_id), "approve")
         return await self._trigger_answer(updated)
@@ -7213,7 +7395,16 @@ class TradingService:
             )
             if claimed is None:
                 return None
-        row = claimed
+        # The fire acts on the sealed row: the condition and size the operator
+        # approved, not whatever the ledger file says now.
+        sealed, verdict = self._check_sealed("trigger", trigger_id)
+        if verdict is not None and verdict != "ok":
+            error = await self._integrity_alert("trigger", trigger_id, verdict, sealed)
+            await self._trigger_integrity_stop(trigger_id, error)
+            if manual:
+                raise error
+            return None
+        row = sealed or claimed
         if row.get("group_id"):
             await self._bracket_hold_sibling(row, now)
         fire_id = self.ledger.insert_fire(
@@ -7230,6 +7421,12 @@ class TradingService:
         kind = str(row["kind"])
         if kind == "alert":
             await self._trigger_settle_fire(fire_id, "alerted", None)
+            return await self._trigger_fired(fire_id)
+        if verdict is None:
+            # Locked when it fired: the terms could not be checked, so nothing trades.
+            await self._trigger_settle_fire(
+                fire_id, "failed", triggers.fire_reason("wallet.locked", "Wallet vault is locked")
+            )
             return await self._trigger_fired(fire_id)
         chain = CHAINS[int(row["chain_id"])]
         sell = kind == "sell"
@@ -7301,6 +7498,35 @@ class TradingService:
             # On its way to the chain: the card says ``triggered`` until it settles.
             await self._trigger_changed(self._trigger_row(trigger_id))
         return await self._trigger_fired(fire_id)
+
+    async def _trigger_integrity_stop(self, trigger_id: str, error: TradingError) -> None:
+        """End a trigger whose seal failed (both legs of a bracket): terminal, nothing parked."""
+        verdict = (error.details or {}).get("verdict", "mismatch")
+        reason = f"integrity check failed ({verdict}): not fired"
+        now = self._now()
+        row = self.ledger.get_trigger(trigger_id)
+        ids = [trigger_id]
+        if row is not None and row.get("group_id"):
+            ids = [
+                str(leg["trigger_id"]) for leg in self.ledger.group_triggers(str(row["group_id"]))
+            ]
+        for ident in ids:
+            updated = self.ledger.update_trigger(
+                ident,
+                now=now,
+                expect_status=sorted(triggers.LIVE_STATUSES),
+                status="stopped",
+                status_reason=reason,
+                expires_at=None,
+            )
+            for order in self.ledger.orders_for_trigger(ident):
+                if order["status"] == "awaiting_approval":
+                    with contextlib.suppress(TradingError):
+                        await self.reject(str(order["order_id"]), "trigger failed its seal")
+            if updated is not None:
+                await self._trigger_changed(updated, bracket=False)
+        if row is not None and row.get("group_id"):
+            await self._bracket_announce(str(row["group_id"]))
 
     async def _trigger_fired(self, fire_id: int) -> dict[str, Any] | None:
         """Announce a fire once, as it happened (alert sent, order placed, skipped, failed)."""
@@ -7872,7 +8098,13 @@ class TradingService:
                 row.update(self._trigger_arming(direction, current, now))
                 row["approved_at"] = now
             legs.append(row)
-        self.ledger.insert_triggers(legs)
+        if not agent:
+            self._require_seal("create a bracket")
+        with self.ledger.transaction():
+            self.ledger.insert_triggers(legs)
+            if not agent:
+                for row in legs:
+                    self._seal_or_raise("trigger", str(row["trigger_id"]), "create a bracket")
         log.info("trading.bracket_created", bracket=group_id, kind=kind_, status=legs[0]["status"])
         return await self._bracket_answer(group_id)
 
@@ -7917,26 +8149,30 @@ class TradingService:
             for row in (tp, sl):
                 await self._trigger_expire(row, now, "no decision within 24 h")
             raise self._bracket_bad_state(bracket_id, "approve")
+        self._require_seal("approve a bracket")
         chain = CHAINS[int(tp["chain_id"])]
         current = await self._dca_price(chain, str(tp["token"]))
-        self._bracket_move(
-            bracket_id,
-            "approve",
-            [
-                (
-                    row,
-                    "awaiting_approval",
-                    {
-                        "status_reason": None,
-                        "approved_at": now,
-                        "expires_at": None,
-                        **self._trigger_arming(str(row["direction"]), current, now),
-                    },
-                )
-                for row in (tp, sl)
-            ],
-            now,
-        )
+        with self.ledger.transaction():
+            self._bracket_move(
+                bracket_id,
+                "approve",
+                [
+                    (
+                        row,
+                        "awaiting_approval",
+                        {
+                            "status_reason": None,
+                            "approved_at": now,
+                            "expires_at": None,
+                            **self._trigger_arming(str(row["direction"]), current, now),
+                        },
+                    )
+                    for row in (tp, sl)
+                ],
+                now,
+            )
+            for row in (tp, sl):
+                self._seal_or_raise("trigger", str(row["trigger_id"]), "approve a bracket")
         return await self._bracket_answer(bracket_id)
 
     async def bracket_reject(self, bracket_id: str, reason: str | None = None) -> dict[str, Any]:

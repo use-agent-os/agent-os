@@ -115,6 +115,13 @@ create ──(operator)──────────────► active ─�
   recomputed from the anchor, so at most one buy fires when it is due.
 - Nothing is ever deleted. `list` shows live mandates
   (`awaiting_approval`, `active`, `paused`) unless `--all`.
+- **Sealed terms.** Approving a mandate (or creating one as the operator)
+  seals its terms (wallet, chain, tokens, `usdPerRun`, `capUsd`, `runsMax`,
+  `everySeconds`, `maxPriceUsd`, slippage) with the vault key, so it needs
+  an unlocked vault; `update` re-seals. Every run checks the seal first: a
+  mandate whose row was changed outside the engine is `stopped`
+  (`"integrity check failed (…)"`) without buying, and the gateway
+  broadcasts `trading.integrity.alert`.
 
 ## Ledger (schema v7)
 
@@ -198,8 +205,8 @@ Errors are `TradingError` codes: `trading.dca.not_found`,
 `trading.dca.bad_state` (e.g. approve on an active one, resume on a stopped
 one), `trading.dca.invalid` (usd ≤ 0 or under $0.01, cap < usd, every < 60 s, unknown
 quote on Robinhood Chain without `--quote`), `trading.operator_required`
-(from the RPC layer), plus the usual `trading.disabled`, `wallet.locked`,
-`trading.unsupported_chain`, `trading.token_not_found` (unknown symbol;
+(from the RPC layer), `trading.integrity` (the mandate failed its seal), plus
+the usual `trading.disabled`, `wallet.locked`, `trading.unsupported_chain`, `trading.token_not_found` (unknown symbol;
 an ambiguous one stays `trading.invalid`). At create, `slippagePct` may
 not exceed the agent slippage ceiling and the wallet may not be `all`.
 

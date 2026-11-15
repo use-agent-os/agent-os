@@ -212,3 +212,50 @@ class TestKeystoreImportBounds:
             vault.import_keystore("evil", json.dumps(hostile), "pw")
         with pytest.raises(ValueError, match="no crypto"):
             vault.import_keystore("evil", json.dumps({"version": 3}), "pw")
+
+
+class TestLedgerSealKey:
+    """The ledger seal key: as protected as the wallet keys, stable for the vault's life."""
+
+    def test_only_in_memory_while_unlocked_and_stable(self, vault_root: Path) -> None:
+        vault = Vault(vault_root, **FAST_KDF)
+        vault.setup(PASSWORD, "manual")
+        key = vault.ledger_seal_key()
+        assert key is not None and len(key) == 32
+        assert vault.take_new_seal() is False  # a new vault has nothing to adopt
+        assert key.hex() not in vault.index_path.read_text(encoding="utf-8")
+        vault.lock()
+        assert vault.ledger_seal_key() is None
+        vault.unlock(PASSWORD)
+        assert vault.ledger_seal_key() == key
+        vault.change_password(PASSWORD, "another long password")
+        assert vault.ledger_seal_key() == key
+        restarted = Vault(vault_root, **FAST_KDF)
+        assert restarted.ledger_seal_key() is None
+        restarted.unlock("another long password")
+        assert restarted.ledger_seal_key() == key
+
+    def test_a_vault_from_before_seals_gets_one_at_its_next_unlock(self, vault_root: Path) -> None:
+        Vault(vault_root, **FAST_KDF).setup(PASSWORD, "auto")
+        index = json.loads((vault_root / "index.json").read_text(encoding="utf-8"))
+        index.pop("ledger_seal")
+        (vault_root / "index.json").write_text(json.dumps(index), encoding="utf-8")
+        old = Vault(vault_root, **FAST_KDF)
+        assert old.try_auto_unlock() is True
+        assert old.ledger_seal_key() is not None
+        assert old.take_new_seal() is True and old.take_new_seal() is False
+        again = Vault(vault_root, **FAST_KDF)
+        again.unlock(PASSWORD)
+        assert again.ledger_seal_key() == old.ledger_seal_key()
+        assert again.take_new_seal() is False
+
+    def test_a_removed_and_reimported_key_is_another_incarnation(self, vault: Vault) -> None:
+        vault.setup(PASSWORD, "auto")
+        record = vault.import_private_key("A", "0x" + "4c" * 32)
+        first = vault.incarnation(record.address)
+        assert first is not None
+        vault.remove(record.address, PASSWORD)
+        assert vault.incarnation(record.address) is None
+        again = vault.import_private_key("A again", "0x" + "4c" * 32)
+        assert again.address == record.address
+        assert vault.incarnation(again.address) not in (None, first)

@@ -196,6 +196,21 @@ Trading** pane has a *Test key* button (`trading.probe`).
 - Export (keystore or raw private key) and wallet removal always ask for
   the vault password, whatever the mode. Private keys never appear in logs,
   RPC responses (other than `wallet.export`), or the ledger.
+- **Ledger seals.** The engine does not sign what it merely reads back from
+  `state/trading.sqlite`. Every order is sealed when the engine writes it,
+  and every mandate, trigger and bracket when you approve it (or create it
+  yourself): an HMAC over the terms that decide what is signed (wallet,
+  chain, tokens, amounts, recipient, slippage and floors, the bridge or LP
+  plan, batch, expiry; for a mandate or trigger its size, price condition
+  and validity), bound to the wallet's incarnation. The key is derived from
+  the vault's password-encrypted secret and exists only in gateway memory
+  while the vault is unlocked, so approving or creating a mandate, trigger
+  or bracket needs an unlocked vault. The seal is checked before every
+  signature and before every DCA buy or trigger fire; a row changed outside
+  the engine is refused (`trading.integrity`; a mandate or trigger is
+  stopped), and the gateway broadcasts `trading.integrity.alert`. Seals
+  survive restarts and password changes; the first unlock after the upgrade
+  that introduced them seals what was already live.
 - Before signing, the engine checks balances, simulates the transaction
   with `eth_call`, and validates what the provider returned: an approval
   must be a plain `approve(spender, amount)` on the token being sold, to a
@@ -206,7 +221,11 @@ Trading** pane has a *Test key* button (`trading.probe`).
   token itself. Anything else is refused unsigned.
 - `~/.agentos/wallets/` (and any `unlock.key`) is a sandbox *sensitive
   path*: the agent's file tools cannot read it. The agent trades through
-  the gateway, which is the only thing that needs the keys.
+  the gateway, which is the only thing that needs the keys. So is the
+  ledger, `state/trading.sqlite` with its `-wal`/`-shm`/`-journal` files
+  (file mode `0600`), any copy named `trading.sqlite`, and the pre-upgrade
+  snapshots under `state/snapshots`: the agent reads its orders and history
+  through the gateway, never the file.
 - Token metadata from third-party APIs is data, not instructions: the skill
   tells the agent to ignore anything in a token name that reads like a
   command, and genuine Robinhood Stock Tokens are preferred over lookalikes
@@ -359,7 +378,9 @@ the housekeeping loop picks it up and keeps waiting for the receipt
 within the wait window fails the order with `trading.tx_pending` (retry
 once it lands). Every change is broadcast on the gateway WebSocket
 (`trading.changed`, `trading.approval.requested`,
-`trading.order.finished`), so the desktop never polls for it.
+`trading.order.finished`), so the desktop never polls for it. A row that
+failed its seal is announced as `trading.integrity.alert` (`kind` order /
+mandate / trigger, `id`, `verdict` missing / mismatch, `wallet`, `message`).
 
 ## How the agent uses it
 

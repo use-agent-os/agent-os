@@ -12,10 +12,11 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import stat
 import threading
 import time
 import uuid
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ from typing import Any
 import structlog
 
 from agentos.paths import state_dir
+from agentos.trading import integrity
 from agentos.trading.chains import NATIVE_ADDRESS
 from agentos.trading.pnl import Lot
 
@@ -431,6 +433,16 @@ CREATE TABLE IF NOT EXISTS rebuild_logs (
     amount TEXT NOT NULL,
     PRIMARY KEY (chain_id, wallet, tx_hash, log_index)
 );
+
+-- The engine's seal over the money terms of an order, mandate or trigger
+-- (agentos.trading.integrity). A row without one, or whose seal does not
+-- match, is never signed for.
+CREATE TABLE IF NOT EXISTS seals (
+    kind TEXT NOT NULL,
+    id TEXT NOT NULL,
+    seal TEXT NOT NULL,
+    PRIMARY KEY (kind, id)
+);
 """
 
 # One opening balance per position: the amount the chain sweep cannot explain.
@@ -504,6 +516,24 @@ class Position:
     cost_usd: float
 
 
+#: Files SQLite keeps beside the ledger: owner-only like the database itself.
+LEDGER_SIDECARS = ("-wal", "-shm", "-journal")
+
+
+def _owner_only(path: Path) -> None:
+    """``0600`` on the ledger and its sidecars: other local users read neither.
+
+    Defence in depth only: the agent runs as the same user, which is what the
+    sensitive-path floor and the row seals (``agentos.trading.integrity``) are for.
+    """
+    for candidate in (path, *(path.with_name(path.name + s) for s in LEDGER_SIDECARS)):
+        try:
+            if candidate.exists():
+                os.chmod(candidate, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:  # pragma: no cover - permissions are best effort on odd filesystems
+            pass
+
+
 class Ledger:
     def __init__(self, path: str | Path | None = None) -> None:
         target = Path(path) if path is not None else default_ledger_path()
@@ -520,7 +550,19 @@ class Ledger:
         self._conn.execute("PRAGMA synchronous=NORMAL;")
         self._conn.execute("PRAGMA foreign_keys=ON;")
         self._txn_depth = 0
+        #: Seals rows (``agentos.trading.integrity``); the service attaches it.
+        #: Without one nothing is sealed and nothing is checked here.
+        self.sealer: integrity.Sealer | None = None
+        # Seals written inside the open transaction, told to the sealer only
+        # once it commits (a rolled-back seal was never the engine's).
+        self._seal_log: list[tuple[str, str, str | None]] = []
+        # The highest confirmed spend this process has seen per (wallet, day):
+        # a ``daily_spend`` row deleted or zeroed behind its back does not
+        # hand an agent a fresh cap while it runs.
+        self._spend_floor: dict[tuple[str, str], float] = {}
         self._init_schema()
+        if str(target) != ":memory:":
+            _owner_only(target)
 
     def _init_schema(self) -> None:
         with self._lock:
@@ -821,11 +863,13 @@ class Ledger:
                 self._txn_depth -= 1
                 if self._txn_depth == 0:
                     self._conn.rollback()
+                    self._seal_log.clear()
                 raise
             else:
                 self._txn_depth -= 1
                 if self._txn_depth == 0:
                     self._commit()
+                    self._flush_seal_log()
 
     def close(self) -> None:
         with self._lock:
@@ -880,7 +924,127 @@ class Ledger:
             ):
                 column = "address" if table == "wallets" else "wallet"
                 self._conn.execute(f"DELETE FROM {table} WHERE {column} = ?", (key,))  # noqa: S608
+            for day_key in [k for k in self._spend_floor if k[0] == key]:
+                del self._spend_floor[day_key]
             self._commit()
+
+    # ── integrity seals (agentos.trading.integrity) ────────────────────
+
+    def _row_of(self, kind: str, ident: str) -> dict[str, Any] | None:
+        table, column = integrity.TABLES[kind]
+        with self._lock:
+            return _row(
+                self._conn.execute(
+                    f"SELECT * FROM {table} WHERE {column} = ?",  # noqa: S608
+                    (ident,),
+                ).fetchone()
+            )
+
+    def sealed_row(self, kind: str, ident: str) -> tuple[dict[str, Any] | None, str | None]:
+        """A row and its seal, read in one statement (no write can land between the two)."""
+        table, column = integrity.TABLES[kind]
+        with self._lock:
+            found = self._conn.execute(
+                f"SELECT t.*, s.seal AS seal__ FROM {table} t "  # noqa: S608
+                f"LEFT JOIN seals s ON s.kind = ? AND s.id = t.{column} WHERE t.{column} = ?",
+                (kind, ident),
+            ).fetchone()
+        if found is None:
+            return None, None
+        row = dict(found)
+        seal = row.pop("seal__", None)
+        return row, (str(seal) if seal is not None else None)
+
+    def _write_seal(self, kind: str, ident: str, seal: str | None) -> None:
+        if seal is None:
+            self._conn.execute("DELETE FROM seals WHERE kind = ? AND id = ?", (kind, ident))
+        else:
+            self._conn.execute(
+                "INSERT INTO seals (kind, id, seal) VALUES (?, ?, ?) "
+                "ON CONFLICT(kind, id) DO UPDATE SET seal = excluded.seal",
+                (kind, ident, seal),
+            )
+        self._seal_log.append((kind, ident, seal))
+        if self._txn_depth == 0:
+            self._flush_seal_log()
+
+    def _flush_seal_log(self) -> None:
+        log_ = self._seal_log
+        self._seal_log = []
+        if self.sealer is None:
+            return
+        for kind, ident, seal in log_:
+            self.sealer.remember(kind, ident, seal)
+
+    def seal_row(self, kind: str, ident: str) -> bool:
+        """Seal a row as it stands: an operator's approval, or the one-time adoption.
+
+        ``False`` (nothing written) without a sealer, a key or the row.
+        """
+        sealer = self.sealer
+        if sealer is None:
+            return False
+        with self.transaction():
+            row = self._row_of(kind, ident)
+            seal = sealer.seal(kind, row) if row is not None else None
+            if seal is None:
+                return False
+            self._write_seal(kind, ident, seal)
+        return True
+
+    def unsealed_ids(self, kind: str, statuses: Iterable[str]) -> list[str]:
+        """Ids of ``kind`` rows in ``statuses`` with no seal at all."""
+        table, column = integrity.TABLES[kind]
+        wanted = list(statuses)
+        if not wanted:
+            return []
+        marks = ", ".join("?" for _ in wanted)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT {column} AS id FROM {table} t WHERE status IN ({marks}) "  # noqa: S608
+                f"AND NOT EXISTS (SELECT 1 FROM seals s WHERE s.kind = ? AND s.id = t.{column})",
+                (*wanted, kind),
+            ).fetchall()
+        return [str(r["id"]) for r in rows]
+
+    def _reseal(
+        self, kind: str, ident: str, before: dict[str, Any], before_seal: str | None
+    ) -> None:
+        """After an engine write to a row's terms: carry its seal over, never launder one.
+
+        The new seal is written only if the old one still verified, so an
+        out-of-band edit made before this write stays a mismatch and is never
+        signed. A row without a seal stays without one (a proposal, until it is
+        approved). With the vault locked the new terms cannot be vouched for:
+        the seal is dropped and nothing signs the row until it is sealed again.
+        """
+        sealer = self.sealer
+        if sealer is None or before_seal is None:
+            return
+        verdict = sealer.check(kind, before, before_seal)
+        if verdict == "ok":
+            after = self._row_of(kind, ident)
+            self._write_seal(kind, ident, sealer.seal(kind, after) if after is not None else None)
+        elif verdict is None:
+            self._write_seal(kind, ident, None)
+        else:
+            log.warning("trading.ledger_seal_mismatch", kind=kind, id=ident, verdict=verdict)
+
+    def _sealed_update(
+        self, kind: str, ident: str, fields: dict[str, Any], run: Callable[[], int]
+    ) -> int:
+        """Run an UPDATE of ``ident``; re-seal it when the write touched its terms."""
+        if self.sealer is None or not integrity.terms_touched(kind, fields):
+            with self._lock:
+                count = run()
+                self._commit()
+            return count
+        with self.transaction():
+            before, before_seal = self.sealed_row(kind, ident)
+            count = run()
+            if count and before is not None:
+                self._reseal(kind, ident, before, before_seal)
+        return count
 
     # ── tokens ─────────────────────────────────────────────────────────
 
@@ -920,7 +1084,33 @@ class Ledger:
                     time.time(),
                 ),
             )
+            if self.sealer is not None:
+                # Every sealed column was just overwritten by the engine: the
+                # row's decimals are the ones it fetched, whatever was there.
+                ident = integrity.token_id(chain_id, address)
+                stored = self.get_token(chain_id, address)
+                seal = self.sealer.seal(integrity.TOKEN_KIND, stored) if stored else None
+                self._write_seal(integrity.TOKEN_KIND, ident, seal)
             self._commit()
+
+    def sealed_token(self, chain_id: int, address: str) -> tuple[dict[str, Any] | None, str | None]:
+        """A token row and its seal, read in one statement."""
+        with self._lock:
+            found = self._conn.execute(
+                "SELECT t.*, s.seal AS seal__ FROM tokens t LEFT JOIN seals s "
+                "ON s.kind = ? AND s.id = ? WHERE t.chain_id = ? AND t.address = ?",
+                (
+                    integrity.TOKEN_KIND,
+                    integrity.token_id(chain_id, address),
+                    int(chain_id),
+                    address.lower(),
+                ),
+            ).fetchone()
+        if found is None:
+            return None, None
+        row = dict(found)
+        seal = row.pop("seal__", None)
+        return row, (str(seal) if seal is not None else None)
 
     def get_token(self, chain_id: int, address: str) -> dict[str, Any] | None:
         with self._lock:
@@ -1467,6 +1657,9 @@ class Ledger:
         the order that run or fire creates adopts it here, so the link between
         the two survives a crash between the insert and the pipeline's first
         answer.
+
+        With a sealer attached the row is sealed in the same write
+        (``agentos.trading.integrity``): only the engine creates orders.
         """
         columns = list(order.keys())
         with self.transaction():
@@ -1475,6 +1668,11 @@ class Ledger:
                 f"VALUES ({', '.join('?' for _ in columns)})",
                 [order[c] for c in columns],
             )
+            if self.sealer is not None:
+                stored = self._row_of("order", str(order["order_id"]))
+                seal = self.sealer.seal("order", stored) if stored is not None else None
+                if seal is not None:
+                    self._write_seal("order", str(order["order_id"]), seal)
             if order.get("mandate_id"):
                 self._conn.execute(
                     "UPDATE mandate_runs SET order_id = ? WHERE run_id = ("
@@ -1509,14 +1707,19 @@ class Ledger:
         if expect_status is not None:
             where += " AND status = ?"
             params.append(expect_status)
-        with self._lock:
-            cursor = self._conn.execute(
-                f"UPDATE orders SET {sets} WHERE {where}",  # noqa: S608
-                params,
-            )
-            self._commit()
-            if expect_status is not None and cursor.rowcount == 0:
-                return None
+        count = self._sealed_update(
+            "order",
+            order_id,
+            fields,
+            lambda: (
+                self._conn.execute(
+                    f"UPDATE orders SET {sets} WHERE {where}",  # noqa: S608
+                    params,
+                ).rowcount
+            ),
+        )
+        if expect_status is not None and count == 0:
+            return None
         return self.get_order(order_id)
 
     def settle_order(
@@ -1746,14 +1949,19 @@ class Ledger:
             where += " AND next_run_at IS ?"
             params.append(expect_next_run_at)
             guarded = True
-        with self._lock:
-            cursor = self._conn.execute(
-                f"UPDATE mandates SET {sets} WHERE {where}",  # noqa: S608
-                params,
-            )
-            self._commit()
-            if cursor.rowcount == 0 and guarded:
-                return None
+        count = self._sealed_update(
+            "mandate",
+            mandate_id,
+            fields,
+            lambda: (
+                self._conn.execute(
+                    f"UPDATE mandates SET {sets} WHERE {where}",  # noqa: S608
+                    params,
+                ).rowcount
+            ),
+        )
+        if count == 0 and guarded:
+            return None
         return self.get_mandate(mandate_id)
 
     def add_mandate_counts(self, mandate_id: str, *, now: float, **deltas: int) -> None:
@@ -2039,14 +2247,19 @@ class Ledger:
             wanted = [expect_status] if isinstance(expect_status, str) else list(expect_status)
             where += f" AND status IN ({', '.join('?' for _ in wanted)})"
             params.extend(wanted)
-        with self._lock:
-            cursor = self._conn.execute(
-                f"UPDATE triggers SET {sets} WHERE {where}",  # noqa: S608
-                params,
-            )
-            self._commit()
-            if cursor.rowcount == 0 and expect_status is not None:
-                return None
+        count = self._sealed_update(
+            "trigger",
+            trigger_id,
+            fields,
+            lambda: (
+                self._conn.execute(
+                    f"UPDATE triggers SET {sets} WHERE {where}",  # noqa: S608
+                    params,
+                ).rowcount
+            ),
+        )
+        if count == 0 and expect_status is not None:
+            return None
         return self.get_trigger(trigger_id)
 
     def add_trigger_counts(self, trigger_id: str, *, now: float, **deltas: int) -> None:
@@ -2159,22 +2372,38 @@ class Ledger:
 
     def add_daily_spend(self, wallet: str, usd: float, day: str | None = None) -> None:
         day = day or local_day()
+        key = (wallet.lower(), day)
         with self._lock:
+            before = self._stored_spend(*key)
             self._conn.execute(
                 "INSERT INTO daily_spend (wallet, day, spent_usd) VALUES (?, ?, ?) "
                 "ON CONFLICT(wallet, day) DO UPDATE SET spent_usd = spent_usd + excluded.spent_usd",
-                (wallet.lower(), day, float(usd)),
+                (key[0], day, float(usd)),
             )
             self._commit()
+            floor = max(self._spend_floor.get(key, before), before)
+            self._spend_floor[key] = floor + float(usd)
+
+    def _stored_spend(self, wallet: str, day: str) -> float:
+        row = self._conn.execute(
+            "SELECT spent_usd FROM daily_spend WHERE wallet = ? AND day = ?", (wallet, day)
+        ).fetchone()
+        return float(row["spent_usd"]) if row else 0.0
 
     def spent_today(self, wallet: str, day: str | None = None) -> float:
+        """Confirmed agent spend of ``wallet`` on ``day``, never below what this process saw.
+
+        The row is the record; the in-memory high-water mark is what keeps a
+        row deleted or zeroed outside the engine from re-opening the cap while
+        the gateway runs (a restart starts again from the row).
+        """
         day = day or local_day()
+        key = (wallet.lower(), day)
         with self._lock:
-            row = self._conn.execute(
-                "SELECT spent_usd FROM daily_spend WHERE wallet = ? AND day = ?",
-                (wallet.lower(), day),
-            ).fetchone()
-        return float(row["spent_usd"]) if row else 0.0
+            stored = self._stored_spend(*key)
+            floor = max(self._spend_floor.get(key, stored), stored)
+            self._spend_floor[key] = floor
+        return floor
 
     # ── allowances ─────────────────────────────────────────────────────
 
