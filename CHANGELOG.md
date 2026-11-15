@@ -6,15 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### Fixed
-- Desktop: "Update all" in Settings › About no longer asks for a second
-  "Update" on the Engine card. It still runs the engine preflight first and
-  goes ahead on its own when nothing would be interrupted; running sessions,
-  jobs due soon, a pending approval or a failed check still stop at the
-  preflight for you to decide.
-
-## [2026.11.15] - 2026-11-15
-
 ### Security
 - Output redaction now masks wallet material it used to pass to the model and
   transcript verbatim (WAL-09): a secret the gateway holds — a skill hot-wallet
@@ -162,12 +153,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   queue database and the new mandate store (`<state>/skill-signing/`) are on
   the sensitive-path floor. See
   [Skill signing prompts](docs/approvals-and-permissions.md#skill-signing-prompts).
+  (WAL-10)
 - The GMGN skills install `gmgn-cli@1.7.1` instead of whatever `latest` is, and
   AgentOS refuses `GMGN_PRIVATE_KEY` to any other installed version. Their
   SKILL.md files no longer claim a CLI confirmation prompt
   (`/dev/tty`, `GMGN_ALLOW_AUTOMATED_TRADES` + `--yes`): 1.7.1 has none, and
   the approval above is the gate. Run
   `npm install -g --ignore-scripts gmgn-cli@1.7.1` if a newer one is installed.
+  (WAL-04)
 - Data a command prints can no longer publish an inline artifact.
   `exec_command` used to auto-publish any stdout line shaped like
   `publish_artifact path=… mime=application/vnd.agentos.…`, so an ERC-20
@@ -183,6 +176,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   characters (newlines, ESC, BIDI controls) in on-chain strings, token
   symbols and names are capped at 64 characters, and invalid UTF-8 no longer
   aborts a read. See [Inline artifacts](docs/artifacts-and-media.md).
+  (WAL-20)
 - `senior-unilp-manager` no longer prints a malformed `UNIV4_LP_PRIVATE_KEY`
   (or the variable `--signer-env` names) in its error message. A key of the
   right length with one non-hex character used to reach `int(…, 16)`, whose
@@ -190,7 +184,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   and the ratchet cron log. The key is now rejected by name only, and the
   shared key parser in both hot-wallet skills (`unilp`, `poolsfun`) refuses
   non-hex input — including whitespace and `_`, which `int()` used to accept
-  as a silently different key — before `int()` sees it.
+  as a silently different key — before `int()` sees it. (WAL-21)
 - **Desktop: Touch ID now stands in front of every click that trades or may
   spend (WAL-16).** With Settings › Security on, a trigger's **Fire now** and
   a DCA's **Buy now** (desk and chat cards alike) went out with no
@@ -208,6 +202,125 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (only the key's SHA-256 digest crosses IPC), survives closing the sheet or
   reloading the window, runs at once when the app quits, and still leaves
   alone anything copied over the key.
+- Trading: the engine no longer signs whatever the ledger file says. An
+  agent's shell could rewrite a parked order in `state/trading.sqlite` so
+  that your approval of a small send paid its own address. The ledger, its
+  `-wal`/`-shm`/`-journal` files, any copy named `trading.sqlite` and the
+  pre-upgrade snapshots (`state/snapshots`) are now sensitive paths, the
+  file is `0600`, and every order (and every DCA mandate, trigger and
+  bracket you approve) is sealed with a key derived from the vault secret
+  that exists only in gateway memory while the vault is unlocked. Before
+  signing, the engine checks the order's wallet, chain, tokens, amounts,
+  recipient, floors, plan and expiry against the seal; before a DCA buy or a
+  trigger fire, the mandate's or trigger's terms. A row edited outside the
+  engine is refused, never signed: the order fails `trading.integrity`, the
+  mandate or trigger stops (`integrity check failed`), and the gateway
+  broadcasts `trading.integrity.alert` and logs
+  `trading.integrity_violation`. A `daily_spend` row deleted behind the
+  engine's back no longer re-opens the daily cap while the gateway runs.
+  Nothing to migrate: the first unlock after upgrading seals what is
+  already live (parked orders, active mandates, armed triggers). Creating
+  or approving a mandate, trigger or bracket now needs an unlocked vault
+  (`wallet.locked` otherwise), as signing always did. The seal is checked
+  first and the approval binding (below) second, at execution, right before
+  a transaction is signed and right before a permit is signed; approving a
+  multisend with one edited leg fails every leg before any is signed.
+  (WAL-05)
+- Trading: `agentos wallet lock` (`wallet.lock`) now holds until you unlock
+  with the password, in `auto` mode too and across gateway restarts. Before,
+  the next status read or agent swap re-read `unlock.key` and undid it. While
+  locked nothing signs: agent swaps fail `wallet.locked`, due DCA buys and
+  armed triggers wait (no failed runs, no auto-pause; alerts keep ringing),
+  approving an order is refused with the order left parked, and buy-now /
+  fire-now are refused. `wallet.status` carries `lockedByOperator`. The
+  latch wins over a sealed `unlock.key` and over `[trading] unlock_mode =
+  auto`; `wallet unlock`, `wallet mode` and a password change (each with the
+  password) lift it. (WAL-22)
+- Trading: removing a wallet ends its automation. Every DCA mandate,
+  trigger and bracket bound to it is stopped (`wallet removed`) and what it
+  parked is rejected, so importing the same key again revives nothing; a
+  re-import is a new incarnation of the wallet, which no old seal matches.
+  A mandate's spent budget no longer drops when its orders are deleted.
+  (WAL-26)
+- Trading: an agent swap that the daily cap refuses (including
+  `daily_cap_usd = 0`) is rejected even when the caller declares an
+  `expectedOutRaw`. Before, a client quote a little above the fresh one
+  parked the over-cap swap for approval instead, so an approval could run it
+  past the cap. A swap parked for a stale client quote now also names the
+  threshold or impact reason it would have waited for anyway. (WAL-23)
+- Trading: an agent swap whose sell side has no usable feed price now waits
+  for your approval on every provider, and shows its value as unknown
+  rather than $0. Before, on the Uniswap route, the order was valued by the
+  token it buys alone (a price the caller can choose), and Uniswap's own
+  `priceImpact` was trusted, so the whole balance of an unpriced holding
+  could be swapped with no approval and without touching the daily cap. A
+  provider's price impact is now cross-checked against the engine's feed
+  (the larger counts) and is "unknown" — so the order parks — when the
+  feed cannot price a side. A zero or non-finite feed price counts as no
+  price. Bridges are sized from the engine's feed on either chain, never
+  from Relay's own `amountUsd`. Expect more agent swaps on Robinhood Chain
+  (no USD feed) to wait for you. (WAL-06)
+- Trading: the vault key no longer signs a Uniswap quote's `permitData`
+  blind. Before, any EIP-712 typed data in the Trading API response was
+  signed and sent back to `/swap`, so a hostile or tampered response could
+  obtain an EIP-3009 transfer of the whole USDC balance, an unlimited
+  Permit2 allowance to any spender, or a permit on another chain. Now only
+  a Permit2 `PermitSingle`/`PermitTransferFrom` bound to the order (its
+  chain, the canonical Permit2, its sell token, at most its amount, a pinned
+  Universal Router, deadlines under an hour) is signed, rebuilt from the
+  checked fields; anything else fails the order with
+  `trading.permit_refused` and nothing is sent. The default no-Permit2 flow
+  is unchanged. (WAL-07)
+- Trading: an approval binds to exactly what it releases. Approving one leg
+  of an agent multisend used to sign every leg of the batch, while the
+  request and the single-order views named only that leg. Every awaiting
+  order now carries `approval` (what one approve releases: leg count,
+  totals, unpriced flag) and a digest of all its legs' terms;
+  `trading.orders.approve` takes it as `approvalDigest`. **A batch is
+  approved only with its digest**, which `trading.orders.batch` serves beside
+  every leg (`trading.approval_binding_required` otherwise); a stale digest
+  is refused with `trading.approval_changed`. A single order's digest is
+  optional and checked when given. After an approval the engine holds each
+  leg to its approved terms again where its transaction is built and
+  signed (a send or revoke to its exact `to`/`value`/`data`), so an order
+  changed between your approval and the signature fails instead of going
+  out. `agentos trade approve` and the desktop app send the digest; a
+  script that approves a multisend with a bare `orderId` must read the
+  batch first. (WAL-12)
+- CLI: `agentos trade approve` is an honest approval surface. It reads the
+  order first and shows everything the approval releases — both token
+  contracts in full with a verified/UNVERIFIED mark, the full recipient and
+  wallet, the chain id, slippage, provider and value, and for a multisend
+  leg every leg of the batch with the total (and a warning when it is
+  unpriced, so the daily cap does not bound it) — then asks before it acts.
+  **`--yes` skips the question and is now required with `--json`** (without
+  it: `CONFIRMATION_REQUIRED`, exit 2), so scripts that approve with
+  `--json` need `--yes`. `trade dca|trigger|bracket approve` likewise show
+  the automation and ask first (`--yes`). `trade orders` names a parked
+  order's recipient and wallet in full and marks unverified tokens;
+  `trade order` prints token contracts and, for a parked multisend leg, every
+  leg. Mandate, trigger and bracket token payloads carry `verified`.
+  (WAL-08)
+- CLI and trading: control characters from contracts, agents and providers
+  no longer reach your terminal. `agentos trade` and `agentos wallet` print
+  every C0/C1 control, ANSI escape, bidi override and zero-width character
+  in what they show as a visible escape (`\x1b`, `\u202e`) — table cells,
+  panels, approval prompts and server error messages alike; `--json` output
+  `\u`-escapes C1, bidi and invisible characters (same data once parsed).
+  The engine stores token symbols and names without such characters
+  (existing rows are cleaned when read), and a failed swap records `0`
+  instead of the caller's unparsed `amountIn`. (WAL-13)
+
+### Fixed
+- Desktop: "Update all" in Settings › About no longer asks for a second
+  "Update" on the Engine card. It still runs the engine preflight first and
+  goes ahead on its own when nothing would be interrupted; running sessions,
+  jobs due soon, a pending approval or a failed check still stop at the
+  preflight for you to decide.
+
+## [2026.11.15] - 2026-11-15
+
+### Security
 - **Breaking default — Discord and Slack channels now refuse senders you have
   not admitted.** Before, any Discord user who could DM or @mention the bot,
   and any Slack workspace member or guest, started an agent turn with the
@@ -240,38 +353,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   wherever `AGENTOS_STATE_DIR` puts them (the container image keeps them in
   `/var/lib/agentos`), and the shell check reads globs, variables, `cd` and
   model-supplied `env` values the way the shell will.
-- Trading: the engine no longer signs whatever the ledger file says. An
-  agent's shell could rewrite a parked order in `state/trading.sqlite` so
-  that your approval of a small send paid its own address. The ledger, its
-  `-wal`/`-shm`/`-journal` files, any copy named `trading.sqlite` and the
-  pre-upgrade snapshots (`state/snapshots`) are now sensitive paths, the
-  file is `0600`, and every order (and every DCA mandate, trigger and
-  bracket you approve) is sealed with a key derived from the vault secret
-  that exists only in gateway memory while the vault is unlocked. Before
-  signing, the engine checks the order's wallet, chain, tokens, amounts,
-  recipient, floors, plan and expiry against the seal; before a DCA buy or a
-  trigger fire, the mandate's or trigger's terms. A row edited outside the
-  engine is refused, never signed: the order fails `trading.integrity`, the
-  mandate or trigger stops (`integrity check failed`), and the gateway
-  broadcasts `trading.integrity.alert` and logs
-  `trading.integrity_violation`. A `daily_spend` row deleted behind the
-  engine's back no longer re-opens the daily cap while the gateway runs.
-  Nothing to migrate: the first unlock after upgrading seals what is
-  already live (parked orders, active mandates, armed triggers). Creating
-  or approving a mandate, trigger or bracket now needs an unlocked vault
-  (`wallet.locked` otherwise), as signing always did.
-- Trading: `agentos wallet lock` (`wallet.lock`) now holds until you unlock
-  with the password, in `auto` mode too and across gateway restarts. Before,
-  the next status read or agent swap re-read `unlock.key` and undid it. While
-  locked nothing signs: agent swaps fail `wallet.locked`, due DCA buys and
-  armed triggers wait (no failed runs, no auto-pause; alerts keep ringing),
-  approving an order is refused with the order left parked, and buy-now /
-  fire-now are refused. `wallet.status` carries `lockedByOperator`.
-- Trading: removing a wallet ends its automation. Every DCA mandate,
-  trigger and bracket bound to it is stopped (`wallet removed`) and what it
-  parked is rejected, so importing the same key again revives nothing; a
-  re-import is a new incarnation of the wallet, which no old seal matches.
-  A mandate's spent budget no longer drops when its orders are deleted.
 - Approvals are yours alone: answering a prompt, changing the approval mode,
   forgetting remembered answers, `POST /api/elevated-mode`, an `elevated`
   hint on `chat.send` and approving a channel pairing are refused
@@ -374,74 +455,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `env`, `sudo`, `xargs`, …), or that do not parse always ask. `bash -lc
   '<command>'` is matched by its inner command. Docs:
   [ACP agents › Permission modes](docs/acp-agents.md#permission-modes).
-- Trading: an agent swap that the daily cap refuses (including
-  `daily_cap_usd = 0`) is rejected even when the caller declares an
-  `expectedOutRaw`. Before, a client quote a little above the fresh one
-  parked the over-cap swap for approval instead, so an approval could run it
-  past the cap. A swap parked for a stale client quote now also names the
-  threshold or impact reason it would have waited for anyway. (WAL-23)
-- Trading: an agent swap whose sell side has no usable feed price now waits
-  for your approval on every provider, and shows its value as unknown
-  rather than $0. Before, on the Uniswap route, the order was valued by the
-  token it buys alone (a price the caller can choose), and Uniswap's own
-  `priceImpact` was trusted, so the whole balance of an unpriced holding
-  could be swapped with no approval and without touching the daily cap. A
-  provider's price impact is now cross-checked against the engine's feed
-  (the larger counts) and is "unknown" — so the order parks — when the
-  feed cannot price a side. A zero or non-finite feed price counts as no
-  price. Bridges are sized from the engine's feed on either chain, never
-  from Relay's own `amountUsd`. Expect more agent swaps on Robinhood Chain
-  (no USD feed) to wait for you. (WAL-06)
-- Trading: the vault key no longer signs a Uniswap quote's `permitData`
-  blind. Before, any EIP-712 typed data in the Trading API response was
-  signed and sent back to `/swap`, so a hostile or tampered response could
-  obtain an EIP-3009 transfer of the whole USDC balance, an unlimited
-  Permit2 allowance to any spender, or a permit on another chain. Now only
-  a Permit2 `PermitSingle`/`PermitTransferFrom` bound to the order (its
-  chain, the canonical Permit2, its sell token, at most its amount, a pinned
-  Universal Router, deadlines under an hour) is signed, rebuilt from the
-  checked fields; anything else fails the order with
-  `trading.permit_refused` and nothing is sent. The default no-Permit2 flow
-  is unchanged. (WAL-07)
-- Trading: an approval binds to exactly what it releases. Approving one leg
-  of an agent multisend used to sign every leg of the batch, while the
-  request and the single-order views named only that leg. Every awaiting
-  order now carries `approval` (what one approve releases: leg count,
-  totals, unpriced flag) and a digest of all its legs' terms;
-  `trading.orders.approve` takes it as `approvalDigest`. **A batch is
-  approved only with its digest**, which `trading.orders.batch` serves beside
-  every leg (`trading.approval_binding_required` otherwise); a stale digest
-  is refused with `trading.approval_changed`. A single order's digest is
-  optional and checked when given. After an approval the engine holds each
-  leg to its approved terms again where its transaction is built and
-  signed (a send or revoke to its exact `to`/`value`/`data`), so an order
-  changed between your approval and the signature fails instead of going
-  out. `agentos trade approve` and the desktop app send the digest; a
-  script that approves a multisend with a bare `orderId` must read the
-  batch first. (WAL-12)
-- CLI: `agentos trade approve` is an honest approval surface. It reads the
-  order first and shows everything the approval releases — both token
-  contracts in full with a verified/UNVERIFIED mark, the full recipient and
-  wallet, the chain id, slippage, provider and value, and for a multisend
-  leg every leg of the batch with the total (and a warning when it is
-  unpriced, so the daily cap does not bound it) — then asks before it acts.
-  **`--yes` skips the question and is now required with `--json`** (without
-  it: `CONFIRMATION_REQUIRED`, exit 2), so scripts that approve with
-  `--json` need `--yes`. `trade dca|trigger|bracket approve` likewise show
-  the automation and ask first (`--yes`). `trade orders` names a parked
-  order's recipient and wallet in full and marks unverified tokens;
-  `trade order` prints token contracts and, for a parked multisend leg, every
-  leg. Mandate, trigger and bracket token payloads carry `verified`.
-  (WAL-08)
-- CLI and trading: control characters from contracts, agents and providers
-  no longer reach your terminal. `agentos trade` and `agentos wallet` print
-  every C0/C1 control, ANSI escape, bidi override and zero-width character
-  in what they show as a visible escape (`\x1b`, `\u202e`) — table cells,
-  panels, approval prompts and server error messages alike; `--json` output
-  `\u`-escapes C1, bidi and invisible characters (same data once parsed).
-  The engine stores token symbols and names without such characters
-  (existing rows are cleaned when read), and a failed swap records `0`
-  instead of the caller's unparsed `amountIn`. (WAL-13)
 
 ### Changed
 - Editing the config file by hand no longer applies the operator-only
