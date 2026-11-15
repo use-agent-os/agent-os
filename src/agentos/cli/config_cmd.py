@@ -128,7 +128,7 @@ def config_reload(
 
     The gateway applies most edits of its config file by itself, but never a
     change to an operator-only setting (trading limits, hooks, tool policy,
-    permissions, sandbox, auth, safety, workspace confinement, ACP
+    permissions, sandbox, auth, safety, workspace confinement, ACP and MCP
     launch settings, gateway_control, ...): an agent's shell could have
     written it. A restart does not apply one either; the gateway keeps running
     on the values you last approved. Run this from your own terminal after

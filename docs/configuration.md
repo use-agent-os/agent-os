@@ -959,6 +959,12 @@ oauth = true
 tool_timeout_seconds = 30
 ```
 
+`mcp` is an operator-only setting: a stdio server is a command the gateway
+itself runs, so an agent's connection cannot register or enable one through a
+config RPC, a file edit of `[mcp]` is held until `agentos config reload`, and
+`mcp.connect` / `mcp.disconnect` / `mcp.oauth.*` fail for an agent's connection
+with `mcp.operator_required`. Settings › MCP in the console works as before.
+
 Supported transports are `stdio`, `sse`, and `streamable_http`. The MCP SDK is
 included in the standard AgentOS installation, so Streamable HTTP and OAuth work
 without installing an additional package extra.
@@ -1698,7 +1704,7 @@ event listing `hot` and `restartRequired` paths. Restart to apply those.
 `tools` (including `tools.invoke`), `permissions`, `sandbox`, `auth`,
 `safety`, `workspace_dir`, `workspace_strict`, `acp.permission_mode`,
 `acp.non_interactive_permissions`, `acp.agents`, `acp.allowed_agents`,
-`acp.allowed_cwds`, `acp.install_missing_adapters`, `gateway_control`,
+`acp.allowed_cwds`, `acp.install_missing_adapters`, `gateway_control`, `mcp`,
 `skills.install_policy`, `browser.binary_path`, `browser.cdp_port`,
 `browser.attach_confirmed`, `browser.allow_unsafe_evaluate`, `cors`,
 `control_ui.allowed_origins`, `gateway.bind`, `gateway.public_origin`,

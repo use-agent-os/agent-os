@@ -2,7 +2,7 @@
 
 An edit of the config file that touches an operator-only setting
 (``agentos.config_roots``: the trading limits, hooks, the tool policy,
-``gateway_control``, ...) is *held* by the running gateway: on a
+``gateway_control``, MCP servers, ...) is *held* by the running gateway: on a
 host without the OS sandbox the file is a same-user write away for an agent's
 shell, so the watcher never makes such an edit live. A restart used to read
 the whole file as the operator's, which turned "held" into "applied at the

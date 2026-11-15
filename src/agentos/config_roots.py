@@ -11,7 +11,7 @@ import, so it stays free of imports of its own.
 
 A root belongs here when an agent setting it could raise its own limits or
 run code as the gateway: the trading guardrails and endpoints, commands the
-gateway itself runs (lifecycle hooks, ACP harness launch
+gateway itself runs (lifecycle hooks, MCP stdio servers, ACP harness launch
 overrides, the skill install policy command), who may restart the gateway,
 the tool policy, the default elevation, the sandbox, authentication, the
 prompt-injection guards, the workspace confinement, how ACP harness
@@ -46,6 +46,8 @@ OPERATOR_ONLY_CONFIG_ROOTS: tuple[str, ...] = (
     "acp.install_missing_adapters",
     # chat_restart lets an agent's connection restart the gateway.
     "gateway_control",
+    # Stdio servers are commands the gateway forks with its own environment.
+    "mcp",
     # A command the gateway runs on every hub skill install.
     "skills.install_policy",
     # The browser binary the gateway executes, and attaching to the user's
@@ -83,6 +85,7 @@ OPERATOR_ONLY_ENV_PREFIXES: tuple[str, ...] = (
     "AGENTOS_TRADING_",
     "AGENTOS_SANDBOX_",
     "AGENTOS_AUTH_",
+    "AGENTOS_MCP_",
     "AGENTOS_CORS_",
     "AGENTOS_CONTROL_UI_ALLOWED_ORIGINS",
     "AGENTOS_BROWSER_BINARY_PATH",

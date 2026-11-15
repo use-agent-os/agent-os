@@ -209,7 +209,7 @@ WRITE_DENYLIST: frozenset[str] = (
 # pydantic-settings reads ``AGENTOS_GATEWAY_<ROOT>`` (a JSON value) and
 # ``AGENTOS_GATEWAY_<ROOT>__<FIELD>``, and the sections that are settings
 # models of their own also read their own prefix (``AGENTOS_TRADING_``,
-# ``AGENTOS_SANDBOX_``, ``AGENTOS_AUTH_``, ...). A value
+# ``AGENTOS_SANDBOX_``, ``AGENTOS_AUTH_``, ``AGENTOS_MCP_``, ...). A value
 # written into ``.env`` here is the config at the next boot, so writing one is
 # changing the trading cap or the sandbox by another route; the config RPC
 # refuses an agent that, and so does this surface for everyone. Matched

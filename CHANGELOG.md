@@ -62,6 +62,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   directory the gateway starts in) can no longer set `PYTHON*`, the signer's
   crypto backends, TLS trust or any denylisted name; put those in
   `~/.agentos/.env` or the environment.
+- **Registering or launching an MCP server is the operator's action
+  (WAL-19).** A stdio MCP server is a command the gateway forks itself; `mcp`
+  is now an operator-only setting (an agent's connection cannot register or
+  enable one, a file edit of `[mcp]` is held, `AGENTOS_MCP_*` cannot be
+  written through `agentos env`), and `mcp.connect`, `mcp.disconnect` and
+  `mcp.oauth.*` fail for an agent's connection with `mcp.operator_required`.
+  Settings › MCP in the console works as before.
 - **Breaking default — Discord and Slack channels now refuse senders you have
   not admitted.** Before, any Discord user who could DM or @mention the bot,
   and any Slack workspace member or guest, started an agent turn with the
