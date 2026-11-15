@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- `senior-unilp-manager` no longer prints a malformed `UNIV4_LP_PRIVATE_KEY`
+  (or the variable `--signer-env` names) in its error message. A key of the
+  right length with one non-hex character used to reach `int(…, 16)`, whose
+  error carries the whole value, into the agent's tool output, the transcript
+  and the ratchet cron log. The key is now rejected by name only, and the
+  shared key parser in both hot-wallet skills (`unilp`, `poolsfun`) refuses
+  non-hex input — including whitespace and `_`, which `int()` used to accept
+  as a silently different key — before `int()` sees it.
 - **Breaking default — Discord and Slack channels now refuse senders you have
   not admitted.** Before, any Discord user who could DM or @mention the bot,
   and any Slack workspace member or guest, started an agent turn with the

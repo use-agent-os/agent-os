@@ -233,6 +233,15 @@ def resolve_private_key(signer_env: str = ENV_SIGNER) -> str:
         key = "0x" + key
     if len(key) != 66:
         raise RuntimeError(f"{signer_env} is not a 32-byte hex private key")
+    # Validate the alphabet here rather than letting int(key, 16) do it downstream.
+    # ValueError embeds the offending string in its message, so a key with one
+    # mistyped character would be printed in full by the top-level error handler
+    # and land in the agent transcript. Never let key material reach an exception.
+    if any(character not in "0123456789abcdefABCDEF" for character in key[2:]):
+        raise RuntimeError(
+            f"{signer_env} is not valid hex (32 bytes, 0-9/a-f). "
+            "The value is not shown here on purpose."
+        )
     return key
 
 
