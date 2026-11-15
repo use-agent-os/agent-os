@@ -1571,7 +1571,11 @@ balance read still tries the chain's public node first),
 `approval_ttl_seconds`, `agent_max_price_impact_pct`,
 `agent_max_slippage_pct`, `default_slippage_pct` (unset = provider auto),
 `unlock_mode` (`auto` | `manual`), `sync_interval_seconds`,
-`price_ttl_seconds`.
+`price_ttl_seconds`. A change applied without a restart (`config set`,
+`agentos config reload`) is what the engine's own loop enforces from its next
+tick: `enabled = false` stops DCA buys and trigger fires and refuses to sign
+anything, an order already waiting for approval included, and a new cap or
+threshold judges the next automated buy.
 
 Read: [`features/trading.md`](features/trading.md)
 

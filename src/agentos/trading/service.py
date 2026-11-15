@@ -391,8 +391,9 @@ class TradingService:
         background: bool = True,
         lp_env_factory: LpEnvFactory | None = None,
     ) -> None:
+        # The running gateway config (or a bare ``TradingConfig``); the
+        # ``[trading]`` section is read through it on every use (``config``).
         self._gateway_config = config
-        self.config = getattr(config, "trading", config)
         self.vault = vault or Vault()
         self.ledger = ledger or Ledger()
         self._http = http or httpx.AsyncClient(timeout=15.0)
@@ -404,10 +405,8 @@ class TradingService:
         self._aggregator_factory = aggregator_factory
         self._aggregator: AggregatorClient | None = None
         self._aggregator_base = ""
-        self._relay = RelayClient(
-            base_url=str(getattr(self.config, "relay_base_url", "") or RELAY_BASE_URL),
-            http=self._http,
-        )
+        self._relay_client: RelayClient | None = None
+        self._relay_base = ""
         # One Relay status read per bridge order at a time: the fill tracker
         # and a status request must not both book the arrival.
         self._bridge_locks: dict[str, asyncio.Lock] = {}
@@ -612,6 +611,51 @@ class TradingService:
             return True
         return self.vault.try_auto_unlock()
 
+    @property
+    def config(self) -> Any:
+        """The ``[trading]`` section of the running config, read on every use.
+
+        A config write (``config.set``/``patch``/``apply``, the operator's
+        ``config.reload``) replaces the running config's ``trading`` section
+        with a new object and reports it applied without a restart. Holding
+        the section object would leave the engine's own loop -- DCA buys,
+        trigger fires, recovery -- on the settings from before the change:
+        ``trading.enabled = false`` or ``daily_cap_usd = 0`` would not stop an
+        unattended buy. Reading through the gateway config means the loop and
+        every RPC see the same settings at all times.
+        """
+        return getattr(self._gateway_config, "trading", self._gateway_config)
+
+    @config.setter
+    def config(self, value: Any) -> None:
+        """Bind a gateway config, or a bare ``TradingConfig`` read as it is."""
+        self._gateway_config = value
+
+    def _trading_enabled(self) -> bool:
+        return bool(getattr(self.config, "enabled", True))
+
+    def _require_enabled(self) -> None:
+        """Refuse to sign while trading is off (``trading.enabled = false``).
+
+        Checked at the signing step itself, so an order that was already on
+        its way when the operator switched trading off is not signed.
+        """
+        if not self._trading_enabled():
+            raise TradingError("trading.disabled", "Trading is disabled in config")
+
+    def _sign_permit_enabled(self, permit: dict[str, Any], key: bytes) -> str:
+        self._require_enabled()
+        return self._sign_permit(permit, key)
+
+    @property
+    def _relay(self) -> RelayClient:
+        """The Relay client for the configured ``relay_base_url`` (rebuilt on change)."""
+        base = str(getattr(self.config, "relay_base_url", "") or RELAY_BASE_URL)
+        if self._relay_client is None or self._relay_base != base:
+            self._relay_client = RelayClient(base_url=base, http=self._http)
+            self._relay_base = base
+        return self._relay_client
+
     def ensure_started(self) -> None:
         """Start the sync/expiry loop once an event loop is running."""
         if not self._background or self._task is not None:
@@ -665,8 +709,8 @@ class TradingService:
         housekeeping keeps its clock whatever the sync is doing, and a sync
         still running when the next interval comes is simply left to finish.
         """
-        interval = float(getattr(self.config, "sync_interval_seconds", 60))
         while True:
+            interval = float(getattr(self.config, "sync_interval_seconds", 60))
             try:
                 await self.housekeep()
             except asyncio.CancelledError:
@@ -694,16 +738,22 @@ class TradingService:
         self._sync_task = asyncio.get_running_loop().create_task(_sync(), name="trading-sync-pass")
 
     async def housekeep(self) -> None:
-        """One pass of housekeeping: expire approvals, run DCA buys and triggers, settle."""
+        """One pass of housekeeping: expire approvals, run DCA buys and triggers, settle.
+
+        While trading is off no DCA buy runs and no trigger is checked: their
+        schedules and arming stay as they are (a failed run would count
+        towards pausing them) until the operator switches trading back on.
+        """
         await self.expire_orders()
-        try:
-            await self.dca_run_due()
-        except Exception as exc:  # one bad mandate must not stop the housekeeping
-            log.warning("trading.dca_error", error=str(exc))
-        try:
-            await self.trigger_check()
-        except Exception as exc:  # nor one bad trigger
-            log.warning("trading.trigger_error", error=str(exc))
+        if self._trading_enabled():
+            try:
+                await self.dca_run_due()
+            except Exception as exc:  # one bad mandate must not stop the housekeeping
+                log.warning("trading.dca_error", error=str(exc))
+            try:
+                await self.trigger_check()
+            except Exception as exc:  # nor one bad trigger
+                log.warning("trading.trigger_error", error=str(exc))
         if self.vault.initialized:
             await self.recover_submitted()
 
@@ -4314,7 +4364,7 @@ class TradingService:
             tx = await provider.build(
                 quote,
                 deadline=int(self._now()) + 600,
-                sign_permit=lambda permit: self._sign_permit(permit, key),
+                sign_permit=lambda permit: self._sign_permit_enabled(permit, key),
                 decision_origin=origin,
             )
             if quote.fetched_at != fetched_before:
@@ -5162,6 +5212,7 @@ class TradingService:
             "maxPriorityFeePerGas": max_priority,
             "type": 2,
         }
+        self._require_enabled()
         raw = self._sign_tx(full_tx, key)
         local_hash = _local_tx_hash(raw)
         # Record before send: from here on the ledger knows a transaction
@@ -5806,6 +5857,8 @@ class TradingService:
 
     async def approve(self, order_id: str, *, wait: bool = False) -> dict[str, Any]:
         """Run an order the agent parked. Approving one leg of a multisend approves them all."""
+        # Trading switched off: the order stays parked rather than failing.
+        self._require_enabled()
         row, members = self._pending_group(order_id)
         if row.get("expires_at") and float(row["expires_at"]) <= self._now():
             for member in members:
@@ -8154,8 +8207,6 @@ def get_trading_service(
         _service = TradingService(config, broadcast=broadcast)
         return _service
     if config is not None:
-        trading_cfg = getattr(config, "trading", config)
-        _service.config = trading_cfg
         _service._gateway_config = config
     if broadcast is not None:
         _service._broadcast = broadcast

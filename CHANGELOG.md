@@ -37,6 +37,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   units, the update runner, `start.sh`/`start.ps1` and the pip upgrade path
   now pass `-P`, and a restarted or spawned gateway gets the `PYTHON*`
   variables the first launch had rather than any a `.env` added since.
+- **Switching trading off, or lowering a limit, now stops the engine's own
+  loop at its next tick (WAL-11).** The trading service held the `[trading]`
+  section it was built with, so after `config set trading.enabled false`,
+  `daily_cap_usd = 0` or a lower threshold (reported as applied, no restart)
+  approved DCA buys and trigger fires kept being signed on the old settings
+  until some wallet/trading request happened to refresh it. The service now
+  reads the live config on every decision; while trading is off DCA buys and
+  trigger checks are skipped (their schedules and arming are kept), approving
+  a parked order is refused with `trading.disabled`, and the signing step
+  itself refuses. The Relay client also follows a changed
+  `trading.relay_base_url`.
 - **Breaking default — Discord and Slack channels now refuse senders you have
   not admitted.** Before, any Discord user who could DM or @mention the bot,
   and any Slack workspace member or guest, started an agent turn with the
