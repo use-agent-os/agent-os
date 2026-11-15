@@ -47,6 +47,7 @@ from agentos.cli.wallet_cmd import (
     token_symbol,
 )
 from agentos.display_text import display_safe, terminal_text
+from agentos.skill_stdio import inline_artifact_marker
 
 
 class _JsonUsageGroup(TyperGroup):
@@ -2157,7 +2158,7 @@ def _write_lp_card(result: dict[str, Any]) -> None:
         typer.echo(f"[card not written: {exc}]", err=True)
         return
     _prune_lp_cards(path.parent)
-    print_text(f"publish_artifact path={name} mime={LP_MIME}")
+    print_text(inline_artifact_marker(name, LP_MIME))
 
 
 def _prune_lp_cards(directory: Path, keep: int = LP_CARDS_KEPT) -> None:
@@ -2809,7 +2810,7 @@ def _write_markets_card(result: dict[str, Any]) -> None:
         typer.echo(f"[card not written: {exc}]", err=True)
         return
     _prune_cards(path.parent, _MARKETS_CARD_FILE, MARKETS_CARDS_KEPT)
-    print_text(f"publish_artifact path={name} mime={MARKETS_MIME}")
+    print_text(inline_artifact_marker(name, MARKETS_MIME))
 
 
 def _compact_usd(value: Any) -> str:
@@ -3172,7 +3173,7 @@ def _write_dca_card(result: dict[str, Any]) -> None:
         typer.echo(f"[card not written: {exc}]", err=True)
         return
     _prune_cards(path.parent, _DCA_CARD_FILE, DCA_CARDS_KEPT)
-    print_text(f"publish_artifact path={name} mime={DCA_MIME}")
+    print_text(inline_artifact_marker(name, DCA_MIME))
 
 
 def _dca_call(method: str, params: dict[str, Any], *, json_output: bool) -> Any:
@@ -3881,7 +3882,7 @@ def _write_trigger_card(result: dict[str, Any]) -> None:
         typer.echo(f"[card not written: {exc}]", err=True)
         return
     _prune_cards(path.parent, _TRIGGER_CARD_FILE, TRIGGER_CARDS_KEPT)
-    print_text(f"publish_artifact path={name} mime={TRIGGER_MIME}")
+    print_text(inline_artifact_marker(name, TRIGGER_MIME))
 
 
 def _trigger_call(method: str, params: dict[str, Any], *, json_output: bool) -> Any:

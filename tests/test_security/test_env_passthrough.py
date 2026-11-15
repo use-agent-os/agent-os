@@ -22,6 +22,12 @@ def _isolate_registry() -> None:
     env_passthrough.reset_managed_credentials_cache()
 
 
+def _without_custody(env: dict[str, str]) -> dict[str, str]:
+    """Drop what every child gets for the skill-signing-key custody (WAL-10)."""
+    held = {"GMGN_PRIVATE_KEY", env_passthrough.SIGNING_KEYS_HELD_ENV}
+    return {key: value for key, value in env.items() if key not in held}
+
+
 class TestSubprocessEnv:
     """What is withheld. PATH is rewritten too, but that is TestOwnCliFirst's
     subject; neutralising it here keeps these assertions about stripping."""
@@ -33,7 +39,7 @@ class TestSubprocessEnv:
     def test_the_gateway_token_never_reaches_a_child(self) -> None:
         """It authenticates to the control plane; nothing a command runs needs it."""
         base = {"PATH": "/usr/bin", "AGENTOS_GATEWAY_TOKEN": "tok"}
-        assert env_passthrough.build_subprocess_env(base) == {"PATH": "/usr/bin"}
+        assert _without_custody(env_passthrough.build_subprocess_env(base)) == {"PATH": "/usr/bin"}
 
     @pytest.mark.parametrize(
         "name",
@@ -54,17 +60,17 @@ class TestSubprocessEnv:
         result = env_passthrough.build_subprocess_env(
             {"PATH": "/usr/bin"}, {"AGENTOS_GATEWAY_TOKEN": "tok", "MY_VAR": "v"}
         )
-        assert result == {"PATH": "/usr/bin", "MY_VAR": "v"}
+        assert _without_custody(result) == {"PATH": "/usr/bin", "MY_VAR": "v"}
 
     def test_the_users_own_credentials_still_cross(self) -> None:
         """The local shell is the operator's; breaking gh and aws protects nothing."""
         base = {"GITHUB_TOKEN": "gh", "AWS_ACCESS_KEY_ID": "ak", "DOCKER_HOST": "unix://x"}
-        assert env_passthrough.build_subprocess_env(base) == base
+        assert _without_custody(env_passthrough.build_subprocess_env(base)) == base
 
     def test_provider_keys_cross_by_default(self) -> None:
         """Bundled skill scripts read them straight out of os.environ."""
         base = {"OPENROUTER_API_KEY": "sk-or-v1-x", "AGENTOS_LLM_API_KEY": "k"}
-        assert env_passthrough.build_subprocess_env(base) == base
+        assert _without_custody(env_passthrough.build_subprocess_env(base)) == base
 
     def test_provider_keys_are_stripped_when_the_operator_opts_in(
         self, monkeypatch: pytest.MonkeyPatch

@@ -125,6 +125,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   written through `agentos env`), and `mcp.connect`, `mcp.disconnect` and
   `mcp.oauth.*` fail for an agent's connection with `mcp.operator_required`.
   Settings › MCP in the console works as before.
+- **Breaking — the skill hot-wallet keys need your approval to move funds.**
+  `senior-unilp-manager`, `poolsdotfun-token-launcher` and the GMGN skills
+  signed with `UNIV4_LP_PRIVATE_KEY` / `POOLSFUN_PRIVATE_KEY` /
+  `GMGN_PRIVATE_KEY` straight out of the agent's environment, outside the
+  trading engine's approvals; the only gate was a `PLAN_HASH` the same dry run
+  prints, so an agent could pay a whole LP wallet to any `--recipient` by
+  running the command twice. Those keys no longer reach any process the agent
+  drives (shell, `execute_code`, cron scripts, MCP servers, coding harnesses,
+  lifecycle hooks), the skills no longer read them back from
+  `~/.agentos/.env`, and an agent connection can neither `env.set` nor
+  `env.reveal` them (whatever a skill manifest declares). AgentOS
+  passes one only to a direct command running that skill's own entry point —
+  it runs its packaged copy without a shell — and a command that moves funds
+  (`--broadcast`, `ratchet.py arm --confirm` / `clear-attention`, `gmgn-cli
+  swap` / `multi-swap` / `order strategy create|cancel` / `cooking create`)
+  first waits for an approval prompt that `bypass`, `/elevated`, auto-approve
+  and session elevation do not answer; cron cannot ask, so it is refused
+  there. **What to do:** keep these keys in Settings > Skills (a
+  `GMGN_PRIVATE_KEY` that only lives in `~/.config/gmgn/.env` is no longer
+  used — move it into Settings and delete it from that file, which is now a
+  sensitive path); approve each broadcast when asked; and **re-arm existing
+  ratchet mandates** (`disarm`, then `arm … --confirm`): a tick now fires
+  only mandates armed through an approved command, with the bounds approved,
+  and reports `refused` for the rest. `tick.sh` keeps working as long as it is
+  the single documented `exec python3 …/ratchet.py tick …` line. The approval
+  queue database and the new mandate store (`<state>/skill-signing/`) are on
+  the sensitive-path floor. See
+  [Skill signing prompts](docs/approvals-and-permissions.md#skill-signing-prompts).
+- The GMGN skills install `gmgn-cli@1.7.1` instead of whatever `latest` is, and
+  AgentOS refuses `GMGN_PRIVATE_KEY` to any other installed version. Their
+  SKILL.md files no longer claim a CLI confirmation prompt
+  (`/dev/tty`, `GMGN_ALLOW_AUTOMATED_TRADES` + `--yes`): 1.7.1 has none, and
+  the approval above is the gate. Run
+  `npm install -g --ignore-scripts gmgn-cli@1.7.1` if a newer one is installed.
+- Data a command prints can no longer publish an inline artifact.
+  `exec_command` used to auto-publish any stdout line shaped like
+  `publish_artifact path=… mime=application/vnd.agentos.…`, so an ERC-20
+  whose `symbol()` held a newline and that line made a read-only
+  `senior-unilp-manager` lookup push a workspace file at the user as a
+  rendered card. Each command now gets a fresh `AGENTOS_INLINE_ARTIFACT_NONCE`
+  and only a marker carrying it publishes; bundled scripts and
+  `agentos trade` print it through `agentos.skill_stdio.inline_artifact_marker`.
+  **A third-party skill that prints the bare marker no longer auto-renders**:
+  print it with that helper (or append ` nonce=$AGENTOS_INLINE_ARTIFACT_NONCE`),
+  or have the model call `publish_artifact`. The `senior-unilp-manager` and
+  `poolsdotfun-token-launcher` ABI decoders also replace unprintable
+  characters (newlines, ESC, BIDI controls) in on-chain strings, token
+  symbols and names are capped at 64 characters, and invalid UTF-8 no longer
+  aborts a read. See [Inline artifacts](docs/artifacts-and-media.md).
+- `senior-unilp-manager` no longer prints a malformed `UNIV4_LP_PRIVATE_KEY`
+  (or the variable `--signer-env` names) in its error message. A key of the
+  right length with one non-hex character used to reach `int(…, 16)`, whose
+  error carries the whole value, into the agent's tool output, the transcript
+  and the ratchet cron log. The key is now rejected by name only, and the
+  shared key parser in both hot-wallet skills (`unilp`, `poolsfun`) refuses
+  non-hex input — including whitespace and `_`, which `int()` used to accept
+  as a silently different key — before `int()` sees it.
 - **Breaking default — Discord and Slack channels now refuse senders you have
   not admitted.** Before, any Discord user who could DM or @mention the bot,
   and any Slack workspace member or guest, started an agent turn with the

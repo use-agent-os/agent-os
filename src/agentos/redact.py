@@ -1368,6 +1368,10 @@ CREDENTIAL_HOME_DIRS: tuple[str, ...] = (
     ".kube",
     ".gnupg",
     ".password-store",
+    # gmgn-cli's own credential home: ``.env`` with GMGN_PRIVATE_KEY and the
+    # ``keypair.pem`` it was made from. The key signs real trades, and AgentOS
+    # hands it only to an operator-approved gmgn-cli command (WAL-04).
+    ".config/gmgn",
 )
 
 #: Files masked when read but **not** blocked by the sandbox. Each holds a

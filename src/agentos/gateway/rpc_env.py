@@ -135,9 +135,15 @@ def _refuse_agent_reveal(ctx: RpcContext, name: str) -> None:
     binding = recognized_agent(ctx)
     if binding is None:
         return
-    spec = _catalog_for(ctx).get(name)
-    if spec is not None and not spec.secret:
-        return
+    # A skill's hot-wallet key reaches only its gated entry point
+    # (tools/skill_signing.py): reading it here would let an agent sign
+    # whatever it likes without the operator ever seeing the transaction. It
+    # is refused whatever the catalog says, since a skill manifest (which an
+    # agent can write) is what declares a name non-secret (WAL-10/WAL-04).
+    if name.upper() not in env_policy.SKILL_SIGNING_KEY_ENV:
+        spec = _catalog_for(ctx).get(name)
+        if spec is not None and not spec.secret:
+            return
     log.warning("env.agent_reveal_refused", key=name, via=binding.via)
     raise RpcHandlerError(
         "env.protected",

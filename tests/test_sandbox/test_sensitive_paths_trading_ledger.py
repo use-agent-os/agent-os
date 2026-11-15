@@ -52,7 +52,9 @@ def test_backups_and_copies_of_the_ledger_are_sensitive(state: Path, tmp_path: P
 
 
 def test_the_rest_of_the_state_dir_is_not_swept_in(state: Path) -> None:
-    for name in ("approval_queue.sqlite", "safety_log.jsonl", "history"):
+    # approval_queue.sqlite is on the floor for its own reason (the skill
+    # signing approvals, WAL-10), not as part of the ledger.
+    for name in ("safety_log.jsonl", "history"):
         assert is_sensitive_path(str(state / "state" / name)) is None, name
     assert is_sensitive_path(str(state / "state" / "trading.sqlite.notes")) is None
 

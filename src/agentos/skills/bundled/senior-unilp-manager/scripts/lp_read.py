@@ -150,6 +150,9 @@ Global: --chain <key|id>  (default robinhood)   --rpc <url>   --json
 
 _meta_cache: dict[str, dict] = {}
 
+#: Longest on-chain token symbol or name this script prints.
+MAX_TOKEN_TEXT = 64
+
 
 def token_meta(client, chain: dict, address: str | None) -> dict:
     addr = (address or NATIVE).lower()
@@ -175,10 +178,14 @@ def token_meta(client, chain: dict, address: str | None) -> dict:
         for fn in ("symbol", "name", "decimals", "totalSupply")
     ])
 
+    # symbol()/name() are whatever the token's deployer chose. The decoder already
+    # replaced anything unprintable; the length bound keeps one token from flooding
+    # every table it appears in.
     meta = {
         "address": checksummed,
-        "symbol": symbol["result"] if symbol["status"] == "success" else short(checksummed),
-        "name": name["result"] if name["status"] == "success" else "",
+        "symbol": (symbol["result"][:MAX_TOKEN_TEXT] if symbol["status"] == "success"
+                   else short(checksummed)),
+        "name": name["result"][:MAX_TOKEN_TEXT] if name["status"] == "success" else "",
         "decimals": int(decimals["result"]) if decimals["status"] == "success" else 18,
         "totalSupply": (int(total_supply["result"])
                         if total_supply["status"] == "success" else None),

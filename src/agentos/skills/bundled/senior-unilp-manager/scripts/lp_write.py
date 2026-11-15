@@ -3,8 +3,11 @@
 
 EVERY subcommand is a dry run unless BOTH ``--broadcast`` and ``--confirm <PLAN_HASH>``
 are given. The dry run prints a parameter table plus a PLAN_HASH; broadcasting requires
-echoing that hash back, so the transaction that gets signed is provably the one the
-human approved.
+echoing that hash back, so the transaction that gets signed is provably the plan that was
+shown. The hash is an integrity check, not an approval: whoever ran the dry run can read
+it back. Under AgentOS the human step is the gateway's -- the signing key is withheld from
+the agent's shell and released to a ``--broadcast`` run only after the operator approves
+that exact command (``agentos/tools/skill_signing.py``).
 
     python3 scripts/lp_write.py approve  --token <addr>
     python3 scripts/lp_write.py create-pool --token0 <addr> --token1 <addr> --fee 3000 \\
@@ -38,7 +41,10 @@ from agentos.skill_stdio import configure_utf8_stdio  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lp_read import pool_key_for_id  # noqa: E402  (read-only; imports no signing path)
+from lp_read import (  # noqa: E402  (read-only; imports no signing path)
+    MAX_TOKEN_TEXT,
+    pool_key_for_id,
+)
 from unilp.abi_codec import encode_function_data  # noqa: E402
 from unilp.abi_defs import (  # noqa: E402
     ERC20_ABI,
@@ -280,7 +286,8 @@ def token_info(client, chain: dict, address: str) -> dict:
     ])
     return {
         "address": checksummed,
-        "symbol": symbol["result"] if symbol["status"] == "success" else short(checksummed),
+        "symbol": (symbol["result"][:MAX_TOKEN_TEXT] if symbol["status"] == "success"
+                   else short(checksummed)),
         "decimals": int(decimals["result"]) if decimals["status"] == "success" else 18,
         "isNative": False,
     }

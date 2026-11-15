@@ -153,6 +153,12 @@ def runtime_sensitive_prefixes() -> tuple[str, ...]:
             *(ledger + suffix for suffix in TRADING_LEDGER_SIDECARS),
             str(home / "state" / "snapshots"),
         ]
+        # What makes a skill's hot-wallet key reachable (tools/skill_signing.py):
+        # the operator's approval rows -- one rewritten to "approved" releases
+        # the key -- and the store of operator-approved ratchet mandates.
+        queue = home / "state" / "approval_queue.sqlite"
+        entries.extend(str(queue) + tail for tail in ("", "-wal", "-shm", "-journal"))
+        entries.append(str(home / "skill-signing"))
     except (OSError, RuntimeError):
         entries = []
     # The key that seals the vault's unlock.key, kept outside the state root

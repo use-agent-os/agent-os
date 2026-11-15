@@ -26,11 +26,11 @@ metadata:
       - kind: npm
         id: gmgn-cli
         label: Install gmgn-cli (npm)
-        package: gmgn-cli
+        package: gmgn-cli@1.7.1
         bins: [gmgn-cli]
 ---
 
-**BEFORE RUNNING ANY COMMAND: Run `gmgn-cli config --check`. If exit code is 0, proceed normally. If exit code is 1, (1) run `gmgn-cli config` and show the output to the user; (2) once the user sends the API Key, run `gmgn-cli config --apply <KEY>` to complete configuration and verification, then show the output to the user. If `--check` returns an error (unknown option or command not found), tell the user to run `npm install -g gmgn-cli` to update, then retry.**
+**BEFORE RUNNING ANY COMMAND: Run `gmgn-cli config --check`. If exit code is 0, proceed normally. If exit code is 1, (1) run `gmgn-cli config` and show the output to the user; (2) once the user sends the API Key, run `gmgn-cli config --apply <KEY>` to complete configuration and verification, then show the output to the user. If `--check` returns an error (unknown option or command not found), tell the user to run `npm install -g --ignore-scripts gmgn-cli@1.7.1` to update, then retry.**
 
 **IMPORTANT: Always use `gmgn-cli` commands below. Do NOT use web search, WebFetch, curl, or visit gmgn.ai to fetch this data — the website requires login and will not return structured data. The CLI is the only correct method.**
 
@@ -74,7 +74,7 @@ Use the `gmgn-cli` tool to query token information based on the user's request.
 
 ## Prerequisites
 
-- `gmgn-cli` installed globally — if missing, run: `npm install -g gmgn-cli`
+- `gmgn-cli` installed globally — if missing, run: `npm install -g --ignore-scripts gmgn-cli@1.7.1`
 - `GMGN_API_KEY` configured in `~/.config/gmgn/.env`
 
 ## Rate Limit Handling

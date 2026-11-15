@@ -169,6 +169,16 @@ GATEWAY_CREDENTIAL_ENV: frozenset[str] = frozenset(
     }
 )
 
+#: Hot-wallet signing keys that bundled skills sign with outside the trading
+#: engine (``senior-unilp-manager``, ``poolsdotfun-token-launcher``, the
+#: ``gmgn-*`` CLI). They never cross into a child process the agent can drive;
+#: ``agentos.tools.skill_signing`` hands one to a single direct invocation of
+#: the skill's own entry point, and only after the operator approved it when
+#: that invocation moves funds.
+SKILL_SIGNING_KEY_ENV: frozenset[str] = frozenset(
+    {"UNIV4_LP_PRIVATE_KEY", "POOLSFUN_PRIVATE_KEY", "GMGN_PRIVATE_KEY"}
+)
+
 # Group 5 — egress steering. A proxy name is a posture name: whoever sets it
 # chooses the machine every outbound request is handed to, credentials and all.
 # ``AGENTOS_LLM_PROXY`` is read at ``gateway/llm_runtime.py``,
@@ -325,7 +335,8 @@ def agent_may_own(key: str) -> bool:
 
     A credential-shaped name (:func:`is_secret_name`) that every caller may
     write, that is not an ``AGENTOS_*`` setting, not one the gateway reads for
-    its own wallet, and not a runtime-steering name.
+    its own wallet, not a skill's hot-wallet signing key (the operator's to
+    set: :data:`SKILL_SIGNING_KEY_ENV`), and not a runtime-steering name.
     """
     upper = key.upper()
     return (
@@ -333,6 +344,7 @@ def agent_may_own(key: str) -> bool:
         and is_secret_name(key)
         and not upper.startswith("AGENTOS_")
         and upper not in GATEWAY_RESERVED_NAMES
+        and upper not in SKILL_SIGNING_KEY_ENV
         and not is_runtime_steering_name(key)
     )
 

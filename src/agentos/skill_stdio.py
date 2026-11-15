@@ -34,12 +34,31 @@ Two shapes, both from #2358's convention:
 
 from __future__ import annotations
 
+import os
 import sys
 
 #: Keyword arguments for a ``subprocess.run`` / ``Popen`` whose child emits
 #: UTF-8 -- git, ffmpeg, the gmgn CLIs -- so its output is decoded as UTF-8
 #: rather than through the locale ``text=True`` would inherit.
 SUBPROCESS_UTF8: dict[str, str] = {"encoding": "utf-8", "errors": "replace"}
+
+#: Set by ``exec_command`` to a fresh random value for every command it runs.
+#: An inline-artifact marker auto-publishes only when it carries this value,
+#: so a marker-shaped line inside data a script merely prints -- a token
+#: symbol read from a chain, an API response -- publishes nothing: the data
+#: cannot know a value minted after it was written.
+INLINE_ARTIFACT_NONCE_ENV = "AGENTOS_INLINE_ARTIFACT_NONCE"
+
+
+def inline_artifact_marker(path: object, mime: str) -> str:
+    """The line a script prints to have ``exec_command`` render the file it wrote.
+
+    Outside ``exec_command`` (no nonce in the environment) the bare marker is
+    returned; it is still a readable hint, it just never auto-publishes.
+    """
+    line = f"publish_artifact path={path} mime={mime}"
+    nonce = os.environ.get(INLINE_ARTIFACT_NONCE_ENV, "").strip()
+    return f"{line} nonce={nonce}" if nonce else line
 
 
 def write_stdout(text: str) -> None:

@@ -83,8 +83,11 @@ The bundled `robinhood-agentic-trading` skill encodes the operating rules:
 ## Bundled trading and research skills
 
 These install with AgentOS and load on demand. Skills marked
-`risk: high` declare `signing` capability and require explicit confirmation
-before they execute anything.
+`risk: high` declare `signing` capability. The ones that sign with a hot-wallet
+key of their own (`senior-unilp-manager`, `poolsdotfun-token-launcher`,
+`gmgn-swap`, `gmgn-cooking`) never see that key in the agent's shell; AgentOS
+passes it to a single direct run of the skill's entry point, and asks you to
+approve any run that moves funds — see [Safety model](#safety-model).
 
 | Skill | What it does |
 | --- | --- |
@@ -159,11 +162,31 @@ calls themselves, and the model turns you route to a remote provider.
 
 Trading skills are held to a stricter standard than ordinary tools.
 
+- **Operator approval for every skill write that moves funds.** The skill
+  hot-wallet keys — `UNIV4_LP_PRIVATE_KEY`, `POOLSFUN_PRIVATE_KEY`,
+  `GMGN_PRIVATE_KEY` — are held back from every process the agent can drive
+  (its shell, `execute_code`, cron scripts, MCP servers, coding agents). AgentOS
+  hands one only to a direct invocation of that skill's own entry point, runs
+  its packaged copy itself without a shell, and for a `--broadcast`, a ratchet
+  `arm --confirm`, or a GMGN `swap` / `multi-swap` / `order strategy create|cancel`
+  / `cooking create` first asks you to approve that exact command. `/elevated`,
+  `bypass` and auto-approve do not answer that prompt. The unattended
+  `ratchet.py tick --broadcast` gets the key without asking, but fires only
+  mandates whose `arm` you approved, with the bounds you approved, and always
+  pays the signing wallet itself. Keep these keys in **Settings > Skills**: a
+  key in a file the agent's shell can read (`~/.config/gmgn/.env`) is outside
+  this custody.
 - **Explicit confirmation.** Skills tagged `[FINANCIAL EXECUTION]` do not act on
-  an inferred intent; they require the user to confirm the specific action.
+  an inferred intent; they show the user the specific action first. That is the
+  model's instruction; the approval above is what enforces it.
 - **Dry run by default.** `senior-unilp-manager` splits reads from writes. Its
   read script cannot sign at all, and a write is a dry run unless it is given
-  both `--broadcast` and the plan hash printed by that same dry run.
+  both `--broadcast` and the plan hash printed by that same dry run. The plan
+  hash binds the broadcast to the plan that was shown; it is not an approval —
+  the agent can read it back — which is why the broadcast also waits for yours.
+- **Pinned GMGN CLI.** The `gmgn-*` skills install `gmgn-cli@1.7.1`, and AgentOS
+  refuses to hand `GMGN_PRIVATE_KEY` to any other installed version. That CLI has
+  no confirmation prompt of its own; the approval above is the gate.
 - **Schema truth.** The agent plans against the live authenticated schemas of
   the connected server, not remembered API shapes.
 - **Publisher verification.** A skill cannot mint its own brand. Only bundled

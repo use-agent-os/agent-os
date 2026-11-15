@@ -25,8 +25,10 @@ Arming is still an attended, hash-confirmed act; what the mandate buys is the ri
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -575,7 +577,50 @@ def cmd_arm(client, chain: dict, args: dict, signer: dict) -> None:
                       "thresholds": mandate["thresholds"]})
         mandate["lastSeq"] = store.last_seq()
         store.save(mandate)
+        _write_arm_receipt(ident, store.load())
     print("\n  ARMED. Wire it to cron with:  ratchet.py tick --all --broadcast --json")
+
+
+# Under AgentOS the signing key reaches this script only through its signing gate
+# (agentos/tools/skill_signing.py). An operator-approved ``arm --confirm`` is given a
+# receipt path; the gate records the id and this digest, and a gated tick is handed
+# the recorded set. A mandate the operator never approved -- or one whose bounds were
+# edited on disk afterwards, since ``bounds`` is not part of the id -- does not fire.
+_ARM_RECEIPT_ENV = "UNILP_ARM_RECEIPT"
+_OPERATOR_MANDATES_ENV = "UNILP_OPERATOR_MANDATES"
+
+
+def mandate_binding_digest(mandate: dict | None) -> str:
+    """sha256 over the identity *and* the bounds, as the file holds them."""
+    mandate = mandate or {}
+    body = {"immutable": mandate.get("immutable"), "bounds": mandate.get("bounds")}
+    return hashlib.sha256(canonical_json(body).encode("utf-8")).hexdigest()
+
+
+def _write_arm_receipt(ident: str, saved: dict | None) -> None:
+    target = os.environ.get(_ARM_RECEIPT_ENV)
+    if not target:
+        return
+    receipt = {"id": ident, "digest": mandate_binding_digest(saved)}
+    Path(target).write_text(json.dumps(receipt), encoding="utf-8")
+
+
+def operator_refusal(ident: str, mandate: dict) -> str | None:
+    """Why a gated tick must not act on this mandate, or None when it may."""
+    raw = os.environ.get(_OPERATOR_MANDATES_ENV)
+    if raw is None:
+        return None  # not run by AgentOS's gate: the standalone behaviour
+    try:
+        approved = json.loads(raw)
+    except ValueError:
+        approved = {}
+    if not isinstance(approved, dict) or ident not in approved:
+        return ("not armed through an operator approval in AgentOS — re-arm it with "
+                "`arm ... --confirm <MANDATE_HASH>` and approve that command")
+    if approved[ident] != mandate_binding_digest(mandate):
+        return ("its bounds differ from what the operator approved when arming it — "
+                "disarm it and arm it again")
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1110,6 +1155,9 @@ def tick_one(client, chain: dict, args: dict, signer: dict, ident: str,
         mandate = store.load()
         if mandate is None:
             return {**result, "action": "missing", "reason": "no such mandate"}
+        refusal = operator_refusal(ident, mandate)
+        if refusal is not None:
+            return {**result, "action": "refused", "reason": refusal}
 
         # The log is the write-ahead record; the mandate file is the view. If the view is
         # behind, a crash landed between the outcome record and the replace.
