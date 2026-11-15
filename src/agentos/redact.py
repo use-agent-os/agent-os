@@ -44,6 +44,7 @@ import shlex
 from collections.abc import Callable, Iterable, Mapping
 
 __all__ = [
+    "clear_registered_secret_values",
     "is_env_dump_command",
     "mask_secret",
     "mask_url_userinfo",
@@ -51,6 +52,7 @@ __all__ = [
     "redact_file_output",
     "redact_sensitive_text",
     "redact_terminal_output",
+    "register_secret_values",
     "secret_literal_marker",
 ]
 
@@ -484,6 +486,126 @@ def secret_header_marker(headers: object) -> str | None:
     return None
 
 
+# ── Known wallet secrets: value registry, keystores, mnemonics ───────────────
+#
+# redact.py is the only layer between a child process's output and the model
+# context. Its name- and shape-based passes miss wallet material: a skill
+# hot-wallet key (``UNIV4_LP_PRIVATE_KEY``) is a bare ``0x``+64-hex string, the
+# vault password is a bare line, and a keystore's ciphertext field name is not
+# a credential name (WAL-09). A tx hash is also 64 hex, so these cannot be
+# masked by shape alone: a value is masked here only when it is a secret the
+# gateway actually holds, or it is in an unmistakably key-shaped context
+# (a keystore field, a BIP-39 mnemonic).
+
+#: Literal secret values the gateway holds — skill hot-wallet keys, the vault
+#: password — registered by the components that load them (``env_store``,
+#: ``trading.vault``, boot). Masked by exact match before any shape pass, so a
+#: random 64-hex tx hash is never touched, only the real key is. A session only
+#: grows this set; see the module docstring on why redaction never relaxes.
+_registered_secret_values: set[str] = set()
+#: Below this a "secret" is too short to mask without eating ordinary words.
+_MIN_REGISTERED_SECRET_LEN = 8
+
+
+def register_secret_values(*values: str | None) -> None:
+    """Register literal secret values to mask verbatim in all tool output.
+
+    Idempotent and additive. A ``0x``-prefixed value is also registered without
+    the prefix, so a key printed as ``0x55…`` from the environment and the same
+    bytes shown without ``0x`` elsewhere are both caught.
+    """
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        stripped = value.strip()
+        if len(stripped) < _MIN_REGISTERED_SECRET_LEN:
+            continue
+        _registered_secret_values.add(stripped)
+        if stripped[:2].lower() == "0x" and len(stripped) > _MIN_REGISTERED_SECRET_LEN + 2:
+            _registered_secret_values.add(stripped[2:])
+
+
+def clear_registered_secret_values() -> None:
+    """Forget every registered secret value. For tests and re-init."""
+    _registered_secret_values.clear()
+
+
+def _mask_registered_values(text: str, mask: Callable[[str], str]) -> str:
+    if not _registered_secret_values:
+        return text
+    # Longest first: a key and a substring of it must not race.
+    for secret in sorted(_registered_secret_values, key=len, reverse=True):
+        if secret in text:
+            text = text.replace(secret, mask(secret))
+    return text
+
+
+#: Keystore v3 stores the encrypted key in ``ciphertext`` and the integrity tag
+#: in ``mac``; ``salt`` and ``iv`` complete the offline-crack input. None is a
+#: credential *name*, so the assignment pass never masked them — a keystore read
+#: under ``/elevated full`` handed them over whole.
+_KEYSTORE_FIELD_RE = re.compile(
+    r'("(?:ciphertext|mac|salt|iv)"\s*:\s*)"([0-9a-fA-F]{16,})"',
+    re.IGNORECASE,
+)
+
+
+def _mask_keystore_fields(text: str, mask: Callable[[str], str]) -> str:
+    if '"ciphertext"' not in text and '"Crypto"' not in text and '"crypto"' not in text:
+        return text
+    return _KEYSTORE_FIELD_RE.sub(lambda m: f'{m.group(1)}"{mask(m.group(2))}"', text)
+
+
+#: A BIP-39 mnemonic is the plaintext root of every wallet it seeds, and no
+#: shape rule catches it: it is ordinary words with spaces, which
+#: :func:`_is_secret_literal_value` explicitly treats as not-a-secret. It is
+#: recognised structurally instead — a run of 12/15/18/21/24 words that are all
+#: in the BIP-39 list is a mnemonic with negligible false-positive risk.
+_MNEMONIC_LENGTHS = frozenset({12, 15, 18, 21, 24})
+_WORD_RUN_RE = re.compile(r"(?<![A-Za-z])([a-z]{3,8}(?:[ \t ]+[a-z]{3,8}){11,23})(?![A-Za-z])")
+_bip39_words: frozenset[str] | None = None
+
+
+def _bip39_wordlist() -> frozenset[str]:
+    global _bip39_words
+    if _bip39_words is None:
+        try:
+            import eth_account.hdaccount as _hd
+
+            path = os.path.join(os.path.dirname(_hd.__file__), "wordlist", "english.txt")
+            with open(path, encoding="utf-8") as handle:
+                _bip39_words = frozenset(line.strip() for line in handle if line.strip())
+        except (OSError, ImportError, ModuleNotFoundError, TypeError):
+            _bip39_words = frozenset()
+    return _bip39_words
+
+
+def _mask_mnemonics(text: str, mask: Callable[[str], str]) -> str:
+    if " " not in text and "\t" not in text and " " not in text:
+        return text
+    words = _bip39_wordlist()
+    if not words:
+        return text
+
+    def _replace(match: re.Match[str]) -> str:
+        phrase = match.group(1)
+        parts = phrase.split()
+        if len(parts) in _MNEMONIC_LENGTHS and all(part in words for part in parts):
+            return mask(phrase)
+        return phrase
+
+    return _WORD_RUN_RE.sub(_replace, text)
+
+
+def _mask_wallet_secrets(text: str, *, file_read: bool) -> str:
+    """Mask wallet material shape/name passes miss: known values, keystores, mnemonics."""
+    whole = _mask_whole_nonreusable if file_read else _mask_whole
+    text = _mask_registered_values(text, whole)
+    text = _mask_keystore_fields(text, whole)
+    text = _mask_mnemonics(text, whole)
+    return text
+
+
 # ── Masking ─────────────────────────────────────────────────────────────────
 
 _MASK = "***"
@@ -545,6 +667,9 @@ def redact_sensitive_text(
         return text
 
     mask = _mask_nonreusable if file_read else _mask_token
+    # Wallet material first (known secret values, keystores, mnemonics): these
+    # are masked whole, before a shape pass could reveal a head/tail of one.
+    text = _mask_wallet_secrets(text, file_read=file_read)
     text = _redact_value_shapes(text, mask=mask)
     return _redact_named_credentials(text, mask=mask, assignments=not code_file)
 
@@ -584,9 +709,7 @@ def mask_url_userinfo(text: str, *, mask: str = _MASK) -> str:
         return text
     return _URL_USERINFO_RE.sub(
         lambda m: (
-            f"{m.group(1)}{mask}{m.group(3)}"
-            if not _is_reference_value(m.group(2))
-            else m.group(0)
+            f"{m.group(1)}{mask}{m.group(3)}" if not _is_reference_value(m.group(2)) else m.group(0)
         ),
         text,
     )
@@ -1000,6 +1123,10 @@ _CREDENTIAL_FILE_FORMATS: Mapping[str, str] = {
     ".pgpass": "pgpass",
     ".netrc": "netrc",
     "_netrc": "netrc",
+    # The vault's auto-unlock file: a sealed envelope now, a bare password in a
+    # legacy file. Either way its whole content is masked (WAL-09), because the
+    # sensitive-path floor that normally hides it is off under /elevated full.
+    "unlock.key": "unlock_key",
 }
 
 #: ``.netrc`` introduces each value with a keyword: ``machine H login U
@@ -1103,6 +1230,8 @@ def _redact_credential_file_format(
         return _redact_pgpass(text, mask=mask)
     if file_format == "netrc":
         return _redact_netrc(text, mask=mask)
+    if file_format == "unlock_key":
+        return mask(text) if text.strip() else text
     return text
 
 
@@ -1333,6 +1462,7 @@ def redact_file_output(text: str, *, path: str | os.PathLike[str] | None = None)
     file_format = _credential_file_format(path)
     if file_format is not None:
         text = _redact_credential_file_format(text, file_format, mask=_mask_whole_nonreusable)
+    text = _mask_wallet_secrets(text, file_read=True)
     masked = _redact_value_shapes(text, mask=_mask_nonreusable, line_safe=True)
     if _is_source_code_path(path) or path is None:
         return masked

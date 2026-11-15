@@ -97,7 +97,9 @@ def validate_rpc_url(rpc_url: str) -> str:
     """
     scheme = urllib.parse.urlsplit(rpc_url.strip()).scheme.lower()
     if scheme not in ALLOWED_RPC_SCHEMES:
-        raise ValueError(f"invalid --rpc-url {rpc_url!r}: must start with http:// or https://")
+        # The URL is not echoed: an RPC provider key lives in its path or query.
+        shown = f" {scheme!r}" if scheme else ""
+        raise ValueError(f"invalid --rpc-url scheme{shown}: must start with http:// or https://")
     return rpc_url.strip()
 
 

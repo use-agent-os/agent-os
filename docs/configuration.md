@@ -743,7 +743,8 @@ next config load AgentOS **automatically migrates** any config still pinning
 
 - the strategy is rewritten to `pilot-v1`;
 - the original file is backed up verbatim next to it as
-  `config.toml.backup.<timestamp>` (mode `0600`);
+  `config.toml.backup.<timestamp>` (mode `0600`; like the config itself, a
+  sensitive path an agent's shell and file tools cannot read);
 - the flip is logged, and the rewrite is idempotent (a config already on
   `pilot-v1` is left untouched, with no backup).
 
@@ -1683,7 +1684,8 @@ nothing else changed), and `agentos doctor` reports
 `gateway.config.reload_held`. Apply them yourself with
 `agentos config reload` (refused from an agent's session) or by restarting
 the gateway. The active config file and `<state dir>/config.toml` are also
-sensitive paths: an agent's shell and file tools cannot read or write them.
+sensitive paths: an agent's shell and file tools cannot read or write them,
+nor the `<name>.backup.<stamp>` copies a config write leaves beside them.
 The same settings cannot be written into `.env` through `agentos env set`,
 the console or an agent tool (`AGENTOS_TRADING_*`,
 `AGENTOS_GATEWAY_SANDBOX__*`, ...): edit `.env` by hand if you mean it.

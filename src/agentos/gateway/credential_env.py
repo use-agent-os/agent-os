@@ -34,7 +34,13 @@ log = structlog.get_logger(__name__)
 
 #: The desktop's secret is scrubbed (and re-materialized for a re-exec) by
 #: ``AgentSurface.load_operator_secret_from_env``; it is never kept here.
-_HANDLED_ELSEWHERE = frozenset({"AGENTOS_OPERATOR_SECRET", "AGENTOS_OPERATOR_SECRET_FILE"})
+#: ``AGENTOS_VAULT_KEK`` stays in this process's environment on purpose: the
+#: vault opens ``unlock.key`` with it after boot, and it is withheld from
+#: children by ``tools.env_passthrough`` (it is in ``GATEWAY_CREDENTIAL_ENV``),
+#: which is the boundary that matters -- so it is not scrubbed here.
+_HANDLED_ELSEWHERE = frozenset(
+    {"AGENTOS_OPERATOR_SECRET", "AGENTOS_OPERATOR_SECRET_FILE", "AGENTOS_VAULT_KEK"}
+)
 
 _scrubbed: dict[str, str] = {}
 

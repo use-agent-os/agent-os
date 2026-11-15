@@ -41,8 +41,26 @@ import structlog
 from agentos import env_policy
 from agentos.env import parse_env_file
 from agentos.paths import default_agentos_home
+from agentos.redact import register_secret_values
 
 log = structlog.get_logger(__name__)
+
+
+def _remember_if_secret(key: str, value: str) -> None:
+    """Register a secret-named variable's value for masking in tool output (WAL-09)."""
+    if env_policy.is_secret_name(key):
+        register_secret_values(value)
+
+
+def register_secret_env_values() -> None:
+    """Register every secret-named value in the process environment.
+
+    Called once the ``.env`` files are loaded (boot) so a skill hot-wallet key
+    already present is masked in tool output, not just one set this session.
+    """
+    for key, value in os.environ.items():
+        _remember_if_secret(key, value)
+
 
 #: Where a variable's effective value comes from, most to least specific.
 Source = Literal["process", "cwd_file", "home_file", "unset"]
@@ -320,6 +338,7 @@ def set_env_var(key: str, value: str, *, apply_live: bool = True) -> EnvEntry:
     existed = _apply_to_file(env_file_path(), {key: value})
     if apply_live:
         os.environ[key] = env_policy.sanitize_value(key, value)
+    _remember_if_secret(key, value)
     log.info("env.set", key=key, applied_live=apply_live, created=key not in existed)
     return resolve_entry(key)
 
@@ -330,6 +349,8 @@ def set_env_vars(mapping: Mapping[str, str], *, apply_live: bool = True) -> list
     if apply_live:
         for key, value in mapping.items():
             os.environ[key] = env_policy.sanitize_value(key, value)
+    for key, value in mapping.items():
+        _remember_if_secret(key, value)
     log.info("env.set_many", count=len(mapping), applied_live=apply_live)
     return [resolve_entry(key) for key in sorted(mapping)]
 

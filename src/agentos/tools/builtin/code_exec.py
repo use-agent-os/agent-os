@@ -656,6 +656,17 @@ _CODE_SENSITIVE_READ_TOKENS = (
     "os.system(",
     "os.popen(",
 )
+#: Tokens that mean the code walks a directory tree, so naming a directory
+#: that is an ancestor of a protected one reads every protected file under it
+#: (WAL-01), the ``execute_code`` twin of a shell ``cp -r``/``tar``.
+_CODE_RECURSIVE_READ_TOKENS = (
+    "walk(",
+    ".rglob(",
+    "copytree(",
+    "make_archive(",
+    "iterdir(",
+    "scandir(",
+)
 _CODE_NETWORK_TOKENS = (
     "httpx.",
     "requests.",
@@ -696,7 +707,13 @@ def _check_code_sensitive_access(code: str) -> tuple[str, str] | None:
     ctx = current_tool_context.get()
     workspace = ctx.workspace_dir if ctx is not None else None
 
-    from agentos.sandbox.sensitive_paths import sensitive_path_in_text, sensitive_path_marker
+    from agentos.sandbox.sensitive_paths import (
+        recursive_read_ancestor_marker,
+        sensitive_path_in_text,
+        sensitive_path_marker,
+    )
+
+    has_recursive_read = any(token in lowered for token in _CODE_RECURSIVE_READ_TOKENS)
 
     for literal in _iter_code_string_literals(code):
         marker = sensitive_path_marker(literal, workspace=workspace) or sensitive_path_in_text(
@@ -706,6 +723,12 @@ def _check_code_sensitive_access(code: str) -> tuple[str, str] | None:
         path_like_literal = literal.strip().startswith(("/", "~", "."))
         if marker is not None and (has_read_or_shell or path_like_literal):
             return "sensitive_path", marker
+        # A recursive read whose argument is the parent of a protected dir
+        # (``copytree('~/.agentos', …)``) descends into the vault/keystores.
+        if has_recursive_read:
+            ancestor = recursive_read_ancestor_marker(literal)
+            if ancestor is not None:
+                return "sensitive_path", ancestor
 
     from agentos.tools.builtin.web import _sensitive_body_marker, _sensitive_url_marker
 

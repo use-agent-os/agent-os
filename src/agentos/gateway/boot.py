@@ -2196,6 +2196,11 @@ async def build_services(
     from agentos.env import load_env
 
     load_env()
+    # A skill hot-wallet key already in the environment is masked in tool
+    # output, not just one set this session (WAL-09).
+    from agentos.env_store import register_secret_env_values
+
+    register_secret_env_values()
 
     # ── Config ──────────────────────────────────────────────────────
     if config is None:

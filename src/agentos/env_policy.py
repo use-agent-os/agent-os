@@ -111,6 +111,7 @@ _SHELL_NAMES = (
 #   AGENTOS_GATEWAY_TOKEN             cli/gateway_rpc.py
 #   AGENTOS_GATEWAY_CONFIG_PATH       gateway config resolution
 #   AGENTOS_STATE_DIR / _ROOT / …     paths.py and friends
+#   AGENTOS_VAULT_KEK_DIR             paths.py (where the vault's sealing key lives)
 #
 # Bind posture (host/port/listen) is CLI-only by design — ``rpc_config.py``
 # already refuses to persist it — so it is listed here for the same reason.
@@ -128,6 +129,7 @@ _AGENTOS_POSTURE_NAMES = (
     "AGENTOS_GATEWAY_TOKEN",
     "AGENTOS_GATEWAY_CONFIG_PATH",
     "AGENTOS_STATE_DIR",
+    "AGENTOS_VAULT_KEK_DIR",
     "AGENTOS_LOG_DIR",
     "AGENTOS_ROOT",
     "AGENTOS_MIGRATIONS_DIR",
@@ -158,6 +160,10 @@ GATEWAY_CREDENTIAL_ENV: frozenset[str] = frozenset(
         "AGENTOS_GATEWAY_HOOKS__TOKEN",
         "AGENTOS_OPERATOR_SECRET",
         "AGENTOS_OPERATOR_SECRET_FILE",
+        # The key that seals the vault's stored password when a container or
+        # service manager injects it (agentos.trading.unlock_key). Held in the
+        # gateway's memory only, never in a child's environment.
+        "AGENTOS_VAULT_KEK",
     }
 )
 

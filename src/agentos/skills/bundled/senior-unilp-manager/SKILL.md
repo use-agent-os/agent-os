@@ -315,7 +315,9 @@ transaction does changes the hash — if you find a flag that does not, that is 
 
 The key is read from **`UNIV4_LP_PRIVATE_KEY` in the environment and nowhere else**.
 **Never put a private key on a command line** — it would land in shell history and in the
-agent transcript, and redaction only masks `NAME=value`, not a bare hex string. Override the
+agent transcript. Redaction masks the key's value once the gateway knows it (set it via
+Settings / `env.set` / `.env`), but a key only ever on a command line is never registered, so
+keep it out of argv. Override the
 variable name with `--signer-env <VAR>`. Only the derived address is ever printed —
 `lp_write.py address` prints just that, and is the way to answer "which wallet am I using".
 Signing is pure Python and therefore **not constant-time**: use a hot LP key, not a treasury

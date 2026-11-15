@@ -7,6 +7,62 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- Output redaction now masks wallet material it used to pass to the model and
+  transcript verbatim (WAL-09): a secret the gateway holds — a skill hot-wallet
+  key (`UNIV4_LP_PRIVATE_KEY`, `POOLSFUN_PRIVATE_KEY`, …), the vault password —
+  is registered by value and masked wherever it appears in tool output, so
+  `printenv NAME`, `echo $NAME` and bare prints are covered, not only
+  `NAME=value`. `unlock.key` is masked whole on read, keystore `ciphertext`/
+  `mac`/`salt`/`iv` and BIP-39 mnemonics are masked by shape, and a wallet
+  address or transaction hash (also 64 hex) stays readable.
+- The wallet vault's auto-unlock password is no longer stored in clear. In
+  `auto` mode `~/.agentos/wallets/unlock.key` now holds the password sealed
+  with AES-256-GCM under a 256-bit key kept **outside** the state directory —
+  `AGENTOS_VAULT_KEK` (64 hex, for containers/service managers), else the
+  Windows Data Protection API, else a `0600` file under the OS state dir
+  (`AGENTOS_VAULT_KEK_DIR` overrides the location). The file and its key are
+  each useless alone. A pre-existing plain-text `unlock.key` still unlocks and
+  is sealed in place on the next unlock; `manual` mode and `wallet mode
+  manual` delete the key. This is defence in depth, not an OS boundary: code
+  running as the same user can read both, so enable `agentos sandbox` or use
+  `manual` unlock for a real boundary.
+- A recursive read, copy or archive of a directory that is an **ancestor** of
+  a protected one is refused by the sensitive-path floor, closing the gap
+  where `grep -r ~/.agentos`, `cp -r ~`, `tar` of the state root (and the
+  `execute_code` equivalents `shutil.copytree`/`os.walk`/`Path.rglob`) read
+  `unlock.key` and every keystore from above without naming `wallets/`.
+  `/elevated full` still lifts it, and recursive work inside the workspace is
+  unaffected (WAL-01).
+- `[trading] unlock_mode` (`AGENTOS_TRADING_UNLOCK_MODE`) is honoured; it was
+  documented but read by nothing, so a gateway configured `manual` still
+  stored the vault password and auto-unlocked. `wallet.setup` without
+  `unlockMode` (and `agentos wallet setup` without `--mode`, which no longer
+  sends a default) now uses it. With `manual`, the vault never reads or
+  writes `unlock.key`: auto setup and switching to auto are refused
+  (`wallet.unlock_mode_policy`), a password stored by an earlier auto vault
+  is ignored (logged once as `vault.unlock_key_ignored`) and is deleted only
+  when you run the new `agentos wallet mode manual` (logged as
+  `vault.unlock_mode_changed`). `wallet status` adds `storedUnlockMode`,
+  `configuredUnlockMode` and `unlockKeyPresent` (WAL-25).
+- The verbatim backups AgentOS leaves beside a config file it rewrites
+  (`config.toml.backup.<stamp>`, `agentos.toml.backup.<stamp>`) and the
+  writer's `.config.toml.*.tmp` staging files are sensitive paths like the
+  config itself: an agent's shell, `read_file`, `list_dir`, globs and `cd`
+  spellings no longer reach the Uniswap key, keyed RPC URLs or gateway token
+  they hold. Existing backups stay where they are (WAL-17).
+- `agentos wallet export --out FILE` creates the file owner-only from its
+  first byte (`O_EXCL`, mode `0600`; on Windows an ACL for the current user
+  alone) and **refuses a path that already exists** (`FILE_EXISTS`, checked
+  before the password is sent) instead of overwriting it. It says so when
+  the filesystem cannot make the file private, and `--json` adds
+  `"private": true|false` (WAL-14).
+- A keyed RPC URL (`trading.rpc_urls`, `RPC_BASE_URL`, `RPC_ROBINHOOD_URL`)
+  no longer reaches a caller in a `wallet.*` / `trading.*` error. Every
+  handler now cuts a configured RPC URL in an error message or its details
+  down to its host, and the LP reads answer a non-`http(s)` or hostless URL
+  with `trading.rpc` naming the host only. The bundled LP, pools.fun,
+  chain-stocks and RWA-lookup skills' URL checks no longer quote the URL they
+  refuse (WAL-24).
 - **Breaking default — Discord and Slack channels now refuse senders you have
   not admitted.** Before, any Discord user who could DM or @mention the bot,
   and any Slack workspace member or guest, started an agent turn with the

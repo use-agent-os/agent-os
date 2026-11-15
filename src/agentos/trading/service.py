@@ -394,6 +394,8 @@ class TradingService:
         self._gateway_config = config
         self.config = getattr(config, "trading", config)
         self.vault = vault or Vault()
+        if self.vault.configured_mode is None:
+            self.vault.configured_mode = self._configured_unlock_mode
         self.ledger = ledger or Ledger()
         self._http = http or httpx.AsyncClient(timeout=15.0)
         self.prices = prices or PriceService(
@@ -606,6 +608,12 @@ class TradingService:
                 token_out=meta_out.address,
             )
             return await self._priced(self.provider("uniswap"), **kwargs)
+
+    def _configured_unlock_mode(self) -> str | None:
+        """``[trading] unlock_mode`` as the operator has it now (config is edited in place)."""
+        trading = getattr(self._gateway_config, "trading", self._gateway_config)
+        value = getattr(trading, "unlock_mode", None)
+        return value if isinstance(value, str) else None
 
     def ensure_unlocked(self) -> bool:
         if self.vault.unlocked:

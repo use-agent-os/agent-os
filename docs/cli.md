@@ -1109,13 +1109,14 @@ Read: [`flows.md`](flows.md)
 
 ```sh
 agentos wallet status
-agentos wallet setup --mode auto            # once; auto = password in ~/.agentos/wallets/unlock.key (0600)
+agentos wallet setup [--mode auto|manual]   # once; default: [trading] unlock_mode (auto = password kept in ~/.agentos/wallets/unlock.key)
 agentos wallet setup --mode manual          # or: unlock per gateway session, keys only in RAM
+agentos wallet mode manual|auto             # switch later; manual deletes the stored password (logged)
 agentos wallet unlock / lock
 agentos wallet create --label main
 agentos wallet import --label cold --private-key-stdin < key.txt
 agentos wallet import --label cold --keystore wallet.json
-agentos wallet export <addr> --keystore --out backup.json
+agentos wallet export <addr> --keystore --out backup.json   # a new owner-only file (0600 / user-only ACL); an existing path is refused
 agentos wallet export <addr> --private-key   # prints the raw key; always asks the vault password
 agentos wallet list / rename <addr> <label> / primary <addr> / remove <addr> --yes|-y
 agentos wallet balances [<addr>] [--chain base|robinhood] [--refresh] [--hidden] [--json]   # ledger view; --refresh re-reads the chain first (throttled to once per 10 s per wallet); --hidden lists junk tokens too
@@ -1570,7 +1571,11 @@ balance read still tries the chain's public node first),
 `approval_threshold_usd`, `daily_cap_usd` (0 = agent swaps off),
 `approval_ttl_seconds`, `agent_max_price_impact_pct`,
 `agent_max_slippage_pct`, `default_slippage_pct` (unset = provider auto),
-`unlock_mode` (`auto` | `manual`), `sync_interval_seconds`,
+`unlock_mode` (`auto` | `manual`; the default for `wallet setup` without
+`--mode`, and with `manual` the vault never reads or writes `unlock.key`:
+auto setup or `wallet mode auto` is refused, `wallet.unlock_mode_policy`, and
+a stored password from an earlier auto vault is ignored until
+`agentos wallet mode manual` deletes it), `sync_interval_seconds`,
 `price_ttl_seconds`.
 
 Read: [`features/trading.md`](features/trading.md)

@@ -13,6 +13,9 @@ _PYTEST_STATE_ROOT = Path(tempfile.gettempdir()) / f"agentos-pytest-{os.getpid()
 
 os.environ.setdefault("AGENTOS_STATE_DIR", str(_PYTEST_STATE_ROOT / "state"))
 os.environ.setdefault("AGENTOS_LOG_DIR", str(_PYTEST_STATE_ROOT / "logs"))
+# The vault seals unlock.key with a key kept outside the state root, by
+# default under the real home; tests must never write there.
+os.environ.setdefault("AGENTOS_VAULT_KEK_DIR", str(_PYTEST_STATE_ROOT / "vault-keys"))
 os.environ.setdefault("AGENTOS_TURN_CALL_LOG", "0")
 # OpenCAP, Surplus and OpenRouter price lookups refresh their catalogs over the
 # network when the cache is cold. Default tests must stay offline; tests that
@@ -23,3 +26,20 @@ os.environ.setdefault("AGENTOS_TURN_CALL_LOG", "0")
 os.environ.setdefault("AGENTOS_OPENCAP_LIVE_PRICING", "0")
 os.environ.setdefault("AGENTOS_SURPLUS_LIVE_PRICING", "0")
 os.environ.setdefault("AGENTOS_OPENROUTER_LIVE_PRICING", "0")
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _reset_redaction_secret_registry():
+    """Keep the process-global secret-value registry (WAL-09) from leaking.
+
+    A vault or env test that registers a password/key would otherwise mask that
+    literal in an unrelated test's output (e.g. the trading password
+    ``correct horse battery`` masking a passphrase-redaction assertion).
+    """
+    from agentos.redact import clear_registered_secret_values
+
+    clear_registered_secret_values()
+    yield
+    clear_registered_secret_values()

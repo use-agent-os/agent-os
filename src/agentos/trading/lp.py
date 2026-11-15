@@ -55,6 +55,7 @@ from agentos.trading.chains import (
     ChainSpec,
     is_native,
     normalize_address,
+    redact_rpc_url,
     rpc_url_for,
 )
 from agentos.trading.service import TradingError
@@ -2717,7 +2718,16 @@ def _engine_env(
     lib = unilp()
     overrides = dict(getattr(service.config, "rpc_urls", {}) or {})
     url = rpc_url_for(spec, overrides)
-    client = lib.rpc.RpcClient(dict(lib.chains.CHAINS[spec.key]), url)
+    try:
+        client = lib.rpc.RpcClient(dict(lib.chains.CHAINS[spec.key]), url)
+    except ValueError:
+        # The library's URL guard names the URL it refused, and provider keys
+        # live in its path and query: speak for it with the host only.
+        raise TradingError(
+            "trading.rpc",
+            f"the RPC URL for {spec.name} ({redact_rpc_url(url)}) must be an "
+            "http:// or https:// URL with a host",
+        ) from None
     log_client = (
         lib.rpc.RpcClient(dict(lib.chains.CHAINS[spec.key]), spec.rpc_url, timeout=20)
         if url.rstrip("/") != spec.rpc_url.rstrip("/")
