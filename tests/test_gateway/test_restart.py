@@ -192,7 +192,8 @@ async def test_safe_restart_runs_the_sequence_in_order(tmp_path: Path) -> None:
     plan = restarter.exec_plan
     assert plan is not None
     argv, env = plan
-    assert argv == [sys.executable, "-m", "agentos.cli.main", *sys.argv[1:]]
+    # ``-P`` (WAL-03): the re-exec never imports from the working directory.
+    assert argv == [sys.executable, "-P", "-m", "agentos.cli.main", *sys.argv[1:]]
     assert env[OPERATOR_SECRET_FILE_ENV] == str(tmp_path / "s")
 
     stored = json.loads(restart_request_path(_config(tmp_path)).read_text(encoding="utf-8"))
@@ -317,7 +318,7 @@ async def test_exec_releases_the_pid_lock_then_execs(tmp_path: Path) -> None:
     assert events[-2:] == ["pidlock_release", "exec"]
     path, argv, env = execs[0]
     assert path == sys.executable
-    assert argv[:3] == [sys.executable, "-m", "agentos.cli.main"]
+    assert argv[:4] == [sys.executable, "-P", "-m", "agentos.cli.main"]
     assert env[OPERATOR_SECRET_FILE_ENV] == str(tmp_path / "s")
 
 

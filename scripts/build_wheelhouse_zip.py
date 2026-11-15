@@ -898,7 +898,7 @@ PY
 fi
 
 AGENTOS_BIN="${VENV_PYTHON}"
-AGENTOS_MODULE=( "-m" "agentos.cli.main" )
+AGENTOS_MODULE=( "-P" "-m" "agentos.cli.main" )
 if [[ "${CLI_MODE}" == "1" ]]; then
   exec "${AGENTOS_BIN}" "${AGENTOS_MODULE[@]}" "$@"
 fi
@@ -1293,7 +1293,7 @@ for wheel_path in sorted(package_dir.glob("*.whl")):
 }
 Repair-WindowsVCRedistForOnnxIfNeeded
 
-$AgentOSArgs = @("-m", "agentos.cli.main")
+$AgentOSArgs = @("-P", "-m", "agentos.cli.main")
 
 if ($Cli) {
     & $VenvPython @AgentOSArgs @CliArgs

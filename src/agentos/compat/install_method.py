@@ -445,7 +445,7 @@ def build_upgrade_plan(
             method=resolved_method,
             delegated=False,
             tool=None,
-            command=[sys.executable, "-m", "pip", "install", "--upgrade", spec],
+            command=[sys.executable, "-P", "-m", "pip", "install", "--upgrade", spec],
             manual_hint=(
                 f"{sys.executable} -m ensurepip\n    "
                 f'{sys.executable} -m pip install --upgrade "{spec}"'
@@ -455,7 +455,7 @@ def build_upgrade_plan(
     if resolved_method is InstallMethod.PIP:
         # A genuine site-packages install: pip is the right upgrade tool. The
         # extras must be spelled out — pip drops any that are not in the spec.
-        pip_cmd = [sys.executable, "-m", "pip", "install", "--upgrade", spec]
+        pip_cmd = [sys.executable, "-P", "-m", "pip", "install", "--upgrade", spec]
         return UpgradePlan(
             method=resolved_method,
             delegated=False,
@@ -471,7 +471,7 @@ def build_upgrade_plan(
         method=resolved_method,
         delegated=False,
         tool=None,
-        command=[sys.executable, "-m", "pip", "install", "--upgrade", spec],
+        command=[sys.executable, "-P", "-m", "pip", "install", "--upgrade", spec],
         manual_hint=(
             "could not detect the install method — reinstall/upgrade with your "
             f'original installer, e.g.:\n    uv tool install --force "{spec}"\n    '

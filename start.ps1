@@ -357,7 +357,7 @@ for wheel_path in sorted(package_dir.glob("*.whl")):
 }
 Repair-WindowsVCRedistForOnnxIfNeeded
 
-$AgentOSArgs = @("-m", "agentos.cli.main")
+$AgentOSArgs = @("-P", "-m", "agentos.cli.main")
 
 if ($Cli) {
     & $VenvPython @AgentOSArgs @CliArgs

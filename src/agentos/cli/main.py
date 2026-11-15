@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
+from agentos import safe_python
 from agentos.env import load_env, warn_if_proxy_ignored
 
 if TYPE_CHECKING:
@@ -95,6 +96,11 @@ def _route_logs_to_stderr() -> None:
 
 
 _route_logs_to_stderr()
+
+# Record the PYTHON* variables this process was launched with before the
+# .env files below can add any, so a re-exec or a spawned gateway gets the same
+# interpreter environment as this launch (agentos.safe_python.launch_env).
+safe_python.capture_launch_env()
 
 # Populate os.environ from .env files before any submodule import reads keys.
 # Precedence: os.environ > $CWD/.env > $CWD/.env.test > ~/.agentos/.env.

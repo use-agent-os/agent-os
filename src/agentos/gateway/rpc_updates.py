@@ -25,6 +25,7 @@ from agentos.compat import pypi_client, version_utils
 from agentos.gateway.access import CONTROL_ONLY
 from agentos.gateway.rpc import RpcContext, get_dispatcher
 from agentos.paths import state_dir
+from agentos.safe_python import launch_env, python_argv
 
 _d = get_dispatcher()
 
@@ -127,7 +128,7 @@ def agentos_command() -> list[str]:
     found = shutil.which("agentos")
     if found:
         return [found]
-    return [sys.executable, "-m", "agentos.cli.main"]
+    return python_argv("-m", "agentos.cli.main")
 
 
 def current_status() -> dict[str, Any]:
@@ -171,7 +172,7 @@ def start_upgrade(*, source: str) -> dict[str, Any]:
     except OSError:
         pass
 
-    env = hardened_path_env()
+    env = launch_env(hardened_path_env())
     # The upgrade's own once-a-day notice would land in the log as noise.
     env["AGENTOS_NO_UPDATE_NOTICE"] = "1"
     command = [*agentos_command(), "upgrade", "--json", "--source", source]
@@ -188,7 +189,9 @@ def start_upgrade(*, source: str) -> dict[str, Any]:
         {"command": command, "env": env, "log": str(log), "job": str(job_path())}
     )
     proc = subprocess.Popen(  # noqa: S603 - argv built internally
-        [sys.executable, "-c", _RUNNER, runner_args],
+        # ``-P``: the runner imports json/subprocess; the gateway's working
+        # directory must not be able to shadow them (agentos.safe_python).
+        python_argv("-c", _RUNNER, runner_args),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

@@ -55,6 +55,7 @@ from agentos.asyncio_utils import create_background_task
 from agentos.gateway.agent_surface import OPERATOR_SECRET_FILE_ENV, get_agent_surface
 from agentos.gateway.credential_env import credential_env_for_reexec
 from agentos.paths import default_agentos_home
+from agentos.safe_python import launch_env, python_argv
 
 log = structlog.get_logger(__name__)
 
@@ -248,9 +249,12 @@ def default_reexec_argv() -> list[str]:
     """The same gateway, the same flags, through the interpreter that runs now.
 
     Matches the shape ``gateway_lifecycle`` spawns, so an operator's
-    ``--listen``/``--port``/``--config`` survive the restart verbatim.
+    ``--listen``/``--port``/``--config`` survive the restart verbatim. ``-P``
+    keeps the working directory off ``sys.path``: ``-m`` would put it first,
+    and a module planted there would be imported by the process that holds
+    the vault keys (``agentos.safe_python``).
     """
-    return [sys.executable, "-m", "agentos.cli.main", *sys.argv[1:]]
+    return python_argv("-m", "agentos.cli.main", *sys.argv[1:])
 
 
 def restart_request_path(config: Any) -> Path:
@@ -478,7 +482,9 @@ class GatewayRestarter:
         # ends the process with exit 1 so an on-failure supervisor respawns it.
         try:
             argv = list(self._argv_factory())
-            env = dict(os.environ)
+            # The interpreter variables this gateway was launched with, not
+            # whatever a ``.env`` file added to os.environ since.
+            env = launch_env(os.environ)
             # Boot removed the env-sourced gateway token from os.environ
             # (gateway.credential_env); the new image needs it back.
             env.update(credential_env_for_reexec())

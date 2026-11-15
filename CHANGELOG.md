@@ -28,6 +28,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   binary/CDP settings, `cors`, `control_ui.allowed_origins`, `gateway.bind`,
   `gateway.public_origin`, `state_dir` and `observability.otlp_*`, and one
   list (`agentos.config_roots`) now feeds every gate.
+- **AgentOS's own Python launches no longer import from the working
+  directory (WAL-03).** The in-place restart re-exec'd `python -m
+  agentos.cli.main`, which puts the working directory (`$HOME` for the
+  service units) first on `sys.path`, so a file such as `eth_account.py`
+  dropped there by an agent's shell ran inside the gateway that holds the
+  wallet keys. The restart, `agentos gateway start`, the generated service
+  units, the update runner, `start.sh`/`start.ps1` and the pip upgrade path
+  now pass `-P`, and a restarted or spawned gateway gets the `PYTHON*`
+  variables the first launch had rather than any a `.env` added since.
 - **Breaking default — Discord and Slack channels now refuse senders you have
   not admitted.** Before, any Discord user who could DM or @mention the bot,
   and any Slack workspace member or guest, started an agent turn with the

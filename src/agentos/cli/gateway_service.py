@@ -93,7 +93,7 @@ def resolve_agentos_program(
     ``sys.argv[0]`` when it is the ``agentos`` script (made absolute but not
     resolved, so a ``~/.local/bin/agentos`` symlink keeps following
     ``uv tool upgrade``), else ``agentos`` on ``PATH``, else this interpreter
-    with ``-m agentos.cli.main``.
+    with ``-P -m agentos.cli.main``.
     """
     raw = sys.argv[0] if argv0 is None else argv0
     if raw:
@@ -103,7 +103,8 @@ def resolve_agentos_program(
     found = which("agentos")
     if found:
         return [str(Path(found).absolute())]
-    return [executable or sys.executable, "-m", "agentos.cli.main"]
+    # ``-P``: the gateway must not import from its working directory.
+    return [executable or sys.executable, "-P", "-m", "agentos.cli.main"]
 
 
 def service_path_env(home: Path, inherited: str | None = None) -> str:
