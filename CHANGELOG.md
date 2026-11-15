@@ -141,6 +141,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `env`, `sudo`, `xargs`, …), or that do not parse always ask. `bash -lc
   '<command>'` is matched by its inner command. Docs:
   [ACP agents › Permission modes](docs/acp-agents.md#permission-modes).
+- Trading: an agent swap that the daily cap refuses (including
+  `daily_cap_usd = 0`) is rejected even when the caller declares an
+  `expectedOutRaw`. Before, a client quote a little above the fresh one
+  parked the over-cap swap for approval instead, so an approval could run it
+  past the cap. A swap parked for a stale client quote now also names the
+  threshold or impact reason it would have waited for anyway. (WAL-23)
 
 ### Changed
 - Editing the config file by hand no longer applies the operator-only

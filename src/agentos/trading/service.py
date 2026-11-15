@@ -4125,6 +4125,24 @@ class TradingService:
             if quote.slippage_pct is not None
             else row.get("slippage_pct"),
         )
+        # The row is still ``quoted`` here, so its own value is not yet in
+        # ``open_agent_value_usd``; the verdict adds it on top of everything
+        # else in flight for this wallet.
+        verdict = self._verdict(
+            initiator=str(row["initiator"]),
+            value=value,
+            record=record,
+            quote=quote,
+            order_id=str(row["order_id"]),
+        )
+        # The cap is decided first: an order it refuses is rejected outright,
+        # whatever quote the client says it confirmed. A client-declared
+        # ``expectedOutRaw`` used to park an over-cap (or cap = 0) agent swap
+        # for approval before this verdict ever ran (WAL-23).
+        if verdict.decision == "blocked_daily_cap":
+            self.ledger.update_order(row["order_id"], status="rejected", reason=verdict.reason)
+            await self._order_finished(self.get_order(row["order_id"]))
+            return
         # The client confirmed a number; the engine's fresh quote must not
         # be far below it, or the user is executing a trade they never saw.
         client_expected = _client_expected_out(row)
@@ -4140,6 +4158,9 @@ class TradingService:
                     + "); quote again"
                 )
                 if row["initiator"] == "agent":
+                    if verdict.decision == "needs_approval":
+                        # The approver sees every reason this order waits.
+                        reason = f"{reason}; {verdict.reason}"
                     self.ledger.update_order(
                         row["order_id"],
                         status="awaiting_approval",
@@ -4151,20 +4172,6 @@ class TradingService:
                     )
                     return
                 raise TradingError("trading.price_moved", reason)
-        # The row is still ``quoted`` here, so its own value is not yet in
-        # ``open_agent_value_usd``; the verdict adds it on top of everything
-        # else in flight for this wallet.
-        verdict = self._verdict(
-            initiator=str(row["initiator"]),
-            value=value,
-            record=record,
-            quote=quote,
-            order_id=str(row["order_id"]),
-        )
-        if verdict.decision == "blocked_daily_cap":
-            self.ledger.update_order(row["order_id"], status="rejected", reason=verdict.reason)
-            await self._order_finished(self.get_order(row["order_id"]))
-            return
         if verdict.decision == "needs_approval":
             ttl = int(self.config.approval_ttl_seconds)
             self.ledger.update_order(
