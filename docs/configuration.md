@@ -93,9 +93,12 @@ an open exec window) may `env.set`, `env.unset` or `env.import` only a name
 the catalog marks agent-settable: a credential-shaped name (`*_API_KEY`,
 `*_TOKEN`, ...) that an installed skill's `requires.env` or a built-in tool
 declares. Provider keys, names only your `.env` holds, `AGENTOS_*` names, the
-wallet's own `RPC_BASE_URL` / `RPC_ROBINHOOD_URL` / `UNISWAP_API_KEY`, and the
+wallet's own `RPC_BASE_URL` / `RPC_ROBINHOOD_URL` / `UNISWAP_API_KEY`, the
+skill hot-wallet keys (`UNIV4_LP_PRIVATE_KEY`, `POOLSFUN_PRIVATE_KEY`,
+`GMGN_PRIVATE_KEY`, whatever a skill manifest declares about them), and the
 runtime-steering names above are refused with `env.protected`; so is
-`env.reveal` of any secret (or uncatalogued) name. Your own connections -- the
+`env.reveal` of any secret (or uncatalogued) name, and of a hot-wallet key
+always. Your own connections -- the
 console, the desktop app, the CLI outside an agent's session -- are not
 affected. The agent's `env_set` tool still asks for your approval per write.
 
