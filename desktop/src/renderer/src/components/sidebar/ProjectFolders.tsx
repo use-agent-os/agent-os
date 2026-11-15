@@ -22,7 +22,13 @@ import { quick } from '~/lib/motion'
 import { errorText, invalidateProjects, useAgents, useMoveSession } from '~/stores/projects'
 import type { SessionRow } from '~/stores/sessions'
 import { useUi } from '~/stores/ui'
-import { folderPreview, normalizeName, SESSION_DRAG_TYPE, type Filed } from '~/views/projects/logic'
+import {
+  FOLDER_PREVIEW,
+  folderPreview,
+  normalizeName,
+  SESSION_DRAG_TYPE,
+  type Filed,
+} from '~/views/projects/logic'
 import { useProjectActions } from '~/views/projects/project-actions'
 import { DeleteProjectConfirm } from '~/views/projects/ProjectView'
 import { RenameField, SessionRowLink } from './SessionRow'
@@ -111,6 +117,8 @@ function FolderRow({ project, rows }: { project: RawProject; rows: SessionRow[] 
   const open = useUi((s) => s.openFolders.has(id))
   const toggle = useUi((s) => s.toggleFolder)
   const setOpen = useUi((s) => s.setFolderOpen)
+  const expanded = useUi((s) => s.expandedFolders.has(id))
+  const setExpanded = useUi((s) => s.setFolderExpanded)
   const reduce = useReducedMotion()
   const { move } = useMoveSession()
   const actions = useProjectActions(project)
@@ -119,7 +127,7 @@ function FolderRow({ project, rows }: { project: RawProject; rows: SessionRow[] 
   const [renaming, setRenaming] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const linkRef = useRef<HTMLAnchorElement>(null)
-  const { shown, hidden } = folderPreview(rows)
+  const { shown, hidden } = folderPreview(rows, FOLDER_PREVIEW, expanded)
   // A function, so a "$" in the project's name is not read as a pattern.
   const newChatLabel = t('projects.folder.newChat').replace('{name}', () => name)
 
@@ -250,10 +258,23 @@ function FolderRow({ project, rows }: { project: RawProject; rows: SessionRow[] 
             {shown.map((row) => (
               <SessionRowLink key={row.key} row={row} nested />
             ))}
+            {/* In place, the way a list grows: the project page is the folder's name. */}
             {hidden > 0 ? (
-              <NavLink to={projectPath(id)} className="proj-folder__more">
+              <button
+                type="button"
+                className="proj-folder__more app-no-drag"
+                onClick={() => setExpanded(id, true)}
+              >
                 {hidden} {t('projects.folder.more')}
-              </NavLink>
+              </button>
+            ) : expanded && rows.length > FOLDER_PREVIEW ? (
+              <button
+                type="button"
+                className="proj-folder__more app-no-drag"
+                onClick={() => setExpanded(id, false)}
+              >
+                {t('projects.folder.less')}
+              </button>
             ) : null}
           </motion.div>
         ) : null}

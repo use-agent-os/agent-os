@@ -73,6 +73,11 @@ interface UiStore {
   composerFocusRequest: number
   /** Project folders currently disclosed in the sidebar. */
   openFolders: ReadonlySet<string>
+  /**
+   * Folders whose "N more" was pressed: they list every chat, not just the
+   * preview. For this run of the app only; a relaunch starts folded.
+   */
+  expandedFolders: ReadonlySet<string>
   /** The inline "new project" row is showing in the sidebar. */
   creatingProject: boolean
   toggleSidebar(): void
@@ -95,6 +100,7 @@ interface UiStore {
   setFolderOpen(id: string, open: boolean): void
   /** Replace the open set wholesale: the Projects header's collapse / expand all. */
   setOpenFolders(ids: Iterable<string>): void
+  setFolderExpanded(id: string, expanded: boolean): void
   startCreatingProject(): void
   stopCreatingProject(): void
 }
@@ -111,6 +117,7 @@ export const useUi = create<UiStore>((set) => ({
   pendingPrompt: null,
   composerFocusRequest: 0,
   openFolders: loadOpenFolders(),
+  expandedFolders: new Set(),
   creatingProject: false,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSidebarWidth: (width) => {
@@ -166,6 +173,14 @@ export const useUi = create<UiStore>((set) => ({
     saveOpenFolders(next)
     set({ openFolders: next })
   },
+  setFolderExpanded: (id, expanded) =>
+    set((s) => {
+      if (s.expandedFolders.has(id) === expanded) return s
+      const next = new Set(s.expandedFolders)
+      if (expanded) next.add(id)
+      else next.delete(id)
+      return { expandedFolders: next }
+    }),
   startCreatingProject: () => set({ creatingProject: true, sidebarOpen: true }),
   stopCreatingProject: () => set({ creatingProject: false }),
 }))

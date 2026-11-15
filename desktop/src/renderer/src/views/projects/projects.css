@@ -192,6 +192,10 @@ a.proj-folder__link:focus-visible::after {
 }
 .proj-folder__more {
   display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  cursor: default;
   padding: 3px 8px 4px 30px;
   font-size: 11.5px;
   color: var(--muted-foreground);

@@ -13,6 +13,7 @@ export const projects = {
   'projects.folder.close': 'Hide chats',
   'projects.folder.empty': 'No chats yet',
   'projects.folder.more': 'more',
+  'projects.folder.less': 'Show less',
   'projects.folder.drop': 'Move here',
   'projects.folder.newChat': 'New chat in {name}',
   'projects.folder.rename.label': 'Project name',
