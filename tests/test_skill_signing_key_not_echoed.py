@@ -74,7 +74,11 @@ def _run(script: Path, argv: list[str], env_name: str, key: str) -> subprocess.C
         (_UNILP / "lp_write.py", ["address"]),
         (_UNILP / "lp_write.py", ["address", "--json"]),
         (_UNILP / "lp_read.py", ["positions", "--rpc", "http://127.0.0.1:9"]),
-        (_UNILP / "ratchet.py", ["list", "--rpc", "http://127.0.0.1:9"]),
+        pytest.param(
+            _UNILP / "ratchet.py",
+            ["list", "--rpc", "http://127.0.0.1:9"],
+            marks=pytest.mark.skipif(os.name == "nt", reason="ratchet's journal needs fcntl"),
+        ),
     ],
     ids=["lp_write-address", "lp_write-address-json", "lp_read-positions", "ratchet-list"],
 )

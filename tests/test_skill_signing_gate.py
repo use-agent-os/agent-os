@@ -409,8 +409,10 @@ async def test_any_other_cron_script_gets_no_key(fake_bundle: Path, tmp_path: Pa
 
     script_dir = tmp_path / "state" / "scripts" / "x"
     script_dir.mkdir(parents=True)
+    # as_posix: a Windows path's backslashes are escapes to bash.
+    ratchet = (fake_bundle / "ratchet.py").as_posix()
     (script_dir / "tick.sh").write_text(
-        f"echo hi\nexec python3 {fake_bundle}/ratchet.py tick --all --broadcast\n",
+        f'echo hi\nexec python3 "{ratchet}" tick --all --broadcast\n',
         encoding="utf-8",
     )
     ok, output = await run_job_script("x/tick.sh", timeout=60)
@@ -462,7 +464,11 @@ async def test_an_mcp_server_does_not_inherit_a_signing_key(
         raise RuntimeError("stop here")
 
     monkeypatch.setattr(stdio.asyncio, "create_subprocess_exec", spawn)
-    client = stdio.MCPStdioClient(MCPServerConfig(name="x", transport="stdio", command="x"))
+    # An absolute command that exists: Windows resolves the command through
+    # PATHEXT before it spawns, and the spawn is what this test stops at.
+    client = stdio.MCPStdioClient(
+        MCPServerConfig(name="x", transport="stdio", command=sys.executable)
+    )
     with pytest.raises(RuntimeError, match="stop here"):
         await client.connect()
     assert seen["env"] is not None and "UNIV4_LP_PRIVATE_KEY" not in seen["env"]
