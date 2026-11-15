@@ -11,8 +11,9 @@ the password and every keystore together (WAL-01).
 256-bit key-encryption key (KEK) that is **not** in the state directory:
 
 * ``env``   -- ``AGENTOS_VAULT_KEK`` (64 hex characters), for containers and
-  service managers that inject secrets. The gateway reads it at boot and
-  drops it from its environment, so it is in no file and no child process.
+  service managers that inject secrets. It is withheld from every child
+  process (``tools.env_passthrough``), so the key is in no file and no
+  subprocess, only the gateway's own memory.
 * ``dpapi`` -- Windows: the KEK is sealed with the Data Protection API for the
   current user and stored under ``%LOCALAPPDATA%\\AgentOS\\vault-keys``; the
   blob is useless to another account or machine.
@@ -139,13 +140,15 @@ def _open(kek: bytes, envelope: Envelope) -> bytes:
 
 
 def _env_kek() -> bytes | None:
-    """``AGENTOS_VAULT_KEK``, from the environment or from what boot scrubbed."""
-    raw = os.environ.get(KEK_ENV, "")
-    if not raw:
-        from agentos.gateway.credential_env import credential_env_for_reexec
+    """``AGENTOS_VAULT_KEK`` from the environment.
 
-        raw = credential_env_for_reexec().get(KEK_ENV, "")
-    raw = raw.strip()
+    Kept in this process's ``os.environ`` (the boot-time credential scrub skips
+    it; ``gateway.credential_env._HANDLED_ELSEWHERE``) but withheld from every
+    child, since it is in ``GATEWAY_CREDENTIAL_ENV`` which
+    ``tools.env_passthrough`` strips. So the gateway can seal and open the
+    vault while no subprocess ever sees the key.
+    """
+    raw = os.environ.get(KEK_ENV, "").strip()
     if not raw:
         return None
     try:

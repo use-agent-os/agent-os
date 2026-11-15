@@ -26,3 +26,20 @@ os.environ.setdefault("AGENTOS_TURN_CALL_LOG", "0")
 os.environ.setdefault("AGENTOS_OPENCAP_LIVE_PRICING", "0")
 os.environ.setdefault("AGENTOS_SURPLUS_LIVE_PRICING", "0")
 os.environ.setdefault("AGENTOS_OPENROUTER_LIVE_PRICING", "0")
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _reset_redaction_secret_registry():
+    """Keep the process-global secret-value registry (WAL-09) from leaking.
+
+    A vault or env test that registers a password/key would otherwise mask that
+    literal in an unrelated test's output (e.g. the trading password
+    ``correct horse battery`` masking a passphrase-redaction assertion).
+    """
+    from agentos.redact import clear_registered_secret_values
+
+    clear_registered_secret_values()
+    yield
+    clear_registered_secret_values()

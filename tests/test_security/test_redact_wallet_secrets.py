@@ -125,5 +125,8 @@ def test_env_store_registers_a_secret_named_value(monkeypatch, tmp_path) -> None
     from agentos import env_store
 
     monkeypatch.setenv("AGENTOS_STATE_DIR", str(tmp_path))
-    env_store.set_env_var("POOLSFUN_PRIVATE_KEY", KEY)
+    # apply_live=False keeps POOLSFUN_PRIVATE_KEY out of os.environ (which
+    # set_env_var writes directly, bypassing monkeypatch); registration for
+    # masking happens regardless, which is what this checks.
+    env_store.set_env_var("POOLSFUN_PRIVATE_KEY", KEY, apply_live=False)
     assert KEY not in redact.redact_terminal_output(KEY + "\n", "printenv POOLSFUN_PRIVATE_KEY")
