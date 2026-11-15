@@ -86,7 +86,9 @@ create ──(operator)──────────────► active ─�
   the cent, never under $0.01), or `runs.done == runs.max`, the
   mandate is `completed` (`statusReason` = `"cap reached"` /
   `"runs reached"`) and emits `trading.dca.changed`. `spent_usd` is also
-  cached on the mandate row (updated at settle) so the list is one query.
+  cached on the mandate row (updated at settle) so the list is one query,
+  and it is a floor: confirmed spend never reads lower than it, so a cap
+  does not reopen because order rows went missing.
 - **Max price guard.** With `max_price_usd` set, a run where the engine's
   spot price of `token` is above it is `skipped` (`max_price`, the price
   seen goes into `reason` detail). No buy, schedule advances normally.
@@ -115,6 +117,17 @@ create ──(operator)──────────────► active ─�
   recomputed from the anchor, so at most one buy fires when it is due.
 - Nothing is ever deleted. `list` shows live mandates
   (`awaiting_approval`, `active`, `paused`) unless `--all`.
+- **Removing the wallet** (`wallet.remove`) stops every mandate bound to it
+  (`statusReason` `"wallet removed"`) and rejects its buys waiting for
+  approval. Importing the same key again revives none of them.
+- **Sealed terms.** Approving a mandate (or creating one as the operator)
+  seals its terms (wallet, chain, tokens, `usdPerRun`, `capUsd`, `runsMax`,
+  `everySeconds`, `maxPriceUsd`, slippage) with the vault key, so it needs
+  an unlocked vault; `update` re-seals. Every run checks the seal first: a
+  mandate whose row was changed outside the engine is `stopped`
+  (`"integrity check failed (…)"`) without buying, and the gateway
+  broadcasts `trading.integrity.alert`. While you have locked the vault
+  (`agentos wallet lock`) due runs wait for the unlock instead of failing.
 
 ## Ledger (schema v7)
 
@@ -198,8 +211,8 @@ Errors are `TradingError` codes: `trading.dca.not_found`,
 `trading.dca.bad_state` (e.g. approve on an active one, resume on a stopped
 one), `trading.dca.invalid` (usd ≤ 0 or under $0.01, cap < usd, every < 60 s, unknown
 quote on Robinhood Chain without `--quote`), `trading.operator_required`
-(from the RPC layer), plus the usual `trading.disabled`, `wallet.locked`,
-`trading.unsupported_chain`, `trading.token_not_found` (unknown symbol;
+(from the RPC layer), `trading.integrity` (the mandate failed its seal), plus
+the usual `trading.disabled`, `wallet.locked`, `trading.unsupported_chain`, `trading.token_not_found` (unknown symbol;
 an ambiguous one stays `trading.invalid`). At create, `slippagePct` may
 not exceed the agent slippage ceiling and the wallet may not be `all`.
 

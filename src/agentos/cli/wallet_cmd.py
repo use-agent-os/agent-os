@@ -223,6 +223,8 @@ def wallet_status(
     table.add_column("Value")
     table.add_row("initialized", "yes" if result.get("initialized") else "no")
     table.add_row("unlocked", "yes" if result.get("unlocked") else "no")
+    if result.get("lockedByOperator"):
+        table.add_row("locked", "by you (`agentos wallet unlock` to sign again)")
     table.add_row("unlock mode", str(result.get("unlockMode") or "—"))
     stored = result.get("storedUnlockMode")
     if stored and stored != result.get("unlockMode"):
@@ -316,7 +318,7 @@ def wallet_mode(
 def wallet_unlock(
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
-    """Unlock the vault for this gateway session."""
+    """Unlock the vault for this gateway session (and end a `wallet lock`)."""
 
     password = read_password("Vault password", json_output=json_output)
 
@@ -334,7 +336,7 @@ def wallet_unlock(
 def wallet_lock(
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
-    """Lock the vault (drops keys from gateway memory)."""
+    """Lock the vault: nothing signs until `wallet unlock`, in auto mode and across restarts."""
 
     async def _run(client):
         return await client.call("wallet.lock", {})
@@ -344,6 +346,10 @@ def wallet_lock(
         print_json(result)
         return
     console.print("Vault locked.")
+    console.print(
+        "Nothing signs (agent swaps, DCA buys, price triggers) until you run "
+        "`agentos wallet unlock`, in auto mode too and across gateway restarts."
+    )
 
 
 @app.command("list")

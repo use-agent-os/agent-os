@@ -17,12 +17,19 @@ The operator's ``[trading] unlock_mode`` is a policy over both: when it says
 index records, and refuses to be set up or switched to ``auto``. A leftover
 ``unlock.key`` is removed only by an explicit ``set_unlock_mode("manual")``.
 
+An explicit :meth:`Vault.lock` is the operator saying "nothing signs". It is
+latched in ``index.json`` and outranks ``unlock.key``: an ``auto`` vault stays
+locked, across gateway restarts too, until :meth:`Vault.unlock` is called with
+the password.
+
 Nothing in this module logs, returns or serialises a private key except
 :meth:`Vault.export`, which re-verifies the password first.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -46,6 +53,11 @@ UnlockMode = Literal["auto", "manual"]
 INDEX_FILE = "index.json"
 UNLOCK_FILE = "unlock.key"
 INDEX_VERSION = 1
+#: ``index.json`` key of the operator's lock latch (:meth:`Vault.lock`).
+LOCK_LATCH = "operator_locked"
+#: ``index.json`` key of the ledger seal's salt (:meth:`Vault.ledger_seal_key`).
+LEDGER_SEAL = "ledger_seal"
+_LEDGER_SEAL_LABEL = b"agentos/trading/ledger-seal/v1\x00"
 
 log = structlog.get_logger(__name__)
 
@@ -158,6 +170,11 @@ class Vault:
         self.configured_mode = configured_mode
         self._warned_ignored_unlock_key = False
         self._warned_unlock_key_unavailable = False
+        # The ledger seal key (``ledger_seal_key``): in memory while unlocked only.
+        self._seal_key: bytes | None = None
+        # Set when an unlock had to create the seal salt: the ledger's live rows
+        # predate sealing and the service adopts them once (``take_new_seal``).
+        self._seal_new = False
 
     # ── paths ──────────────────────────────────────────────────────────
 
@@ -249,6 +266,16 @@ class Vault:
             return self.policy_mode() or "auto"
         return self.stored_unlock_mode
 
+    @property
+    def operator_locked(self) -> bool:
+        """The operator locked the vault and has not unlocked it since (any mode, any restart)."""
+        if not self.initialized:
+            return False
+        try:
+            return bool(self._read_index().get(LOCK_LATCH))
+        except VaultError:
+            return False
+
     def status(self) -> dict[str, Any]:
         wallets = self.list() if self.initialized else []
         primary = self.primary_address() if self.initialized else None
@@ -257,6 +284,7 @@ class Vault:
             "initialized": self.initialized,
             "unlocked": self.unlocked,
             "unlockMode": self.unlock_mode,
+            "lockedByOperator": self.operator_locked,
             # What the index records and what the operator configured; they
             # differ only for a vault set up auto before unlock_mode = manual,
             # whose unlock.key stays (unused) until `agentos wallet mode manual`.
@@ -309,13 +337,15 @@ class Vault:
             if unlock_mode == "auto":
                 self._refuse_auto_under_manual_policy()
             _secure_dir(self.root)
-            verifier = self._encrypt(secrets.token_bytes(32), password)
+            secret = secrets.token_bytes(32)
+            seal = _new_ledger_seal()
             self._write_index(
                 {
                     "unlock_mode": unlock_mode,
                     "primary": None,
                     "wallets": [],
-                    "verifier": verifier,
+                    "verifier": self._encrypt(secret, password),
+                    LEDGER_SEAL: seal,
                     "created_at": time.time(),
                 }
             )
@@ -326,16 +356,22 @@ class Vault:
             self._password = password
             register_secret_values(password)
             self._keys = {}
+            self._seal_key = _derive_seal_key(secret, seal)
+            self._seal_new = False
 
-    def verify_password(self, password: str) -> None:
+    def _open_verifier(self, password: str) -> bytes:
+        """The verifier's secret: decrypting it is what proves the password."""
         index = self._read_index()
         verifier = index.get("verifier")
         if not isinstance(verifier, dict):
             raise VaultError("wallet index has no password verifier")
-        self._decrypt(verifier, password)
+        return self._decrypt(verifier, password)
+
+    def verify_password(self, password: str) -> None:
+        self._open_verifier(password)
 
     def unlock(self, password: str) -> None:
-        """Unlock with the operator's password.
+        """Unlock with the operator's password: the one way out of an operator's lock.
 
         In ``auto`` mode a stored password that no longer opens (its key was
         lost with a container's home, a legacy plain-text file the gateway
@@ -344,6 +380,7 @@ class Vault:
         """
         with self._lock:
             self._unlock(password)
+            self._clear_lock_latch()
             if self.unlock_mode == "auto" and self.unlock_path.exists():
                 if not self._unlock_key_opens_to(password):
                     try:
@@ -354,9 +391,10 @@ class Vault:
                         log.warning("vault.unlock_key_resealed")
 
     def _unlock(self, password: str) -> None:
+        """Decrypt every key into memory. Leaves an operator's lock latch as it is."""
         password = _require_password(password)
         with self._lock:
-            self.verify_password(password)
+            secret = self._open_verifier(password)
             keys: dict[str, bytes] = {}
             for record in self.list():
                 path = self.keystore_path(record.address)
@@ -364,21 +402,59 @@ class Vault:
                     continue
                 keystore = json.loads(path.read_text(encoding="utf-8"))
                 keys[record.key] = self._decrypt(keystore, password)
+            index = self._read_index()
+            seal, changed = self._ledger_seal(index)
+            if changed:
+                self._write_index(index)
             self._keys = keys
             self._password = password
             register_secret_values(password)
+            self._seal_key = _derive_seal_key(secret, seal)
+
+    def _clear_lock_latch(self) -> None:
+        """Lift the operator's lock latch; only an explicit, password-proven call does this."""
+        index = self._read_index()
+        if index.get(LOCK_LATCH):
+            index[LOCK_LATCH] = False
+            self._write_index(index)
+
+    def _ledger_seal(self, index: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        """The index's seal salt; ``True`` when it had to be created (``index`` is changed)."""
+        stored = index.get(LEDGER_SEAL)
+        if isinstance(stored, dict) and _valid_ledger_seal(stored):
+            return stored, False
+        # A vault from before ledger seals: start sealing now, and let the
+        # service vouch (once) for the rows that are already live.
+        seal = index[LEDGER_SEAL] = _new_ledger_seal()
+        self._seal_new = True
+        return seal, True
 
     def lock(self) -> None:
+        """Drop the keys and latch the lock: nothing auto-unlocks until :meth:`unlock`.
+
+        ``auto`` mode would otherwise read ``unlock.key`` again on the next
+        status call or agent swap and undo the lock at once. The latch lives in
+        ``index.json`` so a gateway restart does not undo it either.
+        """
         with self._lock:
             self._keys = {}
             self._password = None
+            self._seal_key = None
+            if self.initialized:
+                index = self._read_index()
+                if not index.get(LOCK_LATCH):
+                    index[LOCK_LATCH] = True
+                    self._write_index(index)
 
     def try_auto_unlock(self) -> bool:
-        """Unlock from ``unlock.key`` when in ``auto`` mode. Never raises."""
+        """Unlock from ``unlock.key`` when in ``auto`` mode. Never raises.
+
+        An operator's :meth:`lock` outranks the file: a latched vault stays locked.
+        """
         with self._lock:
             if self.unlocked:
                 return True
-            if not self.initialized:
+            if not self.initialized or self.operator_locked:
                 return False
             if self.unlock_mode != "auto":
                 self._warn_ignored_unlock_key()
@@ -523,13 +599,16 @@ class Vault:
                 mode=mode,
                 unlock_key_removed=removed,
             )
+            # An explicit, password-proven operator action: it lifts the lock
+            # latch like ``unlock`` does.
             if not self.unlocked:
                 self._unlock(password)
+            self._clear_lock_latch()
 
     def change_password(self, password: str, new_password: str) -> None:
         new_password = _require_password(new_password)
         with self._lock:
-            self.verify_password(password)
+            secret = self._open_verifier(password)
             index = self._read_index()
             records = [self._record(raw) for raw in index["wallets"]]
             keys: dict[str, bytes] = {}
@@ -542,7 +621,11 @@ class Vault:
                     self.keystore_path(record.address),
                     json.dumps(self._encrypt(keys[record.key], new_password)),
                 )
-            index["verifier"] = self._encrypt(secrets.token_bytes(32), new_password)
+            # The same secret under the new password: the ledger seal key is
+            # derived from it, and every live order and mandate stays sealed.
+            index["verifier"] = self._encrypt(secret, new_password)
+            seal, _created = self._ledger_seal(index)
+            index[LOCK_LATCH] = False
             self._write_index(index)
             # Under a manual policy the stored password is not refreshed: the
             # old one no longer opens anything, and writing the new one would
@@ -552,6 +635,44 @@ class Vault:
             self._keys = keys
             self._password = new_password
             register_secret_values(new_password)
+            self._seal_key = _derive_seal_key(secret, seal)
+
+    # ── ledger seal (agentos.trading.integrity) ────────────────────────
+
+    def ledger_seal_key(self) -> bytes | None:
+        """The key the ledger's rows are sealed with; ``None`` while locked.
+
+        Derived from the verifier's secret (encrypted under the vault password,
+        so as well protected as the wallet keys) and a per-vault salt in
+        ``index.json``. It is never written anywhere.
+        """
+        return self._seal_key
+
+    def take_new_seal(self) -> bool:
+        """``True`` once after an unlock started sealing an existing vault (adopt its rows)."""
+        with self._lock:
+            new, self._seal_new = self._seal_new, False
+            return new
+
+    def incarnation(self, address: str) -> str | None:
+        """Which time the vault learned this key: a removal and re-import is a new one.
+
+        A random id written when the wallet was added; a wallet added before
+        that id existed answers its creation time instead. ``None`` for an
+        address the vault does not hold.
+        """
+        try:
+            key = normalize_address(address)
+            index = self._read_index()
+        except (VaultError, ValueError):
+            return None
+        for raw in index.get("wallets", []):
+            if normalize_address(str(raw.get("address") or "")) == key:
+                stored = raw.get("incarnation")
+                if isinstance(stored, str) and stored:
+                    return stored
+                return f"created:{float(raw.get('created_at') or 0.0)!r}"
+        return None
 
     def _require_unlocked(self) -> str:
         if not self.initialized:
@@ -613,7 +734,8 @@ class Vault:
         if any(normalize_address(w["address"]) == record.key for w in index["wallets"]):
             raise VaultError(f"wallet {record.address} already exists")
         _write_private(self.keystore_path(record.address), json.dumps(self._encrypt(key, password)))
-        index["wallets"].append(self._raw(record))
+        # A fresh id each time the vault learns this key (``incarnation``).
+        index["wallets"].append({**self._raw(record), "incarnation": secrets.token_hex(16)})
         if not index.get("primary"):
             index["primary"] = record.address
         self._write_index(index)
@@ -762,6 +884,25 @@ def _check_keystore_kdf(keystore: Any) -> None:
             raise ValueError("keystore pbkdf2 iteration count is too expensive to decrypt")
     else:
         raise ValueError(f"keystore kdf {kdf or 'missing'!r} is not supported")
+
+
+def _new_ledger_seal() -> dict[str, Any]:
+    return {"version": 1, "salt": secrets.token_hex(16), "created_at": time.time()}
+
+
+def _valid_ledger_seal(seal: Any) -> bool:
+    if not isinstance(seal, dict) or seal.get("version") != 1:
+        return False
+    try:
+        return len(bytes.fromhex(str(seal.get("salt") or ""))) == 16
+    except ValueError:
+        return False
+
+
+def _derive_seal_key(secret: bytes, seal: dict[str, Any]) -> bytes:
+    """``HMAC-SHA256(verifier secret, label || salt)``: one key per vault, for one purpose."""
+    salt = bytes.fromhex(str(seal["salt"]))
+    return hmac.new(secret, _LEDGER_SEAL_LABEL + salt, hashlib.sha256).digest()
 
 
 def _require_password(password: str) -> str:

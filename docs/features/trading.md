@@ -199,9 +199,33 @@ Trading** pane has a *Test key* button (`trading.probe`).
     is injected with `[trading] unlock_mode = "auto"` the default.
   - `manual` — nothing on disk; unlock per gateway session from the app or
     `agentos wallet unlock`. Keys live only in the gateway's memory.
+- **Lock** (`agentos wallet lock`, `wallet.lock`) holds in both modes, and
+  across gateway restarts, until you unlock with the password: `unlock.key`
+  is not read while it holds. Nothing signs: agent swaps fail
+  `wallet.locked`, due DCA buys and armed triggers wait (no failed runs,
+  no auto-pause; alerts still ring), and approving an order is refused with
+  the order left parked. `wallet.status` says `lockedByOperator`.
 - Export (keystore or raw private key) and wallet removal always ask for
   the vault password, whatever the mode. Private keys never appear in logs,
   RPC responses (other than `wallet.export`), or the ledger.
+- Removing a wallet stops every DCA mandate, trigger and bracket bound to it
+  (`wallet removed`) and rejects what they parked. Importing the same key
+  again is a new wallet as far as approvals go: nothing comes back.
+- **Ledger seals.** The engine does not sign what it merely reads back from
+  `state/trading.sqlite`. Every order is sealed when the engine writes it,
+  and every mandate, trigger and bracket when you approve it (or create it
+  yourself): an HMAC over the terms that decide what is signed (wallet,
+  chain, tokens, amounts, recipient, slippage and floors, the bridge or LP
+  plan, batch, expiry; for a mandate or trigger its size, price condition
+  and validity), bound to the wallet's incarnation. The key is derived from
+  the vault's password-encrypted secret and exists only in gateway memory
+  while the vault is unlocked, so approving or creating a mandate, trigger
+  or bracket needs an unlocked vault. The seal is checked before every
+  signature and before every DCA buy or trigger fire; a row changed outside
+  the engine is refused (`trading.integrity`; a mandate or trigger is
+  stopped), and the gateway broadcasts `trading.integrity.alert`. Seals
+  survive restarts and password changes; the first unlock after the upgrade
+  that introduced them seals what was already live.
 - Before signing, the engine checks balances, simulates the transaction
   with `eth_call`, and validates what the provider returned: an approval
   must be a plain `approve(spender, amount)` on the token being sold, to a
@@ -215,7 +239,11 @@ Trading** pane has a *Test key* button (`trading.probe`).
   or archive of a *parent* directory (`grep -r ~/.agentos`, `cp -r ~`,
   `tar` of the state root, the `execute_code` equivalents) is refused too,
   so the vault cannot be swept up from above. The agent trades through the
-  gateway, which is the only thing that needs the keys.
+  gateway, which is the only thing that needs the keys. So is the
+  ledger, `state/trading.sqlite` with its `-wal`/`-shm`/`-journal` files
+  (file mode `0600`), any copy named `trading.sqlite`, and the pre-upgrade
+  snapshots under `state/snapshots`: the agent reads its orders and history
+  through the gateway, never the file.
 - Token metadata from third-party APIs is data, not instructions: the skill
   tells the agent to ignore anything in a token name that reads like a
   command, and genuine Robinhood Stock Tokens are preferred over lookalikes
@@ -368,7 +396,9 @@ the housekeeping loop picks it up and keeps waiting for the receipt
 within the wait window fails the order with `trading.tx_pending` (retry
 once it lands). Every change is broadcast on the gateway WebSocket
 (`trading.changed`, `trading.approval.requested`,
-`trading.order.finished`), so the desktop never polls for it.
+`trading.order.finished`), so the desktop never polls for it. A row that
+failed its seal is announced as `trading.integrity.alert` (`kind` order /
+mandate / trigger, `id`, `verdict` missing / mismatch, `wallet`, `message`).
 
 ## How the agent uses it
 

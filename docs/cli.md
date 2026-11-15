@@ -1112,13 +1112,13 @@ agentos wallet status
 agentos wallet setup [--mode auto|manual]   # once; default: [trading] unlock_mode (auto = password kept in ~/.agentos/wallets/unlock.key)
 agentos wallet setup --mode manual          # or: unlock per gateway session, keys only in RAM
 agentos wallet mode manual|auto             # switch later; manual deletes the stored password (logged)
-agentos wallet unlock / lock
+agentos wallet unlock / lock                # lock holds until unlock, in auto mode and across restarts: nothing signs, DCA buys and trading triggers wait
 agentos wallet create --label main
 agentos wallet import --label cold --private-key-stdin < key.txt
 agentos wallet import --label cold --keystore wallet.json
 agentos wallet export <addr> --keystore --out backup.json   # a new owner-only file (0600 / user-only ACL); an existing path is refused
 agentos wallet export <addr> --private-key   # prints the raw key; always asks the vault password
-agentos wallet list / rename <addr> <label> / primary <addr> / remove <addr> --yes|-y
+agentos wallet list / rename <addr> <label> / primary <addr> / remove <addr> --yes|-y   # remove also stops the wallet's DCA mandates, triggers and brackets (re-importing the key revives none)
 agentos wallet balances [<addr>] [--chain base|robinhood] [--refresh] [--hidden] [--json]   # ledger view; --refresh re-reads the chain first (throttled to once per 10 s per wallet); --hidden lists junk tokens too
 
 agentos trade status                        # provider, API key, chains, limits, vault state; --json adds ledgerRepair ("full sync required") after a ledger repair migration

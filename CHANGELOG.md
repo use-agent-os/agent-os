@@ -95,6 +95,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   wherever `AGENTOS_STATE_DIR` puts them (the container image keeps them in
   `/var/lib/agentos`), and the shell check reads globs, variables, `cd` and
   model-supplied `env` values the way the shell will.
+- Trading: the engine no longer signs whatever the ledger file says. An
+  agent's shell could rewrite a parked order in `state/trading.sqlite` so
+  that your approval of a small send paid its own address. The ledger, its
+  `-wal`/`-shm`/`-journal` files, any copy named `trading.sqlite` and the
+  pre-upgrade snapshots (`state/snapshots`) are now sensitive paths, the
+  file is `0600`, and every order (and every DCA mandate, trigger and
+  bracket you approve) is sealed with a key derived from the vault secret
+  that exists only in gateway memory while the vault is unlocked. Before
+  signing, the engine checks the order's wallet, chain, tokens, amounts,
+  recipient, floors, plan and expiry against the seal; before a DCA buy or a
+  trigger fire, the mandate's or trigger's terms. A row edited outside the
+  engine is refused, never signed: the order fails `trading.integrity`, the
+  mandate or trigger stops (`integrity check failed`), and the gateway
+  broadcasts `trading.integrity.alert` and logs
+  `trading.integrity_violation`. A `daily_spend` row deleted behind the
+  engine's back no longer re-opens the daily cap while the gateway runs.
+  Nothing to migrate: the first unlock after upgrading seals what is
+  already live (parked orders, active mandates, armed triggers). Creating
+  or approving a mandate, trigger or bracket now needs an unlocked vault
+  (`wallet.locked` otherwise), as signing always did.
+- Trading: `agentos wallet lock` (`wallet.lock`) now holds until you unlock
+  with the password, in `auto` mode too and across gateway restarts. Before,
+  the next status read or agent swap re-read `unlock.key` and undid it. While
+  locked nothing signs: agent swaps fail `wallet.locked`, due DCA buys and
+  armed triggers wait (no failed runs, no auto-pause; alerts keep ringing),
+  approving an order is refused with the order left parked, and buy-now /
+  fire-now are refused. `wallet.status` carries `lockedByOperator`.
+- Trading: removing a wallet ends its automation. Every DCA mandate,
+  trigger and bracket bound to it is stopped (`wallet removed`) and what it
+  parked is rejected, so importing the same key again revives nothing; a
+  re-import is a new incarnation of the wallet, which no old seal matches.
+  A mandate's spent budget no longer drops when its orders are deleted.
 - Approvals are yours alone: answering a prompt, changing the approval mode,
   forgetting remembered answers, `POST /api/elevated-mode`, an `elevated`
   hint on `chat.send` and approving a channel pairing are refused

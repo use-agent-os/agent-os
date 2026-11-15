@@ -139,6 +139,20 @@ def test_lock(client: _FakeClient) -> None:
     result = runner.invoke(wallet_cmd.app, ["lock"])
     assert result.exit_code == 0
     assert client.calls == [("wallet.lock", {})]
+    # The lock holds in auto mode too: the message says what it stops and what ends it.
+    text = " ".join(result.output.split())
+    assert "agentos wallet unlock" in text and "auto mode" in text
+
+
+def test_status_shows_an_operators_lock(client: _FakeClient) -> None:
+    client.payloads["wallet.status"] = {
+        **client.payloads["wallet.status"],
+        "unlocked": False,
+        "lockedByOperator": True,
+    }
+    result = runner.invoke(wallet_cmd.app, ["status"])
+    assert result.exit_code == 0, result.output
+    assert "by you" in result.output
 
 
 def test_list_marks_primary(client: _FakeClient) -> None:
