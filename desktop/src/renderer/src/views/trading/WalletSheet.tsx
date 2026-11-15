@@ -19,6 +19,7 @@ import { qrDataUrl } from '@/lib/qr'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { isTouchIdDeclined, useTouchIdPrompt } from '~/lib/biometric-gate'
+import { copySecret } from '~/lib/clipboard-secret'
 import { desktopApi } from '~/lib/desktop-api'
 import {
   usePortfolio,
@@ -880,26 +881,17 @@ function ExportSheet({ wallet, onClose }: { wallet: Wallet; onClose: () => void 
       },
     )
   }
-  // A copied key must not sit in the clipboard indefinitely. Best effort: a
-  // minute later, if the clipboard still holds exactly this secret, it is
-  // blanked; anything else pasted over it in the meantime is left alone.
-  const clearTimer = useRef<number | null>(null)
-  useEffect(
-    () => () => {
-      if (clearTimer.current !== null) window.clearTimeout(clearTimer.current)
-    },
-    [],
-  )
+  // A copied key must not sit in the clipboard indefinitely. A minute later,
+  // if the clipboard still holds exactly this secret, it is blanked; anything
+  // else pasted over it in the meantime is left alone. The timer is main's,
+  // not this sheet's: Close, navigating away or a reload cannot cancel it,
+  // and quitting the app blanks it at once.
   async function copy() {
     if (!secret) return
     try {
-      await navigator.clipboard.writeText(secret)
+      await copySecret(secret)
       setCopied(true)
       toast.success(t('trading.sheet.export.clipboard'), { id: 'trd-export' })
-      if (clearTimer.current !== null) window.clearTimeout(clearTimer.current)
-      clearTimer.current = window.setTimeout(() => {
-        void clearClipboardIf(secret)
-      }, CLIPBOARD_CLEAR_MS)
     } catch {
       /* clipboard unavailable */
     }
@@ -1007,19 +999,6 @@ function ExportSheet({ wallet, onClose }: { wallet: Wallet; onClose: () => void 
       )}
     </Sheet>
   )
-}
-
-/** How long a copied secret may sit in the clipboard before it is blanked. */
-export const CLIPBOARD_CLEAR_MS = 60_000
-
-/** Blank the clipboard only if it still holds `secret`; swallow every failure. */
-export async function clearClipboardIf(secret: string): Promise<void> {
-  try {
-    const current = await navigator.clipboard.readText()
-    if (current === secret) await navigator.clipboard.writeText('')
-  } catch {
-    /* clipboard unreadable: nothing to do */
-  }
 }
 
 function RemoveSheet({ wallet, onClose }: { wallet: Wallet; onClose: () => void }) {

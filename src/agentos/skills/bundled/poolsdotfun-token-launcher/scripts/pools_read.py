@@ -348,8 +348,10 @@ def cmd_token(client: RpcClient, args: dict) -> None:
             "launched through this factory."
         )
 
-    name = client.read(token, ERC20_ABI, "name")
-    symbol = client.read(token, ERC20_ABI, "symbol")
+    # Deployer-chosen strings: the decoder replaced anything unprintable, and the bound
+    # keeps one token from flooding the output.
+    name = str(client.read(token, ERC20_ABI, "name"))[:64]
+    symbol = str(client.read(token, ERC20_ABI, "symbol"))[:64]
     supply = client.read(token, ERC20_ABI, "totalSupply")
     try:
         uri = client.read(token, ERC20_ABI, "metadataUri")

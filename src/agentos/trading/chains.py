@@ -9,7 +9,9 @@ so adding a chain later is a table row, not a code change.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import urlsplit
 
 NATIVE_ADDRESS = "0x0000000000000000000000000000000000000000"
@@ -186,6 +188,48 @@ def redact_rpc_url(url: str) -> str:
         host = f"{host}:{parsed.port}"
     tail = "/…" if (parsed.path.strip("/") or parsed.query) else ""
     return f"{parsed.scheme}://{host}{tail}"
+
+
+def configured_rpc_urls(overrides: Mapping[str, Any] | None = None) -> list[str]:
+    """Every RPC URL the operator configured: ``trading.rpc_urls`` and the env fallbacks."""
+    urls = [str(value).strip() for value in (overrides or {}).values() if value]
+    for env_name in RPC_ENV_VARS.values():
+        urls.append(os.environ.get(env_name, "").strip())
+    return [url for url in dict.fromkeys(urls) if url]
+
+
+#: A path or query fragment this short carries no provider key worth hiding,
+#: and replacing it would mangle ordinary text (``/v2``, ``/rpc``).
+_MIN_SECRET_FRAGMENT = 8
+
+
+def scrub_rpc_urls(text: str, urls: Iterable[str]) -> str:
+    """Replace every occurrence of a configured RPC URL in *text* by its host.
+
+    The URL itself is replaced first, then its path and query on their own and
+    each long path segment, so a message quoting only the keyed part
+    (``/v2/<key>``) is covered too. An error is the one place a URL reaches a
+    caller in full: the engine's own clients redact, a library's guard may not.
+    """
+    if not text:
+        return text
+    ordered = sorted({url for url in urls if url}, key=len, reverse=True)
+    for url in ordered:
+        if url in text:
+            text = text.replace(url, redact_rpc_url(url))
+    for url in ordered:
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            continue
+        fragments = [parsed.path + (f"?{parsed.query}" if parsed.query else ""), parsed.query]
+        fragments += parsed.path.split("/")
+        if parsed.password:
+            fragments.append(parsed.password)
+        for fragment in sorted(set(fragments), key=len, reverse=True):
+            if len(fragment.strip("/")) >= _MIN_SECRET_FRAGMENT and fragment in text:
+                text = text.replace(fragment, "…")
+    return text
 
 
 def is_native(address: str | None) -> bool:

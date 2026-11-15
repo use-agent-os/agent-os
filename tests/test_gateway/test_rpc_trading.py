@@ -683,6 +683,47 @@ class TestSendAndToolsRpc:
         assert res.ok is False and res.error.code == "trading.insufficient_balance"
         assert (await call("trading.orders.batch", {"batchId": "bat_nope"}, ctx)).ok is False
 
+    async def test_batch_approval_names_every_leg_and_echoes_its_digest(
+        self, ctx: RpcContext, stack: dict[str, Any]
+    ) -> None:
+        """WAL-12 over the wire: a batch is approved only with the digest of all its legs."""
+        await self._funded(ctx, stack)
+        agent = _agent_ctx(stack)
+        legs = [
+            {"to": "0x2222222222222222222222222222222222222222", "amount": "1"},
+            {"to": "0x3333333333333333333333333333333333333333", "amount": "450"},
+        ]
+        res = await call(
+            "trading.send", {"chainId": 8453, "token": "USDC", "recipients": legs}, agent
+        )
+        assert res.ok, res.error
+        first = res.payload["orders"][0]
+        assert first["status"] == "awaiting_approval"
+        assert first["approval"]["legCount"] == 2 and first["approval"]["digest"] is None
+        bare = await call("trading.orders.approve", {"orderId": first["orderId"]}, ctx)
+        assert bare.ok is False and bare.error.code == "trading.approval_binding_required"
+        batch = await call("trading.orders.batch", {"batchId": first["batchId"]}, ctx)
+        approval = batch.payload["approval"]
+        assert [leg["recipient"] for leg in approval["legs"]] == [
+            "0x2222222222222222222222222222222222222222",
+            "0x3333333333333333333333333333333333333333",
+        ]
+        assert approval["totalRaw"] == str(451 * 10**6)
+        stale = await call(
+            "trading.orders.approve",
+            {"orderId": first["orderId"], "approvalDigest": "f" * 64},
+            ctx,
+        )
+        assert stale.ok is False and stale.error.code == "trading.approval_changed"
+        assert stack["base"].sent == []
+        done = await call(
+            "trading.orders.approve",
+            {"orderId": first["orderId"], "approvalDigest": approval["digest"]},
+            ctx,
+        )
+        assert done.ok, done.error
+        assert len(stack["base"].sent) == 2
+
     async def test_agent_send_and_revoke_park_for_the_user(
         self, ctx: RpcContext, stack: dict[str, Any]
     ) -> None:
@@ -828,3 +869,58 @@ class TestClientQuote:
             res = await call("trading.swap", {**base, "expectedOutRaw": bad}, ctx)
             assert res.ok is False, bad
         assert len(seen) == 3
+
+
+def _unbound_ctx(stack: dict[str, Any]) -> RpcContext:
+    """A local connection with no operator proof: it gets the agent's rules."""
+    from agentos.gateway.access import ConnectionSurface
+    from agentos.gateway.agent_surface import AgentBinding
+    from agentos.gateway.auth import AccessContext
+
+    access = AccessContext(
+        surface=ConnectionSurface.CONTROL,
+        admitted=True,
+        credential_verified=False,
+        agent=AgentBinding(via="unbound"),
+    )
+    return RpcContext(conn_id="unbound-conn", access=access, config=stack["config"])
+
+
+class TestOperatorLockHolds:
+    """WAL-22: in auto mode the next agent call used to read unlock.key and undo the lock."""
+
+    async def test_no_agent_or_unbound_call_undoes_the_operators_lock(
+        self, ctx: RpcContext, stack: dict[str, Any]
+    ) -> None:
+        await call("wallet.setup", {"password": PASSWORD}, ctx)  # auto, the default
+        address = (await call("wallet.create", {"label": "Main"}, ctx)).payload["wallet"]["address"]
+        stack["base"].set_native(address, 10**18)
+        stack["base"].set_erc20(USDC, address, 1000 * 10**6)
+        service = stack["service"]
+        agent = _agent_ctx(stack)
+        swap = {"chainId": 8453, "tokenIn": "USDC", "tokenOut": "WETH", "amountIn": "10"}
+
+        assert (await call("wallet.lock", {}, ctx)).payload == {"unlocked": False}
+        for method, params, who in [
+            ("wallet.status", {}, agent),
+            ("wallet.list", {}, agent),
+            ("trading.status", {}, _unbound_ctx(stack)),
+            ("wallet.balances", {}, agent),
+            ("trading.quote", swap, agent),
+            ("wallet.status", {}, ctx),  # the operator's own status read is no unlock either
+        ]:
+            await call(method, params, who)
+            assert service.vault.unlocked is False, method
+        status = await call("wallet.status", {}, agent)
+        assert status.payload["unlocked"] is False and status.payload["lockedByOperator"] is True
+
+        res = await call("trading.swap", swap, agent)
+        assert res.ok is False and res.error.code == "wallet.locked"
+        assert stack["base"].sent == [] and service.vault.unlocked is False
+
+        # Only the operator's unlock, with the password, ends it.
+        assert (await call("wallet.unlock", {"password": PASSWORD}, ctx)).ok
+        res = await call("trading.swap", swap, agent)
+        assert res.ok, res.error
+        assert res.payload["orders"][0]["status"] == "submitted"
+        assert len(stack["base"].sent) == 1

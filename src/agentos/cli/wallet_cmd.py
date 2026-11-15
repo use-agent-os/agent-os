@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from rich.table import Table
 from agentos.cli.gateway_rpc import run_gateway_sync
 from agentos.cli.output import emit_error, print_json
 from agentos.cli.ui import ACCENT, ACCENT_HEADER, console, markup_escape
+from agentos.display_text import display_safe
 
 app = typer.Typer(help="Manage the trading wallet vault (create, import, export, unlock).")
 
@@ -33,6 +35,19 @@ CHAIN_KEYS: dict[int, str] = {chain_id: key for key, chain_id in CHAIN_IDS.items
 NATIVE_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 _ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+
+
+def _gateway(action: Callable[[Any], Any], *, json_output: bool = False) -> Any:
+    """``run_gateway_sync`` for a view: in human mode every string is terminal-safe.
+
+    Token symbols come from contracts, order fields from the agent, errors
+    from providers; a control or bidi character in any of them is shown as an
+    escape, never sent to the operator's terminal (WAL-13). ``--json`` output
+    is the payload as served (``print_json`` escapes what a terminal could act
+    on without changing the data).
+    """
+    result = run_gateway_sync(action, json_output=json_output)
+    return result if json_output else display_safe(result)
 
 
 # ── shared helpers (also used by ``agentos trade``) ─────────────────────────
@@ -127,6 +142,70 @@ def token_symbol(token: Any) -> str:
     return str(token or "—")
 
 
+def _restrict_windows_acl(path: Path) -> None:
+    """Owner-only DACL on a Windows file: no inherited entries, the user alone.
+
+    ``os.open``'s mode only sets the read-only bit there; the file would
+    otherwise inherit whatever the directory grants (``Users``, ``Everyone``
+    on a shared drive). Raises ``OSError`` when the ACL cannot be set.
+    """
+    import getpass
+    import subprocess
+
+    user = getpass.getuser()
+    domain = os.environ.get("USERDOMAIN", "")
+    principal = f"{domain}\\{user}" if domain else user
+    completed = subprocess.run(
+        ["icacls", str(path), "/inheritance:r", "/grant:r", f"{principal}:F"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise OSError(f"icacls could not restrict {path}: {completed.stderr.strip()}")
+
+
+def write_private_file(path: Path, text: str) -> bool:
+    """Create *path* owner-only from its first byte and write *text* to it.
+
+    ``O_CREAT | O_EXCL`` never reuses an existing file -- not a world-readable
+    one left from an earlier export, not one another process already holds
+    open, not a symlink planted at the name -- and raises ``FileExistsError``
+    instead. The mode is ``0600`` at creation, so the secret never sits in a
+    file the umask made readable. On Windows the ACL is cut to the current
+    user while the file is still empty. Returns whether the result is
+    verifiably owner-only (a POSIX filesystem that ignores modes says no).
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        if os.name == "nt":
+            _restrict_windows_acl(path)
+        # newline="": the bytes the gateway returned are the bytes on disk.
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            fd = -1
+            handle.write(text)
+    except BaseException:
+        if fd != -1:
+            os.close(fd)
+        path.unlink(missing_ok=True)
+        raise
+    if os.name == "nt":
+        return True
+    info = os.stat(path)
+    return (info.st_mode & 0o077) == 0 and info.st_uid == os.geteuid()
+
+
+def _refuse_existing_export(out: Path, *, json_output: bool) -> None:
+    emit_error(
+        f"{out} already exists; export writes a new file and never overwrites one",
+        json_output=json_output,
+        code="FILE_EXISTS",
+    )
+    raise typer.Exit(1)
+
+
 def _wallet_row(result: Any) -> dict[str, Any]:
     wallet = result.get("wallet") if isinstance(result, dict) else None
     return wallet if isinstance(wallet, dict) else {}
@@ -149,7 +228,7 @@ def wallet_status(
     async def _run(client):
         return await client.call("wallet.status", {})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -159,56 +238,109 @@ def wallet_status(
     table.add_column("Value")
     table.add_row("initialized", "yes" if result.get("initialized") else "no")
     table.add_row("unlocked", "yes" if result.get("unlocked") else "no")
+    if result.get("lockedByOperator"):
+        table.add_row("locked", "by you (`agentos wallet unlock` to sign again)")
     table.add_row("unlock mode", str(result.get("unlockMode") or "—"))
+    stored = result.get("storedUnlockMode")
+    if stored and stored != result.get("unlockMode"):
+        note = " (stored password unused; `agentos wallet mode manual` deletes it)"
+        table.add_row("vault records", f"{stored}{note if result.get('unlockKeyPresent') else ''}")
     table.add_row("wallets", str(result.get("walletCount") or 0))
     table.add_row("primary", str(result.get("primary") or "—"))
     table.add_row("vault", markup_escape(str(result.get("vaultPath") or "—")))
     console.print(table)
 
 
+def _unlock_mode_arg(mode: str | None, option: str) -> str | None:
+    if mode is None:
+        return None
+    mode = mode.strip().lower()
+    if mode not in {"auto", "manual"}:
+        raise typer.BadParameter(f"{option} must be 'auto' or 'manual'")
+    return mode
+
+
+def _explain_auto_unlock() -> None:
+    console.print(
+        "The password is kept in the vault's unlock.key, sealed with a key stored apart "
+        "from it, so the agent can sign unattended. Anyone who can run code as this OS "
+        "user can still spend from these wallets: `agentos sandbox` or manual unlock "
+        "keeps the agent out."
+    )
+
+
 @app.command("setup")
 def wallet_setup(
-    mode: str = typer.Option(
-        "auto",
+    mode: str | None = typer.Option(
+        None,
         "--mode",
-        help="auto = password stored in unlock.key (0600), manual = unlock per gateway session",
+        help="auto = password kept (encrypted) for unattended signing, manual = unlock "
+        "per gateway session; default: the [trading] unlock_mode setting",
     ),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Create the vault with a new password (first run only)."""
 
-    mode = mode.strip().lower()
-    if mode not in {"auto", "manual"}:
-        raise typer.BadParameter("--mode must be 'auto' or 'manual'")
+    requested = _unlock_mode_arg(mode, "--mode")
     password = read_password("Vault password", confirm=True, json_output=json_output)
+    params: dict[str, Any] = {"password": password}
+    if requested is not None:
+        params["unlockMode"] = requested
 
     async def _run(client):
-        return await client.call("wallet.setup", {"password": password, "unlockMode": mode})
+        return await client.call("wallet.setup", params)
+
+    result = _gateway(_run, json_output=json_output)
+    if json_output:
+        print_json(result)
+        return
+    # The gateway decides the mode (a manual [trading] unlock_mode wins): print
+    # what it reports, not what was asked for.
+    actual = str((result or {}).get("unlockMode") or requested or "auto")
+    console.print(f"Vault created ([{ACCENT}]{actual}[/] unlock).")
+    if actual == "auto":
+        _explain_auto_unlock()
+
+
+@app.command("mode")
+def wallet_mode(
+    mode: str = typer.Argument(..., help="auto or manual"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Switch how the vault unlocks; `manual` deletes the stored password."""
+
+    target = _unlock_mode_arg(mode, "MODE")
+    password = read_password("Vault password", json_output=json_output)
+
+    async def _run(client):
+        return await client.call("wallet.setUnlockMode", {"mode": target, "password": password})
 
     result = run_gateway_sync(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
-    console.print(f"Vault created ([{ACCENT}]{mode}[/] unlock).")
-    if mode == "auto":
+    console.print(f"Vault unlock mode is now [{ACCENT}]{target}[/].")
+    if target == "manual":
         console.print(
-            "The password is kept in ~/.agentos/wallets/unlock.key so the agent can sign "
-            "unattended; anyone who can read that file can spend from these wallets."
+            "The stored password was deleted; unlock with `agentos wallet unlock` "
+            "after each gateway start."
         )
+    else:
+        _explain_auto_unlock()
 
 
 @app.command("unlock")
 def wallet_unlock(
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
-    """Unlock the vault for this gateway session."""
+    """Unlock the vault for this gateway session (and end a `wallet lock`)."""
 
     password = read_password("Vault password", json_output=json_output)
 
     async def _run(client):
         return await client.call("wallet.unlock", {"password": password})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -219,16 +351,20 @@ def wallet_unlock(
 def wallet_lock(
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
-    """Lock the vault (drops keys from gateway memory)."""
+    """Lock the vault: nothing signs until `wallet unlock`, in auto mode and across restarts."""
 
     async def _run(client):
         return await client.call("wallet.lock", {})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
     console.print("Vault locked.")
+    console.print(
+        "Nothing signs (agent swaps, DCA buys, price triggers) until you run "
+        "`agentos wallet unlock`, in auto mode too and across gateway restarts."
+    )
 
 
 @app.command("list")
@@ -240,7 +376,7 @@ def wallet_list(
     async def _run(client):
         return await client.call("wallet.list", {})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -275,7 +411,7 @@ def wallet_create(
     async def _run(client):
         return await client.call("wallet.create", {"label": label})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -322,7 +458,7 @@ def wallet_import(
     async def _run(client):
         return await client.call("wallet.import", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -334,7 +470,11 @@ def wallet_export(
     address: str = typer.Argument(..., help="Wallet address to export"),
     keystore: bool = typer.Option(False, "--keystore", help="Export the encrypted keystore JSON"),
     private_key: bool = typer.Option(False, "--private-key", help="Export the raw private key"),
-    out: Path | None = typer.Option(None, "--out", help="Write to this file (mode 0600)"),
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help="Write to this new file, owner-only (mode 0600); never overwrites",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Export a wallet. Always asks for the vault password."""
@@ -349,19 +489,36 @@ def wallet_export(
             "wallet.export", {"address": address, "password": password, "format": fmt}
         )
 
+    if out is not None and os.path.lexists(out):
+        # Checked before the password goes anywhere; the write below refuses
+        # too (O_EXCL), this only spares the user a round trip.
+        _refuse_existing_export(out, json_output=json_output)
+
     result = run_gateway_sync(_run, json_output=json_output)
     result = result if isinstance(result, dict) else {}
     secret = result.get("keystoreJson") if keystore else result.get("privateKey")
     if out is not None:
-        out.write_text(str(secret or ""), encoding="utf-8")
         try:
-            os.chmod(out, 0o600)
-        except OSError:
-            pass
+            private = write_private_file(out, str(secret or ""))
+        except FileExistsError:
+            _refuse_existing_export(out, json_output=json_output)
+        except OSError as exc:
+            emit_error(
+                f"cannot write {out}: {exc.strerror or exc}",
+                json_output=json_output,
+                code="WRITE_FAILED",
+            )
+            raise typer.Exit(1) from None
         if json_output:
-            print_json({"written": str(out), "format": fmt})
+            print_json({"written": str(out), "format": fmt, "private": private})
+        elif private:
+            note = "owner-only" if os.name == "nt" else "mode 0600"
+            console.print(f"Wrote {fmt} to [{ACCENT}]{markup_escape(str(out))}[/] ({note}).")
         else:
-            console.print(f"Wrote {fmt} to [{ACCENT}]{markup_escape(str(out))}[/] (mode 0600).")
+            console.print(
+                f"Wrote {fmt} to [{ACCENT}]{markup_escape(str(out))}[/], but [red]could not "
+                "make it owner-only[/] on this filesystem: move it somewhere private."
+            )
         return
     if json_output:
         print_json(result)
@@ -384,7 +541,7 @@ def wallet_rename(
     async def _run(client):
         return await client.call("wallet.rename", {"address": address, "label": label})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -413,7 +570,7 @@ def wallet_remove(
     async def _run(client):
         return await client.call("wallet.remove", {"address": address, "password": password})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -430,7 +587,7 @@ def wallet_primary(
     async def _run(client):
         return await client.call("wallet.setPrimary", {"address": address})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -462,7 +619,7 @@ def wallet_balances(
     async def _run(client):
         return await client.call("wallet.balances", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return

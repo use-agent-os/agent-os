@@ -217,8 +217,11 @@ Errors: `trading.bracket.not_found`, `trading.bracket.bad_state`,
 both of `stopLoss` / `trailPct`; a size on `alert`; more than one size;
 `tpPct` without `amountPct`, over it, or ≤ 0; take-profit not above the
 stop; the trigger's price/percent/trail/validFor/quote/wallet refusals,
-same wording), `trading.operator_required` (RPC), plus `trading.disabled`,
+same wording), `trading.operator_required` (RPC), `trading.integrity` (a leg
+failed its seal: both legs are stopped), plus `trading.disabled`,
 `wallet.locked`, `trading.unsupported_chain`, `trading.token_not_found`.
+Approving or creating a bracket as the operator seals both legs and needs an
+unlocked vault.
 
 Events: every leg change emits the trigger's events **and**
 `trading.changed {reason: "bracket", bracketId}` +
@@ -459,8 +462,10 @@ faint; legs strip as two mono rows). `canWrite` is true only on the desk.
   'live']`, refreshed by `trading.changed` and `trading.bracket.changed`
   (add to `TRADING_EVENTS`); `useBracketActions()` → approve / reject /
   pause / resume / stop / fire(bracket, leg?) with toasts
-  (`trading.bracket.toast.*`), Touch ID through `bracketTouchId(bracket)`
-  in `touch-id.ts` (the ask names both lines and the size).
+  (`trading.bracket.toast.*`), Touch ID through the store's `gatedCall`
+  (`TRADING_WRITE_GATES`: approve, fire and resume ask; the ask comes from
+  `bracketTouchId(bracket, op)` in `touch-id.ts` and names both lines and
+  the size).
 - **Approvals region**: pending brackets above pending triggers as a
   `BracketCard` (name, the two lines, size, wallet, expiry, both legs'
   warnings) with **Approve & arm** / Reject (one decision for both legs).
@@ -481,8 +486,10 @@ faint; legs strip as two mono rows). `canWrite` is true only on the desk.
   `bracket_create`, title `Protect · ETH · +20 % / −10 %` (or the prices);
   `trade bracket <sub>` → `bracket_list|bracket_approve|…`; the
   `trigger-cards/bracket-…` marker is a bracket card.
-- **Chat wiring** (`ChatView.tsx`): the Touch ID gate before a bracket
-  `approve` / `fire` (`requireBracketTouchId`), beside the trigger one.
+- **Chat wiring** (`ChatView.tsx`): every card write goes through the
+  store's `gatedCall`, so a bracket card's `approve` / `fire` / `resume`
+  ask exactly as the desk's do (the bracket is read first via
+  `bracketAskById` to name it).
 - **Desk prompt** (`agent.ts`, bump `TRADING_AGENT_VERSION`): a
   **Brackets** section. A request for both an exit above and an exit below
   on a position — "protect my ETH", "protect the position", "take profit

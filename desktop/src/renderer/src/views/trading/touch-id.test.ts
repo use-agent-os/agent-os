@@ -1,19 +1,15 @@
 import { readFileSync } from 'node:fs'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AuthResult } from '@shared/app'
-import { DEFAULT_SETTINGS } from '@shared/settings'
-import { resetBiometricGateForTests, TouchIdDeclined } from '~/lib/biometric-gate'
-import { desktopApi } from '~/lib/desktop-api'
-import { useSettings } from '~/stores/settings'
+import { describe, expect, it, vi } from 'vitest'
 import { order, USDC } from './test-utils'
 import {
+  bracketAskById,
   bracketTouchId,
+  mandateAskById,
   mandateCeilingUsd,
   mandateTouchId,
+  manualTradeTouchId,
   orderTouchId,
-  requireBracketTouchId,
-  requireMandateTouchId,
-  requireTriggerTouchId,
+  triggerAskById,
   triggerTouchId,
   vaultReason,
 } from './touch-id'
@@ -140,29 +136,25 @@ describe('triggerTouchId', () => {
   })
 })
 
-describe('requireTriggerTouchId', () => {
-  beforeEach(() => {
-    resetBiometricGateForTests()
-    useSettings.setState({
-      loaded: true,
-      settings: { ...structuredClone(DEFAULT_SETTINGS), security: { touchId: 'all' } },
-    })
-  })
-
+describe('triggerAskById', () => {
   it('reads the trigger to name it, and asks as high-risk when it cannot', async () => {
-    const authenticate = vi
-      .spyOn(desktopApi().app, 'authenticate')
-      .mockResolvedValue({ ok: true } satisfies AuthResult)
     const call = vi.fn(async () => ({ kind: 'trigger', trigger: TRIGGER }))
-    await requireTriggerTouchId(call, 'trg_1a2b3c4d')
+    const ask = await triggerAskById(call, 'trg_1a2b3c4d')
     expect(call).toHaveBeenCalledWith('trading.trigger.get', { triggerId: 'trg_1a2b3c4d' })
-    expect(authenticate.mock.calls[0]?.[0]).toMatch(/^arm the trigger “Stop-loss ETH”/)
+    expect(ask.reason).toMatch(/^arm the trigger “Stop-loss ETH”/)
+    expect((await triggerAskById(call, 'trg_1a2b3c4d', 'fire')).reason).toMatch(
+      /^fire the trigger “Stop-loss ETH” now: /,
+    )
     const failing = vi.fn(async () => {
       throw new Error('trading.trigger.not_found')
     })
-    await requireTriggerTouchId(failing, 'trg_9')
-    expect(authenticate.mock.calls[1]?.[0]).toBe('arm the trigger trg_9')
-    authenticate.mockRestore()
+    expect(await triggerAskById(failing, 'trg_9')).toEqual({
+      kind: 'approve-high',
+      reason: 'arm the trigger trg_9',
+    })
+    expect((await triggerAskById(failing, 'trg_9', 'fire')).reason).toBe(
+      'fire the trigger trg_9 now',
+    )
   })
 })
 
@@ -193,31 +185,23 @@ describe('bracketTouchId', () => {
   })
 })
 
-describe('requireBracketTouchId', () => {
-  beforeEach(() => {
-    resetBiometricGateForTests()
-    useSettings.setState({
-      loaded: true,
-      settings: { ...structuredClone(DEFAULT_SETTINGS), security: { touchId: 'all' } },
-    })
-  })
-
+describe('bracketAskById', () => {
   it('reads the bracket to name it, and asks as high-risk when it cannot', async () => {
-    const authenticate = vi
-      .spyOn(desktopApi().app, 'authenticate')
-      .mockResolvedValue({ ok: true } satisfies AuthResult)
     const call = vi.fn(async () => ({ kind: 'bracket', bracket: BRACKET }))
-    await requireBracketTouchId(call, 'brk_1a2b3c4d')
+    expect((await bracketAskById(call, 'brk_1a2b3c4d')).reason).toMatch(
+      /^arm the bracket “Protect ETH”/,
+    )
     expect(call).toHaveBeenCalledWith('trading.bracket.get', { bracketId: 'brk_1a2b3c4d' })
-    expect(authenticate.mock.calls[0]?.[0]).toMatch(/^arm the bracket “Protect ETH”/)
-    await requireBracketTouchId(call, 'brk_1a2b3c4d', 'fire')
-    expect(authenticate.mock.calls[1]?.[0]).toMatch(/^fire the bracket “Protect ETH” now/)
+    expect((await bracketAskById(call, 'brk_1a2b3c4d', 'fire')).reason).toMatch(
+      /^fire the bracket “Protect ETH” now/,
+    )
     const failing = vi.fn(async () => {
       throw new Error('trading.bracket.not_found')
     })
-    await requireBracketTouchId(failing, 'brk_9')
-    expect(authenticate.mock.calls[2]?.[0]).toBe('arm the bracket brk_9')
-    authenticate.mockRestore()
+    expect(await bracketAskById(failing, 'brk_9')).toEqual({
+      kind: 'approve-high',
+      reason: 'arm the bracket brk_9',
+    })
   })
 })
 
@@ -230,38 +214,50 @@ describe('vaultReason', () => {
   })
 })
 
-describe('requireMandateTouchId', () => {
-  beforeEach(() => {
-    resetBiometricGateForTests()
-    useSettings.setState({
-      loaded: true,
-      settings: { ...structuredClone(DEFAULT_SETTINGS), security: { touchId: 'all' } },
-    })
-  })
-
-  it('reads the mandate to name it, then prompts; a cancel throws', async () => {
-    const authenticate = vi
-      .spyOn(desktopApi().app, 'authenticate')
-      .mockResolvedValue({ ok: false, reason: 'cancelled' } satisfies AuthResult)
+describe('mandateAskById', () => {
+  it('reads the mandate to name it', async () => {
     const call = vi.fn(async () => ({ kind: 'mandate', mandate: mandate({ name: 'DCA ETH' }) }))
-    await expect(requireMandateTouchId(call, 'dca_1')).rejects.toBeInstanceOf(TouchIdDeclined)
+    expect((await mandateAskById(call, 'dca_1')).reason).toMatch(/^approve the DCA “DCA ETH”/)
     expect(call).toHaveBeenCalledWith('trading.dca.get', { mandateId: 'dca_1' })
-    expect(authenticate.mock.calls[0]?.[0]).toMatch(/^approve the DCA “DCA ETH”/)
-    authenticate.mockRestore()
+    expect((await mandateAskById(call, 'dca_1', 'run')).reason).toMatch(
+      /^buy now with the DCA “DCA ETH”: /,
+    )
   })
 
-  it('still prompts, as high-risk, when the mandate cannot be read', async () => {
-    useSettings.setState({
-      settings: { ...structuredClone(DEFAULT_SETTINGS), security: { touchId: 'high' } },
-    })
-    const authenticate = vi
-      .spyOn(desktopApi().app, 'authenticate')
-      .mockResolvedValue({ ok: true } satisfies AuthResult)
+  it('asks as high-risk when the mandate cannot be read', async () => {
     const call = vi.fn(async () => {
       throw new Error('offline')
     })
-    await expect(requireMandateTouchId(call, 'dca_1')).resolves.toBeUndefined()
-    expect(authenticate).toHaveBeenCalledWith('approve the DCA dca_1')
-    authenticate.mockRestore()
+    expect(await mandateAskById(call, 'dca_1')).toEqual({
+      kind: 'approve-high',
+      reason: 'approve the DCA dca_1',
+    })
+    expect((await mandateAskById(call, 'dca_1', 'run')).reason).toBe('buy now with the DCA dca_1')
+  })
+})
+
+describe('Buy now and a manual trade', () => {
+  it('sizes Buy now by one buy, not the whole cap', () => {
+    const m = mandate({
+      name: 'DCA ETH',
+      budget: { ...MANDATE.budget, usdPerRun: 25, capUsd: 5000 },
+    })
+    expect(mandateTouchId(m).kind).toBe('approve-high')
+    expect(mandateTouchId(m, 'run')).toMatchObject({
+      kind: 'approve',
+      reason: expect.stringMatching(/^buy now with the DCA “DCA ETH”: \$25\.00, on /),
+    })
+  })
+
+  it('asks a swap or send of unknown worth as high-risk', () => {
+    expect(
+      manualTradeTouchId('swap', { what: '1 ETH → USDC', chainId: 8453, valueUsd: 20 }),
+    ).toEqual({ kind: 'approve', reason: 'swap 1 ETH → USDC on Base' })
+    expect(manualTradeTouchId('send', { what: '5 USDC', chainId: 8453, valueUsd: null }).kind).toBe(
+      'approve-high',
+    )
+    expect(manualTradeTouchId('swap', { what: 'x', chainId: 8453, valueUsd: 900 }).kind).toBe(
+      'approve-high',
+    )
   })
 })

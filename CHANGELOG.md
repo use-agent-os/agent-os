@@ -6,6 +6,311 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+- Output redaction now masks wallet material it used to pass to the model and
+  transcript verbatim (WAL-09): a secret the gateway holds — a skill hot-wallet
+  key (`UNIV4_LP_PRIVATE_KEY`, `POOLSFUN_PRIVATE_KEY`, …), the vault password —
+  is registered by value and masked wherever it appears in tool output, so
+  `printenv NAME`, `echo $NAME` and bare prints are covered, not only
+  `NAME=value`. `unlock.key` is masked whole on read, keystore `ciphertext`/
+  `mac`/`salt`/`iv` and BIP-39 mnemonics are masked by shape, and a wallet
+  address or transaction hash (also 64 hex) stays readable.
+- The wallet vault's auto-unlock password is no longer stored in clear. In
+  `auto` mode `~/.agentos/wallets/unlock.key` now holds the password sealed
+  with AES-256-GCM under a 256-bit key kept **outside** the state directory —
+  `AGENTOS_VAULT_KEK` (64 hex, for containers/service managers), else the
+  Windows Data Protection API, else a `0600` file under the OS state dir
+  (`AGENTOS_VAULT_KEK_DIR` overrides the location). The file and its key are
+  each useless alone. A pre-existing plain-text `unlock.key` still unlocks and
+  is sealed in place on the next unlock; `manual` mode and `wallet mode
+  manual` delete the key. This is defence in depth, not an OS boundary: code
+  running as the same user can read both, so enable `agentos sandbox` or use
+  `manual` unlock for a real boundary.
+- A recursive read, copy or archive of a directory that is an **ancestor** of
+  a protected one is refused by the sensitive-path floor, closing the gap
+  where `grep -r ~/.agentos`, `cp -r ~`, `tar` of the state root (and the
+  `execute_code` equivalents `shutil.copytree`/`os.walk`/`Path.rglob`) read
+  `unlock.key` and every keystore from above without naming `wallets/`.
+  `/elevated full` still lifts it, and recursive work inside the workspace is
+  unaffected (WAL-01).
+- `[trading] unlock_mode` (`AGENTOS_TRADING_UNLOCK_MODE`) is honoured; it was
+  documented but read by nothing, so a gateway configured `manual` still
+  stored the vault password and auto-unlocked. `wallet.setup` without
+  `unlockMode` (and `agentos wallet setup` without `--mode`, which no longer
+  sends a default) now uses it. With `manual`, the vault never reads or
+  writes `unlock.key`: auto setup and switching to auto are refused
+  (`wallet.unlock_mode_policy`), a password stored by an earlier auto vault
+  is ignored (logged once as `vault.unlock_key_ignored`) and is deleted only
+  when you run the new `agentos wallet mode manual` (logged as
+  `vault.unlock_mode_changed`). `wallet status` adds `storedUnlockMode`,
+  `configuredUnlockMode` and `unlockKeyPresent` (WAL-25).
+- The verbatim backups AgentOS leaves beside a config file it rewrites
+  (`config.toml.backup.<stamp>`, `agentos.toml.backup.<stamp>`) and the
+  writer's `.config.toml.*.tmp` staging files are sensitive paths like the
+  config itself: an agent's shell, `read_file`, `list_dir`, globs and `cd`
+  spellings no longer reach the Uniswap key, keyed RPC URLs or gateway token
+  they hold. Existing backups stay where they are (WAL-17).
+- `agentos wallet export --out FILE` creates the file owner-only from its
+  first byte (`O_EXCL`, mode `0600`; on Windows an ACL for the current user
+  alone) and **refuses a path that already exists** (`FILE_EXISTS`, checked
+  before the password is sent) instead of overwriting it. It says so when
+  the filesystem cannot make the file private, and `--json` adds
+  `"private": true|false` (WAL-14).
+- A keyed RPC URL (`trading.rpc_urls`, `RPC_BASE_URL`, `RPC_ROBINHOOD_URL`)
+  no longer reaches a caller in a `wallet.*` / `trading.*` error. Every
+  handler now cuts a configured RPC URL in an error message or its details
+  down to its host, and the LP reads answer a non-`http(s)` or hostless URL
+  with `trading.rpc` naming the host only. The bundled LP, pools.fun,
+  chain-stocks and RWA-lookup skills' URL checks no longer quote the URL they
+  refuse (WAL-24).
+- **A restart no longer applies an operator-only config edit you did not
+  approve (WAL-02).** An agent's connection could switch on
+  `[gateway_control] chat_restart` through `config.set` and then restart the
+  gateway itself, and the restarted gateway read the whole config file as
+  yours, so a `[trading]` cap the watcher had held became the running limit.
+  `gateway_control` is now refused to every agent binding (unbound
+  included), and the gateway keeps the values of every operator-only setting
+  as you last approved them in `~/.agentos/config-approval.toml` (`0600`, on
+  the sensitive-path floor): at boot a setting the file holds differently
+  runs on the approved value and stays held, across restarts, until you run
+  `agentos config reload` from your own terminal (with no gateway running it
+  records the file as approved for the next start; `--config` names the
+  file). Writes through a config RPC, the console, or `agentos config set` /
+  onboarding while no gateway runs approve what they change; the first boot
+  after upgrading adopts the file as it is, so nothing changes for an
+  existing install. The operator-only list also gains the ACP launch
+  settings (`acp.agents`, `acp.allowed_agents`, `acp.allowed_cwds`,
+  `acp.install_missing_adapters`), `skills.install_policy`, the browser
+  binary/CDP settings, `cors`, `control_ui.allowed_origins`, `gateway.bind`,
+  `gateway.public_origin`, `state_dir` and `observability.otlp_*`, and one
+  list (`agentos.config_roots`) now feeds every gate.
+- **AgentOS's own Python launches no longer import from the working
+  directory (WAL-03).** The in-place restart re-exec'd `python -m
+  agentos.cli.main`, which puts the working directory (`$HOME` for the
+  service units) first on `sys.path`, so a file such as `eth_account.py`
+  dropped there by an agent's shell ran inside the gateway that holds the
+  wallet keys. The restart, `agentos gateway start`, the generated service
+  units, the update runner, `start.sh`/`start.ps1` and the pip upgrade path
+  now pass `-P`, and a restarted or spawned gateway gets the `PYTHON*`
+  variables the first launch had rather than any a `.env` added since.
+- **Switching trading off, or lowering a limit, now stops the engine's own
+  loop at its next tick (WAL-11).** The trading service held the `[trading]`
+  section it was built with, so after `config set trading.enabled false`,
+  `daily_cap_usd = 0` or a lower threshold (reported as applied, no restart)
+  approved DCA buys and trigger fires kept being signed on the old settings
+  until some wallet/trading request happened to refresh it. The service now
+  reads the live config on every decision; while trading is off DCA buys and
+  trigger checks are skipped (their schedules and arming are kept), approving
+  a parked order is refused with `trading.disabled`, and the signing step
+  itself refuses. The Relay client also follows a changed
+  `trading.relay_base_url`.
+- **An agent's connection may set only skill and tool credentials through
+  `env.*` (WAL-18).** `env.set` applies a value live to the gateway process,
+  and names such as `ECC_BACKEND_CLASS` (the class eth-keys imports to sign)
+  were writable from an agent-bound connection. A connection the gateway
+  recognizes as an agent's may now `env.set`/`unset`/`import` only a
+  credential-shaped name that a skill's `requires.env` or a built-in tool
+  declares; provider keys, names only your `.env` holds, `AGENTOS_*`, the
+  wallet's `RPC_BASE_URL`/`RPC_ROBINHOOD_URL`/`UNISWAP_API_KEY` and
+  runtime-steering names are refused with `env.protected`, and so is
+  `env.reveal` of any secret. Your own connections are unchanged and the
+  write denylist still applies to everyone. A project-local `.env` (the
+  directory the gateway starts in) can no longer set `PYTHON*`, the signer's
+  crypto backends, TLS trust or any denylisted name; put those in
+  `~/.agentos/.env` or the environment.
+- **Registering or launching an MCP server is the operator's action
+  (WAL-19).** A stdio MCP server is a command the gateway forks itself; `mcp`
+  is now an operator-only setting (an agent's connection cannot register or
+  enable one, a file edit of `[mcp]` is held, `AGENTOS_MCP_*` cannot be
+  written through `agentos env`), and `mcp.connect`, `mcp.disconnect` and
+  `mcp.oauth.*` fail for an agent's connection with `mcp.operator_required`.
+  Settings › MCP in the console works as before.
+- **Breaking — the skill hot-wallet keys need your approval to move funds.**
+  `senior-unilp-manager`, `poolsdotfun-token-launcher` and the GMGN skills
+  signed with `UNIV4_LP_PRIVATE_KEY` / `POOLSFUN_PRIVATE_KEY` /
+  `GMGN_PRIVATE_KEY` straight out of the agent's environment, outside the
+  trading engine's approvals; the only gate was a `PLAN_HASH` the same dry run
+  prints, so an agent could pay a whole LP wallet to any `--recipient` by
+  running the command twice. Those keys no longer reach any process the agent
+  drives (shell, `execute_code`, cron scripts, MCP servers, coding harnesses,
+  lifecycle hooks), the skills no longer read them back from
+  `~/.agentos/.env`, and an agent connection can neither `env.set` nor
+  `env.reveal` them (whatever a skill manifest declares). AgentOS
+  passes one only to a direct command running that skill's own entry point —
+  it runs its packaged copy without a shell — and a command that moves funds
+  (`--broadcast`, `ratchet.py arm --confirm` / `clear-attention`, `gmgn-cli
+  swap` / `multi-swap` / `order strategy create|cancel` / `cooking create`)
+  first waits for an approval prompt that `bypass`, `/elevated`, auto-approve
+  and session elevation do not answer; cron cannot ask, so it is refused
+  there. **What to do:** keep these keys in Settings > Skills (a
+  `GMGN_PRIVATE_KEY` that only lives in `~/.config/gmgn/.env` is no longer
+  used — move it into Settings and delete it from that file, which is now a
+  sensitive path); approve each broadcast when asked; and **re-arm existing
+  ratchet mandates** (`disarm`, then `arm … --confirm`): a tick now fires
+  only mandates armed through an approved command, with the bounds approved,
+  and reports `refused` for the rest. `tick.sh` keeps working as long as it is
+  the single documented `exec python3 …/ratchet.py tick …` line. The approval
+  queue database and the new mandate store (`<state>/skill-signing/`) are on
+  the sensitive-path floor. See
+  [Skill signing prompts](docs/approvals-and-permissions.md#skill-signing-prompts).
+  (WAL-10)
+- The GMGN skills install `gmgn-cli@1.7.1` instead of whatever `latest` is, and
+  AgentOS refuses `GMGN_PRIVATE_KEY` to any other installed version. Their
+  SKILL.md files no longer claim a CLI confirmation prompt
+  (`/dev/tty`, `GMGN_ALLOW_AUTOMATED_TRADES` + `--yes`): 1.7.1 has none, and
+  the approval above is the gate. Run
+  `npm install -g --ignore-scripts gmgn-cli@1.7.1` if a newer one is installed.
+  (WAL-04)
+- Data a command prints can no longer publish an inline artifact.
+  `exec_command` used to auto-publish any stdout line shaped like
+  `publish_artifact path=… mime=application/vnd.agentos.…`, so an ERC-20
+  whose `symbol()` held a newline and that line made a read-only
+  `senior-unilp-manager` lookup push a workspace file at the user as a
+  rendered card. Each command now gets a fresh `AGENTOS_INLINE_ARTIFACT_NONCE`
+  and only a marker carrying it publishes; bundled scripts and
+  `agentos trade` print it through `agentos.skill_stdio.inline_artifact_marker`.
+  **A third-party skill that prints the bare marker no longer auto-renders**:
+  print it with that helper (or append ` nonce=$AGENTOS_INLINE_ARTIFACT_NONCE`),
+  or have the model call `publish_artifact`. The `senior-unilp-manager` and
+  `poolsdotfun-token-launcher` ABI decoders also replace unprintable
+  characters (newlines, ESC, BIDI controls) in on-chain strings, token
+  symbols and names are capped at 64 characters, and invalid UTF-8 no longer
+  aborts a read. See [Inline artifacts](docs/artifacts-and-media.md).
+  (WAL-20)
+- `senior-unilp-manager` no longer prints a malformed `UNIV4_LP_PRIVATE_KEY`
+  (or the variable `--signer-env` names) in its error message. A key of the
+  right length with one non-hex character used to reach `int(…, 16)`, whose
+  error carries the whole value, into the agent's tool output, the transcript
+  and the ratchet cron log. The key is now rejected by name only, and the
+  shared key parser in both hot-wallet skills (`unilp`, `poolsfun`) refuses
+  non-hex input — including whitespace and `_`, which `int()` used to accept
+  as a silently different key — before `int()` sees it. (WAL-21)
+- **Desktop: Touch ID now stands in front of every click that trades or may
+  spend (WAL-16).** With Settings › Security on, a trigger's **Fire now** and
+  a DCA's **Buy now** (desk and chat cards alike) went out with no
+  fingerprint, though both trade at once like a bracket's **Sell now**. Every
+  trading and vault write now goes through one door in the desktop store
+  (`gatedCall` / `TRADING_WRITE_GATES`), which also asks before a resume, a
+  swap, send or burn typed at the desk, your own new DCA, and an edit that
+  may make a DCA spend more. `High-risk approvals` asks when the click moves
+  $500 or more or its worth is unknown; `Every approval` asks for all of
+  them. Reject, pause and stop never ask; `Off` (the default) is unchanged.
+- **Desktop: an exported private key now leaves the clipboard even when the
+  Export sheet is closed (WAL-15).** The one-minute clear was the sheet's own
+  timer and was cancelled by Close, so the natural copy-then-close left the
+  key on the clipboard indefinitely. The clear now runs in the main process
+  (only the key's SHA-256 digest crosses IPC), survives closing the sheet or
+  reloading the window, runs at once when the app quits, and still leaves
+  alone anything copied over the key.
+- Trading: the engine no longer signs whatever the ledger file says. An
+  agent's shell could rewrite a parked order in `state/trading.sqlite` so
+  that your approval of a small send paid its own address. The ledger, its
+  `-wal`/`-shm`/`-journal` files, any copy named `trading.sqlite` and the
+  pre-upgrade snapshots (`state/snapshots`) are now sensitive paths, the
+  file is `0600`, and every order (and every DCA mandate, trigger and
+  bracket you approve) is sealed with a key derived from the vault secret
+  that exists only in gateway memory while the vault is unlocked. Before
+  signing, the engine checks the order's wallet, chain, tokens, amounts,
+  recipient, floors, plan and expiry against the seal; before a DCA buy or a
+  trigger fire, the mandate's or trigger's terms. A row edited outside the
+  engine is refused, never signed: the order fails `trading.integrity`, the
+  mandate or trigger stops (`integrity check failed`), and the gateway
+  broadcasts `trading.integrity.alert` and logs
+  `trading.integrity_violation`. A `daily_spend` row deleted behind the
+  engine's back no longer re-opens the daily cap while the gateway runs.
+  Nothing to migrate: the first unlock after upgrading seals what is
+  already live (parked orders, active mandates, armed triggers). Creating
+  or approving a mandate, trigger or bracket now needs an unlocked vault
+  (`wallet.locked` otherwise), as signing always did. The seal is checked
+  first and the approval binding (below) second, at execution, right before
+  a transaction is signed and right before a permit is signed; approving a
+  multisend with one edited leg fails every leg before any is signed.
+  (WAL-05)
+- Trading: `agentos wallet lock` (`wallet.lock`) now holds until you unlock
+  with the password, in `auto` mode too and across gateway restarts. Before,
+  the next status read or agent swap re-read `unlock.key` and undid it. While
+  locked nothing signs: agent swaps fail `wallet.locked`, due DCA buys and
+  armed triggers wait (no failed runs, no auto-pause; alerts keep ringing),
+  approving an order is refused with the order left parked, and buy-now /
+  fire-now are refused. `wallet.status` carries `lockedByOperator`. The
+  latch wins over a sealed `unlock.key` and over `[trading] unlock_mode =
+  auto`; `wallet unlock`, `wallet mode` and a password change (each with the
+  password) lift it. (WAL-22)
+- Trading: removing a wallet ends its automation. Every DCA mandate,
+  trigger and bracket bound to it is stopped (`wallet removed`) and what it
+  parked is rejected, so importing the same key again revives nothing; a
+  re-import is a new incarnation of the wallet, which no old seal matches.
+  A mandate's spent budget no longer drops when its orders are deleted.
+  (WAL-26)
+- Trading: an agent swap that the daily cap refuses (including
+  `daily_cap_usd = 0`) is rejected even when the caller declares an
+  `expectedOutRaw`. Before, a client quote a little above the fresh one
+  parked the over-cap swap for approval instead, so an approval could run it
+  past the cap. A swap parked for a stale client quote now also names the
+  threshold or impact reason it would have waited for anyway. (WAL-23)
+- Trading: an agent swap whose sell side has no usable feed price now waits
+  for your approval on every provider, and shows its value as unknown
+  rather than $0. Before, on the Uniswap route, the order was valued by the
+  token it buys alone (a price the caller can choose), and Uniswap's own
+  `priceImpact` was trusted, so the whole balance of an unpriced holding
+  could be swapped with no approval and without touching the daily cap. A
+  provider's price impact is now cross-checked against the engine's feed
+  (the larger counts) and is "unknown" — so the order parks — when the
+  feed cannot price a side. A zero or non-finite feed price counts as no
+  price. Bridges are sized from the engine's feed on either chain, never
+  from Relay's own `amountUsd`. Expect more agent swaps on Robinhood Chain
+  (no USD feed) to wait for you. (WAL-06)
+- Trading: the vault key no longer signs a Uniswap quote's `permitData`
+  blind. Before, any EIP-712 typed data in the Trading API response was
+  signed and sent back to `/swap`, so a hostile or tampered response could
+  obtain an EIP-3009 transfer of the whole USDC balance, an unlimited
+  Permit2 allowance to any spender, or a permit on another chain. Now only
+  a Permit2 `PermitSingle`/`PermitTransferFrom` bound to the order (its
+  chain, the canonical Permit2, its sell token, at most its amount, a pinned
+  Universal Router, deadlines under an hour) is signed, rebuilt from the
+  checked fields; anything else fails the order with
+  `trading.permit_refused` and nothing is sent. The default no-Permit2 flow
+  is unchanged. (WAL-07)
+- Trading: an approval binds to exactly what it releases. Approving one leg
+  of an agent multisend used to sign every leg of the batch, while the
+  request and the single-order views named only that leg. Every awaiting
+  order now carries `approval` (what one approve releases: leg count,
+  totals, unpriced flag) and a digest of all its legs' terms;
+  `trading.orders.approve` takes it as `approvalDigest`. **A batch is
+  approved only with its digest**, which `trading.orders.batch` serves beside
+  every leg (`trading.approval_binding_required` otherwise); a stale digest
+  is refused with `trading.approval_changed`. A single order's digest is
+  optional and checked when given. After an approval the engine holds each
+  leg to its approved terms again where its transaction is built and
+  signed (a send or revoke to its exact `to`/`value`/`data`), so an order
+  changed between your approval and the signature fails instead of going
+  out. `agentos trade approve` and the desktop app send the digest; a
+  script that approves a multisend with a bare `orderId` must read the
+  batch first. (WAL-12)
+- CLI: `agentos trade approve` is an honest approval surface. It reads the
+  order first and shows everything the approval releases — both token
+  contracts in full with a verified/UNVERIFIED mark, the full recipient and
+  wallet, the chain id, slippage, provider and value, and for a multisend
+  leg every leg of the batch with the total (and a warning when it is
+  unpriced, so the daily cap does not bound it) — then asks before it acts.
+  **`--yes` skips the question and is now required with `--json`** (without
+  it: `CONFIRMATION_REQUIRED`, exit 2), so scripts that approve with
+  `--json` need `--yes`. `trade dca|trigger|bracket approve` likewise show
+  the automation and ask first (`--yes`). `trade orders` names a parked
+  order's recipient and wallet in full and marks unverified tokens;
+  `trade order` prints token contracts and, for a parked multisend leg, every
+  leg. Mandate, trigger and bracket token payloads carry `verified`.
+  (WAL-08)
+- CLI and trading: control characters from contracts, agents and providers
+  no longer reach your terminal. `agentos trade` and `agentos wallet` print
+  every C0/C1 control, ANSI escape, bidi override and zero-width character
+  in what they show as a visible escape (`\x1b`, `\u202e`) — table cells,
+  panels, approval prompts and server error messages alike; `--json` output
+  `\u`-escapes C1, bidi and invisible characters (same data once parsed).
+  The engine stores token symbols and names without such characters
+  (existing rows are cleaned when read), and a failed swap records `0`
+  instead of the caller's unparsed `amountIn`. (WAL-13)
+
 ### Fixed
 - Desktop: "Update all" in Settings › About no longer asks for a second
   "Update" on the Engine card. It still runs the engine preflight first and

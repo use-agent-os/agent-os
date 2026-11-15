@@ -73,6 +73,23 @@ ASSET_DECIMALS: dict[str, int] = {WETH.lower(): 18, USDG.lower(): 18}
 _env_loaded = False
 
 
+#: Set by AgentOS for a command it runs through its signing gate.
+_GATED_ENV = "AGENTOS_SKILL_SIGNING_GATED"
+#: Set by AgentOS in every child environment it builds.
+_KEYS_HELD_ENV = "AGENTOS_SIGNING_KEYS_HELD"
+
+
+def _never_from_file(name: str) -> bool:
+    """A signing key comes from the process environment or nowhere.
+
+    Under AgentOS the key is held back from the agent's shell and handed only to
+    a gated command; reading it back out of ``~/.agentos/.env`` here would undo
+    that for any script the agent runs. Outside AgentOS, export it.
+    """
+    upper = name.upper()
+    return "PRIVATE_KEY" in upper or upper.endswith(("_KEY", "_SECRET", "_MNEMONIC"))
+
+
 def load_env() -> None:
     """Load a dotenv file if one is configured, without overriding the environment.
 
@@ -85,6 +102,11 @@ def load_env() -> None:
     if _env_loaded:
         return
     _env_loaded = True
+    if os.environ.get(_GATED_ENV):
+        # AgentOS ran this as a gated signing command: the environment is the
+        # gateway's own, and a .env in the working directory is something the
+        # agent may have written (an RPC endpoint that lies to the simulation).
+        return
 
     candidates = [
         os.environ.get("POOLSFUN_ENV"),
@@ -112,11 +134,26 @@ def load_env() -> None:
                 name = name[7:].strip()
             if name in os.environ:
                 continue  # never override an explicit value
+            if _never_from_file(name):
+                continue
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
                 value = value[1:-1]
             os.environ[name] = value
         return
+
+
+def _url_host(parsed: urllib.parse.SplitResult) -> str:
+    """``scheme://host`` of a URL, for an error message.
+
+    Provider keys live in an RPC URL's path (Alchemy, Infura) or query (dRPC),
+    and an error is read by the agent, the model and the transcript: name the
+    endpoint by its host, never in full.
+    """
+    host = parsed.hostname or ""
+    if host and parsed.port:
+        host = f"{host}:{parsed.port}"
+    return f"{parsed.scheme}://{host}" if parsed.scheme else host or "the URL"
 
 
 def require_http_url(url: str, label: str) -> str:
@@ -133,14 +170,15 @@ def require_http_url(url: str, label: str) -> str:
         raise ValueError(f"empty {label}")
     try:
         parsed = urllib.parse.urlsplit(cleaned)
-    except ValueError as exc:
-        raise ValueError(f"invalid {label} {url!r}: {exc}") from exc
+    except ValueError:
+        raise ValueError(f"invalid {label}: not a URL; must be http:// or https://") from None
     if parsed.scheme.lower() not in ("http", "https"):
         raise ValueError(
-            f"invalid {label} scheme {parsed.scheme!r} in {url!r}: must be http:// or https://"
+            f"invalid {label} scheme {parsed.scheme!r} for {_url_host(parsed)}: "
+            "must be http:// or https://"
         )
     if not parsed.netloc:
-        raise ValueError(f"{label} {url!r} has no host: must be http:// or https://")
+        raise ValueError(f"{label} has no host: must be http:// or https://")
     return cleaned
 
 
@@ -196,6 +234,15 @@ def resolve_private_key(signer_env: str = ENV_SIGNER) -> str:
     """
     load_env()
     raw = os.environ.get(signer_env)
+    if not raw and os.environ.get(_KEYS_HELD_ENV):
+        raise RuntimeError(
+            f"{signer_env} is held back from the agent's shell by AgentOS. It is passed "
+            "only to a direct run of this skill's own script: one command, "
+            '`python3 "<skill dir>/scripts/<script>.py" <command> ...` (an optional leading '
+            'S="<skill dir>/scripts" is fine), with no pipe, redirect, `cd` or second '
+            "command. A --broadcast also needs the user's approval, which AgentOS asks "
+            "for itself."
+        )
     if not raw:
         raise RuntimeError(
             f"env var {signer_env} is not set. Set it in the agent environment "

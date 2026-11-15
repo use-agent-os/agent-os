@@ -12,6 +12,11 @@ name — produces a different hash and the broadcast refuses. It is not a
 formality: a token launch is irreversible and mints a fixed supply into a
 permanently locked pool, so there is no way to undo a typo in a symbol.
 
+The hash is an integrity check, not an approval: whoever ran step 1 can read it.
+Under AgentOS the human step is the gateway's -- ``POOLSFUN_PRIVATE_KEY`` is withheld
+from the agent's shell and released to a ``--broadcast`` run only after the operator
+approves that exact command (``agentos/tools/skill_signing.py``).
+
 A launch needs three things: a name, a symbol, and (optionally) an image.
 Everything else has a default, and every default is printed in the plan.
 """

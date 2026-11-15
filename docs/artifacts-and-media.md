@@ -73,11 +73,21 @@ mime. Two steps, and both have a failure mode worth knowing.
 contains a line that is exactly
 
 ```
-publish_artifact path=<file> mime=application/vnd.agentos.<something>+json
+publish_artifact path=<file> mime=application/vnd.agentos.<something>+json nonce=<nonce>
 ```
 
-the artifact is published automatically and the marker is replaced with a note
-telling the model not to publish it again. This is deliberate: leaving the call
+where `<nonce>` is the value `exec_command` put in that command's
+`AGENTOS_INLINE_ARTIFACT_NONCE` environment variable, the artifact is published
+automatically and the marker is replaced with a note
+telling the model not to publish it again. Print it with
+`agentos.skill_stdio.inline_artifact_marker(path, mime)`, which adds the nonce.
+The nonce is fresh for every command, so a marker-shaped line inside data the
+command merely prints — a token symbol read off a chain, an API response —
+cannot trigger a publish; a marker without this command's nonce stays plain
+text. Before this, any matching line published, which let an attacker-chosen
+ERC-20 symbol push a workspace file at the user as a rendered card.
+
+Auto-publishing is deliberate: leaving the call
 to the model meant the file got written and the UI never drew, because the model
 would answer with a hand-written table instead. Only the
 `application/vnd.agentos.` family auto-publishes — a plain file still needs an

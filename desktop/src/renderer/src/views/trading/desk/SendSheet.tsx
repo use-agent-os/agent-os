@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
+import { isTouchIdDeclined } from '~/lib/biometric-gate'
 import { useBalances, useSend, type SendRecipient } from '~/stores/trading'
 import {
   checksumMismatch,
@@ -170,6 +171,19 @@ export function SendSheet({
         token: form.token.trim(),
         recipients,
         ...(form.note.trim() ? { note: form.note.trim() } : {}),
+        // Names the send in the Touch ID sheet (Settings › Security); never sent.
+        touchId: {
+          what: [
+            total !== null
+              ? `${total} ${held?.token.symbol ?? ''}`
+              : `$${form.usd.trim()} ×${count}`,
+            '→',
+            count === 1 && legs[0]
+              ? shortAddress(legs[0].address.trim())
+              : `${count} ${t('trading.send.count')}`,
+          ].join(' '),
+          valueUsd: totalUsd,
+        },
       },
       {
         onSuccess: (res) => {
@@ -195,8 +209,11 @@ export function SendSheet({
           })
           onClose()
         },
-        onError: (err) =>
-          toast.error(`${t('trading.send.failed')}: ${errorText(err)}`, { id: 'trd-send' }),
+        onError: (err) => {
+          // Declined: the gate has said why, and nothing was sent.
+          if (isTouchIdDeclined(err)) return
+          toast.error(`${t('trading.send.failed')}: ${errorText(err)}`, { id: 'trd-send' })
+        },
       },
     )
   }

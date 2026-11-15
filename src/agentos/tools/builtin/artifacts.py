@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hmac
 import json
 import mimetypes
 import os
 import re
+import secrets
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -340,11 +342,27 @@ async def publish_artifact(
 # gets the render. The model stays in charge of the *prose*; it is no longer in
 # charge of whether the UI draws.
 
+#
+# The marker must also carry the nonce exec_command put in that command's
+# environment (agentos.skill_stdio.inline_artifact_marker prints it). Matching
+# any marker-shaped line let *data* trigger the publish: an ERC-20 symbol read
+# off a chain is attacker-chosen, and one holding a newline and a marker made a
+# read-only lookup push a workspace file at the user as a rendered card, with
+# no model or human step (WAL-20). Data cannot carry a value minted after it
+# was written, so a marker without this command's nonce is left as plain text.
+
 #: The marker a skill script prints, alone on its own line.
 INLINE_ARTIFACT_MARKER_RE = re.compile(
-    r"^publish_artifact[ \t]+path=(?P<path>\S+)[ \t]+mime=(?P<mime>\S+)[ \t]*(?=\r?$)",
+    r"^publish_artifact[ \t]+path=(?P<path>\S+)[ \t]+mime=(?P<mime>\S+)"
+    r"(?:[ \t]+nonce=(?P<nonce>\S+))?[ \t]*(?=\r?$)",
     re.MULTILINE,
 )
+
+
+def new_inline_artifact_nonce() -> str:
+    """A fresh nonce for one command; see :data:`agentos.skill_stdio.INLINE_ARTIFACT_NONCE_ENV`."""
+    return secrets.token_hex(16)
+
 
 #: Only AgentOS's own inline-render mimes auto-publish. A plain file (a report, a
 #: zip) still requires a deliberate publish_artifact call, so stray output that
@@ -355,7 +373,9 @@ INLINE_ARTIFACT_MIME_PREFIX = "application/vnd.agentos."
 _MAX_INLINE_ARTIFACTS_PER_CALL = 4
 
 
-async def publish_inline_artifacts(output: str, cwd: str | None = None) -> str:
+async def publish_inline_artifacts(
+    output: str, cwd: str | None = None, *, nonce: str | None = None
+) -> str:
     """Publish inline artifacts announced in ``output`` and replace the markers.
 
     Best-effort by construction: a shell command must never fail, or have its
@@ -366,8 +386,12 @@ async def publish_inline_artifacts(output: str, cwd: str | None = None) -> str:
     ``cwd`` is the directory the command ran in. A relative marker path names a
     file relative to it -- that is where the script wrote it -- not relative to
     the workspace root that ``publish_artifact`` resolves against.
+
+    ``nonce`` is the value the command was given in
+    :data:`agentos.skill_stdio.INLINE_ARTIFACT_NONCE_ENV`. Only a marker carrying it publishes;
+    with no nonce nothing does.
     """
-    if not output or "publish_artifact" not in output:
+    if not output or not nonce or "publish_artifact" not in output:
         return output
     ctx = current_tool_context.get()
     if ctx is None or not ctx.workspace_dir:
@@ -382,6 +406,10 @@ async def publish_inline_artifacts(output: str, cwd: str | None = None) -> str:
     for match in matches:
         marker = match.group(0)
         if marker in replacements:
+            continue
+        if not hmac.compare_digest(match.group("nonce") or "", nonce):
+            # Not announced by the command itself: text that merely looks like
+            # a marker (printed data) stays text and publishes nothing.
             continue
         mime = match.group("mime")
         if not mime.startswith(INLINE_ARTIFACT_MIME_PREFIX):

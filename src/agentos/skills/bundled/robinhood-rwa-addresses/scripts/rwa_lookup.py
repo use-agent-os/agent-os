@@ -40,6 +40,7 @@ from typing import Any
 _SRC_ROOT = str(Path(__file__).resolve().parents[5])
 if _SRC_ROOT not in sys.path:
     sys.path.insert(0, _SRC_ROOT)
+from agentos.skill_stdio import inline_artifact_marker  # noqa: E402
 from agentos.skill_stdio import write_stdout as _write_stdout  # noqa: E402
 
 TOKEN_LIST_URL = "https://tokens.coingecko.com/robinhood/all.json"
@@ -97,7 +98,9 @@ def validate_rpc_url(rpc_url: str) -> str:
     """
     scheme = urllib.parse.urlsplit(rpc_url.strip()).scheme.lower()
     if scheme not in ALLOWED_RPC_SCHEMES:
-        raise ValueError(f"invalid --rpc-url {rpc_url!r}: must start with http:// or https://")
+        # The URL is not echoed: an RPC provider key lives in its path or query.
+        shown = f" {scheme!r}" if scheme else ""
+        raise ValueError(f"invalid --rpc-url scheme{shown}: must start with http:// or https://")
     return rpc_url.strip()
 
 
@@ -458,7 +461,7 @@ def _write_cards(result: dict[str, Any], output: str) -> None:
         out_path = Path(output)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        print(f"publish_artifact path={output} mime={rwa_cards.CARDS_MIME}", file=sys.stderr)
+        print(inline_artifact_marker(output, rwa_cards.CARDS_MIME), file=sys.stderr)
     except Exception as exc:  # noqa: BLE001 - lookup already printed; never fail on the card
         print(f"[card not written: {exc}]", file=sys.stderr)
 

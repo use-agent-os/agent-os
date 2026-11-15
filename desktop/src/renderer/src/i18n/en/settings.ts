@@ -422,17 +422,17 @@ export const settings = {
   // Security
   'settings.security.touchId': 'Touch ID',
   'settings.security.touchId.blurb':
-    'A fingerprint before the desk sends an approval. Cancel the prompt and nothing is sent.',
+    'A fingerprint before the desk approves, trades or fires anything. Cancel the prompt and nothing is sent.',
   'settings.security.mode': 'Confirm with Touch ID',
   'settings.security.mode.off': 'Off',
   'settings.security.mode.high': 'High-risk approvals',
   'settings.security.mode.all': 'Every approval',
   'settings.security.mode.help.off':
-    'Approve, Export private key and Remove wallet act on the click.',
+    'Approve, Fire now, Buy now, Sell now, swaps, sends, Export private key and Remove wallet act on the click.',
   'settings.security.mode.help.high':
-    'High-risk approvals (the card’s “High risk” stamp), DCA mandates over the same line, Export private key and Remove wallet.',
+    'High-risk approvals (the card’s “High risk” stamp), and anything over the same line that trades at once or may spend: Fire now, Buy now, Sell now, a resume, a swap or send, your own DCA. Plus Export private key and Remove wallet.',
   'settings.security.mode.help.all':
-    'Every approval, including each DCA mandate, plus Export private key and Remove wallet.',
+    'Every approval and every click that trades at once or may spend (Fire now, Buy now, Sell now, a resume, a swap or send, your own DCA), plus Export private key and Remove wallet.',
   'settings.security.unavailable': 'This Mac has no Touch ID sensor (or the lid is closed).',
   'settings.security.unavailable.on':
     'Touch ID is unavailable right now (closed lid?), so these actions will be refused until it is back. Turn this off to act without it.',

@@ -32,7 +32,9 @@ Anything else — another token, another chain, the same chain twice — is
   chain for good, like a send). It counts toward the agent's daily cap
   (origin notional in USD, in flight and once confirmed); over the cap, or
   with the cap at 0, it is `rejected`; unpriced, it waits rather than
-  slipping past the cap. A manual bridge runs at once.
+  slipping past the cap. The notional comes from the engine's own price
+  feed: the origin chain's price of the asset, else the destination chain's
+  price of the same asset. Relay's own `amountUsd` never sizes the order. A manual bridge runs at once.
 - **Re-quote before signing.** The quote the user approved is a promise
   about the price only. At execution Relay is asked again; a fill below the
   approved floor (`BRIDGE_TOLERANCE_PCT`, 1 %) sends an agent's order back to

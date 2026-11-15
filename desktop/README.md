@@ -329,9 +329,13 @@ Settings › Security › **Confirm with Touch ID** puts a fingerprint in front
 of the operator's money-moving clicks. `Off` (the default: a Mac without a
 sensor must never be locked out) asks for nothing. `High-risk approvals` asks
 before an approval the card stamps high-risk (the same `askRisk` the card
-uses; a DCA mandate whose cap reaches the same line), and before **Export
-private key** and **Remove wallet**. `Every approval` asks before every
-approval as well, DCA mandates included.
+uses; a DCA mandate whose cap reaches the same line), before anything over
+the same line that trades at once or may spend — a trigger's **Fire now**, a
+DCA's **Buy now** (sized by one buy), a bracket's **Sell now**, a resume, a
+swap or send typed at the desk, your own DCA or an edit that may spend more —
+and before **Export private key** and **Remove wallet**. `Every approval`
+asks before all of those whatever their size. A value the desk cannot price
+counts as high-risk.
 
 The prompt is `systemPreferences.promptTouchID()` in main (`main/security.ts`,
 behind `app.biometrics` / `app.authenticate`): biometrics only, never a
@@ -339,15 +343,31 @@ password fallback, and never attempted when `canPromptTouchID()` says no
 (with the lid closed a raw prompt hangs). LocalAuthentication's error message
 is mapped to `cancelled`, `unavailable` or `failed`. In the renderer one gate,
 `lib/biometric-gate.ts`, reads the setting at call time and sits in front of
-the RPC rather than in the buttons: inside `useOrderDecision` (every
-`trading.orders.approve`: the desk's cards, the BOOK, the Trading tab),
-`useMandateActions().approve` and the chat DCA card's `trading.dca.approve`,
-and `useWalletMutation` for `wallet.export` / `wallet.remove` (before the
-password leaves the renderer). A cancelled, unavailable or failed prompt
+the RPC rather than in the buttons. Every trading and vault write goes
+through `gatedCall` in `stores/trading.ts`, which looks the method up in
+`TRADING_WRITE_GATES`: the desk's cards, Missions rows, the BOOK, the
+Trading tab, the swap / send / burn sheets and the chat cards (`ChatView`'s
+LP/DCA/trigger/bracket actions) all share it, and the key export asks before
+the password leaves the renderer. Every `trading.orders.approve` (through
+`useOrderDecision`) also sends the `approvalDigest` the engine requires — a
+multisend leg's from `trading.orders.batch`, beside every leg, fetched when
+not cached. A reject, pause or stop is never gated; a
+write missing from the table is asked for as high-risk, and
+`stores/trading.test.ts` fails when a write in the required-methods lists is
+not classified. A cancelled, unavailable or failed prompt
 toasts and sends nothing; the card stays live. While the sheet is up the
 button that asked reads "Touch ID…" and a second click is ignored. The setting
 itself never needs Touch ID to change. Tool approvals are not gated: they are
 file and command gates, not money.
+
+**Copy** on an exported private key puts it on the clipboard and asks main
+(`app.scrubClipboard`, `main/clipboard-scrub.ts`) to blank it a minute later
+if the clipboard still holds exactly that key; anything copied over it is
+left alone. Only the key's SHA-256 digest crosses IPC. The timer is main's,
+so closing the sheet, navigating away or reloading the window cannot cancel
+it, and quitting the app blanks it first (the quit waits at most a second
+for the clipboard). It is not cleared when the window loses focus: that is
+when the key gets pasted into a password manager.
 
 ## Quick Ask
 

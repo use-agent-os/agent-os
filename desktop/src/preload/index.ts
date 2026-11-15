@@ -27,6 +27,8 @@ const api: DesktopApi = {
     loginItem: () => ipcRenderer.invoke(IPC.app.loginItem),
     biometrics: () => ipcRenderer.invoke(IPC.app.biometrics),
     authenticate: (reason: string) => ipcRenderer.invoke(IPC.app.authenticate, reason),
+    scrubClipboard: (digest: string, afterMs: number) =>
+      ipcRenderer.invoke(IPC.app.scrubClipboard, digest, afterMs),
   },
   settings: {
     get: () => ipcRenderer.invoke(IPC.settings.get),

@@ -301,6 +301,20 @@ def _decode_single(param: dict, data: bytes, offset: int) -> Any:
     raise AbiError(f"unsupported static type: {type_name}")
 
 
+def _display_safe(raw: bytes) -> str:
+    """Decode an ABI ``string`` for display, which is the only thing this codec's strings
+    are used for: a token's ``symbol()`` / ``name()`` / metadata URI read off a chain.
+
+    Those bytes are chosen by whoever deployed the contract. Decoded verbatim, a newline
+    let a symbol forge whole lines of this script's output -- a fake table row, or a
+    control marker the host reads off stdout -- and ESC / BIDI characters rewrote what the
+    terminal shows. Anything that is not printable becomes U+FFFD, and invalid UTF-8 no
+    longer aborts the whole read.
+    """
+    text = raw.decode("utf-8", errors="replace")
+    return "".join(ch if ch.isprintable() else "\ufffd" for ch in text)
+
+
 def _decode_param(param: dict, data: bytes, offset: int) -> Any:
     type_name = param["type"]
 
@@ -310,7 +324,7 @@ def _decode_param(param: dict, data: bytes, offset: int) -> Any:
         raw = data[start:start + length]
         if len(raw) < length:
             raise AbiError(f"truncated {type_name}: want {length} bytes, have {len(raw)}")
-        return raw.decode("utf-8") if type_name == "string" else "0x" + raw.hex()
+        return _display_safe(raw) if type_name == "string" else "0x" + raw.hex()
 
     array = _array_parts(type_name)
     if array is not None:

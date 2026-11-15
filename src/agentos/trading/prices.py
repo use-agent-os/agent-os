@@ -29,6 +29,7 @@ from typing import Any
 
 import httpx
 
+from agentos.display_text import clean_label
 from agentos.trading.chains import BASE, NATIVE_ADDRESS, ChainSpec, is_native, normalize_address
 from agentos.trading.evm import USER_AGENT
 
@@ -75,6 +76,12 @@ class TokenMeta:
     native: bool = False
     verified: bool = False
     stock_token: bool = False
+
+    def __post_init__(self) -> None:
+        # ``symbol()`` / ``name()`` are whatever a contract (or a feed) returns:
+        # no control or bidi character is stored or served (WAL-13).
+        self.symbol = clean_label(self.symbol)
+        self.name = clean_label(self.name)
 
     def to_dict(self) -> dict[str, Any]:
         return {

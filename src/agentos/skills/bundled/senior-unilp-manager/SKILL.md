@@ -61,6 +61,14 @@ python3 "$S"/ratchet.py  <command> [flags]   # unattended take-profit, Part C
 Every command below is written `python3 "$S"/<script>`. Use that form verbatim — a literal
 `<S>` is not a variable, and in a shell it reads as a redirect from a file named `S`.
 
+**The signing key is not in your shell.** AgentOS holds `UNIV4_LP_PRIVATE_KEY` back from
+every command you run and passes it only to a **direct** run of one of these three scripts:
+one command — `S="{baseDir}/scripts"; python3 "$S"/lp_write.py ...`, or the same with the
+full path spelled out — with no pipe, redirect (`2>&1` is fine), `cd`, `VAR=` prefix, `env=`
+override or second command. AgentOS runs its own packaged copy of the script for that
+command. Any other shape runs without the key and stops with "held back from the agent's
+shell"; rewrite it as one direct command — never look for the key elsewhere.
+
 Chain endpoints come from `RPC_ROBINHOOD_URL` and `RPC_BASE_URL`; `--rpc <url>` overrides.
 Both must be `http://` or `https://`; any other scheme is refused, because the
 JSON-RPC transport would otherwise read local files through `file://`.
@@ -300,9 +308,15 @@ steps above, and the fix is always to go back to them:
    simulated wallet deltas, and a `PLAN_HASH`.
 2. Show the user that table and use **AskUserQuestion** to get an explicit yes/no.
 3. Only on an explicit yes, re-run the **identical** command plus
-   `--broadcast --confirm <PLAN_HASH>`.
+   `--broadcast --confirm <PLAN_HASH>`. AgentOS then asks the user to approve that exact
+   command in its own approval prompt before the key is released — `/elevated`, `bypass` and
+   auto-approve do not answer it. If the result is `approval_pending`, wait for the user;
+   never retry in another form.
 4. If the hash changed in between, the parameters changed — go back to step 1. Never paste a
    hash the script did not just print.
+
+The `PLAN_HASH` binds the broadcast to the plan that was simulated; it is not the approval.
+The approval is the user's answer to AgentOS's prompt, which no command can produce.
 
 `PLAN_HASH` covers chain, contract, subcommand, tokenId/poolId, ticks, liquidity, slippage
 bounds, recipient, signer, and the guards the table showed you: the Permit2 expiration, the
@@ -315,7 +329,9 @@ transaction does changes the hash — if you find a flag that does not, that is 
 
 The key is read from **`UNIV4_LP_PRIVATE_KEY` in the environment and nowhere else**.
 **Never put a private key on a command line** — it would land in shell history and in the
-agent transcript, and redaction only masks `NAME=value`, not a bare hex string. Override the
+agent transcript. Redaction masks the key's value once the gateway knows it (set it via
+Settings / `env.set` / `.env`), but a key only ever on a command line is never registered, so
+keep it out of argv. Override the
 variable name with `--signer-env <VAR>`. Only the derived address is ever printed —
 `lp_write.py address` prints just that, and is the way to answer "which wallet am I using".
 Signing is pure Python and therefore **not constant-time**: use a hot LP key, not a treasury
@@ -522,14 +538,19 @@ Two consequences that a two-transaction design would not have:
 ## The mandate is the approval
 
 `arm` is attended and hash-confirmed, exactly like a write: it prints the full table and a
-`MANDATE_HASH` you must echo back. What the mandate then buys is the right to replay *that*
+`MANDATE_HASH` you must echo back, and `arm ... --confirm <MANDATE_HASH>` waits for the
+user's approval in AgentOS's prompt. AgentOS records each mandate armed that way, with its
+bounds; a tick refuses (`action: refused`) any mandate that is not on that record or whose
+bounds changed on disk since — including mandates armed before this rule existed, which need
+`disarm` and a fresh `arm`. `clear-attention` waits for the same approval. What the mandate then buys is the right to replay *that*
 approval against a plan proven to fall inside it. Every fire is checked against the pinned
 `chainId`, PositionManager, poolId (which is `keccak(PoolKey)`, so the hook address is pinned
 with it), tokenId, signer, recipient, slippage floors, milestone index and — for a re-arm —
 the fixed far edge plus a re-derived near edge and a zero cap on the harvested currency.
 
-`lp_write.py --broadcast` is unchanged: it still requires a `--confirm <PLAN_HASH>` a human
-echoed back, and its CLI cannot construct a mandate authorization at all.
+`lp_write.py --broadcast` is unchanged: it still requires a `--confirm <PLAN_HASH>`, waits
+for the user's approval in AgentOS, and its CLI cannot construct a mandate authorization at
+all.
 
 **Optional bounds, off by default:** `--max-principal-per-fire`, `--max-fee-per-gas`,
 `--expires-days`. Without them there is no ceiling on what a fire may move, so a math error
@@ -669,9 +690,14 @@ cron(action="add", schedule={"kind": "cron", "expr": "*/5 * * * *"},
 A script job runs the file itself and never starts an agent turn, so it takes **no**
 `tool_policy` — `tool_policy.elevated` belongs to the `agent_turn` shape above and is
 rejected here. Both shapes need an interactive CLI or Web caller; neither can be scheduled
-from a chat channel. The script inherits the gateway process environment, so confirm
-`UNIV4_LP_PRIVATE_KEY` is visible there before arming: a missing key fails every tick, and
-five consecutive failures retire the job.
+from a chat channel. A script job does **not** inherit `UNIV4_LP_PRIVATE_KEY`: AgentOS runs
+`tick.sh` through its signing gate only when the file is exactly the one `exec python3 ...
+ratchet.py tick --all --broadcast --json --alert-only` line shown above (comments aside), so
+keep it that way — anything more and the tick runs without the key. The same applies to the
+`agent_turn` shape: the task must run that one command on its own. A tick with any other
+flag (`--rpc`, `--deadline-secs`, ...) needs the user's approval, which cron cannot ask for.
+The key itself must be set in Settings > Skills: a missing key fails every tick, and five
+consecutive failures retire the job.
 
 <!-- always -->
 ## Setting up a monitor

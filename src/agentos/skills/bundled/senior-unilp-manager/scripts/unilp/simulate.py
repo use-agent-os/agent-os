@@ -178,7 +178,10 @@ def describe_revert(revert: dict | None) -> str:
             try:
                 body = data[10:]
                 length = int(body[64:128], 16)
-                parts.append('"' + bytes.fromhex(body[128:128 + length * 2]).decode("utf-8") + '"')
+                reason = bytes.fromhex(body[128:128 + length * 2]).decode("utf-8", "replace")
+                # A hook chooses its revert string; never let it forge output lines.
+                reason = "".join(ch if ch.isprintable() else "\ufffd" for ch in reason)
+                parts.append('"' + reason[:256] + '"')
             except (ValueError, UnicodeDecodeError):
                 parts.append(f"selector {selector}")
         elif selector in KNOWN_ERRORS:

@@ -10,16 +10,23 @@ import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { useConnection } from '@/stores/connection'
 import { t, type MessageKey } from '~/i18n'
-import { biometricGate, requireBiometric } from '~/lib/biometric-gate'
+import { isTouchIdDeclined, requireBiometric, type GateKind } from '~/lib/biometric-gate'
 import { errorText, QUOTE_REFRESH_MS } from '~/views/trading/logic'
 import { answeredBracketFire } from '~/views/trading/desk/bracket-logic'
 import { answeredFire } from '~/views/trading/desk/trigger-logic'
 import {
+  bracketAskById,
   bracketTouchId,
+  mandateAskById,
   mandateTouchId,
+  manualTradeTouchId,
   orderTouchId,
+  triggerAskById,
   triggerTouchId,
   vaultReason,
+  type BracketTouchOp,
+  type MandateTouchOp,
+  type TriggerTouchOp,
 } from '~/views/trading/touch-id'
 import { CHAINS } from '~/views/trading/types'
 import type {
@@ -42,6 +49,7 @@ import type {
   MarketsPayload,
   NetworkStatus,
   Order,
+  OrderApproval,
   OrderKind,
   OrderStatus,
   Portfolio,
@@ -333,6 +341,8 @@ export function useOrders(
 interface BatchResult {
   orders?: Order[]
   batchId?: string
+  /** The batch's approval: every leg and the digest an approve must echo. */
+  approval?: OrderApproval | null
 }
 
 const NO_BATCHES: ReadonlyMap<string, Order[]> = new Map()
@@ -513,12 +523,21 @@ interface SwapResult {
   orders: Order[]
 }
 
+/**
+ * A swap typed by the user: it runs at once, so with Touch ID on the
+ * fingerprint comes first (`touchId` names it in the sheet; never sent).
+ */
 export function useSwap() {
   const rpc = useRpc()
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (params: SwapParams) =>
-      rpc.call<SwapResult>('trading.swap', { ...params, initiator: 'manual' }),
+    mutationFn: ({ touchId, ...params }: SwapParams & { touchId?: WriteContext }) =>
+      gatedCall<SwapResult>(
+        (m, p) => rpc.call(m, p),
+        'trading.swap',
+        { ...params, initiator: 'manual' },
+        touchId,
+      ),
     onSettled: () => invalidateTrading(queryClient),
   })
 }
@@ -542,13 +561,21 @@ interface SendResult {
   batchId: string | null
 }
 
-/** A send typed by the user: it runs at once, one leg per recipient. */
+/**
+ * A send typed by the user: it runs at once, one leg per recipient, so with
+ * Touch ID on the fingerprint comes first (`touchId` names it; never sent).
+ */
 export function useSend() {
   const rpc = useRpc()
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (params: SendParams) =>
-      rpc.call<SendResult>('trading.send', { ...params, initiator: 'manual' }),
+    mutationFn: ({ touchId, ...params }: SendParams & { touchId?: WriteContext }) =>
+      gatedCall<SendResult>(
+        (m, p) => rpc.call(m, p),
+        'trading.send',
+        { ...params, initiator: 'manual' },
+        touchId,
+      ),
     onSettled: () => invalidateTrading(queryClient),
   })
 }
@@ -624,6 +651,253 @@ export function useDecode() {
   })
 }
 
+/* ── Touch ID: the one door in front of every money-moving write ───────── */
+
+/**
+ * What the caller of a write already holds, so the Touch ID sheet can name
+ * what the fingerprint approves without a read. Never sent to the engine.
+ */
+export interface WriteContext {
+  order?: Order
+  /** A batch's legs: the engine approves every one at once. */
+  legs?: readonly Order[]
+  mandate?: Mandate
+  trigger?: Trigger
+  bracket?: Bracket
+  /** A swap or send typed at the desk: its words ("0.5 ETH → USDC")… */
+  what?: string
+  /** …and what it moves in USD, when known (unknown is high-risk). */
+  valueUsd?: number | null
+  /** The wallet's name, for a vault write. */
+  label?: string
+}
+
+type RpcCall = (method: string, params: Record<string, unknown>) => Promise<unknown>
+
+interface WriteAsk {
+  kind: GateKind
+  reason: string
+  /** What is asking, for `useTouchIdPrompt`. */
+  key: string | null
+}
+
+/**
+ * How one write is asked for. null: the write is never gated; a gate that
+ * resolves null: these params move nothing (a DCA rename).
+ */
+type WriteGate =
+  | ((
+      params: Record<string, unknown>,
+      ctx: WriteContext,
+      call: RpcCall,
+    ) => Promise<WriteAsk | null>)
+  | null
+
+const idOf = (params: Record<string, unknown>, field: string): string =>
+  typeof params[field] === 'string' ? (params[field] as string) : ''
+
+function mandateGate(op: Exclude<MandateTouchOp, 'create'>): NonNullable<WriteGate> {
+  return async (params, ctx, call) => {
+    const id = idOf(params, 'mandateId')
+    const ask =
+      ctx.mandate && ctx.mandate.id === id
+        ? mandateTouchId(op === 'update' ? patchedMandate(ctx.mandate, params) : ctx.mandate, op)
+        : await mandateAskById(call, id, op)
+    return { ...ask, key: `mandate:${id}` }
+  }
+}
+
+function triggerGate(op: TriggerTouchOp): WriteGate {
+  return async (params, ctx, call) => {
+    const id = idOf(params, 'triggerId')
+    const ask =
+      ctx.trigger && ctx.trigger.id === id
+        ? triggerTouchId(ctx.trigger, op)
+        : await triggerAskById(call, id, op)
+    return { ...ask, key: `trigger:${id}` }
+  }
+}
+
+function bracketGate(op: BracketTouchOp): WriteGate {
+  return async (params, ctx, call) => {
+    const id = idOf(params, 'bracketId')
+    const ask =
+      ctx.bracket && ctx.bracket.id === id
+        ? bracketTouchId(ctx.bracket, op)
+        : await bracketAskById(call, id, op)
+    return { ...ask, key: `bracket:${id}` }
+  }
+}
+
+function manualGate(op: 'swap' | 'send'): WriteGate {
+  return async (params, ctx) => ({
+    ...manualTradeTouchId(op, {
+      what: ctx.what ?? '',
+      chainId: typeof params.chainId === 'number' ? params.chainId : 0,
+      valueUsd: ctx.valueUsd,
+    }),
+    key: `trade:${op}`,
+  })
+}
+
+function vaultGate(action: 'export' | 'remove'): WriteGate {
+  return async (params, ctx) => {
+    const address = idOf(params, 'address')
+    const which =
+      action === 'remove' ? 'remove' : params.format === 'privateKey' ? 'export' : 'exportKeystore'
+    return {
+      kind: 'vault',
+      reason: vaultReason(which, { address, label: ctx.label }),
+      key: `wallet:${address.toLowerCase()}`,
+    }
+  }
+}
+
+/** `trading.dca.update` params read as the mandate they would leave behind. */
+function patchedMandate(m: Mandate, patch: Record<string, unknown>): Mandate {
+  const num = (k: string): number | undefined =>
+    typeof patch[k] === 'number' ? (patch[k] as number) : undefined
+  const runsMax = num('runsMax')
+  return {
+    ...m,
+    name: typeof patch.name === 'string' && patch.name ? patch.name : m.name,
+    budget: {
+      ...m.budget,
+      usdPerRun: num('usdPerRun') ?? m.budget?.usdPerRun,
+      capUsd: num('capUsd') ?? m.budget?.capUsd,
+    },
+    runs: { ...m.runs, max: runsMax === undefined ? m.runs?.max : runsMax || null },
+  }
+}
+
+/** An operator's own `trading.dca.create`: the mandate is active at once. */
+const createMandateGate: WriteGate = async (params) => {
+  const num = (k: string): number | undefined =>
+    typeof params[k] === 'number' ? (params[k] as number) : undefined
+  const chainId = num('chainId') ?? 0
+  const draft = {
+    name: typeof params.name === 'string' ? params.name : '',
+    chain: { id: chainId, name: '' },
+    budget: { usdPerRun: num('usdPerRun'), capUsd: num('capUsd') },
+    runs: { max: num('runsMax') ?? null },
+  } as unknown as Mandate
+  return { ...mandateTouchId(draft, 'create'), key: 'mandate:new' }
+}
+
+/** A `trading.dca.update` that renames only moves nothing; anything else may spend more. */
+const updateMandateGate: WriteGate = async (params, ctx, call) => {
+  const changes = Object.keys(params).filter((k) => k !== 'mandateId' && k !== 'name')
+  return changes.length ? mandateGate('update')(params, ctx, call) : null
+}
+
+/**
+ * Every trading/wallet write the renderer sends, and how Touch ID stands in
+ * front of it (Settings › Security). A gated write is one that places,
+ * fills or fires a trade, or grants (or re-grants) a standing permission to
+ * spend: approvals, "Fire now" / "Buy now" / "Sell now", resumes, a swap or
+ * send typed at the desk, an operator's own DCA, and a key export or a
+ * wallet removal. Nothing else is: a reject, pause or stop only takes
+ * permission away; an LP collect/remove parks an order that is approved
+ * (and gated) on its own card.
+ *
+ * `gatedCall` is the only way the store sends a write, and a method missing
+ * from this table is asked for as high-risk: a new write cannot skip the
+ * gate by being forgotten here (`stores/trading.test.ts` checks every write
+ * in `DESKTOP_REQUIRED_METHODS` is classified).
+ */
+export const TRADING_WRITE_GATES: Readonly<Record<string, WriteGate>> = {
+  'trading.orders.approve': async (params, ctx) => {
+    const orderId = idOf(params, 'orderId')
+    const ask = ctx.order
+      ? orderTouchId(ctx.order, ctx.legs?.length ? ctx.legs : undefined)
+      : {
+          kind: 'approve-high' as const,
+          reason: t('trading.touchId.reason.orderId').replace('{id}', orderId),
+        }
+    return { ...ask, key: orderId }
+  },
+  'trading.orders.reject': null,
+  'trading.swap': manualGate('swap'),
+  'trading.send': manualGate('send'),
+  'trading.allowances.revoke': null,
+  'trading.unwrap': null,
+  'trading.sync': null,
+  'trading.tokens.hide': null,
+  'trading.setProvider': null,
+  'trading.probe': null,
+  'trading.lp.collect': null,
+  'trading.lp.remove': null,
+  'trading.dca.create': createMandateGate,
+  'trading.dca.update': updateMandateGate,
+  'trading.dca.approve': mandateGate('approve'),
+  'trading.dca.run': mandateGate('run'),
+  'trading.dca.resume': mandateGate('resume'),
+  'trading.dca.reject': null,
+  'trading.dca.pause': null,
+  'trading.dca.stop': null,
+  'trading.trigger.approve': triggerGate('approve'),
+  'trading.trigger.fire': triggerGate('fire'),
+  'trading.trigger.resume': triggerGate('resume'),
+  'trading.trigger.reject': null,
+  'trading.trigger.pause': null,
+  'trading.trigger.stop': null,
+  'trading.bracket.approve': bracketGate('approve'),
+  'trading.bracket.fire': bracketGate('fire'),
+  'trading.bracket.resume': bracketGate('resume'),
+  'trading.bracket.reject': null,
+  'trading.bracket.pause': null,
+  'trading.bracket.stop': null,
+  'wallet.export': vaultGate('export'),
+  'wallet.remove': vaultGate('remove'),
+  'wallet.create': null,
+  'wallet.import': null,
+  'wallet.lock': null,
+  'wallet.rename': null,
+  'wallet.setPrimary': null,
+  'wallet.setUnlockMode': null,
+  'wallet.setup': null,
+  'wallet.unlock': null,
+}
+
+/** A write nobody classified: asked for as high-risk, naming the method. */
+const unknownWriteGate =
+  (method: string): NonNullable<WriteGate> =>
+  async () => ({
+    kind: 'approve-high',
+    reason: t('trading.touchId.reason.write').replace('{method}', method),
+    key: null,
+  })
+
+/**
+ * Touch ID for one write, when Settings › Security asks for it. Resolves
+ * when the write may go; throws `TouchIdDeclined` (already toasted) when it
+ * may not, with nothing sent.
+ */
+export async function requireWriteTouchId(
+  call: RpcCall,
+  method: string,
+  params: Record<string, unknown>,
+  ctx: WriteContext = {},
+): Promise<void> {
+  const gate = Object.hasOwn(TRADING_WRITE_GATES, method)
+    ? TRADING_WRITE_GATES[method]
+    : unknownWriteGate(method)
+  if (!gate) return
+  const ask = await gate(params, ctx, call)
+  if (ask) await requireBiometric(ask.kind, ask.reason, ask.key)
+}
+
+/** Send one write through the gate: the prompt first, the RPC only once it passed. */
+export async function gatedCall<T>(
+  call: RpcCall,
+  method: string,
+  params: Record<string, unknown>,
+  ctx: WriteContext = {},
+): Promise<T> {
+  await requireWriteTouchId(call, method, params, ctx)
+  return (await call(method, params)) as T
+}
+
 /** One decision on an order. `order` (and a batch's `legs`) name an approval in the Touch ID sheet. */
 export interface OrderDecision {
   orderId: string
@@ -646,22 +920,34 @@ export function useOrderDecision() {
     // A reject carries no reason here: the engine records the bare "user"
     // itself, and a placeholder reason was stored as "user: user".
     mutationFn: async ({ orderId, approve, order, legs }: OrderDecision) => {
-      if (approve) {
-        const batchId = order?.batchId
-        const cached = batchId
-          ? queryClient.getQueryData<BatchResult>(['trading', 'batch', batchId])?.orders
-          : undefined
-        const ask = order
-          ? orderTouchId(order, legs?.length ? legs : cached)
-          : {
-              kind: 'approve-high' as const,
-              reason: t('trading.touchId.reason.orderId').replace('{id}', orderId),
-            }
-        await requireBiometric(ask.kind, ask.reason, orderId)
+      const batchId = order?.batchId
+      if (!approve) {
+        return gatedCall<{ order: Order }>(
+          (m, p) => rpc.call(m, p),
+          'trading.orders.reject',
+          { orderId },
+          { order, legs },
+        )
       }
-      return rpc.call<{ order: Order }>(
-        approve ? 'trading.orders.approve' : 'trading.orders.reject',
-        { orderId },
+      let batch = batchId
+        ? queryClient.getQueryData<BatchResult>(['trading', 'batch', batchId])
+        : undefined
+      if (batchId && !batch?.approval?.digest) {
+        // One approve runs every leg, so the engine takes it only with the
+        // digest it serves beside all of them (trading.orders.batch).
+        batch = await queryClient.fetchQuery({
+          queryKey: ['trading', 'batch', batchId] as const,
+          queryFn: () => rpc.call<BatchResult>('trading.orders.batch', { batchId }),
+          staleTime: 0,
+        })
+      }
+      const cached = batch?.orders
+      const digest = batchId ? batch?.approval?.digest : order?.approval?.digest
+      return gatedCall<{ order: Order }>(
+        (m, p) => rpc.call(m, p),
+        'trading.orders.approve',
+        digest ? { orderId, approvalDigest: digest } : { orderId },
+        { order, legs: legs?.length ? legs : cached },
       )
     },
     onSettled: () => invalidateTrading(queryClient),
@@ -724,26 +1010,13 @@ export function useWalletMutation<T = unknown>() {
       /** The wallet's name, for the Touch ID sheet; never sent. */
       label?: string
     }) => {
-      if (method === 'wallet.export' || method === 'wallet.remove') {
-        const address = typeof params.address === 'string' ? params.address : ''
-        const known =
-          label ??
-          queryClient
-            .getQueryData<WalletList>(TRADING_KEYS.wallets)
-            ?.wallets?.find((w) => w.address.toLowerCase() === address.toLowerCase())?.label
-        const action =
-          method === 'wallet.remove'
-            ? 'remove'
-            : params.format === 'privateKey'
-              ? 'export'
-              : 'exportKeystore'
-        await requireBiometric(
-          'vault',
-          vaultReason(action, { address, label: known }),
-          `wallet:${address.toLowerCase()}`,
-        )
-      }
-      return rpc.call<T>(method, params)
+      const address = typeof params.address === 'string' ? params.address : ''
+      const known =
+        label ??
+        queryClient
+          .getQueryData<WalletList>(TRADING_KEYS.wallets)
+          ?.wallets?.find((w) => w.address.toLowerCase() === address.toLowerCase())?.label
+      return gatedCall<T>((m, p) => rpc.call(m, p), method, params, { label: known })
     },
     onSettled: () => invalidateTrading(queryClient),
   })
@@ -979,11 +1252,13 @@ export function useMandateActions(): MandateActions {
     mutationFn: ({
       method,
       params,
+      ctx,
     }: {
       method: string
       params: Record<string, unknown>
       id: string | null
-    }) => rpc.call<MandatePayload>(method, params),
+      ctx?: WriteContext
+    }) => gatedCall<MandatePayload>((m, p) => rpc.call(m, p), method, params, ctx),
     onSettled: () => invalidateTrading(queryClient),
   })
   const { mutateAsync } = mutation
@@ -993,12 +1268,15 @@ export function useMandateActions(): MandateActions {
       params: Record<string, unknown>,
       id: string | null,
       done: (res: MandatePayload) => void,
+      ctx?: WriteContext,
     ): Promise<MandatePayload | null> => {
       try {
-        const res = await mutateAsync({ method, params, id })
+        const res = await mutateAsync({ method, params, id, ctx })
         done(res)
         return res ?? null
       } catch (err) {
+        // Touch ID said no: the gate has toasted why, and nothing was sent.
+        if (isTouchIdDeclined(err)) return null
         toast.error(`${t('trading.dca.toast.failed')}: ${errorText(err)}`, {
           id: `dca-${id ?? 'new'}`,
         })
@@ -1009,14 +1287,20 @@ export function useMandateActions(): MandateActions {
   )
   const act = useCallback(
     (action: MandateAction, mandate: Mandate, extra: Record<string, unknown> = {}) =>
-      write(`trading.dca.${action}`, { mandateId: mandate.id, ...extra }, mandate.id, (res) => {
-        const name = res?.mandate?.name || mandate.name
-        if (action === 'run') {
-          runToast(res, mandate)
-          return
-        }
-        toast.success(`${t(DONE_KEYS[action])} · ${name}`, { id: `dca-${mandate.id}` })
-      }),
+      write(
+        `trading.dca.${action}`,
+        { mandateId: mandate.id, ...extra },
+        mandate.id,
+        (res) => {
+          const name = res?.mandate?.name || mandate.name
+          if (action === 'run') {
+            runToast(res, mandate)
+            return
+          }
+          toast.success(`${t(DONE_KEYS[action])} · ${name}`, { id: `dca-${mandate.id}` })
+        },
+        { mandate },
+      ),
     [write],
   )
   const pending = mutation.isPending ? (mutation.variables?.id ?? null) : null
@@ -1033,18 +1317,22 @@ export function useMandateActions(): MandateActions {
         ),
       ),
     update: (mandate, patch) =>
-      write('trading.dca.update', { mandateId: mandate.id, ...patch }, mandate.id, (res) =>
-        toast.success(`${t('trading.dca.toast.updated')} · ${res?.mandate?.name ?? mandate.name}`, {
-          id: `dca-${mandate.id}`,
-        }),
+      write(
+        'trading.dca.update',
+        { mandateId: mandate.id, ...patch },
+        mandate.id,
+        (res) =>
+          toast.success(
+            `${t('trading.dca.toast.updated')} · ${res?.mandate?.name ?? mandate.name}`,
+            { id: `dca-${mandate.id}` },
+          ),
+        { mandate },
       ),
-    // A mandate is a standing permission to spend: with Touch ID on, the
-    // fingerprint comes first, and a declined prompt (already toasted) sends nothing.
-    approve: async (mandate) => {
-      const ask = mandateTouchId(mandate)
-      if (!(await biometricGate(ask.kind, ask.reason, `mandate:${mandate.id}`))) return null
-      return act('approve', mandate)
-    },
+    // A mandate is a standing permission to spend, and Buy now spends at
+    // once: every write goes through `gatedCall` (TRADING_WRITE_GATES), so
+    // with Touch ID on the fingerprint comes first and a declined prompt
+    // (already toasted) sends nothing and resolves null.
+    approve: (mandate) => act('approve', mandate),
     reject: (mandate, reason) => act('reject', mandate, reason ? { reason } : {}),
     pause: (mandate) => act('pause', mandate),
     resume: (mandate) => act('resume', mandate),
@@ -1163,11 +1451,13 @@ export function useTriggerActions(): TriggerActions {
     mutationFn: ({
       method,
       params,
+      ctx,
     }: {
       method: string
       params: Record<string, unknown>
       id: string
-    }) => rpc.call<TriggerPayload>(method, params),
+      ctx?: WriteContext
+    }) => gatedCall<TriggerPayload>((m, p) => rpc.call(m, p), method, params, ctx),
     // The answer is the refreshed trigger: the Missions row shows it at once,
     // then the sweep re-reads everything it moved.
     onSuccess: (res) =>
@@ -1186,6 +1476,7 @@ export function useTriggerActions(): TriggerActions {
           method: `trading.trigger.${action}`,
           params: { triggerId: trigger.id, ...extra },
           id: trigger.id,
+          ctx: { trigger },
         })
         if (action === 'fire') fireToast(res, trigger)
         else
@@ -1194,6 +1485,7 @@ export function useTriggerActions(): TriggerActions {
           })
         return res ?? null
       } catch (err) {
+        if (isTouchIdDeclined(err)) return null
         toast.error(`${t('trading.trigger.toast.failed')}: ${errorText(err)}`, {
           id: `trigger-${trigger.id}`,
         })
@@ -1204,14 +1496,11 @@ export function useTriggerActions(): TriggerActions {
   )
   const pending = mutation.isPending ? (mutation.variables?.id ?? null) : null
   return {
-    // A trigger is a standing permission to trade when the market says so:
-    // with Touch ID on, the fingerprint comes first, and a declined prompt
-    // (already toasted) sends nothing.
-    approve: async (trigger) => {
-      const ask = triggerTouchId(trigger)
-      if (!(await biometricGate(ask.kind, ask.reason, `trigger:${trigger.id}`))) return null
-      return act('approve', trigger)
-    },
+    // A trigger is a standing permission to trade when the market says so,
+    // and Fire now trades at once: every write goes through `gatedCall`, so
+    // with Touch ID on the fingerprint comes first and a declined prompt
+    // (already toasted) sends nothing and resolves null.
+    approve: (trigger) => act('approve', trigger),
     reject: (trigger, reason) => act('reject', trigger, reason ? { reason } : {}),
     pause: (trigger) => act('pause', trigger),
     resume: (trigger) => act('resume', trigger),
@@ -1329,11 +1618,13 @@ export function useBracketActions(): BracketActions {
     mutationFn: ({
       method,
       params,
+      ctx,
     }: {
       method: string
       params: Record<string, unknown>
       id: string
-    }) => rpc.call<BracketPayload>(method, params),
+      ctx?: WriteContext
+    }) => gatedCall<BracketPayload>((m, p) => rpc.call(m, p), method, params, ctx),
     // The answer is the refreshed bracket: the Missions row shows it at once
     // (onSuccess is awaited before onSettled, so the sweep's refetch is not
     // the one cancelled). Then both lists move — the bracket, and its legs
@@ -1355,6 +1646,7 @@ export function useBracketActions(): BracketActions {
           method: `trading.bracket.${action}`,
           params: { bracketId: bracket.id, ...extra },
           id: bracket.id,
+          ctx: { bracket },
         })
         if (action === 'fire') bracketFireToast(res, bracket)
         else
@@ -1363,6 +1655,7 @@ export function useBracketActions(): BracketActions {
           })
         return res ?? null
       } catch (err) {
+        if (isTouchIdDeclined(err)) return null
         toast.error(`${t('trading.bracket.toast.failed')}: ${errorText(err)}`, {
           id: `bracket-${bracket.id}`,
         })
@@ -1373,22 +1666,15 @@ export function useBracketActions(): BracketActions {
   )
   const pending = mutation.isPending ? (mutation.variables?.id ?? null) : null
   return {
-    // One decision arms both legs: with Touch ID on, the fingerprint comes
-    // first, and a declined prompt (already toasted) sends nothing.
-    approve: async (bracket) => {
-      const ask = bracketTouchId(bracket)
-      if (!(await biometricGate(ask.kind, ask.reason, `bracket:${bracket.id}`))) return null
-      return act('approve', bracket)
-    },
+    // One decision arms both legs, and Sell now trades at once: every write
+    // goes through `gatedCall`, so with Touch ID on the fingerprint comes
+    // first and a declined prompt (already toasted) sends nothing.
+    approve: (bracket) => act('approve', bracket),
     reject: (bracket, reason) => act('reject', bracket, reason ? { reason } : {}),
     pause: (bracket) => act('pause', bracket),
     resume: (bracket) => act('resume', bracket),
     stop: (bracket, reason) => act('stop', bracket, reason ? { reason } : {}),
-    fire: async (bracket, leg) => {
-      const ask = bracketTouchId(bracket, 'fire')
-      if (!(await biometricGate(ask.kind, ask.reason, `bracket:${bracket.id}`))) return null
-      return act('fire', bracket, leg ? { leg } : {})
-    },
+    fire: (bracket, leg) => act('fire', bracket, leg ? { leg } : {}),
     pending,
     busy: mutation.isPending,
   }

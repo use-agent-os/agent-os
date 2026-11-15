@@ -6,7 +6,8 @@ import { resetBiometricGateForTests } from '~/lib/biometric-gate'
 import { desktopApi } from '~/lib/desktop-api'
 import { useSettings } from '~/stores/settings'
 import { renderDesk, WALLET } from './test-utils'
-import { CLIPBOARD_CLEAR_MS, clearClipboardIf, WalletSheet } from './WalletSheet'
+import { CLIPBOARD_CLEAR_MS, secretDigest } from '~/lib/clipboard-secret'
+import { WalletSheet } from './WalletSheet'
 
 const rpcCall = vi.fn()
 vi.mock('@/app/providers', () => ({
@@ -120,35 +121,97 @@ describe('WalletSheet', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('0xdeadbeef'))
   })
 
-  it('blanks the clipboard a minute after the copy if the key is still there, and closes clean', async () => {
+  async function revealAndCopy(onClose = vi.fn()) {
     rpcCall.mockResolvedValue({ privateKey: '0xdeadbeef' })
-    const writeText = vi.fn(async () => {})
-    const readText = vi.fn(async () => '0xdeadbeef')
-    Object.assign(navigator, { clipboard: { writeText, readText } })
-    const onClose = vi.fn()
-    renderDesk(<WalletSheet mode={{ kind: 'export', wallet: WALLET }} onClose={onClose} />)
+    const view = renderDesk(
+      <WalletSheet mode={{ kind: 'export', wallet: WALLET }} onClose={onClose} />,
+    )
     fireEvent.change(screen.getByLabelText('Vault password'), { target: { value: 'pw' } })
     fireEvent.click(screen.getByTestId('export-reveal'))
     await screen.findByTestId('export-secret')
     vi.useFakeTimers()
     fireEvent.click(screen.getByTestId('export-copy'))
-    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('0xdeadbeef'))
-    writeText.mockClear()
-    await vi.advanceTimersByTimeAsync(CLIPBOARD_CLEAR_MS + 10)
-    expect(readText).toHaveBeenCalled()
-    expect(writeText).toHaveBeenCalledWith('')
-    vi.useRealTimers()
+    return view
+  }
+
+  it('blanks the clipboard a minute after the copy if the key is still there, and closes clean', async () => {
+    let clip = ''
+    const writeText = vi.fn(async (text: string) => {
+      clip = text
+    })
+    const readText = vi.fn(async () => clip)
+    Object.assign(navigator, { clipboard: { writeText, readText } })
+    const onClose = vi.fn()
+    try {
+      await revealAndCopy(onClose)
+      await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('0xdeadbeef'))
+      writeText.mockClear()
+      await vi.advanceTimersByTimeAsync(CLIPBOARD_CLEAR_MS + 10)
+      expect(readText).toHaveBeenCalled()
+      expect(writeText).toHaveBeenCalledWith('')
+    } finally {
+      vi.useRealTimers()
+    }
     // A Close beside Copy, which forgets the secret on the way out.
     fireEvent.click(screen.getByTestId('export-close'))
     expect(onClose).toHaveBeenCalled()
   })
 
+  // WAL-15: the clear used to be this sheet's own timer, cancelled when it
+  // unmounted, so the natural copy-then-close left the key there for good.
+  it('still blanks the key when the sheet is closed right after the copy', async () => {
+    let clip = ''
+    const writeText = vi.fn(async (text: string) => {
+      clip = text
+    })
+    Object.assign(navigator, { clipboard: { writeText, readText: vi.fn(async () => clip) } })
+    try {
+      const view = await revealAndCopy()
+      await vi.waitFor(() => expect(clip).toBe('0xdeadbeef'))
+      await vi.advanceTimersByTimeAsync(5_000)
+      fireEvent.click(screen.getByTestId('export-close'))
+      view.unmount()
+      await vi.advanceTimersByTimeAsync(CLIPBOARD_CLEAR_MS)
+      expect(clip).toBe('')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('hands the scrub only the key’s digest, never the key', async () => {
+    const scrub = vi.spyOn(desktopApi().app, 'scrubClipboard')
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn(async () => {}), readText: vi.fn(async () => '') },
+    })
+    try {
+      await revealAndCopy()
+      await vi.waitFor(() => expect(scrub).toHaveBeenCalledTimes(1))
+      expect(scrub).toHaveBeenCalledWith(secretDigest('0xdeadbeef'), CLIPBOARD_CLEAR_MS)
+      expect(JSON.stringify(scrub.mock.calls)).not.toContain('deadbeef')
+    } finally {
+      vi.useRealTimers()
+      scrub.mockRestore()
+    }
+  })
+
   it('leaves the clipboard alone when something else was copied over the key', async () => {
-    const writeText = vi.fn(async () => {})
-    const readText = vi.fn(async () => 'a grocery list')
-    Object.assign(navigator, { clipboard: { writeText, readText } })
-    await clearClipboardIf('0xdeadbeef')
-    expect(writeText).not.toHaveBeenCalled()
+    let clip = ''
+    const writeText = vi.fn(async (text: string) => {
+      clip = text
+    })
+    Object.assign(navigator, { clipboard: { writeText, readText: vi.fn(async () => clip) } })
+    try {
+      const view = await revealAndCopy()
+      await vi.waitFor(() => expect(clip).toBe('0xdeadbeef'))
+      view.unmount()
+      clip = 'a grocery list'
+      writeText.mockClear()
+      await vi.advanceTimersByTimeAsync(CLIPBOARD_CLEAR_MS + 10)
+      expect(writeText).not.toHaveBeenCalled()
+      expect(clip).toBe('a grocery list')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('marks a wrong unlock password without closing', async () => {

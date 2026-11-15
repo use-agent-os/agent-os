@@ -112,6 +112,13 @@ def reset_protected_config_paths() -> None:
     _protected_config_paths.clear()
 
 
+#: The trading ledger (``agentos.trading.ledger.default_ledger_path``) and the
+#: files SQLite keeps beside it. An agent never needs them: it trades, reads
+#: its orders and history through the gateway RPC.
+TRADING_LEDGER_NAME = "trading.sqlite"
+TRADING_LEDGER_SIDECARS: tuple[str, ...] = ("-wal", "-shm", "-journal")
+
+
 def runtime_sensitive_prefixes() -> tuple[str, ...]:
     """AgentOS's own operator proof and config, wherever the state root really is.
 
@@ -121,21 +128,91 @@ def runtime_sensitive_prefixes() -> tuple[str, ...]:
     container image, whose ``$HOME`` is elsewhere. Resolved at check time, so
     the floor follows the state root the running process actually uses. The
     state root's ``config.toml`` and the active config file (which may be a
-    project-local ``agentos.toml``) are on it too.
+    project-local ``agentos.toml``) are on it too, and so is the operator's
+    approval of the operator-only settings in it (``gateway.config_approval``).
+
+    So is the trading ledger with its sidecars: it holds the parked orders the
+    operator approves by id, the approved mandates and triggers the engine
+    runs unattended, and the daily-cap accounting. An agent that rewrote it
+    could redirect an approved send to itself. The engine also seals those rows
+    (``agentos.trading.integrity``) and refuses one that was edited, since
+    this floor is a text scan; it is the first line, not the only one. The
+    pre-upgrade snapshots (``state/snapshots``) carry copies of the ledger and
+    of ``config.toml``, and a restore puts them back: they are on it as well.
     """
-    from agentos.paths import default_agentos_home
+    from agentos.paths import default_agentos_home, vault_kek_dir
 
     try:
         home = default_agentos_home()
-        entries = [str(home / "wallets"), str(home / "config.toml")]
+        ledger = str(home / "state" / TRADING_LEDGER_NAME)
+        entries = [
+            str(home / "wallets"),
+            str(home / "config.toml"),
+            str(home / "config-approval.toml"),
+            ledger,
+            *(ledger + suffix for suffix in TRADING_LEDGER_SIDECARS),
+            str(home / "state" / "snapshots"),
+        ]
+        # What makes a skill's hot-wallet key reachable (tools/skill_signing.py):
+        # the operator's approval rows -- one rewritten to "approved" releases
+        # the key -- and the store of operator-approved ratchet mandates.
+        queue = home / "state" / "approval_queue.sqlite"
+        entries.extend(str(queue) + tail for tail in ("", "-wal", "-shm", "-journal"))
+        entries.append(str(home / "skill-signing"))
     except (OSError, RuntimeError):
         entries = []
+    # The key that seals the vault's unlock.key, kept outside the state root
+    # (agentos.trading.unlock_key); just as off-limits as the file it opens.
+    try:
+        entries.append(str(vault_kek_dir()))
+    except (OSError, RuntimeError):
+        pass
     entries.extend(sorted(_protected_config_paths - set(entries)))
     return tuple(entries)
 
 
 def _all_sensitive_prefixes() -> tuple[str, ...]:
     return (*_SENSITIVE_PREFIXES, *runtime_sensitive_prefixes())
+
+
+def _protected_config_files() -> list[str]:
+    """The config files on the floor: the state root's and the active one."""
+    from agentos.paths import default_agentos_home
+
+    files: list[str] = []
+    try:
+        files.append(str(default_agentos_home() / "config.toml"))
+    except (OSError, RuntimeError):
+        pass
+    files.extend(sorted(_protected_config_paths - set(files)))
+    return files
+
+
+def _is_config_copy_name(leaf: str, name: str) -> bool:
+    """Whether *leaf* is a copy AgentOS writes of the config file *name*.
+
+    Every persisted config write first leaves a verbatim backup
+    (``config.toml.backup.<stamp>``, ``make_config_backup``) beside the file,
+    and the atomic writer stages the new text in ``.config.toml.<rand>.tmp``.
+    Both hold the same provider keys and gateway token as the file itself,
+    so they are the file as far as the floor is concerned (WAL-17).
+    """
+    if not name:
+        return False
+    return leaf.startswith(f"{name}.backup.") or (
+        leaf.startswith(f".{name}.") and leaf.endswith(".tmp")
+    )
+
+
+def _config_copy_marker(candidates: list[str]) -> str | None:
+    for entry in _protected_config_files():
+        for normalized in _comparison_path_candidates(entry):
+            directory, _, name = normalized.rpartition("/")
+            for expanded in candidates:
+                parent, _, leaf = expanded.rpartition("/")
+                if parent == directory and _is_config_copy_name(leaf, name):
+                    return entry
+    return None
 
 
 # Exact filename tails we never want mutated, regardless of parent directory.
@@ -164,6 +241,10 @@ _BASE_SENSITIVE_SUFFIXES: tuple[str, ...] = (
     # token written outside home. The leading dot is part of the match, so a
     # file merely named ``vault-token`` is left alone.
     "/.vault-token",
+    # The trading ledger's prefix entries (``runtime_sensitive_prefixes``)
+    # guard it where it lives; these guard a copy of it (and its sidecars).
+    f"/{TRADING_LEDGER_NAME}",
+    *(f"/{TRADING_LEDGER_NAME}{suffix}" for suffix in TRADING_LEDGER_SIDECARS),
 )
 
 # The same credential filenames are blocked as tails too, so moving one out of
@@ -366,6 +447,9 @@ def is_sensitive_path(path: str) -> str | None:
             for normalized in _comparison_path_candidates(prefix):
                 if expanded == normalized or expanded.startswith(normalized + "/"):
                     return prefix
+    config_copy = _config_copy_marker(candidates)
+    if config_copy is not None:
+        return config_copy
     for suffix in _SENSITIVE_SUFFIXES:
         normalized_suffix = suffix.replace("\\", "/")
         if os.name == "nt":
@@ -524,7 +608,10 @@ def sensitive_path_in_text(
     marker = _literal_marker_in_text(text, workspace=workspace)
     if marker is not None or _DISABLED or not text:
         return marker
-    return _shell_marker(text, workspace=workspace, cwd=cwd)
+    marker = _shell_marker(text, workspace=workspace, cwd=cwd)
+    if marker is not None:
+        return marker
+    return _recursive_ancestor_marker(text, workspace=workspace, cwd=cwd)
 
 
 def _literal_marker_in_text(
@@ -678,6 +765,39 @@ def _absolute_text(word: str, base: Path | None) -> str | None:
     return os.path.normpath(expanded).replace("\\", "/")
 
 
+def _glob_config_copy_marker(segments: list[str]) -> str | None:
+    """A glob whose matches include a backup or temp copy of a protected config.
+
+    A copy's name carries a timestamp or a random part, so it cannot be a
+    fixed glob target: the config's directory is listed (one directory, and
+    only when the pattern's parent names it) and the pattern is tried on
+    each copy that is actually there.
+    """
+    if not segments:
+        return None
+    parent, last = segments[:-1], segments[-1]
+    for entry in _protected_config_files():
+        for candidate in _comparison_path_candidates(entry):
+            if not candidate.startswith("/"):
+                continue  # as in ``_glob_targets``: a shell glob is POSIX-rooted
+            directory, _, name = candidate.rpartition("/")
+            wanted = [seg for seg in directory.split("/") if seg]
+            if len(wanted) != len(parent) or not all(
+                _segment_matches(pattern, actual)
+                for pattern, actual in zip(parent, wanted, strict=True)
+            ):
+                continue
+            try:
+                leaves = os.listdir(directory or "/")
+            except OSError:
+                continue
+            for leaf in leaves:
+                folded = leaf.casefold() if os.name == "nt" else leaf
+                if _is_config_copy_name(folded, name) and _segment_matches(last, leaf):
+                    return entry
+    return None
+
+
 def _glob_marker(word: str, bases: list[Path]) -> str | None:
     pattern_text = _UNEVALUATED_RE.sub("*", _expand_env_vars(word))
     anchors: list[Path | None] = (
@@ -692,6 +812,9 @@ def _glob_marker(word: str, bases: list[Path]) -> str | None:
         for target, marker in targets:
             if _pattern_reaches(segments, target):
                 return marker
+        copy_marker = _glob_config_copy_marker(segments)
+        if copy_marker is not None:
+            return copy_marker
         last = segments[-1] if segments else ""
         literals = sum(1 for char in last if char not in "*?[]")
         if literals >= _GLOB_NAME_MIN_LITERALS:
@@ -795,6 +918,215 @@ def _shell_marker(
             if absolute is None:
                 continue
             marker = sensitive_path_marker(absolute, workspace=workspace)
+            if marker is not None:
+                return marker
+    return None
+
+
+# ── recursive reads of an ANCESTOR of a protected directory ─────────────────
+#
+# The literal and shell scans above ask "does a path here name a protected
+# file?". They cannot see that ``grep -r . ~/.agentos``, ``cp -r ~/.agentos
+# dst`` or ``tar -C ~ -cf a.tar .agentos`` read every protected file *under* a
+# directory that is itself unprotected: ~/.agentos is the parent of the vault,
+# ~ is the parent of ~/.ssh. For a recursive read/copy/archive, the ancestor
+# is as sensitive as the target it descends into (WAL-01). A non-recursive
+# ``cat ~/.agentos`` is still fine -- a directory is not a secret, only its
+# protected contents are, and those are reached only by recursing.
+
+#: Tools that walk a directory tree whatever their flags.
+_ALWAYS_RECURSIVE_COMMANDS: frozenset[str] = frozenset(
+    {"tar", "rsync", "tree", "find", "fd", "fdfind", "rg", "ag", "ack", "jar", "cpio", "7z", "7za"}
+)
+#: Tools where a bare ``-r`` means "recurse" (``cp -r``, ``grep -r``). ``ls``
+#: and ``sort`` are absent: there ``-r`` is reverse order and only ``-R`` walks.
+_LOWER_R_RECURSIVE_COMMANDS: frozenset[str] = frozenset(
+    {"cp", "grep", "egrep", "fgrep", "du", "chmod", "chown", "chgrp", "rsync", "scp", "zip"}
+)
+_RECURSION_FLAG_WORDS: frozenset[str] = frozenset({"--recursive", "--archive"})
+#: Options that consume the following token, so a directory after one of them
+#: is the option's value, not an operand to read (``tar -C DIR``, ``-f FILE``).
+_RECURSIVE_OPTION_TAKES_ARG: frozenset[str] = frozenset(
+    {"-C", "--directory", "-f", "--file", "-T", "--files-from", "-X", "--exclude-from"}
+)
+_DIRECTORY_OPTIONS: frozenset[str] = frozenset({"-C", "--directory"})
+
+
+def _segment_is_recursive(command_name: str, tokens: list[str]) -> bool:
+    if command_name in _ALWAYS_RECURSIVE_COMMANDS:
+        return True
+    for token in tokens:
+        if not token.startswith("-") or token in ("-", "--"):
+            continue
+        if token in _RECURSION_FLAG_WORDS:
+            return True
+        if token.startswith("--"):
+            continue
+        cluster = token[1:]
+        if "R" in cluster:
+            return True
+        if "r" in cluster and command_name in _LOWER_R_RECURSIVE_COMMANDS:
+            return True
+    return False
+
+
+def _recursive_protected_targets() -> list[tuple[str, str]]:
+    """``(absolute_dir, marker)`` for each credential location worth guarding.
+
+    The system prefixes (``/etc``, ``/usr/lib/systemd``) are left out: they are
+    write/delete protections, and a recursive *read* of ``/usr`` is ordinary
+    work, not an exfiltration. Only existing locations count -- a recursion
+    cannot read what is not there -- which also keeps ``tree ~`` fast.
+    """
+    entries = (
+        *_BASE_SENSITIVE_PREFIXES,
+        *(f"~/{name}" for name in _HOST_CREDENTIAL_FILES),
+        *runtime_sensitive_prefixes(),
+    )
+    targets: list[tuple[str, str]] = []
+    for entry in entries:
+        for candidate in _comparison_path_candidates(entry):
+            if candidate.startswith("/") and os.path.lexists(candidate):
+                targets.append((candidate.rstrip("/"), entry))
+    # A config file's backup and staging copies (WAL-17) are the file as far
+    # as the floor is concerned, and they outlive it: a backup left beside a
+    # deleted config.toml still makes its directory's ancestors sensitive.
+    for entry in _protected_config_files():
+        for candidate in _comparison_path_candidates(entry):
+            if not candidate.startswith("/"):
+                continue
+            directory, _, name = candidate.rpartition("/")
+            try:
+                leaves = os.listdir(directory or "/")
+            except OSError:
+                continue
+            for leaf in leaves:
+                folded = leaf.casefold() if os.name == "nt" else leaf
+                if _is_config_copy_name(folded, name):
+                    targets.append((f"{directory}/{folded}", entry))
+    return targets
+
+
+def _ancestor_marker(absolute: str | None, targets: list[tuple[str, str]]) -> str | None:
+    """Marker when *absolute* is a strict ancestor of a protected directory."""
+    if not absolute:
+        return None
+    normalized = absolute.rstrip("/")
+    if os.name == "nt":
+        normalized = normalized.casefold()
+    for target, marker in targets:
+        comparison = target.casefold() if os.name == "nt" else target
+        if comparison.startswith(normalized + "/"):
+            return marker
+    return None
+
+
+def _recursive_ancestor_marker(
+    text: str,
+    *,
+    workspace: str | Path | None,
+    cwd: str | Path | None,
+) -> str | None:
+    if _DISABLED or not text:
+        return None
+    targets = _recursive_protected_targets()
+    if not targets:
+        return None
+    start = (
+        _expanduser(cwd)
+        if cwd is not None
+        else (_expanduser(workspace) if workspace is not None else None)
+    )
+
+    # One pass over the whole line, so a ``cd`` or an assignment in one command
+    # still shapes the next (``cd ~/.agentos && grep -r . .``; ``D=~/.agentos;
+    # cp -r $D x``). ``shlex`` keeps the operators (``&&``, ``;``, ``|``) as
+    # their own tokens, which is where one command ends and the next begins.
+    base = start
+    assigned: dict[str, str] = {}
+    command: list[str] = []
+
+    def flush() -> str | None:
+        nonlocal base
+        if not command:
+            return None
+        name = PurePosixPath(command[0].replace("\\", "/")).name.lower()
+        if name in _CD_COMMANDS:
+            if len(command) > 1 and command[1] not in _SHELL_OPERATORS:
+                absolute = _absolute_text(command[1], base)
+                if absolute is not None:
+                    base = Path(absolute)
+            return None
+        return _recursive_marker_for_command(name, command[1:], base, targets)
+
+    for word in _shell_words(text):
+        if word in _SHELL_OPERATORS:
+            marker = flush()
+            if marker is not None:
+                return marker
+            command = []
+            continue
+        if not command:
+            match = _ASSIGNMENT_RE.match(word)
+            if match is not None:  # leading ``NAME=value`` sets a variable
+                assigned[match.group(1)] = _expand_assignments(match.group(2), assigned)
+                continue
+        command.append(_expand_assignments(word, assigned))
+    return flush()
+
+
+def recursive_read_ancestor_marker(path: str) -> str | None:
+    """A protected-dir marker when a recursive read of *path* would reach one.
+
+    For the ``execute_code`` scanner: ``shutil.copytree('~/.agentos', …)`` or
+    ``os.walk(Path.home())`` reads every protected file below a directory that
+    is not itself protected (WAL-01). A plain ``open('~/.agentos')`` does not,
+    so the caller gates this on the code actually doing a recursive read.
+    """
+    if _DISABLED or not path:
+        return None
+    targets = _recursive_protected_targets()
+    if not targets:
+        return None
+    for candidate in _comparison_path_candidates(path):
+        marker = _ancestor_marker(candidate, targets)
+        if marker is not None:
+            return marker
+    return None
+
+
+def _recursive_marker_for_command(
+    name: str,
+    arguments: list[str],
+    base: Path | None,
+    targets: list[tuple[str, str]],
+) -> str | None:
+    if not _segment_is_recursive(name, arguments):
+        return None
+    bases: list[Path | None] = [base]
+    operands: list[str] = []
+    skip_next = False
+    for token in arguments:
+        if token in _SHELL_OPERATORS:
+            break
+        if skip_next:
+            skip_next = False
+            option_dir = _absolute_text(token, base)
+            if option_dir is not None:
+                bases.append(Path(option_dir))
+            continue
+        if token in _RECURSIVE_OPTION_TAKES_ARG:
+            skip_next = token in _DIRECTORY_OPTIONS
+            continue
+        if token.startswith("-"):
+            continue
+        operands.append(token)
+
+    # A recursive command with no path operand walks its own directory.
+    for operand in operands or ["."]:
+        anchors: list[Path | None] = [None] if operand.startswith(("/", "~")) else list(bases)
+        for anchor in anchors:
+            marker = _ancestor_marker(_absolute_text(operand, anchor), targets)
             if marker is not None:
                 return marker
     return None

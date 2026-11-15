@@ -51,7 +51,15 @@ gateway RPC surface (`wallet.*`, `trading.*`).
   reads. A full resync drops and rebuilds the ledger.
 - **Swaps** — quote, approve (a plain ERC-20 approval to the provider's
   spender: 0x's AllowanceHolder or Uniswap's proxy, no Permit2 signatures),
-  sign and broadcast, then confirm from the receipt.
+  sign and broadcast, then confirm from the receipt. A Uniswap quote that
+  carries `permitData` anyway is untrusted input: it is signed only when it
+  is a Permit2 `PermitSingle` / `PermitTransferFrom` on the order's chain and
+  the canonical Permit2 contract, for the order's sell token and at most its
+  amount, to a Universal Router pinned for the chain, with every deadline
+  under an hour away — and what is signed is rebuilt from those checked
+  fields. Anything else (an EIP-3009 transfer, a DAI or EIP-2612 permit,
+  another spender, an unlimited amount) fails the order with
+  `trading.permit_refused` before a signature exists.
   A swap can target one wallet, several, or all of them as a batch; one
   wallet failing never blocks the others.
 - **Agent trading** — the agent signs on its own within code-enforced limits
@@ -153,7 +161,7 @@ approval_ttl_seconds = 900           # unanswered approvals expire
 agent_max_price_impact_pct = 5.0     # agent orders above this wait for approval even under the threshold
 agent_max_slippage_pct = 5.0         # an agent asking for more slippage is refused
 default_slippage_pct = 0.5           # omit to let the provider pick (auto slippage)
-unlock_mode = "auto"                 # or "manual"
+unlock_mode = "auto"                 # or "manual": the vault never stores its password, and auto is refused
 sync_interval_seconds = 60
 price_ttl_seconds = 20
 
@@ -187,15 +195,45 @@ Trading** pane has a *Test key* button (`trading.probe`).
   one vault password. A random *verifier* keystore in `index.json` lets the
   engine check a password without touching any wallet key.
 - **Unlock modes**, both OS-independent (no Keychain, no Electron store):
-  - `auto` — the password sits in `~/.agentos/wallets/unlock.key` (`0600`)
-    and the gateway unlocks at first use. This is what unattended agent
-    missions need. Anyone who can read the directory can spend: same trust
-    level as an SSH key without a passphrase.
+  - `auto` — the password sits in `~/.agentos/wallets/unlock.key` (`0600`),
+    sealed with AES-256-GCM under a key kept **outside** the state directory
+    (`AGENTOS_VAULT_KEK`, else Windows DPAPI, else a `0600` file under the
+    OS state dir; `AGENTOS_VAULT_KEK_DIR` relocates it), and the gateway
+    unlocks at first use. This is what unattended agent missions need. The
+    file and its key are both needed, but a process running code as this OS
+    user can read both, exactly as the gateway does — `agentos sandbox` or
+    `manual` unlock is the real boundary against that. A legacy plain-text
+    `unlock.key` still works and is sealed in place on first unlock. The key
+    is injected with `[trading] unlock_mode = "auto"` the default.
   - `manual` — nothing on disk; unlock per gateway session from the app or
     `agentos wallet unlock`. Keys live only in the gateway's memory.
+- **Lock** (`agentos wallet lock`, `wallet.lock`) holds in both modes, and
+  across gateway restarts, until you unlock with the password: `unlock.key`
+  is not read while it holds. Nothing signs: agent swaps fail
+  `wallet.locked`, due DCA buys and armed triggers wait (no failed runs,
+  no auto-pause; alerts still ring), and approving an order is refused with
+  the order left parked. `wallet.status` says `lockedByOperator`.
 - Export (keystore or raw private key) and wallet removal always ask for
   the vault password, whatever the mode. Private keys never appear in logs,
   RPC responses (other than `wallet.export`), or the ledger.
+- Removing a wallet stops every DCA mandate, trigger and bracket bound to it
+  (`wallet removed`) and rejects what they parked. Importing the same key
+  again is a new wallet as far as approvals go: nothing comes back.
+- **Ledger seals.** The engine does not sign what it merely reads back from
+  `state/trading.sqlite`. Every order is sealed when the engine writes it,
+  and every mandate, trigger and bracket when you approve it (or create it
+  yourself): an HMAC over the terms that decide what is signed (wallet,
+  chain, tokens, amounts, recipient, slippage and floors, the bridge or LP
+  plan, batch, expiry; for a mandate or trigger its size, price condition
+  and validity), bound to the wallet's incarnation. The key is derived from
+  the vault's password-encrypted secret and exists only in gateway memory
+  while the vault is unlocked, so approving or creating a mandate, trigger
+  or bracket needs an unlocked vault. The seal is checked before every
+  signature and before every DCA buy or trigger fire; a row changed outside
+  the engine is refused (`trading.integrity`; a mandate or trigger is
+  stopped), and the gateway broadcasts `trading.integrity.alert`. Seals
+  survive restarts and password changes; the first unlock after the upgrade
+  that introduced them seals what was already live.
 - Before signing, the engine checks balances, simulates the transaction
   with `eth_call`, and validates what the provider returned: an approval
   must be a plain `approve(spender, amount)` on the token being sold, to a
@@ -205,8 +243,15 @@ Trading** pane has a *Test key* button (`trading.probe`).
   (zero for an ERC-20 sale), and not be addressed to the wallet or the sold
   token itself. Anything else is refused unsigned.
 - `~/.agentos/wallets/` (and any `unlock.key`) is a sandbox *sensitive
-  path*: the agent's file tools cannot read it. The agent trades through
-  the gateway, which is the only thing that needs the keys.
+  path*: the agent's file tools cannot read it, and a recursive read, copy
+  or archive of a *parent* directory (`grep -r ~/.agentos`, `cp -r ~`,
+  `tar` of the state root, the `execute_code` equivalents) is refused too,
+  so the vault cannot be swept up from above. The agent trades through the
+  gateway, which is the only thing that needs the keys. So is the
+  ledger, `state/trading.sqlite` with its `-wal`/`-shm`/`-journal` files
+  (file mode `0600`), any copy named `trading.sqlite`, and the pre-upgrade
+  snapshots under `state/snapshots`: the agent reads its orders and history
+  through the gateway, never the file.
 - Token metadata from third-party APIs is data, not instructions: the skill
   tells the agent to ignore anything in a token name that reads like a
   command, and genuine Robinhood Stock Tokens are preferred over lookalikes
@@ -296,7 +341,14 @@ the running gateway: the watcher holds it until the user runs
 simply fail inside an agent turn. `wallet.status` and `trading.status`
 answer an agent without `vaultPath`. A `note` on a swap, send or revoke is
 stored as the approver will see it: control and bidi characters are
-dropped, whitespace is collapsed, and it is cut at 240 characters.
+dropped, whitespace is collapsed, and it is cut at 240 characters. Token
+symbols and names (whatever a contract's `symbol()`/`name()` or a feed
+returns) are stored the same way, without control, bidi or zero-width
+characters, and a failed order never keeps the caller's unparsed amount.
+`agentos trade` and `agentos wallet` show any such character left in what
+they print as a visible escape (`\x1b`, `\u202e`), never send it to your
+terminal; `--json` output `\u`-escapes C1, bidi and invisible characters
+(the parsed data is unchanged).
 `trading.swap` and `trading.send` take a `clientOrderId`: a repeat call with
 the same id returns the existing order instead of placing a second one
 (`agentos trade swap|send --client-id`). Swap targets and approval spenders
@@ -315,10 +367,10 @@ around and one it cannot.
 | Rule | Default | Outcome when hit |
 | --- | --- | --- |
 | Per-order threshold | 100 USD | order parks as `awaiting_approval`; desktop notifies you |
-| Daily cap per wallet | 1,000 USD (local calendar day) | order is `rejected` outright, not queued; the cap is per wallet, so `--all-wallets` spends up to N caps; an order counts as max(in, out) in USD; `spentTodayUsd` counts confirmed spend plus orders still in flight, so a burst cannot race its own confirmations; **0 switches agent swaps off** (there is no "unlimited") |
-| Price-impact ceiling | 5 % (`agent_max_price_impact_pct`) | order parks as `awaiting_approval` even under the USD threshold. "Price impact" here is the price vs reference (it includes the venue fee and feed skew), not pool depth alone |
+| Daily cap per wallet | 1,000 USD (local calendar day) | order is `rejected` outright, not queued; the cap is per wallet, so `--all-wallets` spends up to N caps; an order counts as max(in, out) in USD — but only while the sell side has a feed price; `spentTodayUsd` counts confirmed spend plus orders still in flight, so a burst cannot race its own confirmations; **0 switches agent swaps off** (there is no "unlimited") |
+| Price-impact ceiling | 5 % (`agent_max_price_impact_pct`) | order parks as `awaiting_approval` even under the USD threshold. "Price impact" here is the price vs reference (it includes the venue fee and feed skew), not pool depth alone. A provider's own figure (Uniswap's `priceImpact`) is cross-checked against the engine's feed and the larger one counts; when the feed cannot price a side the impact is unknown and the order parks, whichever provider quoted it |
 | Slippage ceiling | 5 % (`agent_max_slippage_pct`) | quote or swap refused with `trading.slippage_too_high`; nothing is queued |
-| Unpriced order | — | treated as above threshold (fails closed) |
+| Unpriced order | — | treated as above threshold (fails closed). An agent swap whose **sell** side has no usable feed price (none, zero or non-finite) is unpriced even when the buy side has one: the token you receive never sizes the order on its own. The order shows its value as unknown, not $0 |
 | Approval TTL | 15 min | `expired`; agent is told |
 | LP writes (`trade lp collect/remove/add`) | — | **always** park as `awaiting_approval`, from the agent and from you; an agent's `add` counts toward the daily cap (over it: `rejected`), `collect`/`remove` never do; on approval a pool that moved past the approved bounds fails the order with `trading.price_moved` |
 | Bridges (`trade bridge create`) | — | judged like a send: an agent's **always** parks as `awaiting_approval` and counts toward the daily cap (over it, or with the cap at 0: `rejected`; unpriced: waits); on approval Relay is quoted again, and a fill below the approved floor (1 %) sends the order back for approval (a manual one fails `trading.price_moved`) |
@@ -359,7 +411,9 @@ the housekeeping loop picks it up and keeps waiting for the receipt
 within the wait window fails the order with `trading.tx_pending` (retry
 once it lands). Every change is broadcast on the gateway WebSocket
 (`trading.changed`, `trading.approval.requested`,
-`trading.order.finished`), so the desktop never polls for it.
+`trading.order.finished`), so the desktop never polls for it. A row that
+failed its seal is announced as `trading.integrity.alert` (`kind` order /
+mandate / trigger, `id`, `verdict` missing / mismatch, `wallet`, `message`).
 
 ## How the agent uses it
 
@@ -389,8 +443,8 @@ Every client goes through the same gateway methods:
 | `trading.tokens.search`, `trading.tokens.resolve`, `trading.tokens.hide` | search a chain's tokens; resolve one address to its metadata (symbol, decimals, verification, price); hide or show a token (operator-only) |
 | `trading.quote`, `trading.swap`, `trading.send`, `trading.unwrap` | price a swap; place one (per wallet, several, or all); send a token to one or many recipients as one batch; unwrap WETH delivered by a swap (operator-only). `swap` and `send` take `clientOrderId` (idempotency: the same id returns the same order) and a `note` that is sanitised (control/bidi characters, 240 chars) |
 | `trading.allowances.list`, `trading.allowances.revoke` | live ERC-20 allowances with exposure; `approve(spender, 0)` |
-| `trading.orders.list`, `trading.orders.get`, `trading.orders.wait`, `trading.orders.batch` | orders (filter by status, wallet, `kind`); one order; block until it settles; every leg of a multisend by `batchId` |
-| `trading.orders.approve`, `trading.orders.reject` | the user's decision on a parked order (operator-only) |
+| `trading.orders.list`, `trading.orders.get`, `trading.orders.wait`, `trading.orders.batch` | orders (filter by status, wallet, `kind`); one order; block until it settles; every leg of a multisend by `batchId`. An order awaiting approval carries `approval`: what one approve releases (`orderIds`, `legCount`; for a batch leg also `totalRaw`/`total`/`totalUsd` and `unpriced`). A single order's `approval.digest` is on the order itself; a batch's only on `trading.orders.batch` (`approval`, with every leg's `recipient` and amount) |
+| `trading.orders.approve`, `trading.orders.reject` | the user's decision on a parked order (operator-only). `approve` takes `approvalDigest`, the `approval.digest` the order (or its batch) showed: **required for a multisend** (without it: `trading.approval_binding_required`; one approve runs every awaiting leg) and checked when given for a single order; a digest that no longer matches — a leg changed, added or dropped since it was shown — is refused with `trading.approval_changed`. The digest covers chain, wallet, tokens, raw amounts, recipients, provider, slippage, the approved floor, the plan and the expiry of every leg; the engine holds each leg to it again where the transaction is built and signed, and a send or revoke to its exact `to`/`value`/`data`, so a parked order changed after the approval is failed, not signed |
 | `trading.decode` | explain a transaction hash or raw calldata |
 | `trading.lp.pool`, `trading.lp.ranges`, `trading.lp.position`, `trading.lp.positions` | Uniswap V4 read-outs (read-only, allowed for an agent): a token's deepest pool, its liquidity distribution, one position NFT, every position of the vault's (or given) wallets; each echoes `request: {kind, params}` so a card can re-read itself. Payloads: [`../lp-cards.md`](../lp-cards.md) |
 | `trading.lp.collect`, `trading.lp.remove`, `trading.lp.add` | Uniswap V4 writes (allowed for an agent: they only create an order, which always parks for approval). Params mirror the CLI in camelCase — `chainId`, `tokenId`, `pct`, `slippagePct`, `token`, `usd`, `amountBase`, `amountQuote`, `range`, `toPosition`, `wallet`, `note`, `clientOrderId`; the answer is `{"order": …}` with `plan`. Contract: [`../lp-write.md`](../lp-write.md) |

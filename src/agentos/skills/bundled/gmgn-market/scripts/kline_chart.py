@@ -32,7 +32,7 @@ from typing import Any
 _SRC_ROOT = str(Path(__file__).resolve().parents[5])
 if _SRC_ROOT not in sys.path:
     sys.path.insert(0, _SRC_ROOT)
-from agentos.skill_stdio import configure_utf8_stdio  # noqa: E402
+from agentos.skill_stdio import configure_utf8_stdio, inline_artifact_marker  # noqa: E402
 
 CHART_MIME = "application/vnd.agentos.chart+json"
 CANDLE_KEYS = ("open", "high", "low", "close")
@@ -170,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     output.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
     print(f"wrote {len(candles)} candles to {output}")
-    print(f"publish_artifact path={output} mime={CHART_MIME}")
+    print(inline_artifact_marker(output, CHART_MIME))
     return 0
 
 

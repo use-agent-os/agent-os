@@ -39,6 +39,7 @@ import tomli_w
 
 from agentos.acp.registry import ResolvedLaunch
 from agentos.acp.types import AcpSessionInitError
+from agentos.env_policy import SKILL_SIGNING_KEY_ENV
 
 _log = structlog.get_logger("agentos.acp.process")
 
@@ -96,7 +97,9 @@ def scrub_env(
     out: dict[str, str] = {}
     for key, value in src.items():
         upper = key.upper()
-        if key in drop:
+        if key in drop or upper in SKILL_SIGNING_KEY_ENV:
+            # The skills' hot-wallet keys reach only their gated entry point
+            # (tools/skill_signing.py); ``keep`` cannot bring one back either.
             continue
         if upper in _ALWAYS_KEEP or upper in _HARNESS_CREDENTIALS or key in keep:
             out[key] = value

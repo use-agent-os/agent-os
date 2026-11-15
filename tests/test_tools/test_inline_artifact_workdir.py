@@ -75,11 +75,12 @@ def _write_card_command(relative: str, price: str) -> str:
     path and a bare number: nothing that ``sh`` and ``cmd.exe`` quote differently.
     """
     script = (
-        "import json, pathlib, sys; "
+        "import json, os, pathlib, sys; "
         "p = pathlib.Path(sys.argv[1]); p.parent.mkdir(parents=True, exist_ok=True); "
         "p.write_text(json.dumps({'type': 'cards', "
         "'cards': [{'title': 'AAPL', 'price': sys.argv[2]}]})); "
-        f"print('publish_artifact path=' + sys.argv[1] + ' mime={CARDS_MIME}')"
+        f"print('publish_artifact path=' + sys.argv[1] + ' mime={CARDS_MIME} nonce='"
+        " + os.environ['AGENTOS_INLINE_ARTIFACT_NONCE'])"
     )
     return f'"{sys.executable}" -c "{script}" {relative} {price}'
 

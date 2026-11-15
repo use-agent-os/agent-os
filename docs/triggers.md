@@ -256,9 +256,16 @@ direction; `buy` with `trail`; no size on sell/buy, more than one size, a
 size on `alert`; `amount_pct` outside 0 < pct ≤ 100; price ≤ 0; trail
 outside 0 < pct < 100; `valid_for` under 60 s; a percent price with no
 current price; quote missing on Robinhood Chain; a given quote == token; wallet
-`all`), `trading.operator_required` (RPC layer), plus `trading.disabled`,
-`wallet.locked`, `trading.unsupported_chain`, `trading.token_not_found`.
-At create, `slippagePct` may not exceed the agent slippage ceiling.
+`all`), `trading.operator_required` (RPC layer), `trading.integrity` (a
+fire-now on a trigger that failed its seal: it is stopped), plus
+`trading.disabled`, `wallet.locked`, `trading.unsupported_chain`,
+`trading.token_not_found`. At create, `slippagePct` may not exceed the agent
+slippage ceiling. Approving a trigger (or creating one as the operator) seals
+its terms with the vault key, so it needs an unlocked vault; a trigger whose
+row was changed outside the engine is stopped (`"integrity check failed (…)"`)
+instead of firing. While you have locked the vault, trading triggers wait
+(alerts still ring); removing the wallet stops its triggers
+(`"wallet removed"`).
 
 Events: every state change emits `trading.changed {reason: "trigger",
 triggerId}` and `trading.trigger.changed {trigger}` (full `Trigger`

@@ -155,7 +155,7 @@ CREATE_BASE = ["create", "WETH", "--usd", "10", "--every", "1d"]
         (["list"], "trading.dca.list", {}),
         (["list", "--all", "--wallet", "0x1"], "trading.dca.list", {"all": True, "wallet": "0x1"}),
         (["show", MID], "trading.dca.get", {"mandateId": MID}),
-        (["approve", MID], "trading.dca.approve", {"mandateId": MID}),
+        (["approve", MID, "--yes"], "trading.dca.approve", {"mandateId": MID}),
         (["reject", MID], "trading.dca.reject", {"mandateId": MID}),
         (
             ["reject", MID, "--reason", "too much"],
@@ -375,7 +375,7 @@ def test_gateway_error_is_json_exit_1_and_no_card(
 
     monkeypatch.setattr(trade_cmd, "run_gateway_sync", failing)
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(trade_cmd.app, ["dca", "approve", MID, "--json"])
+    result = runner.invoke(trade_cmd.app, ["dca", "approve", MID, "--yes", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.stderr)["error"]["code"] == "trading.operator_required"
     assert "publish_artifact" not in result.stdout
@@ -525,3 +525,32 @@ def test_list_table_leads_with_the_name(client: _Client) -> None:
     assert "dca_9c0d1e2f" in result.stdout  # the id rides under the name
     active = next(line for line in result.stdout.splitlines() if "DCA ETH" in line)
     assert "$60.00 / $300.00" in active
+
+
+def test_approve_shows_the_mandate_and_asks_first(client: _Client) -> None:
+    """WAL-08: an automation approval is never a bare id sent blind."""
+    client.responses["trading.dca.get"] = _fixture("mandate-awaiting")
+    declined = runner.invoke(trade_cmd.app, ["dca", "approve", MID], input="")
+    assert declined.exit_code != 0
+    assert [m for m, _ in client.calls] == ["trading.dca.get"]
+    out = declined.output
+    assert "0x4200000000000000000000000000000000000006" in out and "verified" in out
+    assert "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" in out
+    assert "0xdB00079cad3e665853Bf766eFe26F4C38cdbdCDA" in out
+    assert f"Approve DCA mandate {MID}?" in out
+    approved = runner.invoke(trade_cmd.app, ["dca", "approve", MID], input="y\n")
+    assert approved.exit_code == 0, approved.output
+    assert [m for m, _ in client.calls][-1] == "trading.dca.approve"
+
+
+def test_hostile_symbols_reach_no_mandate_view_raw(client: _Client) -> None:
+    """WAL-13: a mandate panel prints a contract's control bytes as escapes."""
+    payload = _fixture("mandate-awaiting")
+    payload["mandate"]["token"]["symbol"] = "WETH\x1b[31m‮"
+    payload["mandate"]["name"] = "buy\x9b2J"
+    client.responses["trading.dca.get"] = payload
+    shown = runner.invoke(trade_cmd.app, ["dca", "show", MID])
+    assert shown.exit_code == 0, shown.output
+    for char in ("\x1b", "\x9b", "‮"):
+        assert char not in shown.output
+    assert "WETH\\x1b[31m\\u202e" in shown.output

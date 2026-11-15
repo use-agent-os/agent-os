@@ -82,6 +82,11 @@ dependencies = [
     "reportlab>=4.0.0,<5.0",
     "python-telegram-bot>=20.0,<23.0",
     "eth-account>=0.13,<0.14",
+    # AES-256-GCM for the vault's sealed unlock.key (agentos.trading.unlock_key).
+    # Already present transitively via eth-account -> eth-keyfile; declared
+    # directly because we import `Crypto` ourselves. `cryptography` is kept out
+    # of the base install on purpose (test_pyproject_invariants).
+    "pycryptodome>=3.23,<4.0",
     "agent-client-protocol>=0.12.1,<0.13",
 ]
 

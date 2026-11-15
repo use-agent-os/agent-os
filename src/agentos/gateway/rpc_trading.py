@@ -21,7 +21,12 @@ from typing import Any
 from agentos.gateway.agent_surface import agent_binding
 from agentos.gateway.rpc import RpcContext, RpcHandlerError, get_dispatcher
 from agentos.trading import get_trading_service
-from agentos.trading.chains import ChainSpec, resolve_chain
+from agentos.trading.chains import (
+    ChainSpec,
+    configured_rpc_urls,
+    resolve_chain,
+    scrub_rpc_urls,
+)
 from agentos.trading.providers import PROVIDER_IDS
 from agentos.trading.service import (
     DEFAULT_CHART_RANGE,
@@ -30,7 +35,73 @@ from agentos.trading.service import (
     _err,
 )
 
-_d = get_dispatcher()
+
+def _scrub_value(value: Any, urls: list[str]) -> Any:
+    if isinstance(value, str):
+        return scrub_rpc_urls(value, urls)
+    if isinstance(value, dict):
+        return {k: _scrub_value(v, urls) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_scrub_value(v, urls) for v in value]
+    return value
+
+
+def _rpc_urls(ctx: RpcContext) -> list[str]:
+    trading = getattr(ctx.config, "trading", None)
+    return configured_rpc_urls(dict(getattr(trading, "rpc_urls", {}) or {}))
+
+
+def _scrubbed(exc: Exception, ctx: RpcContext) -> Exception | None:
+    """*exc* with every configured RPC URL cut to its host, or ``None`` if it had none.
+
+    Provider keys live in the URL path (Alchemy, Infura) or query (dRPC). The
+    engine's own clients show only the host, but a message built elsewhere --
+    the LP skill library's URL guard, a transport error -- may carry the whole
+    URL, and every caller of these methods, an agent included, reads it.
+    """
+    urls = _rpc_urls(ctx)
+    message = exc.message if isinstance(exc, RpcHandlerError) else str(exc)
+    details = exc.details if isinstance(exc, RpcHandlerError) else None
+    clean_message = scrub_rpc_urls(message, urls)
+    clean_details = _scrub_value(details, urls)
+    if clean_message == message and clean_details == details:
+        return None
+    if isinstance(exc, RpcHandlerError):
+        return RpcHandlerError(
+            exc.code, clean_message, details=clean_details, retryable=exc.retryable
+        )
+    if isinstance(exc, ValueError | KeyError):
+        return type(exc)(clean_message)
+    return RuntimeError(clean_message)
+
+
+class _TradingMethods:
+    """``get_dispatcher().method`` for this module, with RPC URLs kept out of errors."""
+
+    def __init__(self) -> None:
+        self._registry = get_dispatcher()
+
+    def method(self, name: str, *args: Any, **kwargs: Any) -> Callable[[Any], Any]:
+        register = self._registry.method(name, *args, **kwargs)
+
+        def decorator(fn: Callable[[dict | None, RpcContext], Awaitable[Any]]) -> Any:
+            @functools.wraps(fn)
+            async def handler(params: dict | None, ctx: RpcContext) -> Any:
+                try:
+                    return await fn(params, ctx)
+                except Exception as exc:
+                    clean = _scrubbed(exc, ctx)
+                    if clean is None:
+                        raise
+                    raise clean from None
+
+            register(handler)
+            return fn
+
+        return decorator
+
+
+_d = _TradingMethods()
 
 _VALID_EXPORT_FORMATS = {"keystore", "privateKey"}
 _VALID_INITIATORS = {"manual", "agent"}
@@ -245,8 +316,10 @@ async def _wallet_status(params: dict | None, ctx: RpcContext) -> dict[str, Any]
 async def _wallet_setup(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     p = _params(params)
     password = _str(p, "password", required=True) or ""
-    mode = _str(p, "unlockMode") or "auto"
-    if mode not in ("auto", "manual"):
+    # No mode from the client: the operator's [trading] unlock_mode decides
+    # (the vault reads it), and a manual policy refuses an explicit auto.
+    mode = _str(p, "unlockMode")
+    if mode not in (None, "auto", "manual"):
         raise ValueError("params.unlockMode must be 'auto' or 'manual'")
     service = _service(ctx)
     try:
@@ -781,7 +854,13 @@ async def _trading_orders_batch(params: dict | None, ctx: RpcContext) -> dict[st
     batch_id = _str(p, "batchId", required=True) or ""
     service = _service(ctx)
     try:
-        return {"orders": service.batch(batch_id), "batchId": batch_id}
+        # ``approval`` carries the digest ``trading.orders.approve`` needs for
+        # a parked batch: it is only served beside every leg (WAL-12).
+        return {
+            "orders": service.batch(batch_id),
+            "batchId": batch_id,
+            "approval": service.batch_approval(batch_id),
+        }
     except Exception as exc:
         raise _raise(exc) from exc
 
@@ -2139,7 +2218,13 @@ async def _trading_orders_approve(params: dict | None, ctx: RpcContext) -> dict[
     order_id = _str(p, "orderId", required=True) or ""
     service = _service(ctx)
     try:
-        return {"order": await service.approve(order_id, wait=bool(p.get("wait")))}
+        return {
+            "order": await service.approve(
+                order_id,
+                wait=bool(p.get("wait")),
+                approval_digest=_str(p, "approvalDigest"),
+            )
+        }
     except Exception as exc:
         raise _raise(exc) from exc
 

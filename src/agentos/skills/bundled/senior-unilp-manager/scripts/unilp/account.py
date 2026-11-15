@@ -28,6 +28,7 @@ GX = 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798
 GY = 0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8
 G = (GX, GY)
 HALF_N = N // 2
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +127,10 @@ def normalize_private_key(private_key: str | bytes | int) -> int:
         text = strip0x(private_key.strip().strip('"').strip("'"))
         if len(text) != 64:
             raise ValueError("private key must be 32 bytes")
+        # Never let int() see a malformed key: its ValueError embeds the offending
+        # string, and the top-level handler prints str(exc) into the transcript.
+        if any(character not in _HEX_DIGITS for character in text):
+            raise ValueError("private key is not valid hex (32 bytes, 0-9/a-f)")
         value = int(text, 16)
     if not 1 <= value < N:
         raise ValueError("private key out of range for secp256k1")

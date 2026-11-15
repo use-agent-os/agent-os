@@ -47,8 +47,16 @@ def _apply_posture(config: Any, posture: Literal["on", "bypass", "full"]) -> Any
 def _write_posture(config_path: Path | None, posture: Literal["on", "bypass", "full"]) -> None:
     target = _resolve_path(config_path)
     config = _apply_posture(load_config(target), posture)
-    persist_config(config, path=target, restart_required=True)
+    persisted = persist_config(config, path=target, restart_required=True)
     payload = _status_payload(config, restart_required=True)
+    if persisted.held:
+        # The sandbox and permissions are operator-only: while a gateway runs
+        # (or the file already held an unapproved edit) only the operator's
+        # ``agentos config reload`` applies them; a restart keeps them held.
+        typer.echo(
+            f"Sandbox posture written as {payload['posture']}. " + " ".join(persisted.warnings)
+        )
+        return
     typer.echo(
         "Sandbox posture set to "
         f"{payload['posture']}. Restart the gateway for running processes to apply it."

@@ -277,7 +277,12 @@ metadata:
 
 The value is then read at spawn time and never enters the transcript. Command
 output is masked before the model sees it, and the gateway token never reaches
-a child process.
+a child process. A secret the gateway holds is also masked **by value**: a
+skill hot-wallet key or the vault password is replaced wherever it appears in
+tool output — ``printenv NAME``, ``echo $NAME``, a file read — not only in
+``NAME=value`` form. Keystore ``ciphertext``/``mac`` and BIP-39 mnemonics are
+masked by shape; a wallet address or a transaction hash (also 64 hex) is left
+readable.
 
 Read: [`configuration.md`](configuration.md#credentials-and-child-processes)
 

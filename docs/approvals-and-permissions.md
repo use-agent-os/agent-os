@@ -103,6 +103,29 @@ if the gateway process that asked made it, through one of the surfaces above,
 on the same parameters. A row approved by writing the database directly is
 read as a denial.
 
+### Skill Signing Prompts
+
+The bundled skills that sign with a hot-wallet key of their own —
+`senior-unilp-manager` (`UNIV4_LP_PRIVATE_KEY`), `poolsdotfun-token-launcher`
+(`POOLSFUN_PRIVATE_KEY`) and the GMGN skills (`GMGN_PRIVATE_KEY`) — never get
+that key in a process the agent drives: not its shell, `execute_code`, a cron
+script, an MCP server, a coding harness or a lifecycle hook, and an agent's
+connection cannot `env.reveal` it. AgentOS hands it out only for a *direct*
+command running that skill's own entry point (one command; no pipe, redirect,
+substitution or `VAR=` prefix), and runs its own packaged copy of the script —
+or the pinned `gmgn-cli@1.7.1` — without a shell.
+
+When that command moves funds — `lp_write.py`/`pools_write.py --broadcast`,
+`ratchet.py arm --confirm` or `clear-attention`, `gmgn-cli swap`,
+`multi-swap`, `order strategy create|cancel`, `cooking create` — it waits for
+you on an ordinary exec prompt that names the key and, where there is one, the
+payout recipient. Unlike every other exec prompt, `bypass`, `/elevated full`,
+auto-approve, a cached intent and "Stop Asking" on another prompt do not answer
+it, and an unattended run (cron) is refused instead of asked. Approve each one
+yourself. The unattended `ratchet.py tick --broadcast` is the exception: it
+needs no prompt, but fires only the mandates whose `arm` you approved, with
+the bounds you approved.
+
 ### Cached Intents
 
 Approving a destructive action caches the *intent* — kind plus target path —

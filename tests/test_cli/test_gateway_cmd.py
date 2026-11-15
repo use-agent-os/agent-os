@@ -422,7 +422,7 @@ def test_gateway_start_uses_same_interpreter_cli_boundary(tmp_path, monkeypatch)
     assert payload["state"] == "running"
     assert payload["pid"] == 4242
     argv, kwargs = calls[0]
-    assert argv[:5] == [sys.executable, "-m", "agentos.cli.main", "gateway", "run"]
+    assert argv[:6] == [sys.executable, "-P", "-m", "agentos.cli.main", "gateway", "run"]
     assert "--listen" in argv
     assert argv[argv.index("--listen") + 1] == "127.0.0.2"
     assert kwargs["shell"] is False

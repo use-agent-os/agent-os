@@ -114,7 +114,8 @@ def test_setup_auto_warns_about_unlock_key(client: _FakeClient) -> None:
     result = runner.invoke(wallet_cmd.app, ["setup"], input="pw\npw\n")
     assert result.exit_code == 0, result.output
     assert "unlock.key" in result.output
-    assert client.calls[0][1]["unlockMode"] == "auto"
+    # No --mode: the gateway's [trading] unlock_mode decides (WAL-25).
+    assert "unlockMode" not in client.calls[0][1]
 
 
 def test_unlock_uses_env_password_without_prompting(
@@ -138,6 +139,20 @@ def test_lock(client: _FakeClient) -> None:
     result = runner.invoke(wallet_cmd.app, ["lock"])
     assert result.exit_code == 0
     assert client.calls == [("wallet.lock", {})]
+    # The lock holds in auto mode too: the message says what it stops and what ends it.
+    text = " ".join(result.output.split())
+    assert "agentos wallet unlock" in text and "auto mode" in text
+
+
+def test_status_shows_an_operators_lock(client: _FakeClient) -> None:
+    client.payloads["wallet.status"] = {
+        **client.payloads["wallet.status"],
+        "unlocked": False,
+        "lockedByOperator": True,
+    }
+    result = runner.invoke(wallet_cmd.app, ["status"])
+    assert result.exit_code == 0, result.output
+    assert "by you" in result.output
 
 
 def test_list_marks_primary(client: _FakeClient) -> None:
@@ -233,8 +248,82 @@ def test_export_keystore_to_file_is_private(client: _FakeClient, tmp_path, monke
     if os.name != "nt":  # Windows has no POSIX modes to check
         assert oct(out.stat().st_mode & 0o777) == "0o600"
     payload = json.loads(result.stdout)
-    assert payload == {"written": str(out), "format": "keystore"}
+    assert payload == {"written": str(out), "format": "keystore", "private": True}
     assert "version" not in result.stdout
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_export_file_is_private_from_creation(client: _FakeClient, tmp_path, monkeypatch) -> None:
+    """WAL-14: the key is never in a file the umask made readable.
+
+    A no-op ``chmod`` stands in for a filesystem where it fails (or the window
+    before it runs): the mode the file was *created* with is what is left.
+    """
+    monkeypatch.setenv(wallet_cmd.PASSWORD_ENV, "pw")
+    monkeypatch.setattr(wallet_cmd.os, "chmod", lambda *args, **kwargs: None)
+    previous = os.umask(0o022)
+    try:
+        out = tmp_path / "key.txt"
+        result = runner.invoke(wallet_cmd.app, ["export", ADDR, "--private-key", "--out", str(out)])
+    finally:
+        os.umask(previous)
+    assert result.exit_code == 0, result.output
+    assert out.read_text(encoding="utf-8") == "0xdeadbeef"
+    assert oct(out.stat().st_mode & 0o777) == "0o600"
+
+
+def test_export_never_overwrites_an_existing_file(
+    client: _FakeClient, tmp_path, monkeypatch
+) -> None:
+    """WAL-14: an existing (possibly world-readable, possibly open) file is refused."""
+    monkeypatch.setenv(wallet_cmd.PASSWORD_ENV, "pw")
+    out = tmp_path / "key.txt"
+    out.write_text("old", encoding="utf-8")
+    if os.name != "nt":
+        out.chmod(0o644)
+    result = runner.invoke(
+        wallet_cmd.app, ["export", ADDR, "--private-key", "--out", str(out), "--json"]
+    )
+    assert result.exit_code != 0
+    assert out.read_text(encoding="utf-8") == "old"
+    assert client.calls == []  # refused before the password left the terminal
+    assert "already exists" in result.output
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_export_refuses_a_symlink_at_the_target(client: _FakeClient, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv(wallet_cmd.PASSWORD_ENV, "pw")
+    elsewhere = tmp_path / "elsewhere"
+    out = tmp_path / "key.txt"
+    out.symlink_to(elsewhere)
+    result = runner.invoke(wallet_cmd.app, ["export", ADDR, "--private-key", "--out", str(out)])
+    assert result.exit_code != 0
+    assert not elsewhere.exists()
+
+
+def test_write_private_file_refuses_existing_and_cleans_up(tmp_path) -> None:
+    target = tmp_path / "secret.txt"
+    assert wallet_cmd.write_private_file(target, "s3cret") in (True, False)
+    assert target.read_text(encoding="utf-8") == "s3cret"
+    with pytest.raises(FileExistsError):
+        wallet_cmd.write_private_file(target, "other")
+    assert target.read_text(encoding="utf-8") == "s3cret"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACLs")
+def test_export_file_acl_is_owner_only_on_windows(
+    client: _FakeClient, tmp_path, monkeypatch
+) -> None:
+    import subprocess
+
+    monkeypatch.setenv(wallet_cmd.PASSWORD_ENV, "pw")
+    out = tmp_path / "key.txt"
+    result = runner.invoke(wallet_cmd.app, ["export", ADDR, "--private-key", "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    acl = subprocess.run(["icacls", str(out)], capture_output=True, text=True, check=True).stdout
+    for broad in ("Everyone", "BUILTIN\\Users", "Authenticated Users"):
+        assert broad not in acl, acl
+    assert "(I)" not in acl  # nothing inherited from the directory
 
 
 def test_export_requires_exactly_one_format(client: _FakeClient) -> None:

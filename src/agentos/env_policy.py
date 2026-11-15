@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import re
 
+from agentos.config_roots import OPERATOR_ONLY_CONFIG_ROOTS, OPERATOR_ONLY_ENV_PREFIXES
+
 #: POSIX-portable environment variable name. Rejects the digit-leading and
 #: dash-containing names that a shell cannot export without quoting tricks.
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -111,6 +113,7 @@ _SHELL_NAMES = (
 #   AGENTOS_GATEWAY_TOKEN             cli/gateway_rpc.py
 #   AGENTOS_GATEWAY_CONFIG_PATH       gateway config resolution
 #   AGENTOS_STATE_DIR / _ROOT / …     paths.py and friends
+#   AGENTOS_VAULT_KEK_DIR             paths.py (where the vault's sealing key lives)
 #
 # Bind posture (host/port/listen) is CLI-only by design — ``rpc_config.py``
 # already refuses to persist it — so it is listed here for the same reason.
@@ -128,6 +131,7 @@ _AGENTOS_POSTURE_NAMES = (
     "AGENTOS_GATEWAY_TOKEN",
     "AGENTOS_GATEWAY_CONFIG_PATH",
     "AGENTOS_STATE_DIR",
+    "AGENTOS_VAULT_KEK_DIR",
     "AGENTOS_LOG_DIR",
     "AGENTOS_ROOT",
     "AGENTOS_MIGRATIONS_DIR",
@@ -158,7 +162,21 @@ GATEWAY_CREDENTIAL_ENV: frozenset[str] = frozenset(
         "AGENTOS_GATEWAY_HOOKS__TOKEN",
         "AGENTOS_OPERATOR_SECRET",
         "AGENTOS_OPERATOR_SECRET_FILE",
+        # The key that seals the vault's stored password when a container or
+        # service manager injects it (agentos.trading.unlock_key). Held in the
+        # gateway's memory only, never in a child's environment.
+        "AGENTOS_VAULT_KEK",
     }
+)
+
+#: Hot-wallet signing keys that bundled skills sign with outside the trading
+#: engine (``senior-unilp-manager``, ``poolsdotfun-token-launcher``, the
+#: ``gmgn-*`` CLI). They never cross into a child process the agent can drive;
+#: ``agentos.tools.skill_signing`` hands one to a single direct invocation of
+#: the skill's own entry point, and only after the operator approved it when
+#: that invocation moves funds.
+SKILL_SIGNING_KEY_ENV: frozenset[str] = frozenset(
+    {"UNIV4_LP_PRIVATE_KEY", "POOLSFUN_PRIVATE_KEY", "GMGN_PRIVATE_KEY"}
 )
 
 # Group 5 — egress steering. A proxy name is a posture name: whoever sets it
@@ -203,36 +221,22 @@ WRITE_DENYLIST: frozenset[str] = (
 )
 
 # Group 6 — the environment spellings of the operator-only config roots
-# (``gateway.config_commit.OPERATOR_ONLY_CONFIG_ROOTS``; a test keeps the two
-# in step). pydantic-settings reads ``AGENTOS_GATEWAY_<ROOT>`` (a JSON value)
-# and ``AGENTOS_GATEWAY_<ROOT>__<FIELD>``, and the sections that are settings
+# (``agentos.config_roots``, the one list the config gates use too).
+# pydantic-settings reads ``AGENTOS_GATEWAY_<ROOT>`` (a JSON value) and
+# ``AGENTOS_GATEWAY_<ROOT>__<FIELD>``, and the sections that are settings
 # models of their own also read their own prefix (``AGENTOS_TRADING_``,
-# ``AGENTOS_SANDBOX_``, ``AGENTOS_AUTH_``). A value written into ``.env`` here
-# is the config at the next boot, so writing one is changing the trading cap
-# or the sandbox by another route; the config RPC refuses an agent that, and
-# so does this surface for everyone. Matched case-insensitively, as
-# pydantic-settings matches them.
-_OPERATOR_ONLY_CONFIG_ROOTS = (
-    "trading",
-    "hooks",
-    "tools",
-    "permissions",
-    "sandbox",
-    "auth",
-    "safety",
-    "workspace_dir",
-    "workspace_strict",
-    "acp.permission_mode",
-    "acp.non_interactive_permissions",
-)
+# ``AGENTOS_SANDBOX_``, ``AGENTOS_AUTH_``, ``AGENTOS_MCP_``, ...). A value
+# written into ``.env`` here is the config at the next boot, so writing one is
+# changing the trading cap or the sandbox by another route; the config RPC
+# refuses an agent that, and so does this surface for everyone. Matched
+# case-insensitively, as pydantic-settings matches them.
+_OPERATOR_ONLY_CONFIG_ROOTS = OPERATOR_ONLY_CONFIG_ROOTS
 _OPERATOR_ONLY_ENV_NAMES: frozenset[str] = frozenset(
     "AGENTOS_GATEWAY_" + root.upper().replace(".", "__") for root in _OPERATOR_ONLY_CONFIG_ROOTS
 )
 _OPERATOR_ONLY_ENV_PREFIXES: tuple[str, ...] = (
     *(f"{name}__" for name in sorted(_OPERATOR_ONLY_ENV_NAMES)),
-    "AGENTOS_TRADING_",
-    "AGENTOS_SANDBOX_",
-    "AGENTOS_AUTH_",
+    *OPERATOR_ONLY_ENV_PREFIXES,
 )
 
 _DENY_MESSAGE = (
@@ -270,9 +274,79 @@ def _is_denied(key: str) -> bool:
     )
 
 
+def is_protected_name(key: str) -> bool:
+    """Whether *key* is on the write denylist (no surface, no project ``.env``)."""
+    return _is_denied(key)
+
+
 def is_writable(key: str) -> bool:
     """Return whether *key* may be written through an AgentOS surface."""
     return bool(ENV_NAME_RE.match(key)) and not _is_denied(key)
+
+
+# ── What an agent may set ───────────────────────────────────────────────────
+#
+# The denylist above applies to every caller and stays small on purpose. An
+# agent's own connection is held to an allowlist instead (``gateway.rpc_env``):
+# it may set a name only when the env catalog declares it as a skill's or a
+# built-in tool's credential (``env_catalog.EnvVarSpec.agent_settable``), which
+# :func:`agent_may_own` decides. A skill manifest is a file an agent can write,
+# so being declared is not enough: the name must also look like a credential,
+# and must not be one the gateway process itself reads to decide how it loads
+# code, verifies TLS, signs, or where it sends a transaction.
+
+#: Names the libraries inside the gateway process read to pick the code that
+#: computes a signature or a hash, the TLS trust store, or where TLS session
+#: keys are written. None of them is a credential; listed so neither an agent
+#: nor a project-local ``.env`` (``agentos.env``) can set one.
+RUNTIME_STEERING_NAMES: frozenset[str] = frozenset(
+    {
+        # eth-keys / eth-hash backend selectors: import a named class.
+        "ECC_BACKEND_CLASS",
+        "ETH_HASH_BACKEND",
+        "ETH_ACCOUNT_KDF",
+        # TLS trust and key logging.
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "SSLKEYLOGFILE",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        # keyring imports the backend this names.
+        "PYTHON_KEYRING_BACKEND",
+    }
+)
+
+#: Names the gateway reads for its own wallet: the RPC endpoints the signer
+#: falls back to (``trading.chains.RPC_ENV_VARS``) and the default Uniswap key
+#: variable. ``trading.rpc_urls`` is operator-only; so are these spellings.
+GATEWAY_RESERVED_NAMES: frozenset[str] = frozenset(
+    {"RPC_BASE_URL", "RPC_ROBINHOOD_URL", "UNISWAP_API_KEY"}
+)
+
+
+def is_runtime_steering_name(key: str) -> bool:
+    """Whether *key* steers interpreter start-up, crypto backends or TLS trust."""
+    upper = key.upper()
+    return upper.startswith("PYTHON") or upper in RUNTIME_STEERING_NAMES
+
+
+def agent_may_own(key: str) -> bool:
+    """Whether a catalog entry declared by a skill or tool may be agent-settable.
+
+    A credential-shaped name (:func:`is_secret_name`) that every caller may
+    write, that is not an ``AGENTOS_*`` setting, not one the gateway reads for
+    its own wallet, not a skill's hot-wallet signing key (the operator's to
+    set: :data:`SKILL_SIGNING_KEY_ENV`), and not a runtime-steering name.
+    """
+    upper = key.upper()
+    return (
+        is_writable(key)
+        and is_secret_name(key)
+        and not upper.startswith("AGENTOS_")
+        and upper not in GATEWAY_RESERVED_NAMES
+        and upper not in SKILL_SIGNING_KEY_ENV
+        and not is_runtime_steering_name(key)
+    )
 
 
 def assert_writable(key: str) -> None:
