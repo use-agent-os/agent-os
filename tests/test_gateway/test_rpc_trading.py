@@ -828,3 +828,58 @@ class TestClientQuote:
             res = await call("trading.swap", {**base, "expectedOutRaw": bad}, ctx)
             assert res.ok is False, bad
         assert len(seen) == 3
+
+
+def _unbound_ctx(stack: dict[str, Any]) -> RpcContext:
+    """A local connection with no operator proof: it gets the agent's rules."""
+    from agentos.gateway.access import ConnectionSurface
+    from agentos.gateway.agent_surface import AgentBinding
+    from agentos.gateway.auth import AccessContext
+
+    access = AccessContext(
+        surface=ConnectionSurface.CONTROL,
+        admitted=True,
+        credential_verified=False,
+        agent=AgentBinding(via="unbound"),
+    )
+    return RpcContext(conn_id="unbound-conn", access=access, config=stack["config"])
+
+
+class TestOperatorLockHolds:
+    """WAL-22: in auto mode the next agent call used to read unlock.key and undo the lock."""
+
+    async def test_no_agent_or_unbound_call_undoes_the_operators_lock(
+        self, ctx: RpcContext, stack: dict[str, Any]
+    ) -> None:
+        await call("wallet.setup", {"password": PASSWORD}, ctx)  # auto, the default
+        address = (await call("wallet.create", {"label": "Main"}, ctx)).payload["wallet"]["address"]
+        stack["base"].set_native(address, 10**18)
+        stack["base"].set_erc20(USDC, address, 1000 * 10**6)
+        service = stack["service"]
+        agent = _agent_ctx(stack)
+        swap = {"chainId": 8453, "tokenIn": "USDC", "tokenOut": "WETH", "amountIn": "10"}
+
+        assert (await call("wallet.lock", {}, ctx)).payload == {"unlocked": False}
+        for method, params, who in [
+            ("wallet.status", {}, agent),
+            ("wallet.list", {}, agent),
+            ("trading.status", {}, _unbound_ctx(stack)),
+            ("wallet.balances", {}, agent),
+            ("trading.quote", swap, agent),
+            ("wallet.status", {}, ctx),  # the operator's own status read is no unlock either
+        ]:
+            await call(method, params, who)
+            assert service.vault.unlocked is False, method
+        status = await call("wallet.status", {}, agent)
+        assert status.payload["unlocked"] is False and status.payload["lockedByOperator"] is True
+
+        res = await call("trading.swap", swap, agent)
+        assert res.ok is False and res.error.code == "wallet.locked"
+        assert stack["base"].sent == [] and service.vault.unlocked is False
+
+        # Only the operator's unlock, with the password, ends it.
+        assert (await call("wallet.unlock", {"password": PASSWORD}, ctx)).ok
+        res = await call("trading.swap", swap, agent)
+        assert res.ok, res.error
+        assert res.payload["orders"][0]["status"] == "submitted"
+        assert len(stack["base"].sent) == 1

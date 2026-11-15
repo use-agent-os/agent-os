@@ -214,6 +214,44 @@ class TestKeystoreImportBounds:
             vault.import_keystore("evil", json.dumps({"version": 3}), "pw")
 
 
+class TestOperatorLockLatch:
+    """An operator's lock holds in ``auto`` mode too, across restarts (WAL-22)."""
+
+    def test_lock_outranks_unlock_key_until_an_explicit_unlock(self, vault_root: Path) -> None:
+        vault = Vault(vault_root, **FAST_KDF)
+        vault.setup(PASSWORD, "auto")
+        vault.lock()
+        assert vault.try_auto_unlock() is False and vault.unlocked is False
+        assert vault.status()["lockedByOperator"] is True
+        # A gateway restart (a new process, the same directory) does not undo it.
+        restarted = Vault(vault_root, **FAST_KDF)
+        assert restarted.try_auto_unlock() is False
+        assert restarted.operator_locked is True
+        with pytest.raises(VaultLockedError):
+            restarted.private_key("0x" + "00" * 20)
+        # The password is the one way out; after it, auto mode works as before.
+        restarted.unlock(PASSWORD)
+        assert restarted.operator_locked is False
+        assert restarted.status()["lockedByOperator"] is False
+        assert Vault(vault_root, **FAST_KDF).try_auto_unlock() is True
+
+    def test_set_unlock_mode_and_change_password_are_explicit_unlocks(self, vault: Vault) -> None:
+        vault.setup(PASSWORD, "auto")
+        vault.lock()
+        vault.set_unlock_mode("auto", PASSWORD)
+        assert vault.unlocked is True and vault.operator_locked is False
+        vault.lock()
+        vault.change_password(PASSWORD, "another long password")
+        assert vault.unlocked is True and vault.operator_locked is False
+
+    def test_a_wrong_password_leaves_the_lock_on(self, vault: Vault) -> None:
+        vault.setup(PASSWORD, "auto")
+        vault.lock()
+        with pytest.raises(BadPasswordError):
+            vault.unlock("not the password!")
+        assert vault.operator_locked is True and vault.try_auto_unlock() is False
+
+
 class TestLedgerSealKey:
     """The ledger seal key: as protected as the wallet keys, stable for the vault's life."""
 

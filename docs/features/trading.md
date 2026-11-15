@@ -193,6 +193,12 @@ Trading** pane has a *Test key* button (`trading.probe`).
     level as an SSH key without a passphrase.
   - `manual` — nothing on disk; unlock per gateway session from the app or
     `agentos wallet unlock`. Keys live only in the gateway's memory.
+- **Lock** (`agentos wallet lock`, `wallet.lock`) holds in both modes, and
+  across gateway restarts, until you unlock with the password: `unlock.key`
+  is not read while it holds. Nothing signs: agent swaps fail
+  `wallet.locked`, due DCA buys and armed triggers wait (no failed runs,
+  no auto-pause; alerts still ring), and approving an order is refused with
+  the order left parked. `wallet.status` says `lockedByOperator`.
 - Export (keystore or raw private key) and wallet removal always ask for
   the vault password, whatever the mode. Private keys never appear in logs,
   RPC responses (other than `wallet.export`), or the ledger.

@@ -263,7 +263,8 @@ fire-now on a trigger that failed its seal: it is stopped), plus
 slippage ceiling. Approving a trigger (or creating one as the operator) seals
 its terms with the vault key, so it needs an unlocked vault; a trigger whose
 row was changed outside the engine is stopped (`"integrity check failed (…)"`)
-instead of firing.
+instead of firing. While you have locked the vault, trading triggers wait
+(alerts still ring).
 
 Events: every state change emits `trading.changed {reason: "trigger",
 triggerId}` and `trading.trigger.changed {trigger}` (full `Trigger`

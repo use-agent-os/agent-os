@@ -9,6 +9,11 @@ an operating system secret store:
 * ``manual`` — nothing on disk; ``unlock(password)`` is called per gateway
   session and the decrypted keys live only in this process's memory.
 
+An explicit :meth:`Vault.lock` is the operator saying "nothing signs". It is
+latched in ``index.json`` and outranks ``unlock.key``: an ``auto`` vault stays
+locked, across gateway restarts too, until :meth:`Vault.unlock` is called with
+the password.
+
 Nothing in this module logs, returns or serialises a private key except
 :meth:`Vault.export`, which re-verifies the password first.
 """
@@ -35,6 +40,8 @@ UnlockMode = Literal["auto", "manual"]
 INDEX_FILE = "index.json"
 UNLOCK_FILE = "unlock.key"
 INDEX_VERSION = 1
+#: ``index.json`` key of the operator's lock latch (:meth:`Vault.lock`).
+LOCK_LATCH = "operator_locked"
 #: ``index.json`` key of the ledger seal's salt (:meth:`Vault.ledger_seal_key`).
 LEDGER_SEAL = "ledger_seal"
 _LEDGER_SEAL_LABEL = b"agentos/trading/ledger-seal/v1\x00"
@@ -212,6 +219,16 @@ class Vault:
         mode = self._read_index().get("unlock_mode")
         return "manual" if mode == "manual" else "auto"
 
+    @property
+    def operator_locked(self) -> bool:
+        """The operator locked the vault and has not unlocked it since (any mode, any restart)."""
+        if not self.initialized:
+            return False
+        try:
+            return bool(self._read_index().get(LOCK_LATCH))
+        except VaultError:
+            return False
+
     def status(self) -> dict[str, Any]:
         wallets = self.list() if self.initialized else []
         primary = self.primary_address() if self.initialized else None
@@ -219,6 +236,7 @@ class Vault:
             "initialized": self.initialized,
             "unlocked": self.unlocked,
             "unlockMode": self.unlock_mode,
+            "lockedByOperator": self.operator_locked,
             "walletCount": len(wallets),
             "primary": primary,
             "vaultPath": str(self.root),
@@ -284,6 +302,7 @@ class Vault:
         self._open_verifier(password)
 
     def unlock(self, password: str) -> None:
+        """Decrypt every key into memory. The one way out of an operator's lock."""
         password = _require_password(password)
         with self._lock:
             secret = self._open_verifier(password)
@@ -296,6 +315,9 @@ class Vault:
                 keys[record.key] = self._decrypt(keystore, password)
             index = self._read_index()
             seal, changed = self._ledger_seal(index)
+            if index.get(LOCK_LATCH):
+                index[LOCK_LATCH] = False
+                changed = True
             if changed:
                 self._write_index(index)
             self._keys = keys
@@ -314,17 +336,31 @@ class Vault:
         return seal, True
 
     def lock(self) -> None:
+        """Drop the keys and latch the lock: nothing auto-unlocks until :meth:`unlock`.
+
+        ``auto`` mode would otherwise read ``unlock.key`` again on the next
+        status call or agent swap and undo the lock at once. The latch lives in
+        ``index.json`` so a gateway restart does not undo it either.
+        """
         with self._lock:
             self._keys = {}
             self._password = None
             self._seal_key = None
+            if self.initialized:
+                index = self._read_index()
+                if not index.get(LOCK_LATCH):
+                    index[LOCK_LATCH] = True
+                    self._write_index(index)
 
     def try_auto_unlock(self) -> bool:
-        """Unlock from ``unlock.key`` when in ``auto`` mode. Never raises."""
+        """Unlock from ``unlock.key`` when in ``auto`` mode. Never raises.
+
+        An operator's :meth:`lock` outranks the file: a latched vault stays locked.
+        """
         with self._lock:
             if self.unlocked:
                 return True
-            if not self.initialized or self.unlock_mode != "auto":
+            if not self.initialized or self.unlock_mode != "auto" or self.operator_locked:
                 return False
             try:
                 # newline="" for the same reason as the write: the password is
@@ -386,6 +422,7 @@ class Vault:
             # derived from it, and every live order and mandate stays sealed.
             index["verifier"] = self._encrypt(secret, new_password)
             seal, _created = self._ledger_seal(index)
+            index[LOCK_LATCH] = False
             self._write_index(index)
             if index.get("unlock_mode") == "auto":
                 _write_private(self.unlock_path, new_password)

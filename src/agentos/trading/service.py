@@ -614,11 +614,20 @@ class TradingService:
             return await self._priced(self.provider("uniswap"), **kwargs)
 
     def ensure_unlocked(self) -> bool:
-        """Unlock in ``auto`` mode if needed; ``False`` while locked."""
+        """Unlock in ``auto`` mode if needed; ``False`` while locked (an operator's lock holds)."""
         unlocked = self.vault.unlocked or self.vault.try_auto_unlock()
         if unlocked:
             self._seal_ready()
         return unlocked
+
+    def _signing_held(self) -> bool:
+        """The operator locked the vault: no unattended run may even try to sign."""
+        return self.vault.operator_locked
+
+    def _require_unlocked(self, action: str) -> None:
+        if not self.ensure_unlocked():
+            held = " (you locked it: `agentos wallet unlock`)" if self._signing_held() else ""
+            raise TradingError("wallet.locked", f"Wallet vault is locked{held}; cannot {action}")
 
     # ── row seals (agentos.trading.integrity) ──────────────────────────
 
@@ -5930,6 +5939,9 @@ class TradingService:
                 if row.get("trigger_id"):
                     await self._trigger_on_order(member)
             raise TradingError("trading.quote_expired", f"order {order_id} expired")
+        # Refused before the claim, so a locked vault leaves the order parked
+        # for an approval after the unlock instead of failing it.
+        self._require_unlocked("approve an order")
         # Compare-and-set: two approvals racing each other both passed the
         # status read above; only the one that flips the row may execute.
         claimed = [
@@ -6405,6 +6417,8 @@ class TradingService:
         row = self._dca_row(mandate_id)
         if row["status"] not in ("active", "paused"):
             raise self._dca_bad_state(row, "run")
+        if self._signing_held():
+            self._require_unlocked("buy now")
         async with self._dca_lock:
             run_row = await self._dca_fire(row["mandate_id"], manual=True, wait=wait)
         mandate, warnings = await self._dca_build(self._dca_row(mandate_id))
@@ -6425,6 +6439,10 @@ class TradingService:
                 if row.get("expires_at") is not None and float(row["expires_at"]) <= now:
                     await self._dca_expire(row, now)
             await self._dca_reconcile(now)
+            if self._signing_held():
+                # The operator locked the vault: due buys wait for the unlock
+                # (missed slots are not made up) instead of failing into a pause.
+                return
             for row in self.ledger.list_mandates(statuses=["active"], due_before=now):
                 try:
                     await self._dca_fire(str(row["mandate_id"]), manual=False)
@@ -7221,6 +7239,8 @@ class TradingService:
         self._trigger_refuse_leg(row, "fire")
         if row["status"] not in ("armed", "paused"):
             raise self._trigger_bad_state(row, "fire")
+        if self._signing_held() and row["kind"] != "alert":
+            self._require_unlocked("fire a trigger")
         async with self._trigger_lock:
             chain = CHAINS[int(row["chain_id"])]
             price = await self._dca_price(chain, str(row["token"]))
@@ -7252,8 +7272,13 @@ class TradingService:
                 if until is not None and float(until) <= now:
                     await self._trigger_expire(row, now, triggers.not_reached_reason(float(until)))
             await self._trigger_reconcile(now)
+            # The operator locked the vault: only alerts (which never sign)
+            # keep watching; every trading trigger waits for the unlock.
+            held = self._signing_held()
             by_chain: dict[int, list[dict[str, Any]]] = {}
             for row in self.ledger.list_triggers(statuses=["armed"], legs="all"):
+                if held and row["kind"] != "alert":
+                    continue
                 by_chain.setdefault(int(row["chain_id"]), []).append(row)
             for chain_id, rows in by_chain.items():
                 chain = CHAINS.get(chain_id)
@@ -8273,6 +8298,8 @@ class TradingService:
                 raise self._bracket_invalid("leg must be tp or sl")
         if not candidates or (wanted is not None and wanted not in candidates):
             raise self._bracket_bad_state(bracket_id, "fire")
+        if self._signing_held() and legs[0]["kind"] != "alert":
+            self._require_unlocked("fire a bracket")
         chain = CHAINS[int(legs[0]["chain_id"])]
         async with self._trigger_lock:
             price = await self._dca_price(chain, str(legs[0]["token"]))

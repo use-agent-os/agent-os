@@ -59,6 +59,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   already live (parked orders, active mandates, armed triggers). Creating
   or approving a mandate, trigger or bracket now needs an unlocked vault
   (`wallet.locked` otherwise), as signing always did.
+- Trading: `agentos wallet lock` (`wallet.lock`) now holds until you unlock
+  with the password, in `auto` mode too and across gateway restarts. Before,
+  the next status read or agent swap re-read `unlock.key` and undid it. While
+  locked nothing signs: agent swaps fail `wallet.locked`, due DCA buys and
+  armed triggers wait (no failed runs, no auto-pause; alerts keep ringing),
+  approving an order is refused with the order left parked, and buy-now /
+  fire-now are refused. `wallet.status` carries `lockedByOperator`.
 - Approvals are yours alone: answering a prompt, changing the approval mode,
   forgetting remembered answers, `POST /api/elevated-mode`, an `elevated`
   hint on `chat.send` and approving a channel pairing are refused

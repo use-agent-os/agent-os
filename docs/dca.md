@@ -121,7 +121,8 @@ create ──(operator)──────────────► active ─�
   an unlocked vault; `update` re-seals. Every run checks the seal first: a
   mandate whose row was changed outside the engine is `stopped`
   (`"integrity check failed (…)"`) without buying, and the gateway
-  broadcasts `trading.integrity.alert`.
+  broadcasts `trading.integrity.alert`. While you have locked the vault
+  (`agentos wallet lock`) due runs wait for the unlock instead of failing.
 
 ## Ledger (schema v7)
 

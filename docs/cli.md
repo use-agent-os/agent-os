@@ -1111,7 +1111,7 @@ Read: [`flows.md`](flows.md)
 agentos wallet status
 agentos wallet setup --mode auto            # once; auto = password in ~/.agentos/wallets/unlock.key (0600)
 agentos wallet setup --mode manual          # or: unlock per gateway session, keys only in RAM
-agentos wallet unlock / lock
+agentos wallet unlock / lock                # lock holds until unlock, in auto mode and across restarts: nothing signs, DCA buys and trading triggers wait
 agentos wallet create --label main
 agentos wallet import --label cold --private-key-stdin < key.txt
 agentos wallet import --label cold --keystore wallet.json

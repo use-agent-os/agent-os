@@ -36,10 +36,13 @@ def _vault(tmp_path: Path) -> Vault:
 
 
 def _set_up(tmp_path: Path, password: str) -> Vault:
-    """A vault in ``auto`` mode, locked, as it is after a restart."""
+    """A vault in ``auto`` mode; the callers' fresh ``Vault`` is the one after a restart.
+
+    Not ``lock()``-ed: an operator's lock is latched and outranks ``unlock.key``
+    (``test_vault.py``), which is not what a restart is.
+    """
     vault = _vault(tmp_path)
     vault.setup(password, unlock_mode="auto")
-    vault.lock()
     return vault
 
 
