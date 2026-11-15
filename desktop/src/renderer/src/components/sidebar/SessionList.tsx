@@ -9,7 +9,12 @@ import { useSessionSelection } from '~/stores/session-selection'
 import { useSessionView } from '~/stores/session-view'
 import { toSessionRow, useSessions } from '~/stores/sessions'
 import { useUi } from '~/stores/ui'
-import { fileSessions, folderPreview, SESSION_DRAG_TYPE } from '~/views/projects/logic'
+import {
+  FOLDER_PREVIEW,
+  fileSessions,
+  folderPreview,
+  SESSION_DRAG_TYPE,
+} from '~/views/projects/logic'
 import {
   agentIds,
   filterRows,
@@ -45,6 +50,7 @@ export function SessionList() {
   const unread = useSessionMarks((s) => s.unread)
   const liveIds = useLive((s) => s.ids)
   const openFolders = useUi((s) => s.openFolders)
+  const expandedFolders = useUi((s) => s.expandedFolders)
   const setVisible = useSessionSelection((s) => s.setVisible)
   const [over, setOver] = useState(false)
   const searching = Boolean(query.trim())
@@ -102,10 +108,17 @@ export function SessionList() {
     const folders = showFolders
       ? projects
           .filter((p) => openFolders.has(projectId(p)))
-          .map((p) => folderPreview(filed.byProject.get(projectId(p)) ?? []).shown)
+          .map(
+            (p) =>
+              folderPreview(
+                filed.byProject.get(projectId(p)) ?? [],
+                FOLDER_PREVIEW,
+                expandedFolders.has(projectId(p)),
+              ).shown,
+          )
       : []
     return visibleSlots(folders, sections)
-  }, [showFolders, projects, openFolders, filed, sections])
+  }, [showFolders, projects, openFolders, expandedFolders, filed, sections])
   useEffect(() => setVisible(visible), [visible, setVisible])
   useEffect(() => () => setVisible([]), [setVisible])
 

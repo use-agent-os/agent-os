@@ -43,12 +43,16 @@ export function fileSessions(rows: SessionRow[], projects: RawProject[]): Filed 
   return { byProject, unfiled }
 }
 
-/** The rows a folder shows inline, and how many it hides. */
+/**
+ * The rows a folder shows inline, and how many it hides. An expanded folder
+ * (its "N more" pressed) shows every row and hides none.
+ */
 export function folderPreview(
   rows: SessionRow[],
   limit = FOLDER_PREVIEW,
+  expanded = false,
 ): { shown: SessionRow[]; hidden: number } {
-  if (rows.length <= limit) return { shown: rows, hidden: 0 }
+  if (expanded || rows.length <= limit) return { shown: rows, hidden: 0 }
   return { shown: rows.slice(0, limit), hidden: rows.length - limit }
 }
 

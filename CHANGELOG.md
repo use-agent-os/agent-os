@@ -158,6 +158,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `AGENTOS_SANDBOX_*`, `AGENTOS_AUTH_*`, `AGENTOS_GATEWAY_<SECTION>__*`) and
   the gateway credentials into `.env`; edit `.env` by hand if you mean it.
 
+### Fixed
+- Desktop: "N more" under a project folder in the sidebar now lists the
+  folder's older chats in place, with "Show less" to fold them back. Before,
+  it opened the project page, where the chats sit below the brief, so the
+  older sessions never appeared where you clicked.
+
 ## [2026.11.14] - 2026-11-14
 
 ### Fixed

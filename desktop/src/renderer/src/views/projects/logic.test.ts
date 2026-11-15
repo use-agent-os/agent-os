@@ -55,6 +55,10 @@ describe('folderPreview', () => {
     expect(shown).toHaveLength(6)
     expect(hidden).toBe(3)
   })
+  it('shows every row once expanded', () => {
+    const rows = Array.from({ length: 9 }, (_, i) => row(`s${i}`))
+    expect(folderPreview(rows, 6, true)).toEqual({ shown: rows, hidden: 0 })
+  })
 })
 
 describe('groupByAgent', () => {
