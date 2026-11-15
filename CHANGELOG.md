@@ -7,6 +7,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- A connection the gateway recognizes as an agent's (agent token, spawned
+  process, exec window) can no longer change where model and embedding calls
+  go, the spend ceilings or the agent definitions. Refused on every config
+  writer (`config.set`/`patch`/`apply`, onboarding): `llm.base_url`,
+  `llm.proxy`, `agentos_router.judge_base_url`/`jev.base_url`,
+  `memory.embedding.*base_url`, `memory.provider.mem0.*_base_url`, the image,
+  audio and X search `base_url`s, `search_proxy`/`search_use_env_proxy`, a
+  provider profile's `base_url`/`proxy`/`router.judge_base_url`, a channel's
+  `api_base`/`webhook_url`/`gateway_url`/`command_request_url`/IMAP and SMTP
+  host and port (a new channel keeps the defaults), `budgets.*` and `agents`.
+  `agents.create`, `agents.update` and `agents.delete`, which wrote the agent
+  list without `commit_config`, now refuse an agent's connection with
+  `agent.operator_required`. The list lives in `agentos.config_roots`
+  (`AGENT_REFUSED_CONFIG_ROOTS`, `OPERATOR_ONLY_ENTRY_FIELDS`). The web
+  console (unbound on loopback), the desktop app and the operator's CLI are
+  unchanged, and a file edit of these settings applies as before.
 - An ACP **Always allow** no longer covers programs that delete data or run
   code they are handed. `rm`, `rmdir`, `dd`, `mkfs*`, `shred`, `truncate`,
   recursive `chmod`/`chown`/`chgrp`, interpreters (`python*`, `py`, `node`,

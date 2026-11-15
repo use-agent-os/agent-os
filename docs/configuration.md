@@ -1454,7 +1454,8 @@ their `*_limit` counterparts.
   two, so a dropped write cannot quietly retire a ceiling within a run.
 
 `[budgets]` is TOML-only; there is no environment-variable override for these
-keys.
+keys. An agent's connection cannot change the ceilings through any config
+RPC (see [Editing the file while the gateway runs](#editing-the-file-while-the-gateway-runs)).
 
 ## Gateway Binding
 
@@ -1720,6 +1721,22 @@ settings. The running values stay, the gateway logs `config.reload_held`,
 nothing else changed), and `agentos doctor` reports
 `gateway.config.reload_held`. Apply them yourself with
 `agentos config reload` (refused from an agent's session).
+
+**Refused to an agent's connection.** Besides the settings above, a
+connection the gateway recognizes as an agent's (an agent token, a process
+the gateway spawned, an exec window) cannot change where model and embedding
+calls go -- `llm.base_url`, `llm.proxy`, `agentos_router.judge_base_url`,
+`agentos_router.jev.base_url`, `memory.embedding.base_url` and its
+`remote`/`ollama` variants, `memory.provider.mem0.*_base_url`, the image,
+audio and X search `base_url`s, `search_proxy`, `search_use_env_proxy` -- a
+provider profile's `base_url`/`proxy`/`router.judge_base_url`, a channel's
+endpoint (`api_base`, `webhook_url`, `gateway_url`, `command_request_url`,
+`imap_host`/`imap_port`, `smtp_host`/`smtp_port`; a new channel keeps the
+defaults), the spend ceilings (`budgets`) or the agent definitions (`agents`,
+and the `agents.create`/`agents.update`/`agents.delete` RPCs, which fail with
+`agent.operator_required`). Your web console (unbound on loopback), the
+desktop app and your own CLI keep them, and a file edit of them applies as
+before.
 
 **A restart does not apply them either.** The gateway keeps the values of
 the operator-only settings as you last approved them in

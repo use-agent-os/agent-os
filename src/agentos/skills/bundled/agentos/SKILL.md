@@ -902,7 +902,12 @@ Full reference: `docs/http-api.md` (https://useagentos.dev/docs/http-api).
   `~/.agentos/config.toml`; restart the gateway after edits. A hand edit of
   an operator-only setting (trading, hooks, tools, permissions, sandbox, auth,
   safety, workspace, ACP, MCP, gateway_control, ...) is held — across restarts
-  too — until the user runs `agentos config reload`.
+  too — until the user runs `agentos config reload`. From an agent's
+  connection those settings are refused outright, and so are the model,
+  embedding, judge, image, audio and search endpoints (`llm.base_url`,
+  `llm.proxy`, `memory.embedding.base_url`, …, `search_proxy`), a provider
+  profile's or channel's endpoint, `budgets` and `agents`;
+  `agents.create`/`update`/`delete` fail with `agent.operator_required`.
 - **Gateway won't bind publicly** → intentional auth guard; see the
   public-bind recipe above.
 - **Provider/model errors** → `agentos providers status`,

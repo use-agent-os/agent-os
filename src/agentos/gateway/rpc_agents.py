@@ -47,6 +47,31 @@ def _get_agent_registry(ctx: RpcContext):
     return agent_registry
 
 
+def _refuse_agent_caller(ctx: RpcContext, action: str) -> None:
+    """Agent definitions are the operator's: an agent cannot add or rewrite one.
+
+    ``agents`` is refused to an agent's config RPC writes
+    (``agentos.config_roots.AGENT_REFUSED_CONFIG_ROOTS``); these RPCs write it
+    through the registry rather than ``commit_config``, so they apply the same
+    gate themselves. A connection the gateway recognizes
+    as an agent's is refused; the user's console (``unbound``) and the
+    operator are not.
+    """
+    from agentos.gateway.agent_surface import recognized_agent
+    from agentos.gateway.config_commit import refuse_agent_operator_only_change
+
+    try:
+        refuse_agent_operator_only_change(ctx, {"agents"})
+    except ValueError as exc:
+        binding = recognized_agent(ctx)
+        raise RpcHandlerError(
+            "agent.operator_required",
+            f"{action} is the user's to do; an agent cannot change agent definitions. "
+            "Ask the user to do it in the app or with `agentos agents`.",
+            details=binding.to_dict() if binding is not None else None,
+        ) from exc
+
+
 def _get_identity_service(ctx: RpcContext):
     identity_service = getattr(ctx, "identity_service", None)
     if identity_service is None:
@@ -206,6 +231,7 @@ async def _handle_agents_create(params: dict | None, ctx: RpcContext) -> dict:
     if not raw_agent_id:
         raise ValueError("params.id or params.name is required")
     agent_id = normalize_agent_id(raw_agent_id)
+    _refuse_agent_caller(ctx, "Creating an agent")
 
     agent_registry = _get_agent_registry(ctx)
     try:
@@ -223,9 +249,7 @@ async def _handle_agents_create(params: dict | None, ctx: RpcContext) -> dict:
     except ValueError as exc:
         msg = str(exc)
         if "already exists" in msg:
-            raise RpcHandlerError(
-                "agent.exists", msg, details={"agentId": agent_id}
-            ) from exc
+            raise RpcHandlerError("agent.exists", msg, details={"agentId": agent_id}) from exc
         if agent_id == "main" or "builtin" in msg.lower():
             raise RpcHandlerError(
                 "agent.builtin_immutable", msg, details={"agentId": agent_id}
@@ -247,6 +271,7 @@ async def _handle_agents_update(params: dict | None, ctx: RpcContext) -> dict:
 
     if not updated_fields:
         raise ValueError("No fields to update")
+    _refuse_agent_caller(ctx, "Changing an agent")
 
     agent_registry = _get_agent_registry(ctx)
     try:
@@ -273,6 +298,7 @@ async def _handle_agents_delete(params: dict | None, ctx: RpcContext) -> None:
         raise ValueError("params.id is required")
 
     agent_id = normalize_agent_id(params["id"])
+    _refuse_agent_caller(ctx, "Deleting an agent")
 
     # Refuse to delete builtin agents
     if agent_id == "main":
