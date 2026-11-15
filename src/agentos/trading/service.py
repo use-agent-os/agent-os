@@ -30,7 +30,7 @@ import httpx
 import structlog
 
 from agentos import __version__
-from agentos.trading import dca, guardrails, permits, triggers
+from agentos.trading import binding, dca, guardrails, permits, triggers
 from agentos.trading.aggregator import AGGREGATOR_BASE, AggregatorClient, AggregatorProvider
 from agentos.trading.bridge import (
     BRIDGE_FILL_GIVE_UP_S,
@@ -361,6 +361,20 @@ def _client_expected_out(row: dict[str, Any]) -> int | None:
         return None
 
 
+@dataclass
+class _ApprovalBinding:
+    """One claimed leg of an approval, carried to the signer (``binding``).
+
+    ``digest`` is the leg's own :func:`binding.approval_digest`, ``tx`` the
+    exact transaction a send or revoke may sign, and ``verified`` is set once
+    the row read at execution was found unchanged.
+    """
+
+    digest: str
+    tx: dict[str, Any] | None
+    verified: bool = False
+
+
 def _sign_permit(permit: dict[str, Any], key: bytes) -> str:
     from eth_account import Account
 
@@ -433,6 +447,10 @@ class TradingService:
         # wallet in flight at once would read the same pending nonce.
         self._wallet_locks: dict[str, asyncio.Lock] = {}
         self._settling: set[str] = set()
+        # Order id -> what its operator approval released. Only an approval
+        # puts one here, and only for the legs it claimed; the signer refuses
+        # an approved order that has none (``_check_approval_binding``).
+        self._approval_bindings: dict[str, _ApprovalBinding] = {}
         self._sync_lock = asyncio.Lock()
         # One DCA pass (or buy-now) at a time: a slow run must not overlap the
         # next tick's pass and fire the same mandate twice.
@@ -2174,7 +2192,9 @@ class TradingService:
 
     # ── swaps ──────────────────────────────────────────────────────────
 
-    def _order_dict(self, row: dict[str, Any]) -> dict[str, Any]:
+    def _order_dict(
+        self, row: dict[str, Any], *, batch_rows: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
         chain_id = int(row["chain_id"])
         chain = CHAINS.get(chain_id)
         token_in = self._token_dict(chain_id, row["token_in"]) or {}
@@ -2221,6 +2241,11 @@ class TradingService:
             "clientOrderId": row.get("client_order_id"),
             "mandateId": row.get("mandate_id"),
             "triggerId": row.get("trigger_id"),
+            "approval": (
+                self._approval_block(row, batch_rows)
+                if row["status"] == "awaiting_approval"
+                else None
+            ),
             **(self._lp_order_fields(row) if row.get("kind") in LP_ORDER_KINDS else {}),
             **(self._bridge_order_fields(row) if row.get("kind") == "bridge" else {}),
         }
@@ -2320,6 +2345,83 @@ class TradingService:
             "providerLabel": LP_PROVIDER_LABEL,
         }
 
+    def _batch_totals(self, legs: list[dict[str, Any]]) -> dict[str, Any]:
+        """What one approve of these legs releases, in sum: count, token, total, total USD."""
+        first = legs[0]
+        chain_id = int(first["chain_id"])
+        token = self._token_dict(chain_id, str(first["token_in"])) or {}
+        same_token = all(str(r["token_in"]) == str(first["token_in"]) for r in legs)
+        total_raw = sum(int(str(r["amount_raw"] or "0")) for r in legs) if same_token else None
+        values = [r.get("value_usd") for r in legs]
+        total_usd = (
+            float(sum(float(v) for v in values if v is not None))
+            if all(v is not None for v in values)
+            else None
+        )
+        return {
+            "batchId": first.get("batch_id"),
+            "orderIds": [str(r["order_id"]) for r in legs],
+            "legCount": len(legs),
+            "chainId": chain_id,
+            "token": token or None,
+            "totalRaw": str(total_raw) if total_raw is not None else None,
+            "total": (
+                format_amount(total_raw, int(token.get("decimals", 18)))
+                if total_raw is not None
+                else None
+            ),
+            "totalUsd": total_usd,
+            # No price: the daily cap does not bound this approval (WAL-12).
+            "unpriced": total_usd is None,
+        }
+
+    def _approval_block(
+        self, row: dict[str, Any], batch_rows: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
+        """``approval`` on an awaiting order: what approving it releases (WAL-08/12).
+
+        A single order carries the ``digest`` ``trading.orders.approve`` must
+        echo. A batch leg carries the batch's leg count and totals but no
+        digest: that comes only with every leg, from :meth:`batch_approval`
+        (``trading.orders.batch``), so no client can approve a batch from
+        one leg's record.
+        """
+        batch_id = row.get("batch_id")
+        if not batch_id:
+            return {
+                "digest": binding.approval_digest([row]),
+                "batchId": None,
+                "orderIds": [str(row["order_id"])],
+                "legCount": 1,
+            }
+        rows = batch_rows if batch_rows is not None else self.ledger.batch_orders(str(batch_id))
+        legs = [r for r in rows if r["status"] == "awaiting_approval"] or [row]
+        return {"digest": None, **self._batch_totals(legs)}
+
+    def batch_approval(self, batch_id: str) -> dict[str, Any] | None:
+        """The approval of a parked multisend, every leg spelled out; ``None`` when none waits."""
+        legs = [r for r in self.ledger.batch_orders(batch_id) if r["status"] == "awaiting_approval"]
+        if not legs:
+            return None
+        token = self._token_dict(int(legs[0]["chain_id"]), str(legs[0]["token_in"])) or {}
+        decimals = int(token.get("decimals", 18))
+        return {
+            "digest": binding.approval_digest(legs),
+            **self._batch_totals(legs),
+            "legs": [
+                {
+                    "orderId": str(r["order_id"]),
+                    "recipient": checksum_address(str(r["recipient"]))
+                    if r.get("recipient")
+                    else None,
+                    "amountRaw": str(r["amount_raw"]),
+                    "amount": format_amount(int(str(r["amount_raw"] or "0")), decimals),
+                    "valueUsd": r.get("value_usd"),
+                }
+                for r in legs
+            ],
+        }
+
     def get_order(self, order_id: str) -> dict[str, Any]:
         row = self.ledger.get_order(order_id)
         if row is None:
@@ -2336,8 +2438,16 @@ class TradingService:
     ) -> dict[str, Any]:
         key = self.vault.resolve(wallet).key if wallet else None
         rows = self.ledger.list_orders(status=status, wallet=key, limit=limit, kind=kind)
+        batches: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            batch_id = row.get("batch_id")
+            if batch_id and row["status"] == "awaiting_approval" and batch_id not in batches:
+                batches[str(batch_id)] = self.ledger.batch_orders(str(batch_id))
         return {
-            "orders": [self._order_dict(r) for r in rows],
+            "orders": [
+                self._order_dict(r, batch_rows=batches.get(str(r.get("batch_id") or "")))
+                for r in rows
+            ],
             "pendingApprovals": self.ledger.count_orders("awaiting_approval"),
         }
 
@@ -2346,7 +2456,7 @@ class TradingService:
         rows = self.ledger.batch_orders(batch_id)
         if not rows:
             raise TradingError("trading.invalid", f"no batch {batch_id}")
-        return [self._order_dict(r) for r in rows]
+        return [self._order_dict(r, batch_rows=rows) for r in rows]
 
     # ── sends ──────────────────────────────────────────────────────────
 
@@ -2503,6 +2613,8 @@ class TradingService:
         await self._emit(
             "trading.changed", {"reason": "order", "orderId": order_ids[0], "batchId": batch_id}
         )
+        if batch_id:
+            return self.batch(batch_id)
         return [self.get_order(order_id) for order_id in order_ids]
 
     async def _decide_batch(
@@ -2529,12 +2641,17 @@ class TradingService:
                     reason=verdict.reason,
                     expires_at=expires,
                 )
+            orders = self.batch(batch_id) if batch_id else [self.get_order(o) for o in order_ids]
             await self._emit(
                 "trading.approval.requested",
                 {
-                    "order": self.get_order(order_ids[0]),
+                    "order": orders[0],
                     "batchId": batch_id,
-                    "orders": [self.get_order(o) for o in order_ids],
+                    "orders": orders,
+                    # Every leg and the digest one approve of them must echo.
+                    "approval": (
+                        self.batch_approval(batch_id) if batch_id else orders[0].get("approval")
+                    ),
                 },
             )
             return
@@ -4252,9 +4369,63 @@ class TradingService:
             return
         await self._execute(row["order_id"], quote, wait=wait)
 
+    def _check_approval_binding(self, order_id: str, row: dict[str, Any]) -> None:
+        """The row about to be executed is the one its operator approved, unchanged.
+
+        Runs first thing in :meth:`_execute`, before any field of the row is
+        used: every kind's transaction is then built from these checked
+        values. An ``approved`` row with no binding was not approved through
+        :meth:`approve` and is never signed.
+        """
+        bound = self._approval_bindings.get(order_id)
+        if bound is None:
+            if str(row.get("status")) == "approved":
+                raise TradingError(
+                    "trading.approval_changed",
+                    f"order {order_id} is marked approved but no approval of it is held; "
+                    "it is not signed",
+                )
+            return
+        if binding.approval_digest([row]) != bound.digest:
+            log.warning("trading.approval_binding_mismatch", order=order_id)
+            raise TradingError(
+                "trading.approval_changed",
+                f"order {order_id} changed after it was approved; it is not signed",
+            )
+        bound.verified = True
+
+    def _check_signing_binding(
+        self, order_id: str, *, hash_field: str, to: str, value: int, data: str
+    ) -> None:
+        """The last look before the key signs a transaction for ``order_id``."""
+        bound = self._approval_bindings.get(order_id)
+        if bound is None:
+            row = self.ledger.get_order(order_id)
+            if row is not None and str(row.get("status")) == "approved":
+                raise TradingError(
+                    "trading.approval_changed",
+                    f"order {order_id} is marked approved but no approval of it is held; "
+                    "it is not signed",
+                )
+            return
+        if not bound.verified:
+            raise TradingError(
+                "trading.approval_changed",
+                f"order {order_id} reached the signer without its approval being checked",
+            )
+        if bound.tx is not None and hash_field == "tx_hash":
+            signing = {"to": to.lower(), "value": int(value), "data": data.lower()}
+            if signing != bound.tx:
+                log.warning("trading.approval_tx_mismatch", order=order_id)
+                raise TradingError(
+                    "trading.approval_changed",
+                    f"the transaction for order {order_id} is not the one that was approved",
+                )
+
     async def _execute(self, order_id: str, quote: ProviderQuote | None, *, wait: bool) -> None:
         row = self.ledger.get_order(order_id)
         assert row is not None
+        self._check_approval_binding(order_id, row)
         kind = str(row.get("kind") or "swap")
         if kind == "send":
             await self._execute_send(row, wait=wait)
@@ -5285,6 +5456,10 @@ class TradingService:
             "maxPriorityFeePerGas": max_priority,
             "type": 2,
         }
+        if order_id is not None:
+            self._check_signing_binding(
+                order_id, hash_field=hash_field, to=to, value=value, data=data
+            )
         raw = self._sign_tx(full_tx, key)
         local_hash = _local_tx_hash(raw)
         # Record before send: from here on the ledger knows a transaction
@@ -5927,8 +6102,20 @@ class TradingService:
         ]
         return row, members or [order_id]
 
-    async def approve(self, order_id: str, *, wait: bool = False) -> dict[str, Any]:
-        """Run an order the agent parked. Approving one leg of a multisend approves them all."""
+    async def approve(
+        self, order_id: str, *, wait: bool = False, approval_digest: str | None = None
+    ) -> dict[str, Any]:
+        """Run an order the agent parked. Approving one leg of a multisend approves them all.
+
+        The approval binds to what it releases (WAL-12): ``approval_digest``
+        is the ``approval.digest`` the engine showed beside the legs — on the
+        order for a single one, on ``trading.orders.batch`` for a multisend.
+        A batch is never approved without it; a digest that no longer matches
+        (a leg changed, added or dropped since it was shown) is refused with
+        ``trading.approval_changed``. Each claimed leg then carries its own
+        digest to the signer, which refuses a row that changed after this
+        call (``_check_approval_binding``).
+        """
         row, members = self._pending_group(order_id)
         if row.get("expires_at") and float(row["expires_at"]) <= self._now():
             for member in members:
@@ -5940,12 +6127,33 @@ class TradingService:
                 if row.get("trigger_id"):
                     await self._trigger_on_order(member)
             raise TradingError("trading.quote_expired", f"order {order_id} expired")
+        rows = {m: r for m in members if (r := self.ledger.get_order(m)) is not None}
+        legs = [rows[m] for m in members if m in rows]
+        batch_id = row.get("batch_id")
+        given = (approval_digest or "").strip().lower() or None
+        if given is None and batch_id:
+            raise TradingError(
+                "trading.approval_binding_required",
+                f"order {order_id} is one of {len(legs)} legs of batch {batch_id}, and one "
+                "approval runs them all: read the whole batch (trading.orders.batch) and "
+                "approve with its approval digest",
+                details={"orderId": order_id, "batchId": batch_id, "legCount": len(legs)},
+            )
+        if given is not None and given != binding.approval_digest(legs):
+            raise TradingError(
+                "trading.approval_changed",
+                f"order {order_id} is not what was shown when you approved it"
+                + (f" (batch {batch_id} now has {len(legs)} legs awaiting)" if batch_id else "")
+                + "; review it again",
+                details={"orderId": order_id, "batchId": batch_id, "legCount": len(legs)},
+            )
         # Compare-and-set: two approvals racing each other both passed the
         # status read above; only the one that flips the row may execute.
         claimed = [
             member
             for member in members
-            if self.ledger.update_order(
+            if member in rows
+            and self.ledger.update_order(
                 member, expect_status="awaiting_approval", status="approved", reason=None
             )
             is not None
@@ -5954,7 +6162,17 @@ class TradingService:
             raise TradingError(
                 "trading.invalid", f"order {order_id} is no longer awaiting approval"
             )
-        await self._run_legs(claimed, wait=wait)
+        # What was judged above is what the signer will hold each leg to.
+        for member in claimed:
+            self._approval_bindings[member] = _ApprovalBinding(
+                digest=binding.approval_digest([rows[member]]),
+                tx=binding.expected_tx(rows[member]),
+            )
+        try:
+            await self._run_legs(claimed, wait=wait)
+        finally:
+            for member in claimed:
+                self._approval_bindings.pop(member, None)
         await self._emit(
             "trading.changed",
             {"reason": "approval", "orderId": order_id, "batchId": row.get("batch_id")},

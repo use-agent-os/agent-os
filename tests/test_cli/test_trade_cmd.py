@@ -684,6 +684,7 @@ def test_approve_and_reject(client: _FakeClient) -> None:
     rejected = runner.invoke(trade_cmd.app, ["reject", "ord-1", "--reason", "too pricey"])
     assert approved.exit_code == 0 and rejected.exit_code == 0
     assert client.calls == [
+        ("trading.orders.get", {"orderId": "ord-1"}),
         ("trading.orders.approve", {"orderId": "ord-1"}),
         ("trading.orders.reject", {"orderId": "ord-1", "reason": "too pricey"}),
     ]

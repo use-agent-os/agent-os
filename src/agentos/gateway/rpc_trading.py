@@ -781,7 +781,13 @@ async def _trading_orders_batch(params: dict | None, ctx: RpcContext) -> dict[st
     batch_id = _str(p, "batchId", required=True) or ""
     service = _service(ctx)
     try:
-        return {"orders": service.batch(batch_id), "batchId": batch_id}
+        # ``approval`` carries the digest ``trading.orders.approve`` needs for
+        # a parked batch: it is only served beside every leg (WAL-12).
+        return {
+            "orders": service.batch(batch_id),
+            "batchId": batch_id,
+            "approval": service.batch_approval(batch_id),
+        }
     except Exception as exc:
         raise _raise(exc) from exc
 
@@ -2139,7 +2145,13 @@ async def _trading_orders_approve(params: dict | None, ctx: RpcContext) -> dict[
     order_id = _str(p, "orderId", required=True) or ""
     service = _service(ctx)
     try:
-        return {"order": await service.approve(order_id, wait=bool(p.get("wait")))}
+        return {
+            "order": await service.approve(
+                order_id,
+                wait=bool(p.get("wait")),
+                approval_digest=_str(p, "approvalDigest"),
+            )
+        }
     except Exception as exc:
         raise _raise(exc) from exc
 

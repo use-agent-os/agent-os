@@ -1369,7 +1369,18 @@ def trade_approve(
     """
 
     async def _run(client):
-        return await client.call("trading.orders.approve", {"orderId": order_id})
+        # The approval names what it releases: the digest the engine shows
+        # beside the order, or beside every leg of its batch (WAL-12).
+        shown = _dict(_dict(await client.call("trading.orders.get", {"orderId": order_id})))
+        order = _dict(shown.get("order"))
+        approval = _dict(order.get("approval"))
+        if order.get("batchId"):
+            batch = await client.call("trading.orders.batch", {"batchId": order["batchId"]})
+            approval = _dict(_dict(batch).get("approval"))
+        params: dict[str, Any] = {"orderId": order_id}
+        if approval.get("digest"):
+            params["approvalDigest"] = approval["digest"]
+        return await client.call("trading.orders.approve", params)
 
     result = run_gateway_sync(_run, json_output=json_output)
     if json_output:

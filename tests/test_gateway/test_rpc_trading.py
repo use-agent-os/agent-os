@@ -683,6 +683,47 @@ class TestSendAndToolsRpc:
         assert res.ok is False and res.error.code == "trading.insufficient_balance"
         assert (await call("trading.orders.batch", {"batchId": "bat_nope"}, ctx)).ok is False
 
+    async def test_batch_approval_names_every_leg_and_echoes_its_digest(
+        self, ctx: RpcContext, stack: dict[str, Any]
+    ) -> None:
+        """WAL-12 over the wire: a batch is approved only with the digest of all its legs."""
+        await self._funded(ctx, stack)
+        agent = _agent_ctx(stack)
+        legs = [
+            {"to": "0x2222222222222222222222222222222222222222", "amount": "1"},
+            {"to": "0x3333333333333333333333333333333333333333", "amount": "450"},
+        ]
+        res = await call(
+            "trading.send", {"chainId": 8453, "token": "USDC", "recipients": legs}, agent
+        )
+        assert res.ok, res.error
+        first = res.payload["orders"][0]
+        assert first["status"] == "awaiting_approval"
+        assert first["approval"]["legCount"] == 2 and first["approval"]["digest"] is None
+        bare = await call("trading.orders.approve", {"orderId": first["orderId"]}, ctx)
+        assert bare.ok is False and bare.error.code == "trading.approval_binding_required"
+        batch = await call("trading.orders.batch", {"batchId": first["batchId"]}, ctx)
+        approval = batch.payload["approval"]
+        assert [leg["recipient"] for leg in approval["legs"]] == [
+            "0x2222222222222222222222222222222222222222",
+            "0x3333333333333333333333333333333333333333",
+        ]
+        assert approval["totalRaw"] == str(451 * 10**6)
+        stale = await call(
+            "trading.orders.approve",
+            {"orderId": first["orderId"], "approvalDigest": "f" * 64},
+            ctx,
+        )
+        assert stale.ok is False and stale.error.code == "trading.approval_changed"
+        assert stack["base"].sent == []
+        done = await call(
+            "trading.orders.approve",
+            {"orderId": first["orderId"], "approvalDigest": approval["digest"]},
+            ctx,
+        )
+        assert done.ok, done.error
+        assert len(stack["base"].sent) == 2
+
     async def test_agent_send_and_revoke_park_for_the_user(
         self, ctx: RpcContext, stack: dict[str, Any]
     ) -> None:

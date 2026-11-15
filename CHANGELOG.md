@@ -170,6 +170,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   checked fields; anything else fails the order with
   `trading.permit_refused` and nothing is sent. The default no-Permit2 flow
   is unchanged. (WAL-07)
+- Trading: an approval binds to exactly what it releases. Approving one leg
+  of an agent multisend used to sign every leg of the batch, while the
+  request and the single-order views named only that leg. Every awaiting
+  order now carries `approval` (what one approve releases: leg count,
+  totals, unpriced flag) and a digest of all its legs' terms;
+  `trading.orders.approve` takes it as `approvalDigest`. **A batch is
+  approved only with its digest**, which `trading.orders.batch` serves beside
+  every leg (`trading.approval_binding_required` otherwise); a stale digest
+  is refused with `trading.approval_changed`. A single order's digest is
+  optional and checked when given. After an approval the engine holds each
+  leg to its approved terms again where its transaction is built and
+  signed (a send or revoke to its exact `to`/`value`/`data`), so an order
+  changed between your approval and the signature fails instead of going
+  out. `agentos trade approve` and the desktop app send the digest; a
+  script that approves a multisend with a bare `orderId` must read the
+  batch first. (WAL-12)
 
 ### Changed
 - Editing the config file by hand no longer applies the operator-only
