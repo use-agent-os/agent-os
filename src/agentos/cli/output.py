@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from typing import Any, TextIO
 
 import typer
+
+from agentos.display_text import terminal_text
 
 
 def _write_json_text(text: str, *, err: bool = False) -> None:
@@ -40,10 +43,21 @@ def _write_json_text(text: str, *, err: bool = False) -> None:
     stream.flush()
 
 
+#: What ``json.dumps(ensure_ascii=False)`` leaves raw but a terminal may act
+#: on: DEL, the C1 controls (0x9b is CSI), bidi and invisible formatting.
+_JSON_UNSAFE = re.compile("[\x7f-\x9f\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]")
+
+
+def _json_dumps(payload: Any) -> str:
+    """JSON with every character a terminal could act on ``\\u``-escaped (same data)."""
+    text = json.dumps(payload, ensure_ascii=False, default=str)
+    return _JSON_UNSAFE.sub(lambda m: f"\\u{ord(m.group()):04x}", text)
+
+
 def print_json(payload: Any) -> None:
     """Print JSON payload to stdout using the AgentOS CLI contract."""
 
-    _write_json_text(json.dumps(payload, ensure_ascii=False, default=str))
+    _write_json_text(_json_dumps(payload))
 
 
 def print_text(text: str) -> None:
@@ -82,13 +96,9 @@ def emit_error(
     """Emit an error to stderr without polluting JSON stdout."""
 
     if json_output:
-        _write_json_text(
-            json.dumps(
-                error_payload(message, code=code, details=details),
-                ensure_ascii=False,
-                default=str,
-            ),
-            err=True,
-        )
+        _write_json_text(_json_dumps(error_payload(message, code=code, details=details)), err=True)
     else:
-        typer.secho(f"Error: {message}", fg=typer.colors.RED, err=True)
+        # A server message can quote a token symbol or a caller's input:
+        # its control characters are shown, not sent (WAL-13).
+        safe = terminal_text(message, keep_newlines=True)
+        typer.secho(f"Error: {safe}", fg=typer.colors.RED, err=True)

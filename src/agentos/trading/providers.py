@@ -88,6 +88,10 @@ class ProviderQuote:
     # Gas cost in the chain's own coin, for providers that price gas in ETH
     # rather than dollars. The service converts it once it has a native price.
     gas_native: float | None = None
+    # Whether ``price_impact_pct`` was checked against the engine's own feed
+    # (both sides priced). A provider's figure alone is shown, never trusted:
+    # the agent guardrails read an unchecked impact as unknown.
+    impact_checked: bool = False
 
     @property
     def age_s(self) -> float:

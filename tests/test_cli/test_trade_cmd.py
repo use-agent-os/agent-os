@@ -680,11 +680,15 @@ def test_order_get_and_wait(client: _FakeClient) -> None:
 
 
 def test_approve_and_reject(client: _FakeClient) -> None:
-    approved = runner.invoke(trade_cmd.app, ["approve", "ord-1", "--json"])
+    client.payloads["trading.orders.get"] = {
+        "order": _order(status="awaiting_approval", approval={"digest": "d" * 64, "legCount": 1})
+    }
+    approved = runner.invoke(trade_cmd.app, ["approve", "ord-1", "--yes", "--json"])
     rejected = runner.invoke(trade_cmd.app, ["reject", "ord-1", "--reason", "too pricey"])
     assert approved.exit_code == 0 and rejected.exit_code == 0
     assert client.calls == [
-        ("trading.orders.approve", {"orderId": "ord-1"}),
+        ("trading.orders.get", {"orderId": "ord-1"}),
+        ("trading.orders.approve", {"orderId": "ord-1", "approvalDigest": "d" * 64}),
         ("trading.orders.reject", {"orderId": "ord-1", "reason": "too pricey"}),
     ]
     assert json.loads(approved.stdout)["order"]["status"] == "approved"
@@ -745,6 +749,7 @@ def test_sync_and_limits(client: _FakeClient) -> None:
 
 
 def test_every_command_supports_json(client: _FakeClient) -> None:
+    client.payloads["trading.orders.get"] = {"order": _order(status="awaiting_approval")}
     invocations = [
         ["status"],
         ["probe"],
@@ -753,7 +758,7 @@ def test_every_command_supports_json(client: _FakeClient) -> None:
         ["tokens", "--chain", "base", "usdc"],
         ["orders"],
         ["order", "ord-1"],
-        ["approve", "ord-1"],
+        ["approve", "ord-1", "--yes"],
         ["reject", "ord-1"],
         ["history"],
         ["portfolio"],

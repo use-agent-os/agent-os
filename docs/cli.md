@@ -1134,7 +1134,8 @@ agentos trade swap  --chain base --in USDC --out ETH --amount 20 --all-wallets -
 agentos trade swap  --chain base --in USDC --out ETH --amount 20 --client-id dca-eth-$(date +%Y%m%dT%H%M)   # idempotency key: one id per intended order, the same id on every retry; minute resolution so sub-daily jobs never collide
 agentos trade swap  --chain base --in ETH --out USDC --amount 0.01 --expected-out-raw <quote.expectedOutRaw> --min-out-raw <quote.minOutRaw>   # pin the fill to the quote shown; worse than 2× slippage → trading.price_moved
 agentos trade orders [--status awaiting_approval] [--wallet <addr>] [--kind swap|send|revoke|bridge|lp_collect|lp_remove|lp_add] [--limit N]
-agentos trade order <id> --wait --wait-seconds 600 / approve <id> / reject <id> [--reason <text>]   # --wait-seconds without --wait returns at once
+agentos trade order <id> --wait --wait-seconds 600 / reject <id> [--reason <text>]   # --wait-seconds without --wait returns at once; a parked multisend leg also lists every leg of its batch
+agentos trade approve <id> [--yes] [--json]   # operator-only: shows the order in full (token contracts + verified mark, full recipient and wallet, chain, value; a multisend leg lists EVERY leg and the total — one approval runs them all), then asks; --yes skips the question and is required with --json; sends the digest of what was shown, so an order that changed meanwhile is refused (trading.approval_changed)
 agentos trade send --chain base --token USDC --to <addr> --amount 25 [--wallet <addr>] [--note <text>] [--client-id <id>] [--wait] [--wait-seconds 1..900] [--as-agent]
 agentos trade send --chain base --token ETH --to <a> --to <b> --usd 5        # multisend: one batch, $5 of ETH to each
 agentos trade send --chain base --token USDC --to <a>=10 --to <b>=20 --file recipients.txt   # ADDR=AMOUNT per --to; file lines 'ADDR' or 'ADDR,AMOUNT'
@@ -1156,20 +1157,20 @@ agentos trade markets <token> [--chain base|robinhood] [--side all|quote|base] [
 agentos trade dca create <token> --usd X --every 30m|2h|1d|1w|<seconds> (--cap X | --runs N | both) [--max-price X] [--quote <token>] [--chain base|robinhood] [--wallet <addr|label>] [--slippage 1] [--name <text>] [--start now|next] [--json] [--no-card]   # DCA mandate: the engine buys on schedule under a hard cap; from an agent it waits for approval
 agentos trade dca list [--all] [--wallet <addr|label>] [--json] [--no-card]   # live mandates (awaiting approval, active, paused); --all adds completed/stopped/rejected/expired
 agentos trade dca show <id> [--json] [--no-card]            # one mandate: schedule, progress, avg buy vs price now, recent runs
-agentos trade dca approve <id> / reject <id> [--reason <text>] [--json] [--no-card]   # operator-only
+agentos trade dca approve <id> [--yes] / reject <id> [--reason <text>] [--json] [--no-card]   # operator-only; approve shows the mandate (token contracts, wallet, slippage) and asks first; --yes skips it and is required with --json
 agentos trade dca pause <id> / resume <id> / stop <id> [--reason <text>] [--json] [--no-card]   # operator-only; stop is final
 agentos trade dca run <id> [--wait] [--wait-seconds 1..900] [--json] [--no-card]   # buy now (operator-only); the next scheduled buy does not move
 agentos trade dca update <id> [--usd X] [--cap X] [--runs N] [--every 12h] [--max-price X] [--name <text>] [--json] [--no-card]   # operator-only; --runs 0 / --max-price 0 remove the limit
 agentos trade trigger create <token> (--below <price|pct%> | --above <price|pct%> | --trail <pct>) (--sell (--pct 50 | --amount 0.05 | --usd 100) | --buy --usd 50 | --alert) [--quote <token>] [--chain base|robinhood] [--wallet <addr|label>] [--slippage 1] [--name <text>] [--for 30m|2h|1d|1w|<seconds>] [--json] [--no-card]   # price trigger: the engine watches the price and fires once; from an agent it waits for approval; --quote defaults to the chain's USDC (the native coin when the token is USDC)
 agentos trade trigger list [--all] [--wallet <addr|label>] [--json] [--no-card]   # live triggers (awaiting approval, armed, triggered, paused); --all adds done/stopped/rejected/expired
 agentos trade trigger show <id> [--json] [--no-card]            # one trigger: condition, price now and distance, size, checks, recent fires, result
-agentos trade trigger approve <id> / reject <id> [--reason <text>] [--json] [--no-card]   # operator-only
+agentos trade trigger approve <id> [--yes] / reject <id> [--reason <text>] [--json] [--no-card]   # operator-only; approve shows the trigger and asks first (--yes: required with --json)
 agentos trade trigger pause <id> / resume <id> / stop <id> [--reason <text>] [--json] [--no-card]   # operator-only; stop is final
 agentos trade trigger fire <id> [--wait] [--wait-seconds 1..900] [--json] [--no-card]   # fire now whatever the price (operator-only)
 agentos trade protect <token> --tp <price|pct%> (--sl <price|pct%> | --trail <pct>) [--pct 100 | --amount 0.05 | --usd 100] [--tp-pct 50] [--alert] [--quote <token>] [--chain base|robinhood] [--wallet <addr|label>] [--slippage 1] [--name <text>] [--for 30m|2h|1d|1w|<seconds>] [--json] [--no-card]   # bracket: a take-profit and a stop-loss on one position, whichever fires first stops the other; default the whole position (--pct 100); from an agent it waits for one approval
 agentos trade bracket list [--all] [--wallet <addr|label>] [--json] [--no-card]   # live brackets (awaiting approval, armed, triggered, paused); --all adds done/stopped/rejected/expired
 agentos trade bracket show <id> [--json] [--no-card]            # one bracket: both lines with the price now between them, upside/downside, reward:risk, size, each leg's checks, fires, result
-agentos trade bracket approve <id> / reject <id> [--reason <text>] [--json] [--no-card]   # operator-only; acts on both legs
+agentos trade bracket approve <id> [--yes] / reject <id> [--reason <text>] [--json] [--no-card]   # operator-only; acts on both legs; approve shows the bracket and asks first (--yes: required with --json)
 agentos trade bracket pause <id> / resume <id> / stop <id> [--reason <text>] [--json] [--no-card]   # operator-only; both legs; stop is final
 agentos trade bracket fire <id> [--leg tp|sl] [--wait] [--wait-seconds 1..900] [--json] [--no-card]   # fire one leg now (default the nearer one), the other goes on hold (operator-only)
 agentos trade history [--wallet <addr>] [--chain base|robinhood] [--kind swap|deposit|withdraw|gas|approval|lp_collect|lp_remove|lp_add] [--limit N] [--hidden]
@@ -1251,9 +1252,10 @@ price vs reference, venue fee and feed skew included) waits as
 `awaiting_approval` for `trading.approval_ttl_seconds` (15 minutes); an
 order that would push a wallet past `trading.daily_cap_usd` (default 1,000
 per wallet per calendar day — `--all-wallets` spends up to N caps — with an
-order counted as max(in, out) in USD, orders in flight included; 0 switches
-agent swaps off) is
-rejected; `--slippage` above `trading.agent_max_slippage_pct` (default 5) is
+order counted as max(in, out) in USD — an order whose sell side has no
+feed price is unpriced and waits, whatever the token it buys is worth —
+orders in flight included; 0 switches agent swaps off) is
+rejected, `expectedOutRaw` or not; `--slippage` above `trading.agent_max_slippage_pct` (default 5) is
 refused with `trading.slippage_too_high`. `agentos trade approve` /
 `reject`, `hide` / `unhide`, `probe --api-key`, `sync --full` and every
 vault command except `status`, `list` and `balances` fail from an agent's

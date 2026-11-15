@@ -32,7 +32,7 @@ from rich.panel import Panel
 from rich.table import Table
 from typer.core import TyperGroup
 
-from agentos.cli.gateway_rpc import rpc_error_exit_code, run_gateway_sync
+from agentos.cli.gateway_rpc import confirm_or_exit, rpc_error_exit_code, run_gateway_sync
 from agentos.cli.output import emit_error, print_json, print_text
 from agentos.cli.ui import ACCENT, ACCENT_HEADER, console, markup_escape
 from agentos.cli.wallet_cmd import (
@@ -46,6 +46,7 @@ from agentos.cli.wallet_cmd import (
     short_address,
     token_symbol,
 )
+from agentos.display_text import display_safe, terminal_text
 
 
 class _JsonUsageGroup(TyperGroup):
@@ -78,6 +79,19 @@ AGENT_ENV_MARKERS = ("AGENTOS_SESSION_KEY", "AGENTOS_AGENT")
 PROVIDERS: dict[str, str] = {"aggregator": "AgentOS Aggregator", "uniswap": "Uniswap"}
 # Statuses that still move on their own after ``trading.swap`` returns.
 _PENDING_STATUSES = frozenset({"awaiting_approval", "approved", "submitted", "quoted"})
+
+
+def _gateway(action: Callable[[Any], Any], *, json_output: bool = False) -> Any:
+    """``run_gateway_sync`` for a view: in human mode every string is terminal-safe.
+
+    Token symbols come from contracts, order fields from the agent, errors
+    from providers; a control or bidi character in any of them is shown as an
+    escape, never sent to the operator's terminal (WAL-13). ``--json`` output
+    is the payload as served (``print_json`` escapes what a terminal could act
+    on without changing the data).
+    """
+    result = run_gateway_sync(action, json_output=json_output)
+    return result if json_output else display_safe(result)
 
 
 class TokenResolutionError(Exception):
@@ -186,23 +200,65 @@ def _order_rows(result: Any) -> list[dict[str, Any]]:
     return [o for o in orders if isinstance(o, dict)]
 
 
+def _flagged_symbol(token: Any) -> str:
+    """A token's symbol, marked when the engine has not verified the contract behind it.
+
+    Any contract can answer any ``symbol()``: an unverified token that calls
+    itself USDC must not read like USDC on a decision surface (WAL-08).
+    """
+    symbol = token_symbol(token)
+    if isinstance(token, dict) and not token.get("native") and not token.get("verified"):
+        return f"{symbol} (UNVERIFIED)"
+    return symbol
+
+
+def _token_identity(token: Any) -> str:
+    """Symbol, full contract address and verified mark: what tells two tokens apart."""
+    if not isinstance(token, dict):
+        return str(token or "—")
+    symbol = str(token.get("symbol") or "?")
+    if token.get("native"):
+        return f"{symbol} (native gas coin)"
+    mark = "verified" if token.get("verified") else "UNVERIFIED"
+    return f"{symbol} · {token.get('address') or '?'} · {mark}"
+
+
+def _batch_note(order: dict[str, Any]) -> str:
+    """ " · 1 of 3 legs, 900 USDC in all" for a parked batch leg; "" otherwise."""
+    approval = _dict(order.get("approval"))
+    count = approval.get("legCount")
+    if not order.get("batchId") or not count:
+        return ""
+    total = approval.get("total")
+    symbol = token_symbol(approval.get("token") or order.get("tokenIn"))
+    return f" · 1 of {count} legs" + (f", {total} {symbol} in all" if total else "")
+
+
 def _order_legs(order: dict[str, Any]) -> str:
-    """Legs in one phrase: "10 USDC → WETH", "10 USDC → 0x2222…2222", or the spender of a revoke."""
+    """Legs in one phrase: "10 USDC → WETH", "10 USDC → 0x2222…2222", or the spender of a revoke.
+
+    An order that still waits for approval names its recipient in full (two
+    addresses can share their first and last four digits) and its batch.
+    """
     kind = str(order.get("kind") or "swap")
-    amount = f"{amount_text(order.get('amountIn'))} {token_symbol(order.get('tokenIn'))}"
+    waiting = order.get("status") == "awaiting_approval"
+    address = (lambda value: str(value or "")) if waiting else short_address
+    amount = f"{amount_text(order.get('amountIn'))} {_flagged_symbol(order.get('tokenIn'))}"
     if kind == "send":
-        return f"{amount} → {short_address(order.get('recipient'))}"
+        return f"{amount} → {address(order.get('recipient'))}{_batch_note(order)}"
     if kind == "revoke":
-        who = order.get("recipientLabel") or short_address(order.get("recipient"))
-        return f"revoke {token_symbol(order.get('tokenIn'))} for {who}"
+        who = address(order.get("recipient"))
+        if order.get("recipientLabel"):
+            who = f"{who} ({order['recipientLabel']})" if waiting else str(order["recipientLabel"])
+        return f"revoke {_flagged_symbol(order.get('tokenIn'))} for {who}"
     if kind in LP_KINDS:
         return _lp_legs(order)
     if kind == "bridge":
         bridge = _dict(order.get("bridge"))
         dest = chain_label(bridge.get("destinationChainId"))
         out = order.get("receivedOut") or order.get("expectedOut")
-        return f"{amount} → {dest} ({amount_text(out)} {token_symbol(order.get('tokenOut'))})"
-    return f"{amount} → {token_symbol(order.get('tokenOut'))}"
+        return f"{amount} → {dest} ({amount_text(out)} {_flagged_symbol(order.get('tokenOut'))})"
+    return f"{amount} → {_flagged_symbol(order.get('tokenOut'))}"
 
 
 #: Order kinds of the Uniswap V4 LP writes (``trade lp collect|remove|add``).
@@ -250,10 +306,11 @@ def _order_table(orders: list[dict[str, Any]], title: str = "Orders") -> Table:
     table.add_column("Tx / reason")
     for order in orders:
         tail = order.get("txHash") or order.get("reason") or ""
+        waiting = order.get("status") == "awaiting_approval"
         table.add_row(
-            str(order.get("orderId") or ""),
+            markup_escape(str(order.get("orderId") or "")),
             chain_label(order.get("chainId")),
-            short_address(order.get("wallet")),
+            str(order.get("wallet") or "") if waiting else short_address(order.get("wallet")),
             markup_escape(_order_legs(order)),
             money(order.get("valueUsd")),
             str(order.get("status") or ""),
@@ -277,13 +334,27 @@ def _print_order(order: dict[str, Any]) -> None:
     out_amount = (
         order.get("receivedOut") if order.get("status") == "confirmed" else order.get("expectedOut")
     )
+    approval = _dict(order.get("approval"))
+    batch = order.get("batchId")
+    if batch and approval.get("legCount"):
+        total = approval.get("total")
+        batch = (
+            f"{batch} · {approval['legCount']} legs awaiting, one approval runs them all"
+            + (f" · {total} {token_symbol(approval.get('token'))}" if total else "")
+            + (
+                f" ({money(approval.get('totalUsd'))})"
+                if approval.get("totalUsd") is not None
+                else ""
+            )
+            + (" · UNPRICED: the daily cap does not bound it" if approval.get("unpriced") else "")
+        )
     for field, value in (
         ("kind", kind if kind != "swap" else None),
-        ("batch", order.get("batchId")),
+        ("batch", batch),
         ("status", order.get("status")),
         ("reason", order.get("reason")),
-        ("chain", chain_label(order.get("chainId"))),
-        ("to chain", chain_label(bridge.get("destinationChainId")) if bridge else None),
+        ("chain", _chain_text(order.get("chainId"))),
+        ("to chain", _chain_text(bridge.get("destinationChainId")) if bridge else None),
         ("wallet", order.get("wallet")),
         ("to" if kind == "send" else "spender", recipient if kind != "bridge" else None),
         (
@@ -291,12 +362,22 @@ def _print_order(order: dict[str, Any]) -> None:
             f"{amount_text(order.get('amountIn'))} {token_symbol(order.get('tokenIn'))}",
         ),
         (
+            "token" if kind in ("send", "revoke") else "in token",
+            _token_identity(order.get("tokenIn")),
+        ),
+        (
             "out",
             f"{amount_text(out_amount)} {token_symbol(order.get('tokenOut'))}"
             if kind in ("swap", "bridge")
             else None,
         ),
+        (
+            "out token",
+            _token_identity(order.get("tokenOut")) if kind in ("swap", "bridge") else None,
+        ),
         ("min out", order.get("minOut")),
+        ("slippage", percent(order.get("slippagePct")).lstrip("+") if kind == "swap" else None),
+        ("provider", provider_label(order.get("provider")) if kind == "swap" else None),
         ("value", money(order.get("valueUsd"))),
         ("price impact", percent(order.get("priceImpactPct"))),
         ("gas", money(order.get("gasUsd"))),
@@ -315,6 +396,46 @@ def _print_order(order: dict[str, Any]) -> None:
             continue
         table.add_row(field, markup_escape(str(value)))
     console.print(table)
+
+
+def _chain_text(chain_id: Any) -> str | None:
+    if chain_id in (None, ""):
+        return None
+    return f"{chain_label(chain_id)} ({chain_id})"
+
+
+def _print_batch_legs(approval: dict[str, Any]) -> None:
+    """Every leg one approval of a batch releases, recipients in full, and the total."""
+    legs = [leg for leg in approval.get("legs") or [] if isinstance(leg, dict)]
+    symbol = token_symbol(approval.get("token"))
+    table = Table(
+        title=f"Batch {approval.get('batchId') or ''}: {len(legs)} legs, one approval",
+        show_header=True,
+        header_style=ACCENT_HEADER,
+    )
+    table.add_column("#", justify="right")
+    table.add_column("To")
+    table.add_column("Amount", justify="right")
+    table.add_column("Value", justify="right")
+    for n, leg in enumerate(legs, 1):
+        table.add_row(
+            str(n),
+            markup_escape(str(leg.get("recipient") or "")),
+            markup_escape(f"{amount_text(leg.get('amount'))} {symbol}"),
+            money(leg.get("valueUsd")),
+        )
+    table.add_row(
+        "",
+        "total",
+        markup_escape(f"{amount_text(approval.get('total'))} {symbol}"),
+        money(approval.get("totalUsd")),
+    )
+    console.print(table)
+    console.print(markup_escape(f"token: {_token_identity(approval.get('token'))}"))
+    if approval.get("unpriced"):
+        console.print(
+            "[bold red]No USD price for this token: the daily cap does not bound this batch.[/]"
+        )
 
 
 def _named(pair: Any, plan: dict[str, Any]) -> dict[str, Any]:
@@ -346,9 +467,11 @@ def _print_lp_order(order: dict[str, Any], table: Table) -> None:
         ("kind", _lp_legs(order)),
         ("status", order.get("status")),
         ("reason", order.get("reason")),
-        ("chain", chain_label(order.get("chainId"))),
+        ("chain", _chain_text(order.get("chainId"))),
         ("wallet", order.get("wallet")),
         ("pool", f"{_lp_pair(order)} · {pool.get('feePct')} · {pool.get('poolId')}"),
+        ("base token", _token_identity(order.get("tokenIn"))),
+        ("quote token", _token_identity(order.get("tokenOut"))),
         ("hook", pool.get("hook")),
         (
             "range",
@@ -406,7 +529,7 @@ def trade_status(
     async def _run(client):
         return await client.call("trading.status", {})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -491,7 +614,7 @@ def trade_probe(
     async def _run(client):
         return await client.call("trading.probe", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         if isinstance(result, dict) and not result.get("ok"):
@@ -522,7 +645,7 @@ def trade_provider(
         async def _show(client):
             return await client.call("trading.status", {})
 
-        result = _dict(run_gateway_sync(_show, json_output=json_output))
+        result = _dict(_gateway(_show, json_output=json_output))
         current = result.get("provider")
         if json_output:
             print_json({"provider": current, "providers": result.get("providers", [])})
@@ -535,7 +658,7 @@ def trade_provider(
     async def _set(client):
         return await client.call("config.set", {"path": "trading.provider", "value": provider})
 
-    result = _dict(run_gateway_sync(_set, json_output=json_output))
+    result = _dict(_gateway(_set, json_output=json_output))
     if json_output:
         print_json({"provider": provider, **result})
         return
@@ -562,7 +685,7 @@ def trade_tokens(
     async def _run(client):
         return await client.call("trading.tokens.search", {"chainId": chain_id, "query": query})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -598,7 +721,7 @@ def _set_hidden(chain: str, address: str, hidden: bool, json_output: bool) -> No
             "trading.tokens.hide", {"chainId": chain_id, "address": address, "hidden": hidden}
         )
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -673,7 +796,7 @@ def trade_quote(
         return await client.call("trading.quote", params)
 
     try:
-        result = run_gateway_sync(_run, json_output=json_output)
+        result = _gateway(_run, json_output=json_output)
     except TokenResolutionError as exc:
         _exit_token_error(exc, json_output=json_output)
         return
@@ -815,7 +938,7 @@ def trade_swap(
         return {"orders": settled}
 
     try:
-        result = run_gateway_sync(_run, json_output=json_output)
+        result = _gateway(_run, json_output=json_output)
     except TokenResolutionError as exc:
         _exit_token_error(exc, json_output=json_output)
         return
@@ -981,7 +1104,7 @@ def trade_send(
         return {"orders": settled, "batchId": result.get("batchId")}
 
     try:
-        result = run_gateway_sync(_run, json_output=json_output)
+        result = _gateway(_run, json_output=json_output)
     except TokenResolutionError as exc:
         _exit_token_error(exc, json_output=json_output)
         return
@@ -1039,7 +1162,7 @@ def trade_allowances(
             result = await client.call("trading.allowances.list", again)
         return result
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1131,7 +1254,7 @@ def trade_revoke(
         return result
 
     try:
-        result = run_gateway_sync(_run, json_output=json_output)
+        result = _gateway(_run, json_output=json_output)
     except TokenResolutionError as exc:
         _exit_token_error(exc, json_output=json_output)
         return
@@ -1170,7 +1293,7 @@ def trade_decode(
     async def _run(client):
         return await client.call("trading.decode", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1257,7 +1380,7 @@ def trade_network(
     async def _run(client):
         return await client.call("trading.network", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1319,7 +1442,7 @@ def trade_orders(
     async def _run(client):
         return await client.call("trading.orders.list", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1348,35 +1471,96 @@ def trade_order(
             )
         return await client.call("trading.orders.get", {"orderId": order_id})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
-    order = result.get("order") if isinstance(result, dict) else None
-    _print_order(order if isinstance(order, dict) else {})
+    order = _dict(_dict(result).get("order"))
+    _print_order(order)
+    if order.get("batchId") and order.get("status") == "awaiting_approval":
+        batch_id = order["batchId"]
+
+        async def _batch(client):
+            return await client.call("trading.orders.batch", {"batchId": batch_id})
+
+        approval = _dict(_dict(_gateway(_batch, json_output=False)).get("approval"))
+        if approval:
+            _print_batch_legs(approval)
+
+
+async def _approval_view(client: Any, order_id: str) -> dict[str, Any]:
+    """The order and, for a multisend leg, its whole batch: what an approve releases."""
+    order = _dict(
+        _dict(await client.call("trading.orders.get", {"orderId": order_id})).get("order")
+    )
+    approval = _dict(order.get("approval"))
+    if order.get("batchId"):
+        batch = await client.call("trading.orders.batch", {"batchId": order["batchId"]})
+        approval = _dict(_dict(batch).get("approval"))
+    return {"order": order, "approval": approval}
+
+
+def _approval_prompt(order: dict[str, Any], approval: dict[str, Any]) -> str:
+    legs = int(approval.get("legCount") or 1)
+    if order.get("batchId") and legs > 1:
+        total = f"{amount_text(approval.get('total'))} {token_symbol(approval.get('token'))}"
+        return (
+            f"Approve ALL {legs} legs of batch {order['batchId']} ({total}, "
+            f"{money(approval.get('totalUsd'))}) from {order.get('wallet')}?"
+        )
+    return f"Approve order {order.get('orderId')} ({_order_legs(order)})?"
 
 
 @app.command("approve")
 def trade_approve(
     order_id: str = typer.Argument(..., help="Order id awaiting approval"),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Approve without the confirmation prompt (required with --json)"
+    ),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
-    """Approve a parked order.
+    """Approve a parked order, after showing everything the approval releases.
 
     Agent swaps park above the approval threshold or the price-impact ceiling,
     or when the engine cannot price them; agent sends and revokes always park,
     and so does every LP write (``trade lp collect|remove|add``), whoever asked.
+    The order is read first and shown in full — token contracts with their
+    verified mark, the full recipient, chain, value and, for a multisend leg,
+    every leg of its batch (one approval runs them all) — then the command
+    asks before it acts. The approval carries the digest of what was shown,
+    so an order that changed in between is refused, not signed.
     """
 
-    async def _run(client):
-        return await client.call("trading.orders.approve", {"orderId": order_id})
+    async def _show(client):
+        return await _approval_view(client, order_id)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    view = _gateway(_show, json_output=json_output)
+    order = _dict(_dict(view).get("order"))
+    approval = _dict(_dict(view).get("approval"))
+    if order.get("status") != "awaiting_approval":
+        emit_error(
+            f"order {order_id} is {order.get('status') or 'unknown'}, not awaiting approval",
+            json_output=json_output,
+            code="NOT_AWAITING_APPROVAL",
+        )
+        raise typer.Exit(3)
+    if not json_output:
+        _print_order(order)
+        if approval.get("legs"):
+            _print_batch_legs(approval)
+    confirm_or_exit(_approval_prompt(order, approval), yes=yes, json_output=json_output)
+    params: dict[str, Any] = {"orderId": order_id}
+    if approval.get("digest"):
+        params["approvalDigest"] = approval["digest"]
+
+    async def _run(client):
+        return await client.call("trading.orders.approve", params)
+
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
-    order = result.get("order") if isinstance(result, dict) else None
-    _print_order(order if isinstance(order, dict) else {})
+    _print_order(_dict(_dict(result).get("order")))
 
 
 @app.command("reject")
@@ -1394,7 +1578,7 @@ def trade_reject(
     async def _run(client):
         return await client.call("trading.orders.reject", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1430,7 +1614,7 @@ def trade_history(
     async def _run(client):
         return await client.call("trading.history", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1489,7 +1673,7 @@ def trade_portfolio(
     async def _run(client):
         return await client.call("trading.portfolio", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1561,7 +1745,7 @@ def trade_sync(
     async def _run(client):
         return await client.call("trading.sync", params)
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1584,7 +1768,7 @@ def trade_limits(
                 _bad_argument("No primary wallet; pass a wallet address", json_output=json_output)
         return await client.call("trading.limits", {"wallet": target})
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     if json_output:
         print_json(result)
         return
@@ -1733,7 +1917,7 @@ def _bridge_call(
         return result
 
     try:
-        return _dict(run_gateway_sync(_run, json_output=json_output))
+        return _dict(_gateway(_run, json_output=json_output))
     except TokenResolutionError as exc:
         _exit_token_error(exc, json_output=json_output)
         raise typer.Exit(2) from exc
@@ -1883,7 +2067,7 @@ def trade_bridge_status(
             emit_error(exc.message, json_output=json_output, code=exc.code, details=exc.data)
             raise typer.Exit(2) from exc
 
-    result = _dict(run_gateway_sync(_run, json_output=json_output))
+    result = _dict(_gateway(_run, json_output=json_output))
     if json_output:
         print_json(result)
         return
@@ -1926,7 +2110,7 @@ def _lp_call(method: str, params: dict[str, Any], *, json_output: bool) -> Any:
             emit_error(exc.message, json_output=json_output, code=exc.code, details=exc.data)
             raise typer.Exit(2) from exc
 
-    return run_gateway_sync(_run, json_output=json_output)
+    return _gateway(_run, json_output=json_output)
 
 
 def _usd(value: Any) -> str:
@@ -2336,7 +2520,7 @@ async def _lp_card_after(client: Any, order: dict[str, Any]) -> dict[str, Any] |
                 "trading.lp.position", {"chainId": chain_id, "tokenId": str(token_id)}
             )
     except Exception as exc:  # noqa: BLE001 - the order is confirmed; the card is a bonus
-        typer.echo(f"[card not refreshed: {exc}]", err=True)
+        typer.echo(f"[card not refreshed: {terminal_text(exc)}]", err=True)
         return None
     return payload if isinstance(payload, dict) and payload.get("kind") else None
 
@@ -2384,7 +2568,7 @@ def _lp_write(
             card = await _lp_card_after(client, _dict(order))
         return {"result": result, "card": card}
 
-    out = run_gateway_sync(_run, json_output=json_output)
+    out = _gateway(_run, json_output=json_output)
     result = _dict(out).get("result")
     if json_output:
         print_json(result)
@@ -2866,10 +3050,10 @@ def trade_markets(
                 line = "  ".join(
                     str(x) for x in (c.get("symbol"), c.get("name"), c.get("address")) if x
                 )
-                typer.echo(f"  {line}", err=True)
+                typer.echo(f"  {terminal_text(line)}", err=True)
             raise typer.Exit(rpc_error_exit_code(exc.code)) from exc
 
-    result = _dict(run_gateway_sync(_run, json_output=json_output))
+    result = _dict(_gateway(_run, json_output=json_output))
     if not json_output:
         _render_markets(result)
         return
@@ -2997,7 +3181,7 @@ def _dca_call(method: str, params: dict[str, Any], *, json_output: bool) -> Any:
     async def _run(client):
         return await _dca_rpc(client, method, params, json_output=json_output)
 
-    return run_gateway_sync(_run, json_output=json_output)
+    return _gateway(_run, json_output=json_output)
 
 
 async def _dca_rpc(client: Any, method: str, params: dict[str, Any], *, json_output: bool) -> Any:
@@ -3363,6 +3547,43 @@ def _dca_simple(
 
 
 _ID_HELP = "Mandate id (dca_…)"
+_YES_HELP = "Approve without the confirmation prompt (required with --json)"
+
+
+def _print_automation_terms(item: dict[str, Any]) -> None:
+    """The terms a mandate, trigger or bracket approval arms, unshortened (WAL-08)."""
+    wallet = _dict(item.get("wallet"))
+    guards = _dict(item.get("guards"))
+    action = _dict(item.get("action"))
+    slippage = guards.get("slippagePct", action.get("slippagePct", item.get("slippagePct")))
+    for field, value in (
+        ("wallet", wallet.get("address")),
+        ("token", _token_identity(item.get("token")) if item.get("token") else None),
+        ("quote", _token_identity(item.get("quote")) if item.get("quote") else None),
+        ("slippage", f"{slippage} %" if slippage not in (None, "") else None),
+    ):
+        if value in (None, ""):
+            continue
+        console.print(f"[{ACCENT}]{field}[/] {markup_escape(str(value))}")
+
+
+def _confirm_automation(
+    get_method: str,
+    params: dict[str, Any],
+    *,
+    what: str,
+    yes: bool,
+    json_output: bool,
+    call: Callable[..., Any],
+    emit: Callable[..., None],
+    key: str,
+) -> None:
+    """Show the automation as the engine holds it, then ask before arming it."""
+    if not json_output:
+        shown = _dict(call(get_method, params, json_output=False))
+        emit(shown, json_output=False, no_card=True)
+        _print_automation_terms(_dict(shown.get(key)))
+    confirm_or_exit(f"Approve {what}?", yes=yes, json_output=json_output)
 
 
 @dca_app.command("show")
@@ -3378,10 +3599,26 @@ def dca_show(
 @dca_app.command("approve")
 def dca_approve(
     mandate_id: str = typer.Argument(..., help=_ID_HELP),
+    yes: bool = typer.Option(False, "--yes", "-y", help=_YES_HELP),
     json_output: bool = typer.Option(False, "--json", help=_JSON_HELP),
     no_card: bool = typer.Option(False, "--no-card", help=_NO_CARD_HELP),
 ) -> None:
-    """Approve a proposed mandate and start it (yours only; an agent cannot)."""
+    """Approve a proposed mandate and start it (yours only; an agent cannot).
+
+    The mandate is shown first — tokens with their contracts and verified
+    mark, the wallet, slippage, cap — and the command asks before it acts.
+    """
+    params = {"mandateId": _dca_id(mandate_id, json_output=json_output)}
+    _confirm_automation(
+        "trading.dca.get",
+        params,
+        what=f"DCA mandate {params['mandateId']}",
+        yes=yes,
+        json_output=json_output,
+        call=_dca_call,
+        emit=_dca_emit,
+        key="mandate",
+    )
     _dca_simple("trading.dca.approve", mandate_id, json_output=json_output, no_card=no_card)
 
 
@@ -3463,7 +3700,7 @@ def dca_run(
         )
         return {**fresh, "run": settled}
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     _dca_emit(result, json_output=json_output, no_card=no_card)
 
 
@@ -3653,7 +3890,7 @@ def _trigger_call(method: str, params: dict[str, Any], *, json_output: bool) -> 
     async def _run(client):
         return await _trigger_rpc(client, method, params, json_output=json_output)
 
-    return run_gateway_sync(_run, json_output=json_output)
+    return _gateway(_run, json_output=json_output)
 
 
 async def _trigger_rpc(
@@ -4064,10 +4301,25 @@ def trigger_show(
 @trigger_app.command("approve")
 def trigger_approve(
     trigger_id: str = typer.Argument(..., help=_TRIGGER_ID_HELP),
+    yes: bool = typer.Option(False, "--yes", "-y", help=_YES_HELP),
     json_output: bool = typer.Option(False, "--json", help=_JSON_HELP),
     no_card: bool = typer.Option(False, "--no-card", help=_NO_CARD_HELP),
 ) -> None:
-    """Approve a proposed trigger and arm it (yours only; an agent cannot)."""
+    """Approve a proposed trigger and arm it (yours only; an agent cannot).
+
+    The trigger is shown first and the command asks before it arms it.
+    """
+    params = {"triggerId": _trigger_id(trigger_id, json_output=json_output)}
+    _confirm_automation(
+        "trading.trigger.get",
+        params,
+        what=f"trigger {params['triggerId']}",
+        yes=yes,
+        json_output=json_output,
+        call=_trigger_call,
+        emit=_trigger_emit,
+        key="trigger",
+    )
     _trigger_simple("trading.trigger.approve", trigger_id, json_output=json_output, no_card=no_card)
 
 
@@ -4161,7 +4413,7 @@ def trigger_fire(
         )
         return {**fresh, "fire": settled}
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     _trigger_emit(result, json_output=json_output, no_card=no_card)
 
 
@@ -4218,7 +4470,7 @@ def _bracket_call(method: str, params: dict[str, Any], *, json_output: bool) -> 
             client, method, params, json_output=json_output, usage_codes=_BRACKET_USAGE_CODES
         )
 
-    return run_gateway_sync(_run, json_output=json_output)
+    return _gateway(_run, json_output=json_output)
 
 
 def _bracket_leg_word(leg: str, trigger: dict[str, Any]) -> str:
@@ -4596,10 +4848,25 @@ def bracket_show(
 @bracket_app.command("approve")
 def bracket_approve(
     bracket_id: str = typer.Argument(..., help=_BRACKET_ID_HELP),
+    yes: bool = typer.Option(False, "--yes", "-y", help=_YES_HELP),
     json_output: bool = typer.Option(False, "--json", help=_JSON_HELP),
     no_card: bool = typer.Option(False, "--no-card", help=_NO_CARD_HELP),
 ) -> None:
-    """Approve a proposed bracket and arm both legs (yours only; an agent cannot)."""
+    """Approve a proposed bracket and arm both legs (yours only; an agent cannot).
+
+    The bracket is shown first and the command asks before it arms both legs.
+    """
+    params = {"bracketId": _bracket_id(bracket_id, json_output=json_output)}
+    _confirm_automation(
+        "trading.bracket.get",
+        params,
+        what=f"bracket {params['bracketId']} (both legs)",
+        yes=yes,
+        json_output=json_output,
+        call=_bracket_call,
+        emit=_trigger_emit,
+        key="bracket",
+    )
     _bracket_simple("trading.bracket.approve", bracket_id, json_output=json_output, no_card=no_card)
 
 
@@ -4718,5 +4985,5 @@ def bracket_fire(
         )
         return {**fresh, "fire": settled}
 
-    result = run_gateway_sync(_run, json_output=json_output)
+    result = _gateway(_run, json_output=json_output)
     _trigger_emit(result, json_output=json_output, no_card=no_card)

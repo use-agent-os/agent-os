@@ -219,7 +219,7 @@ STOP_LOSS = ["create", "ETH", "--sell", "--pct", "50", "--below", "3800"]
             {"all": True, "wallet": "0x1"},
         ),
         (["show", TID], "trading.trigger.get", {"triggerId": TID}),
-        (["approve", TID], "trading.trigger.approve", {"triggerId": TID}),
+        (["approve", TID, "--yes"], "trading.trigger.approve", {"triggerId": TID}),
         (["reject", TID], "trading.trigger.reject", {"triggerId": TID}),
         (
             ["reject", TID, "--reason", "too tight"],
@@ -435,7 +435,7 @@ def test_operator_required_is_json_exit_1_and_no_card(
 
     monkeypatch.setattr(trade_cmd, "run_gateway_sync", failing)
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(trade_cmd.app, ["trigger", "approve", TID, "--json"])
+    result = runner.invoke(trade_cmd.app, ["trigger", "approve", TID, "--yes", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.stderr)["error"]["code"] == "trading.operator_required"
     assert "publish_artifact" not in result.stdout

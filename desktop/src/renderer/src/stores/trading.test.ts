@@ -131,6 +131,37 @@ describe('useOrderDecision', () => {
     })
     expect(rpcCall).toHaveBeenCalledWith('trading.orders.approve', { orderId: 'o2' })
   })
+
+  it("echoes a single order's approval digest", async () => {
+    rpcCall.mockResolvedValue({ order: {} })
+    const { result } = renderHook(() => useOrderDecision(), { wrapper })
+    const parked = order({ orderId: 'o4', approval: { digest: 'd4' } })
+    await act(async () => {
+      await result.current.mutateAsync({ orderId: 'o4', approve: true, order: parked })
+    })
+    expect(rpcCall).toHaveBeenCalledWith('trading.orders.approve', {
+      orderId: 'o4',
+      approvalDigest: 'd4',
+    })
+  })
+
+  it("approves a multisend leg only with the batch's digest, read beside every leg", async () => {
+    const leg = order({ orderId: 'o5', batchId: 'bat_1', approval: { digest: null, legCount: 2 } })
+    rpcCall.mockImplementation(async (method: string) =>
+      method === 'trading.orders.batch'
+        ? { batchId: 'bat_1', orders: [leg], approval: { digest: 'dbatch', legCount: 2 } }
+        : { order: {} },
+    )
+    const { result } = renderHook(() => useOrderDecision(), { wrapper })
+    await act(async () => {
+      await result.current.mutateAsync({ orderId: 'o5', approve: true, order: leg })
+    })
+    expect(rpcCall).toHaveBeenCalledWith('trading.orders.batch', { batchId: 'bat_1' })
+    expect(rpcCall).toHaveBeenLastCalledWith('trading.orders.approve', {
+      orderId: 'o5',
+      approvalDigest: 'dbatch',
+    })
+  })
 })
 
 describe('Touch ID in front of every approval and vault write', () => {

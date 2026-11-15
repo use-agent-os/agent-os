@@ -714,3 +714,47 @@ class TestExecute:
         with pytest.raises(TradingError) as info:
             await _bridge(funded_service)
         assert info.value.code == "trading.bridge.provider"
+
+
+class TestValuedByTheEngineFeed:
+    """WAL-06 variant: Relay's own ``amountUsd`` never sizes a bridge for the guardrails."""
+
+    @staticmethod
+    def _cheap_relay(fake_relay: FakeRelay) -> None:
+        def mutate(quote: dict[str, Any]) -> dict[str, Any]:
+            quote["details"]["currencyIn"]["amountUsd"] = "0.01"
+            return quote
+
+        fake_relay.mutate_quote = mutate
+
+    async def test_unpriced_origin_is_valued_from_the_destination_feed(
+        self,
+        funded_service: TradingService,
+        robinhood_tokens: FakeChain,
+        fake_relay: FakeRelay,
+        fake_prices: Any,
+    ) -> None:
+        service = funded_service
+        service.config.daily_cap_usd = 20.0
+        self._cheap_relay(fake_relay)
+        fake_prices.spot.pop(("base", USDC))
+        fake_prices.spot[("robinhood", USDG)] = 1.0
+        order = await _bridge(service, token="USDC", amount_in="25", initiator="agent")
+        # $25 by the destination chain's price of the same asset: over the $20 cap.
+        assert order["status"] == "rejected" and order["reason"].startswith("daily cap")
+        assert order["valueUsd"] == pytest.approx(25.0)
+
+    async def test_unpriced_on_both_chains_is_unknown_not_relays_number(
+        self,
+        funded_service: TradingService,
+        robinhood_tokens: FakeChain,
+        fake_relay: FakeRelay,
+        fake_prices: Any,
+    ) -> None:
+        service = funded_service
+        self._cheap_relay(fake_relay)
+        fake_prices.spot.pop(("base", USDC))
+        order = await _bridge(service, token="USDC", amount_in="25", initiator="agent")
+        assert order["status"] == "awaiting_approval"
+        assert order["valueUsd"] is None
+        assert order["reason"] == "value unknown (no price); a bridge always waits"

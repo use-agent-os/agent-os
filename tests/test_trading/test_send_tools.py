@@ -300,10 +300,17 @@ class TestSend:
         assert service.list_orders()["pendingApprovals"] == 1
         assert [o["orderId"] for o in service.batch(batch_id)] == [o["orderId"] for o in orders]
         assert base_chain.sent == []
-        # Approving the second leg runs the whole batch, in order.
+        # One approval releases all three legs, so it must name all three (WAL-12).
+        with pytest.raises(TradingError) as bare:
+            await service.approve(orders[1]["orderId"], wait=True)
+        assert bare.value.code == "trading.approval_binding_required"
+        assert base_chain.sent == []
+        digest = service.batch_approval(batch_id)["digest"]
+        assert asked["approval"]["digest"] == digest and len(asked["approval"]["legs"]) == 3
+        # Approving the second leg with the batch's digest runs the whole batch, in order.
         waiter = asyncio.create_task(service.wait_order(orders[2]["orderId"], timeout_s=5))
         await asyncio.sleep(0.01)
-        approved = await service.approve(orders[1]["orderId"], wait=True)
+        approved = await service.approve(orders[1]["orderId"], wait=True, approval_digest=digest)
         assert approved["status"] == "confirmed"
         assert (await waiter)["status"] == "confirmed"
         assert [o["status"] for o in service.batch(batch_id)] == ["confirmed"] * 3

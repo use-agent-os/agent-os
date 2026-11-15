@@ -278,7 +278,12 @@ def chain_json(spec: ChainSpec) -> dict[str, Any]:
 
 
 def token_json(meta: Mapping[str, Any], price: float | None) -> dict[str, Any]:
-    """The LP cards' ``Token``: address, symbol, decimals, priceUsd."""
+    """The LP cards' ``Token``: address, symbol, decimals, priceUsd — and ``verified``.
+
+    ``verified`` travels with the symbol so an approval view can tell the
+    token a mandate or trigger names from another contract answering the
+    same ``symbol()`` (WAL-08).
+    """
     address = str(meta.get("address") or "")
     native = bool(meta.get("native"))
     return {
@@ -286,6 +291,7 @@ def token_json(meta: Mapping[str, Any], price: float | None) -> dict[str, Any]:
         "symbol": str(meta.get("symbol") or ""),
         "decimals": int(meta.get("decimals", 18)),
         "priceUsd": finite(price),
+        "verified": bool(meta.get("verified")) or native,
     }
 
 
