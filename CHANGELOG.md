@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- The verbatim backups AgentOS leaves beside a config file it rewrites
+  (`config.toml.backup.<stamp>`, `agentos.toml.backup.<stamp>`) and the
+  writer's `.config.toml.*.tmp` staging files are sensitive paths like the
+  config itself: an agent's shell, `read_file`, `list_dir`, globs and `cd`
+  spellings no longer reach the Uniswap key, keyed RPC URLs or gateway token
+  they hold. Existing backups stay where they are (WAL-17).
 - `agentos wallet export --out FILE` creates the file owner-only from its
   first byte (`O_EXCL`, mode `0600`; on Windows an ACL for the current user
   alone) and **refuses a path that already exists** (`FILE_EXISTS`, checked

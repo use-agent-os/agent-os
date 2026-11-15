@@ -138,6 +138,46 @@ def _all_sensitive_prefixes() -> tuple[str, ...]:
     return (*_SENSITIVE_PREFIXES, *runtime_sensitive_prefixes())
 
 
+def _protected_config_files() -> list[str]:
+    """The config files on the floor: the state root's and the active one."""
+    from agentos.paths import default_agentos_home
+
+    files: list[str] = []
+    try:
+        files.append(str(default_agentos_home() / "config.toml"))
+    except (OSError, RuntimeError):
+        pass
+    files.extend(sorted(_protected_config_paths - set(files)))
+    return files
+
+
+def _is_config_copy_name(leaf: str, name: str) -> bool:
+    """Whether *leaf* is a copy AgentOS writes of the config file *name*.
+
+    Every persisted config write first leaves a verbatim backup
+    (``config.toml.backup.<stamp>``, ``make_config_backup``) beside the file,
+    and the atomic writer stages the new text in ``.config.toml.<rand>.tmp``.
+    Both hold the same provider keys and gateway token as the file itself,
+    so they are the file as far as the floor is concerned (WAL-17).
+    """
+    if not name:
+        return False
+    return leaf.startswith(f"{name}.backup.") or (
+        leaf.startswith(f".{name}.") and leaf.endswith(".tmp")
+    )
+
+
+def _config_copy_marker(candidates: list[str]) -> str | None:
+    for entry in _protected_config_files():
+        for normalized in _comparison_path_candidates(entry):
+            directory, _, name = normalized.rpartition("/")
+            for expanded in candidates:
+                parent, _, leaf = expanded.rpartition("/")
+                if parent == directory and _is_config_copy_name(leaf, name):
+                    return entry
+    return None
+
+
 # Exact filename tails we never want mutated, regardless of parent directory.
 # Covers cases like moving an id_rsa out of ~/.ssh into /tmp.
 _BASE_SENSITIVE_SUFFIXES: tuple[str, ...] = (
@@ -366,6 +406,9 @@ def is_sensitive_path(path: str) -> str | None:
             for normalized in _comparison_path_candidates(prefix):
                 if expanded == normalized or expanded.startswith(normalized + "/"):
                     return prefix
+    config_copy = _config_copy_marker(candidates)
+    if config_copy is not None:
+        return config_copy
     for suffix in _SENSITIVE_SUFFIXES:
         normalized_suffix = suffix.replace("\\", "/")
         if os.name == "nt":
@@ -678,6 +721,39 @@ def _absolute_text(word: str, base: Path | None) -> str | None:
     return os.path.normpath(expanded).replace("\\", "/")
 
 
+def _glob_config_copy_marker(segments: list[str]) -> str | None:
+    """A glob whose matches include a backup or temp copy of a protected config.
+
+    A copy's name carries a timestamp or a random part, so it cannot be a
+    fixed glob target: the config's directory is listed (one directory, and
+    only when the pattern's parent names it) and the pattern is tried on
+    each copy that is actually there.
+    """
+    if not segments:
+        return None
+    parent, last = segments[:-1], segments[-1]
+    for entry in _protected_config_files():
+        for candidate in _comparison_path_candidates(entry):
+            if not candidate.startswith("/"):
+                continue  # as in ``_glob_targets``: a shell glob is POSIX-rooted
+            directory, _, name = candidate.rpartition("/")
+            wanted = [seg for seg in directory.split("/") if seg]
+            if len(wanted) != len(parent) or not all(
+                _segment_matches(pattern, actual)
+                for pattern, actual in zip(parent, wanted, strict=True)
+            ):
+                continue
+            try:
+                leaves = os.listdir(directory or "/")
+            except OSError:
+                continue
+            for leaf in leaves:
+                folded = leaf.casefold() if os.name == "nt" else leaf
+                if _is_config_copy_name(folded, name) and _segment_matches(last, leaf):
+                    return entry
+    return None
+
+
 def _glob_marker(word: str, bases: list[Path]) -> str | None:
     pattern_text = _UNEVALUATED_RE.sub("*", _expand_env_vars(word))
     anchors: list[Path | None] = (
@@ -692,6 +768,9 @@ def _glob_marker(word: str, bases: list[Path]) -> str | None:
         for target, marker in targets:
             if _pattern_reaches(segments, target):
                 return marker
+        copy_marker = _glob_config_copy_marker(segments)
+        if copy_marker is not None:
+            return copy_marker
         last = segments[-1] if segments else ""
         literals = sum(1 for char in last if char not in "*?[]")
         if literals >= _GLOB_NAME_MIN_LITERALS:
