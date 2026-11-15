@@ -1115,7 +1115,7 @@ agentos wallet unlock / lock
 agentos wallet create --label main
 agentos wallet import --label cold --private-key-stdin < key.txt
 agentos wallet import --label cold --keystore wallet.json
-agentos wallet export <addr> --keystore --out backup.json
+agentos wallet export <addr> --keystore --out backup.json   # a new owner-only file (0600 / user-only ACL); an existing path is refused
 agentos wallet export <addr> --private-key   # prints the raw key; always asks the vault password
 agentos wallet list / rename <addr> <label> / primary <addr> / remove <addr> --yes|-y
 agentos wallet balances [<addr>] [--chain base|robinhood] [--refresh] [--hidden] [--json]   # ledger view; --refresh re-reads the chain first (throttled to once per 10 s per wallet); --hidden lists junk tokens too

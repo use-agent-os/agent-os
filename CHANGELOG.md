@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- `agentos wallet export --out FILE` creates the file owner-only from its
+  first byte (`O_EXCL`, mode `0600`; on Windows an ACL for the current user
+  alone) and **refuses a path that already exists** (`FILE_EXISTS`, checked
+  before the password is sent) instead of overwriting it. It says so when
+  the filesystem cannot make the file private, and `--json` adds
+  `"private": true|false` (WAL-14).
 - A keyed RPC URL (`trading.rpc_urls`, `RPC_BASE_URL`, `RPC_ROBINHOOD_URL`)
   no longer reaches a caller in a `wallet.*` / `trading.*` error. Every
   handler now cuts a configured RPC URL in an error message or its details

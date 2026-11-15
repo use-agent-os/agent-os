@@ -127,6 +127,70 @@ def token_symbol(token: Any) -> str:
     return str(token or "—")
 
 
+def _restrict_windows_acl(path: Path) -> None:
+    """Owner-only DACL on a Windows file: no inherited entries, the user alone.
+
+    ``os.open``'s mode only sets the read-only bit there; the file would
+    otherwise inherit whatever the directory grants (``Users``, ``Everyone``
+    on a shared drive). Raises ``OSError`` when the ACL cannot be set.
+    """
+    import getpass
+    import subprocess
+
+    user = getpass.getuser()
+    domain = os.environ.get("USERDOMAIN", "")
+    principal = f"{domain}\\{user}" if domain else user
+    completed = subprocess.run(
+        ["icacls", str(path), "/inheritance:r", "/grant:r", f"{principal}:F"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise OSError(f"icacls could not restrict {path}: {completed.stderr.strip()}")
+
+
+def write_private_file(path: Path, text: str) -> bool:
+    """Create *path* owner-only from its first byte and write *text* to it.
+
+    ``O_CREAT | O_EXCL`` never reuses an existing file -- not a world-readable
+    one left from an earlier export, not one another process already holds
+    open, not a symlink planted at the name -- and raises ``FileExistsError``
+    instead. The mode is ``0600`` at creation, so the secret never sits in a
+    file the umask made readable. On Windows the ACL is cut to the current
+    user while the file is still empty. Returns whether the result is
+    verifiably owner-only (a POSIX filesystem that ignores modes says no).
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        if os.name == "nt":
+            _restrict_windows_acl(path)
+        # newline="": the bytes the gateway returned are the bytes on disk.
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            fd = -1
+            handle.write(text)
+    except BaseException:
+        if fd != -1:
+            os.close(fd)
+        path.unlink(missing_ok=True)
+        raise
+    if os.name == "nt":
+        return True
+    info = os.stat(path)
+    return (info.st_mode & 0o077) == 0 and info.st_uid == os.geteuid()
+
+
+def _refuse_existing_export(out: Path, *, json_output: bool) -> None:
+    emit_error(
+        f"{out} already exists; export writes a new file and never overwrites one",
+        json_output=json_output,
+        code="FILE_EXISTS",
+    )
+    raise typer.Exit(1)
+
+
 def _wallet_row(result: Any) -> dict[str, Any]:
     wallet = result.get("wallet") if isinstance(result, dict) else None
     return wallet if isinstance(wallet, dict) else {}
@@ -334,7 +398,11 @@ def wallet_export(
     address: str = typer.Argument(..., help="Wallet address to export"),
     keystore: bool = typer.Option(False, "--keystore", help="Export the encrypted keystore JSON"),
     private_key: bool = typer.Option(False, "--private-key", help="Export the raw private key"),
-    out: Path | None = typer.Option(None, "--out", help="Write to this file (mode 0600)"),
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help="Write to this new file, owner-only (mode 0600); never overwrites",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Export a wallet. Always asks for the vault password."""
@@ -349,19 +417,36 @@ def wallet_export(
             "wallet.export", {"address": address, "password": password, "format": fmt}
         )
 
+    if out is not None and os.path.lexists(out):
+        # Checked before the password goes anywhere; the write below refuses
+        # too (O_EXCL), this only spares the user a round trip.
+        _refuse_existing_export(out, json_output=json_output)
+
     result = run_gateway_sync(_run, json_output=json_output)
     result = result if isinstance(result, dict) else {}
     secret = result.get("keystoreJson") if keystore else result.get("privateKey")
     if out is not None:
-        out.write_text(str(secret or ""), encoding="utf-8")
         try:
-            os.chmod(out, 0o600)
-        except OSError:
-            pass
+            private = write_private_file(out, str(secret or ""))
+        except FileExistsError:
+            _refuse_existing_export(out, json_output=json_output)
+        except OSError as exc:
+            emit_error(
+                f"cannot write {out}: {exc.strerror or exc}",
+                json_output=json_output,
+                code="WRITE_FAILED",
+            )
+            raise typer.Exit(1) from None
         if json_output:
-            print_json({"written": str(out), "format": fmt})
+            print_json({"written": str(out), "format": fmt, "private": private})
+        elif private:
+            note = "owner-only" if os.name == "nt" else "mode 0600"
+            console.print(f"Wrote {fmt} to [{ACCENT}]{markup_escape(str(out))}[/] ({note}).")
         else:
-            console.print(f"Wrote {fmt} to [{ACCENT}]{markup_escape(str(out))}[/] (mode 0600).")
+            console.print(
+                f"Wrote {fmt} to [{ACCENT}]{markup_escape(str(out))}[/], but [red]could not "
+                "make it owner-only[/] on this filesystem: move it somewhere private."
+            )
         return
     if json_output:
         print_json(result)
