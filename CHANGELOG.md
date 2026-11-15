@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- **Desktop: Touch ID now stands in front of every click that trades or may
+  spend (WAL-16).** With Settings › Security on, a trigger's **Fire now** and
+  a DCA's **Buy now** (desk and chat cards alike) went out with no
+  fingerprint, though both trade at once like a bracket's **Sell now**. Every
+  trading and vault write now goes through one door in the desktop store
+  (`gatedCall` / `TRADING_WRITE_GATES`), which also asks before a resume, a
+  swap, send or burn typed at the desk, your own new DCA, and an edit that
+  may make a DCA spend more. `High-risk approvals` asks when the click moves
+  $500 or more or its worth is unknown; `Every approval` asks for all of
+  them. Reject, pause and stop never ask; `Off` (the default) is unchanged.
 - **Breaking default — Discord and Slack channels now refuse senders you have
   not admitted.** Before, any Discord user who could DM or @mention the bot,
   and any Slack workspace member or guest, started an agent turn with the

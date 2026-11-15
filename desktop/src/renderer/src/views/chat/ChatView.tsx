@@ -43,6 +43,7 @@ import { rememberLastSession } from '~/lib/last-session'
 import { useQuickAskSend } from '~/lib/use-quick-ask'
 import { ease, spring } from '~/lib/motion'
 import { useGateway } from '~/stores/gateway'
+import { gatedCall } from '~/stores/trading'
 import { useTradingUi } from '~/stores/trading-ui'
 import { useLive } from '~/stores/live'
 import { useQuickAsk } from '~/stores/quick-ask'
@@ -56,11 +57,6 @@ import { useAcpSession } from './useAcpSession'
 import { useDeskInstruments, type DeskProps } from '~/views/trading/desk/useDeskInstruments'
 import { useTradeLedger } from '~/views/trading/desk/useTradeLedger'
 import type { Token } from '~/views/trading/types'
-import {
-  requireBracketTouchId,
-  requireMandateTouchId,
-  requireTriggerTouchId,
-} from '~/views/trading/touch-id'
 
 const NEW_CHAT_COMBO = 'mod+shift+o'
 const DEFAULT_AGENT_KEY = webchatSessionKey('main')
@@ -291,30 +287,12 @@ function ConnectedChat({
     () =>
       atDesk
         ? {
-            // A DCA card's "Approve & start" is an approval like the desk's:
-            // Touch ID first when Settings › Security says so.
-            call: async (method, params) => {
-              if (method === 'trading.dca.approve')
-                await requireMandateTouchId(
-                  (m, p) => rpc.call(m, p),
-                  String(params.mandateId ?? ''),
-                )
-              // A trigger card's "Approve & arm" (docs/triggers.md) is gated the same way.
-              if (method === 'trading.trigger.approve')
-                await requireTriggerTouchId(
-                  (m, p) => rpc.call(m, p),
-                  String(params.triggerId ?? ''),
-                )
-              // A bracket card's "Approve & arm" (one decision for both legs)
-              // and its "Sell now", which trades at once (docs/brackets.md).
-              if (method === 'trading.bracket.approve' || method === 'trading.bracket.fire')
-                await requireBracketTouchId(
-                  (m, p) => rpc.call(m, p),
-                  String(params.bracketId ?? ''),
-                  method === 'trading.bracket.fire' ? 'fire' : 'approve',
-                )
-              return rpc.call(method, params)
-            },
+            // Every card write goes through the store's one Touch ID door
+            // (TRADING_WRITE_GATES): a DCA card's "Approve & start" and "Buy
+            // now", a trigger card's "Approve & arm" and "Fire now", a bracket
+            // card's "Approve & arm" and "Sell now" ask exactly as the desk's
+            // own buttons do; the object is read first so the sheet can name it.
+            call: (method, params) => gatedCall((m, p) => rpc.call(m, p), method, params),
             onOrder: (orderId) => {
               setOwnOrderIds((prev) => new Set(prev).add(orderId))
               setFocusOrderId(orderId)

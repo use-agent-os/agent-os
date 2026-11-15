@@ -3,6 +3,7 @@ import { useId, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
+import { isTouchIdDeclined } from '~/lib/biometric-gate'
 import { useNow } from '~/lib/use-now'
 import { useSwap } from '~/stores/trading'
 import {
@@ -112,6 +113,11 @@ export function ConfirmSwap({
         expectedOutRaw,
         minOutRaw,
         ...(quote.quoteId ? { quoteId: quote.quoteId } : {}),
+        // Names the swap in the Touch ID sheet (Settings › Security); never sent.
+        touchId: {
+          what: `${amount} ${tokenIn.symbol} → ${tokenOut.symbol}`,
+          valueUsd: quote.valueUsd,
+        },
       },
       {
         onSuccess: (res) => {
@@ -128,6 +134,8 @@ export function ConfirmSwap({
           onSent(orders)
         },
         onError: (err) => {
+          // Declined: the gate has said why, and nothing was sent.
+          if (isTouchIdDeclined(err)) return
           if (errorCode(err) === PRICE_MOVED) {
             // Nothing was sent. The sheet stays open on a fresh price so the
             // person can read the new numbers and decide again.
