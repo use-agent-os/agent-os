@@ -82,7 +82,7 @@ import { SecretInput, useRegisterFields, useReveal } from '../fields'
 import { Disclosure, Notice } from '../ui'
 
 // Settings › Channels (overhaul-control-ui 7.4, Appendix A "Channels"):
-// adapter status and stats, Telegram pairing, and the channel setup dialog.
+// adapter status and stats, sender pairing, and the channel setup dialog.
 
 const CHANNELS_KEY = ['channels'] as const
 const POLL_MS = 5_000
@@ -102,6 +102,13 @@ function GateReason({ gate: g, className }: { gate: Gate; className?: string }) 
 const STATUS_TONE = { ok: 'ok', danger: 'danger', off: 'neutral' } as const
 
 // ── Pairing ─────────────────────────────────────────────────────────────────
+
+/**
+ * Channel types that admit senders by pairing. channels.pairing.list returns a
+ * row only for a Telegram channel or a Discord, Slack or MS Teams channel with
+ * pairing_enabled, and the pairing RPCs accept all four.
+ */
+const PAIRING_TYPES = new Set(['telegram', 'discord', 'slack', 'msteams'])
 
 interface PairingTarget {
   channel: string
@@ -216,21 +223,26 @@ function AccessPanel({
   write: Gate
   onRevoke: (target: PairingTarget) => void
 }) {
-  // Only Telegram has pairing: one binary state, pending or paired.
+  // One binary state per sender, pending or paired.
   const access: ChannelAccess | null = channel.access
-  if (!access || channel.type !== 'telegram') return null
+  const type = String(channel.type || '')
+  if (!access || !PAIRING_TYPES.has(type)) return null
   const name = String(channel.name || '')
   const pending = Array.isArray(access.pending) ? access.pending : []
   const paired = Array.isArray(access.paired) ? access.paired : []
   const locked = isAccessLocked(access.locked_until)
-  const groups = access.groups_enabled
-    ? t(
-        access.group_mention_required
-          ? 'webSetAccess.chGroupsMention'
-          : 'webSetAccess.chGroupsEnabled',
-        { count: access.group_chat_ids?.length ?? 0 },
-      )
-    : t('webSetAccess.chGroupsDisabled')
+  // Group settings are Telegram's; the others pair direct messages only.
+  const groups =
+    type !== 'telegram'
+      ? t('webSetAccess.chPairingDirect')
+      : access.groups_enabled
+        ? t(
+            access.group_mention_required
+              ? 'webSetAccess.chGroupsMention'
+              : 'webSetAccess.chGroupsEnabled',
+            { count: access.group_chat_ids?.length ?? 0 },
+          )
+        : t('webSetAccess.chGroupsDisabled')
 
   const group = (title: string, items: AccessAccount[], isPending: boolean, empty: string) => (
     <section aria-label={title} className="flex flex-col gap-1.5">

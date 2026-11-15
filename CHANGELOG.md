@@ -350,6 +350,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   instead of the caller's unparsed `amountIn`. (WAL-13)
 
 ### Fixed
+- Settings › Channels lists pairing requests for Discord, Slack and MS Teams
+  channels with `pairing_enabled`, next to Telegram, with Approve, Deny and
+  Revoke. The gateway already reported and accepted them; the panel showed
+  Telegram only, so a waiting Discord sender was counted but could not be
+  approved from the console.
 - Desktop: "Update all" in Settings › About no longer asks for a second
   "Update" on the Engine card. It still runs the engine preflight first and
   goes ahead on its own when nothing would be interrupted; running sessions,

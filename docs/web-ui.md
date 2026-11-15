@@ -497,7 +497,7 @@ back to the list.
 | General | Appearance | Theme (System, Light, Dark), text size, send shortcut, show thinking, visual effects. Browser-only; applies at once. |
 | General | Notifications | The Web Push toggle for approval notifications. |
 | Connections | Gateway | Connection URL, auth mode, version and identity; change credentials, reconnect, disconnect, restart. |
-| Connections | Channels | Adapter status, pairing approve, deny and revoke, and the channel setup dialog. |
+| Connections | Channels | Adapter status, pairing approve, deny and revoke (Telegram, and Discord, Slack or MS Teams with pairing on), and the channel setup dialog. |
 | Agents | Agents | Create, edit, customize and delete agents. |
 | Agents | Models & routing | Provider setup (current values, router support), Pilot Router mode, judge / safety-net / Jev settings, translation cap and the tier table including the image tier, subscription logins. |
 | Agents | Search | Web search and X search setup, X search sign-in. |

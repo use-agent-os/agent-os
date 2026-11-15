@@ -44,6 +44,7 @@ export const webSetAccess = defineNamespace('webSetAccess', {
   chGroupsMention:
     'Direct messages require pairing. {count} configured group(s) require a paired sender and a mention.',
   chGroupsDisabled: 'Direct messages require pairing. Group messaging is disabled.',
+  chPairingDirect: 'A sender not on the allowed list must pair first: approve their request here.',
   chPendingTitle: 'Waiting',
   chPairedTitle: 'Paired',
   chNoPending: 'No pairing requests.',
