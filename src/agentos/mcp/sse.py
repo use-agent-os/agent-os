@@ -113,9 +113,10 @@ class MCPSSEClient(MCPSessionClient):
                         read_stream,
                         write_stream,
                         read_timeout_seconds=timedelta(seconds=timeout),
+                        message_handler=self._on_session_message,
                     )
                 )
-                await session.initialize()
+                self._capture_initialize(await session.initialize())
         except BaseException as exc:
             unwrapped = _unwrap_single_exception(exc)
             if isinstance(unwrapped, TimeoutError):

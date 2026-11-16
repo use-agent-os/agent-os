@@ -56,6 +56,11 @@ class MCPServerConfig:
     # ``None`` defers to the global ``mcp.connect_timeout_seconds``.
     connect_timeout_seconds: float | None = None
     tool_filter: MCPToolFilter = field(default_factory=MCPToolFilter)
+    # ``None`` is "auto": defer when this server, or all MCP servers together,
+    # expose more tools than the thresholds below. ``True``/``False`` force it.
+    defer_loading: bool | None = None
+    defer_tool_threshold: int = 8
+    defer_total_tool_threshold: int = 20
 
     @classmethod
     def from_entry(
@@ -64,15 +69,18 @@ class MCPServerConfig:
         *,
         state_dir: str | None = None,
         oauth_redirect_uri: str | None = None,
+        defaults: Any = None,
     ) -> MCPServerConfig:
         """Build the runtime config from a ``gateway.config.MCPServerEntry``.
 
         Duck-typed so this package never imports the gateway config. Every
         place that connects a configured server (boot, ``mcp.connect``, the
         CLI probe) goes through here, so a new entry field cannot reach one
-        path and miss another.
+        path and miss another. ``defaults`` is the ``[mcp]`` section, for the
+        settings a server shares with the others.
         """
         tool_filter = getattr(entry, "tool_filter", None)
+        defer_loading = getattr(entry, "defer_loading", "auto")
         return cls(
             name=entry.name,
             transport=entry.transport,
@@ -91,6 +99,9 @@ class MCPServerConfig:
             tool_filter=MCPToolFilter.of(
                 getattr(tool_filter, "include", ()), getattr(tool_filter, "exclude", ())
             ),
+            defer_loading=defer_loading if isinstance(defer_loading, bool) else None,
+            defer_tool_threshold=int(getattr(defaults, "defer_tool_threshold", 8)),
+            defer_total_tool_threshold=int(getattr(defaults, "defer_total_tool_threshold", 20)),
         )
 
     def effective_connect_timeout(self, default: float) -> float:
@@ -102,6 +113,26 @@ class MCPToolDef:
     name: str
     description: str
     input_schema: dict[str, Any]
+    title: str = ""
+    # ``ToolAnnotations`` as the server sent them (``readOnlyHint``, ...).
+    # Hints from the server about itself, never a basis for authorization.
+    annotations: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_wire(cls, tool: Any) -> MCPToolDef:
+        """Build from a ``tools/list`` item: raw JSON or the SDK's ``Tool`` model."""
+        if not isinstance(tool, dict):
+            tool = tool.model_dump(by_alias=True, exclude_none=True)
+        annotations = tool.get("annotations")
+        annotations = dict(annotations) if isinstance(annotations, dict) else {}
+        title = tool.get("title") or annotations.get("title") or ""
+        return cls(
+            name=tool["name"],
+            description=tool.get("description") or "",
+            input_schema=tool.get("inputSchema") or {},
+            title=title if isinstance(title, str) else "",
+            annotations=annotations,
+        )
 
 
 @dataclass
