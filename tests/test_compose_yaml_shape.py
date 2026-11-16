@@ -25,9 +25,9 @@ def test_compose_no_version_field() -> None:
 def test_compose_gateway_port_is_loopback() -> None:
     data = _load_compose()
     ports = data["services"]["gateway"]["ports"]
-    assert any(
-        str(p) == "127.0.0.1:18791:18791" for p in ports
-    ), f"Expected '127.0.0.1:18791:18791' in ports, got: {ports}"
+    assert any(str(p) == "127.0.0.1:18791:18791" for p in ports), (
+        f"Expected '127.0.0.1:18791:18791' in ports, got: {ports}"
+    )
 
 
 def test_compose_gateway_healthcheck_exists() -> None:
@@ -87,8 +87,7 @@ def test_dockerfile_builds_control_ui_in_node_stage() -> None:
         'RUN pip install ".[recommended]"'
     )
     assert (
-        "COPY pyproject.toml README.md README.release.md LICENSE NOTICE "
-        "THIRD_PARTY_NOTICES.md ./"
+        "COPY pyproject.toml README.md README.release.md LICENSE NOTICE THIRD_PARTY_NOTICES.md ./"
     ) in dockerfile
 
     assert "frontend/node_modules" in dockerignore
@@ -197,9 +196,9 @@ def test_compose_persists_state_via_named_volume() -> None:
     assert f"mkdir -p {state_dir}" in dockerfile, (
         f"Dockerfile must create the state root {state_dir}"
     )
-    assert re.search(
-        rf"chown\b[^\n]*agentos:agentos[^\n]*{re.escape(state_dir)}", dockerfile
-    ), f"Dockerfile must chown {state_dir} to the non-root agentos user"
+    assert re.search(rf"chown\b[^\n]*agentos:agentos[^\n]*{re.escape(state_dir)}", dockerfile), (
+        f"Dockerfile must chown {state_dir} to the non-root agentos user"
+    )
 
     gateway_volumes = [str(v) for v in compose["services"]["gateway"]["volumes"]]
     assert f"agentos-state:{state_dir}" in gateway_volumes, (
@@ -213,3 +212,18 @@ def test_compose_persists_state_via_named_volume() -> None:
     assert "agentos-state" in compose.get("volumes", {}), (
         "compose must declare the top-level 'agentos-state' named volume"
     )
+
+
+def test_compose_keeps_the_vault_sealing_key_off_the_state_volume() -> None:
+    """An archive of the state volume must not carry unlock.key and its key together."""
+    data = _load_compose()
+    gateway = data["services"]["gateway"]
+    kek_dir = gateway["environment"]["AGENTOS_VAULT_KEK_DIR"]
+    mounts = dict(str(v).split(":", 1) for v in gateway["volumes"])
+    assert mounts["agentos-vault-keys"] == kek_dir
+    assert not kek_dir.startswith(mounts["agentos-state"].rstrip("/") + "/")
+    assert "agentos-vault-keys" in data["volumes"]
+    # The image pre-creates the mount point owned by the container user, or a
+    # fresh named volume there is root-owned and the key cannot be written.
+    dockerfile = (_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert f"mkdir -p /var/lib/agentos {kek_dir}" in dockerfile

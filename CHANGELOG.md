@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- The container's `compose.yaml` keeps the key that seals the wallet vault's
+  auto-unlock password on its own volume (`agentos-vault-keys`,
+  `AGENTOS_VAULT_KEK_DIR=/var/lib/agentos-vault-keys`). The container's home is
+  inside the state volume, so the key sat in the same volume as the
+  `unlock.key` it opens, and the documented backup archive of that volume
+  opened every wallet by itself. Setting `AGENTOS_VAULT_KEK_DIR` on a vault
+  that already auto-unlocks is no longer a lockout: the key is still read from
+  the platform's default directory, the password is sealed again under a key in
+  the new directory at the next auto unlock (`vault.unlock_key_moved`) and the
+  old key is deleted. Both directories are on the sensitive-path floor. A
+  container run without the second volume behaves as before; the backup docs
+  now say what its archive carries.
 - `env.reveal` from an agent's connection refuses every name any catalog
   source classifies as secret. The catalog used the first source's
   classification, so a skill manifest (which an agent can write) declaring
@@ -350,6 +362,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   instead of the caller's unparsed `amountIn`. (WAL-13)
 
 ### Fixed
+- Wallet vault: a password change that fails part-way no longer leaves a vault
+  that no password opens. `change_password` rewrote the keystores one by one
+  and the verifier last, so a full disk or a kill in between left wallets under
+  both passwords while an unlock needs one that opens them all. The new
+  keystores are now staged beside the live ones and one `index.json` write
+  commits the change: before it the old password opens everything, after it
+  the new one does, and the next unlock finishes moving the staged files
+  (`vault.rekey_finished`).
+- Wallet vault: keystores, `index.json`, `unlock.key` and its sealing key are
+  flushed to disk (`F_FULLFSYNC` on macOS) before and after the rename that
+  puts them in place. A power cut right after a wallet was created could leave
+  its only keystore empty.
 - Trading: a holding worth under $0.10 is listed but no longer counted in the
   portfolio totals, the allocation bar or the wallet list. Phantom-balance
   airdrops answer `balanceOf` with the same few tokens for every address, so

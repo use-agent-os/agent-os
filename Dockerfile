@@ -127,10 +127,16 @@ ENV PATH=$PATH:$NPM_CONFIG_PREFIX/bin
 # Run as a non-root user — avoids shipping root creds into production.
 # The state root is created and owned by that user before the USER drop,
 # so a freshly initialized volume inherits writable, non-root ownership.
-RUN mkdir -p /var/lib/agentos \
+# /var/lib/agentos-vault-keys is where compose.yaml mounts a second volume for
+# the key that seals the wallet vault's auto-unlock password
+# (AGENTOS_VAULT_KEK_DIR), so that an archive of the state volume does not
+# carry the sealed password and its key together. Pre-created with the same
+# owner so a fresh volume mounted there is writable.
+RUN mkdir -p /var/lib/agentos /var/lib/agentos-vault-keys \
     && useradd --create-home --home-dir /var/lib/agentos/home \
         --uid 10001 --shell /usr/sbin/nologin agentos \
-    && chown -R agentos:agentos /app /var/lib/agentos
+    && chmod 700 /var/lib/agentos-vault-keys \
+    && chown -R agentos:agentos /app /var/lib/agentos /var/lib/agentos-vault-keys
 USER agentos
 
 EXPOSE 18791

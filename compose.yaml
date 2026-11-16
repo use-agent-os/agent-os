@@ -11,12 +11,21 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
       TZ: ${TZ:-UTC}
+      # The key that seals the wallet vault's auto-unlock password lives on
+      # its own volume (below), not in the state volume beside the file it
+      # opens. A vault that already auto-unlocks moves its key here at the
+      # next start.
+      AGENTOS_VAULT_KEK_DIR: /var/lib/agentos-vault-keys
     volumes:
       # Config, state, logs, and workspace persist in a Docker-managed
       # named volume mounted at the image's AGENTOS_STATE_DIR. The
       # image pre-creates that path owned by the non-root container user,
       # so persistence works consistently on Linux, macOS, Windows, and WSL2.
       - agentos-state:/var/lib/agentos
+      # Only the vault's sealing key. Kept apart so a backup or copy of
+      # agentos-state alone cannot open the wallets; losing this volume costs
+      # auto unlock until the vault is unlocked once with its password.
+      - agentos-vault-keys:/var/lib/agentos-vault-keys
     ports:
       - "127.0.0.1:18791:18791"
     healthcheck:
@@ -29,3 +38,4 @@ services:
 
 volumes:
   agentos-state:
+  agentos-vault-keys:

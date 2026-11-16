@@ -52,6 +52,14 @@ def vault_kek_dir() -> Path:
     override = os.environ.get("AGENTOS_VAULT_KEK_DIR", "").strip()
     if override:
         return _expand_user(override)
+    return default_vault_kek_dir()
+
+
+def default_vault_kek_dir() -> Path:
+    """The platform's key directory, whatever ``AGENTOS_VAULT_KEK_DIR`` says.
+
+    A vault sealed before the variable was set still has its key here.
+    """
     if os.name == "nt":
         base = os.environ.get("LOCALAPPDATA", "").strip()
         root = Path(base) if base else _home_dir() / "AppData" / "Local"
