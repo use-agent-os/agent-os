@@ -1735,10 +1735,12 @@ class GatewayServer:
             for task in stuck:
                 task.cancel()
 
-        # Close MCP clients
+        # Close MCP clients; stop reconnecting them first.
         try:
             from agentos.mcp.discovery import close_active_clients
+            from agentos.mcp.supervisor import shutdown_supervisor
 
+            await shutdown_supervisor()
             await close_active_clients()
             log.info("gateway.mcp_clients_closed")
         except ImportError:
@@ -2112,17 +2114,21 @@ async def _discover_configured_mcp_servers(
         log.info("build_services.mcp_enabled_no_servers")
         return
 
-    from agentos.mcp.discovery import discover_and_register
+    from agentos.mcp import discovery
     from agentos.mcp.streamable_http import FileOAuthStorage
+    from agentos.mcp.supervisor import INITIAL_BACKOFF_SECONDS, install_supervisor
     from agentos.mcp.types import MCPServerConfig
 
+    supervisor = install_supervisor(
+        tool_registry, default_connect_timeout=config.mcp.connect_timeout_seconds
+    )
     for entry in config.mcp.servers:
-        timeout = config.mcp.connect_timeout_seconds
+        mcp_cfg = MCPServerConfig.from_entry(entry, state_dir=config.state_dir)
+        if not mcp_cfg.enabled:
+            log.info("build_services.mcp_server_disabled", server=entry.name)
+            continue
+        timeout = mcp_cfg.effective_connect_timeout(config.mcp.connect_timeout_seconds)
         try:
-            mcp_cfg = MCPServerConfig.from_entry(entry, state_dir=config.state_dir)
-            if not mcp_cfg.enabled:
-                log.info("build_services.mcp_server_disabled", server=entry.name)
-                continue
             if mcp_cfg.oauth and mcp_cfg.url:
                 storage = FileOAuthStorage(mcp_cfg.name, mcp_cfg.url, mcp_cfg.state_dir)
                 if not await storage.is_authenticated():
@@ -2132,9 +2138,8 @@ async def _discover_configured_mcp_servers(
                     )
                     continue
 
-            timeout = mcp_cfg.effective_connect_timeout(config.mcp.connect_timeout_seconds)
             names = await asyncio.wait_for(
-                discover_and_register(mcp_cfg, tool_registry),
+                discovery.discover_and_register(mcp_cfg, tool_registry),
                 timeout=timeout,
             )
             log.info(
@@ -2142,18 +2147,23 @@ async def _discover_configured_mcp_servers(
                 server=entry.name,
                 tools=len(names),
             )
+            supervisor.watch(mcp_cfg)
         except TimeoutError:
             log.warning(
                 "build_services.mcp_server_timeout",
                 server=entry.name,
                 timeout=timeout,
+                retry_in_seconds=INITIAL_BACKOFF_SECONDS,
             )
+            supervisor.schedule_retry(mcp_cfg, error="timed out", reason="boot")
         except Exception as exc:
             log.warning(
                 "build_services.mcp_server_failed",
                 server=entry.name,
                 error=str(exc),
+                retry_in_seconds=INITIAL_BACKOFF_SECONDS,
             )
+            supervisor.schedule_retry(mcp_cfg, error=str(exc), reason="boot")
 
 
 async def build_services(

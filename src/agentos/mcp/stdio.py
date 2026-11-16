@@ -206,6 +206,19 @@ class MCPStdioClient(MCPClient):
         # Send initialized notification
         await self._send_notification("notifications/initialized")
 
+    async def wait_for_exit(self) -> int | None:
+        """Wait for the server process to end; its exit code if it died on its own.
+
+        Returns ``None`` when ``close()`` ended it (or it was never started), so
+        a watcher can tell a crash from a disconnect it should leave alone:
+        ``close()`` forgets the process before terminating it.
+        """
+        process = self._process
+        if process is None:
+            return None
+        code = await process.wait()
+        return None if self._process is not process else code
+
     async def close(self) -> None:
         """Terminate the subprocess."""
         process = self._process

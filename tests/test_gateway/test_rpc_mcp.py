@@ -51,6 +51,7 @@ async def test_mcp_status_reports_configured_oauth_server(tmp_path) -> None:
                 "tools": [],
                 "toolMap": {},
                 "toolFilter": {"include": [], "exclude": []},
+                "retry": None,
             }
         ],
     }
