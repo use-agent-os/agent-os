@@ -1186,7 +1186,7 @@ agentos trade bracket approve <id> [--yes] / reject <id> [--reason <text>] [--js
 agentos trade bracket pause <id> / resume <id> / stop <id> [--reason <text>] [--json] [--no-card]   # operator-only; both legs; stop is final
 agentos trade bracket fire <id> [--leg tp|sl] [--wait] [--wait-seconds 1..900] [--json] [--no-card]   # fire one leg now (default the nearer one), the other goes on hold (operator-only)
 agentos trade history [--wallet <addr>] [--chain base|robinhood] [--kind swap|deposit|withdraw|gas|approval|lp_collect|lp_remove|lp_add] [--limit N] [--hidden]
-agentos trade portfolio [--wallet <addr>] [--hidden]   # holdings, cost basis, realized + unrealized PnL; --hidden lists junk tokens too
+agentos trade portfolio [--wallet <addr>] [--hidden]   # holdings, cost basis, realized + unrealized PnL (dust under $0.10 is listed, not counted); --hidden lists junk tokens too
 agentos trade hide --chain base <addr> / unhide --chain base <addr>   # your call on a token's visibility; the engine never reverses it
 agentos trade sync [--wallet <addr>] [--full]   # re-read the chain into the ledger; --full rebuilds it (operator-only) — run it once after an upgrade when `trade status` shows ledgerRepair
 agentos trade limits [<addr>]               # guardrails + today's agent spend (default: the primary wallet)

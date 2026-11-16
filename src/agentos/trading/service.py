@@ -132,6 +132,12 @@ log = structlog.get_logger(__name__)
 Initiator = Literal["manual", "agent"]
 Broadcast = Callable[[str, dict[str, Any]], Awaitable[None]]
 
+# A holding worth less than this is dust: listed (the balance is real) but never
+# part of a total. Phantom-balance airdrops answer ``balanceOf`` with the same
+# few tokens for every address, so without this a wallet nobody funded reads as
+# holding their fraction of a cent. The desktop's ``DUST_USD`` (views/trading/
+# logic.ts) folds the same rows away by default and must match this figure.
+DUST_USD = 0.1
 RECEIPT_TIMEOUT_S = 180.0
 #: A fee-paying LP increase may return up to its planned native fees plus
 #: 1/this of them (fees accrue between planning and the transaction).
@@ -1747,7 +1753,9 @@ class TradingService:
         Hidden (junk) tokens never count towards the totals. They are left out
         of ``holdings`` too unless ``include_hidden``, in which case they come
         back flagged ``hidden`` with a value; ``hiddenCount`` is how many were
-        held either way.
+        held either way. Dust (a priced holding worth under :data:`DUST_USD`)
+        is always listed, with ``allocationPct`` 0, but its value, cost and
+        24h move stay out of the totals too.
         """
         records = self.vault.list() if wallet is None else [self.vault.resolve(wallet)]
         keys = {r.key for r in records}
@@ -1853,6 +1861,12 @@ class TradingService:
                 {"value": 0.0, "cost": 0.0, "realized": 0.0, "change": 0.0, "unpriced": 0},
             )
             counted.add((chain_id, wallet_key, token))
+            bucket["realized"] += pnl.realized_usd
+            if value is not None and value < DUST_USD:
+                # Listed but not summed: a cent of airdrop is not a holding.
+                # Its value, cost and 24h move stay out; realized (above) is
+                # money already made or lost, so it counts.
+                continue
             if value is None:
                 # No price, so no value: its cost must stay out of the totals
                 # too, or the hero shows a loss the market never priced.
@@ -1862,7 +1876,6 @@ class TradingService:
                 bucket["value"] += value
                 if not unsellable:
                     bucket["cost"] += cost
-            bucket["realized"] += pnl.realized_usd
             bucket["change"] += change_usd or 0.0
         # A position sold down to nothing is no longer a holding, but what
         # it made or lost is still this wallet's realised PnL.
@@ -1874,11 +1887,12 @@ class TradingService:
             if token in hidden_by_chain[chain_id]:
                 continue
             per_wallet[wallet_key]["realized"] += realized_usd
-        total_value = sum(h["valueUsd"] or 0.0 for h in holdings if not h["hidden"])
+        total_value = sum(b["value"] for b in per_wallet.values())
         for h in holdings:
+            worth = h["valueUsd"] or 0.0
             h["allocationPct"] = (
-                (h["valueUsd"] or 0.0) / total_value * 100.0
-                if total_value > 0 and not h["hidden"]
+                worth / total_value * 100.0
+                if total_value > 0 and not h["hidden"] and worth >= DUST_USD
                 else 0.0
             )
         holdings.sort(key=lambda h: -(h["valueUsd"] or 0.0))

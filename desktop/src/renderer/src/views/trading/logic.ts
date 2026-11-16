@@ -308,7 +308,9 @@ export type HoldingSort = 'value' | 'pnl' | 'change' | 'symbol' | 'allocation'
 
 /** Positions worth less than this are hidden by default, so airdrop dust and
  *  worthless tokens do not bury the book. The figure in the "n hidden" line is
- *  rendered from this constant, never written out, so the two cannot drift. */
+ *  rendered from this constant, never written out, so the two cannot drift.
+ *  The engine leaves the same rows out of every total (`DUST_USD` in
+ *  trading/service.py); keep the two figures equal. */
 export const DUST_USD = 0.1
 
 export function splitDust(holdings: readonly Holding[]): { kept: Holding[]; dust: Holding[] } {
