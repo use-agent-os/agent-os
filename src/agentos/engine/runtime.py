@@ -4741,10 +4741,22 @@ class TurnRunner:
         from agentos.tools.deferred import prompt_tool_names
 
         prompt_tools, deferred_prompt_tools = prompt_tool_names(tool_defs, session_key)
+        mcp_section = ""
+        if prompt_tools and prompt_mode == "full":
+            from agentos.mcp.prompt import mcp_prompt_inputs
+
+            mcp_section, prompt_tools, deferred_prompt_tools = mcp_prompt_inputs(
+                prompt_tools,
+                deferred_prompt_tools,
+                instructions_max_chars=int(
+                    getattr(getattr(self._config, "mcp", None), "instructions_max_chars", 2000)
+                ),
+            )
         base_prompt = assemble_system_prompt(
             agent_profile,
             tools=prompt_tools or None,
             deferred_tools=deferred_prompt_tools,
+            mcp_servers=mcp_section,
             memory=memory_text,
             runtime_info=runtime_info,
             docs_path=self._resolve_docs_path(),

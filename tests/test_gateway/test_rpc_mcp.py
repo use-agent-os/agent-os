@@ -42,6 +42,7 @@ async def test_mcp_status_reports_configured_oauth_server(tmp_path) -> None:
         "servers": [
             {
                 "name": "robinhood-trading",
+                "enabled": True,
                 "transport": "streamable_http",
                 "url": "https://agent.robinhood.com/mcp/trading",
                 "oauth": True,
@@ -49,6 +50,13 @@ async def test_mcp_status_reports_configured_oauth_server(tmp_path) -> None:
                 "connected": False,
                 "tools": [],
                 "toolMap": {},
+                "toolFilter": {"include": [], "exclude": []},
+                "deferLoading": "auto",
+                "deferred": False,
+                "hasInstructions": False,
+                "resources": False,
+                "prompts": False,
+                "retry": None,
             }
         ],
     }

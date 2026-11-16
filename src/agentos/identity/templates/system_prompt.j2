@@ -42,6 +42,13 @@ These are installed but their schemas are not sent until loaded. When a task mat
 
 {% endif -%}
 
+{% if mcp_servers -%}
+## Connected MCP Servers
+
+{{ mcp_servers }}
+
+{% endif -%}
+
 {% if tools and prompt_mode == "full" -%}
 ## Tool Call Style
 

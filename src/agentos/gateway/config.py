@@ -1766,18 +1766,39 @@ class SessionsConfig(BaseSettings):
     suggest_next_timeout_seconds: float = Field(default=15.0, gt=0)
 
 
+class MCPToolFilterConfig(BaseModel):
+    """Which of a server's tools get registered, by ``fnmatch`` glob on the server's name.
+
+    An empty ``include`` admits every tool; ``exclude`` wins over ``include``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    include: list[str] = Field(default_factory=list)
+    exclude: list[str] = Field(default_factory=list)
+
+
 class MCPServerEntry(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENTOS_MCP_SERVER_")
 
     name: str = ""
+    # A disabled server keeps its definition but is never connected.
+    enabled: bool = True
     transport: Literal["stdio", "sse", "streamable_http"] = "stdio"
     command: str | None = None  # for stdio
     args: list[str] = Field(default_factory=list)  # for stdio
+    cwd: str | None = None  # for stdio; the gateway's own when unset
     url: str | None = None  # for HTTP transports
     env: dict[str, str] = Field(default_factory=dict)
     headers: dict[str, str] = Field(default_factory=dict)
     oauth: bool = False
     tool_timeout_seconds: float = 30.0
+    # Overrides ``mcp.connect_timeout_seconds`` for this server.
+    connect_timeout_seconds: float | None = Field(default=None, gt=0)
+    tool_filter: MCPToolFilterConfig = Field(default_factory=MCPToolFilterConfig)
+    # Keep this server's tool schemas out of requests until ``tool_search``
+    # loads them. "auto" defers past the ``[mcp]`` thresholds below.
+    defer_loading: Literal["auto"] | bool = "auto"
 
 
 class MCPConfig(BaseSettings):
@@ -1786,6 +1807,15 @@ class MCPConfig(BaseSettings):
     enabled: bool = False
     servers: list[MCPServerEntry] = Field(default_factory=list)
     connect_timeout_seconds: float = 5.0
+    # ``defer_loading = "auto"``: a server's tools are deferred when it exposes
+    # more than ``defer_tool_threshold`` of them, or when all connected MCP
+    # servers together expose more than ``defer_total_tool_threshold``.
+    defer_tool_threshold: int = Field(default=8, ge=0)
+    defer_total_tool_threshold: int = Field(default=20, ge=0)
+    # Budget for the server-authored text (``instructions``) the system
+    # prompt's "Connected MCP Servers" section quotes, across all servers.
+    # 0 leaves the instructions out and keeps the server list.
+    instructions_max_chars: int = Field(default=2000, ge=0)
 
 
 class HeartbeatConfig(BaseSettings):

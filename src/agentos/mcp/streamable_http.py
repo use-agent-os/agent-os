@@ -194,7 +194,8 @@ class MCPStreamableHTTPClient(MCPSessionClient):
                 read_stream,
                 write_stream,
                 read_timeout_seconds=timedelta(seconds=self.config.tool_timeout_seconds),
+                message_handler=self._on_session_message,
             )
         )
-        await session.initialize()
+        self._capture_initialize(await session.initialize())
         return session

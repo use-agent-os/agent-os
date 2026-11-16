@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from agentos.mcp import stdio
-from agentos.mcp.stdio import MCPStdioClient
+from agentos.mcp.stdio import MCPConnectionLost, MCPStdioClient
 from agentos.mcp.types import MCPServerConfig
 
 
@@ -101,6 +101,14 @@ def _reader(
     return reader
 
 
+async def _read_response(client: MCPStdioClient, req_id: int) -> dict[str, Any]:
+    """Wait for the reply to *req_id* the way ``_send_request`` does, minus the write."""
+    future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+    client._pending[req_id] = future
+    client._ensure_reader()
+    return await future
+
+
 def _client_reading(data: bytes, *, limit: int | None = None) -> MCPStdioClient:
     return _client_with_process(_PipeProcess(_reader(data=data, limit=limit)))
 
@@ -158,7 +166,7 @@ async def test_read_response_accepts_newline_delimited_message() -> None:
     """The exact frame a spec-compliant MCP stdio server writes (issue #894)."""
     client = _client_reading(b'{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}\n')
 
-    assert await client._read_response(1) == {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}
+    assert await _read_response(client, 1) == {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}
 
 
 @pytest.mark.asyncio
@@ -168,7 +176,7 @@ async def test_read_response_rejects_content_length_framing() -> None:
     client = _client_reading(b"Content-Length: %d\r\n\r\n" % len(body) + body + b"\n")
 
     with pytest.raises(ValueError, match="not valid JSON"):
-        await client._read_response(1)
+        await _read_response(client, 1)
 
 
 @pytest.mark.asyncio
@@ -178,8 +186,7 @@ async def test_read_response_stops_at_the_first_delimiter() -> None:
         b'{"jsonrpc":"2.0","id":1,"result":{"a":1}}\n{"jsonrpc":"2.0","id":2,"result":{"b":2}}\n'
     )
 
-    first = await client._read_response(1)
-    second = await client._read_response(2)
+    first, second = await asyncio.gather(_read_response(client, 1), _read_response(client, 2))
 
     assert first["result"] == {"a": 1}
     assert second["result"] == {"b": 2}
@@ -189,7 +196,7 @@ async def test_read_response_stops_at_the_first_delimiter() -> None:
 async def test_read_response_skips_blank_lines() -> None:
     client = _client_reading(b"\n\r\n" + b'{"jsonrpc":"2.0","id":1,"result":{}}\n')
 
-    assert (await client._read_response(1))["id"] == 1
+    assert (await _read_response(client, 1))["id"] == 1
 
 
 @pytest.mark.asyncio
@@ -205,7 +212,7 @@ async def test_read_response_skips_notifications_before_the_reply() -> None:
         b'{"jsonrpc":"2.0","id":7,"result":{"tools":[]}}\n'
     )
 
-    assert await client._read_response(7) == {"jsonrpc": "2.0", "id": 7, "result": {"tools": []}}
+    assert await _read_response(client, 7) == {"jsonrpc": "2.0", "id": 7, "result": {"tools": []}}
 
 
 @pytest.mark.asyncio
@@ -215,7 +222,7 @@ async def test_read_response_skips_a_reply_to_another_request() -> None:
         b'{"jsonrpc":"2.0","id":7,"result":{"fresh":true}}\n'
     )
 
-    assert (await client._read_response(7))["result"] == {"fresh": True}
+    assert (await _read_response(client, 7))["result"] == {"fresh": True}
 
 
 @pytest.mark.asyncio
@@ -226,7 +233,7 @@ async def test_read_response_skips_a_server_request_reusing_the_id() -> None:
         b'{"jsonrpc":"2.0","id":7,"result":{"ok":true}}\n'
     )
 
-    assert (await client._read_response(7))["result"] == {"ok": True}
+    assert (await _read_response(client, 7))["result"] == {"ok": True}
 
 
 @pytest.mark.asyncio
@@ -255,7 +262,7 @@ async def test_read_response_handles_message_split_across_reads() -> None:
         stdout.feed_eof()
 
     feeder = asyncio.create_task(feed())
-    response = await client._read_response(1)
+    response = await _read_response(client, 1)
     await feeder
 
     assert response["id"] == 1
@@ -273,7 +280,7 @@ async def test_read_response_reads_message_longer_than_the_stream_limit() -> Non
     payload: dict[str, Any] = {"jsonrpc": "2.0", "id": 1, "result": {"text": "x" * 4096}}
     client = _client_reading(json.dumps(payload).encode() + b"\n", limit=64)
 
-    assert await client._read_response(1) == payload
+    assert await _read_response(client, 1) == payload
 
 
 @pytest.mark.asyncio
@@ -286,8 +293,8 @@ async def test_read_response_gives_up_on_a_message_with_no_delimiter_in_sight(
     # without it the read ends in the short-read error instead.
     client = _client_reading(b"x" * 1024, limit=8)
 
-    with pytest.raises(ValueError, match="exceeds 256 bytes"):
-        await client._read_response(1)
+    with pytest.raises(MCPConnectionLost, match="exceeds 256 bytes"):
+        await _read_response(client, 1)
 
 
 @pytest.mark.asyncio
@@ -295,8 +302,8 @@ async def test_read_response_raises_when_eof_arrives_before_the_delimiter() -> N
     """Premature EOF must surface as a clear ValueError, not a JSON error."""
     client = _client_reading(b'{"jsonrpc":"2.0","id":1,"result":{}')  # no newline delimiter
 
-    with pytest.raises(ValueError, match="Truncated message"):
-        await client._read_response(1)
+    with pytest.raises(MCPConnectionLost, match="Truncated message"):
+        await _read_response(client, 1)
 
 
 @pytest.mark.asyncio
@@ -304,16 +311,16 @@ async def test_read_response_raises_when_partial_message_exceeds_stream_limit() 
     """The short-read guard still fires for a partial message past the limit."""
     client = _client_reading(b'{"jsonrpc":"2.0","id":1,"result":"' + b"x" * 4096, limit=64)
 
-    with pytest.raises(ValueError, match="Truncated message"):
-        await client._read_response(1)
+    with pytest.raises(MCPConnectionLost, match="Truncated message"):
+        await _read_response(client, 1)
 
 
 @pytest.mark.asyncio
 async def test_read_response_raises_when_server_closes_stdout() -> None:
     client = _client_reading(b"")
 
-    with pytest.raises(ValueError, match="closed stdout"):
-        await client._read_response(1)
+    with pytest.raises(MCPConnectionLost, match="closed stdout"):
+        await _read_response(client, 1)
 
 
 @pytest.mark.asyncio
@@ -322,7 +329,7 @@ async def test_read_response_reports_undecodable_bytes_as_a_bad_line() -> None:
     client = _client_reading(b"\xff\xfe{}\n")
 
     with pytest.raises(ValueError, match="not valid JSON"):
-        await client._read_response(1)
+        await _read_response(client, 1)
 
 
 @pytest.mark.asyncio
@@ -330,7 +337,7 @@ async def test_read_response_rejects_non_object_message() -> None:
     client = _client_reading(b"[1, 2, 3]\n")
 
     with pytest.raises(ValueError, match="not a JSON-RPC object"):
-        await client._read_response(1)
+        await _read_response(client, 1)
 
 
 # --- end to end against a real subprocess ----------------------------------
@@ -425,8 +432,8 @@ async def test_tool_call_reports_is_error_flag(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_concurrent_tool_calls_serialized_safely(tmp_path: Path) -> None:
-    """Concurrent tool calls on the same stdio client must be safely serialized."""
+async def test_concurrent_tool_calls_each_get_their_own_reply(tmp_path: Path) -> None:
+    """Concurrent tool calls on the same stdio client must not cross replies."""
     server = tmp_path / "server.py"
     server.write_text(_SPEC_COMPLIANT_SERVER)
     client = MCPStdioClient(
