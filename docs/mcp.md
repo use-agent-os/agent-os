@@ -252,6 +252,18 @@ change up.
   `mcp.server_exited`, unregisters that server's tools (so the model is not
   offered tools that can only fail), and reconnects on the same schedule,
   registering the tools again when it is back.
+- **When an HTTP transport drops.** One failed request (an auth error, a 5xx,
+  a dropped connection) can close a Streamable HTTP or SSE session for good.
+  The server's tools stay registered, `mcp.status` reports it as
+  `connected: false`, and the next tool call reconnects first
+  (`mcp.transport_reconnecting`). A call that was in flight when it dropped
+  fails and is not resent; one that never left is sent again after the
+  reconnect.
+- **OAuth tokens.** The saved access token is refreshed with the saved refresh
+  token before it expires, so short-lived tokens need no new sign-in. If the
+  server refuses the refresh, the saved tokens are dropped and the server waits
+  for the user (`build_services.mcp_server_authentication_required` at boot,
+  `mcp.reconnect_needs_sign_in` from a background retry, which then stops).
 - **What is left alone.** OAuth servers that are not signed in wait for the
   user. Disabled servers are never retried. `mcp.connect`, `mcp.disconnect` and
   `mcp.oauth.clear` take a server over from the background retry, and a

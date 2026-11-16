@@ -227,6 +227,56 @@ async def test_boot_failure_schedules_a_background_retry(tmp_path, monkeypatch, 
 
 
 @pytest.mark.asyncio
+async def test_a_server_that_needs_sign_in_is_not_retried(monkeypatch, logs) -> None:
+    """Retrying a refused OAuth refresh cannot succeed; it would only call the server."""
+    from agentos.mcp.streamable_http import MCPAuthorizationRequiredError
+
+    attempts: list[str] = []
+
+    async def discover(config: MCPServerConfig, registry: ToolRegistry, **_: Any) -> list[str]:
+        attempts.append(config.name)
+        raise MCPAuthorizationRequiredError("sign in again")
+
+    monkeypatch.setattr(discovery, "discover_and_register", discover)
+    sleep = FakeSleep()
+    sup = MCPSupervisor(ToolRegistry(), default_connect_timeout=5.0, sleep=sleep)
+
+    sup.schedule_retry(_demo("oauth"), error="401", reason="boot")
+    await _until(lambda: "oauth" not in sup._retries)
+
+    assert attempts == ["oauth"]
+    assert sup.retry_state("oauth") is None
+    assert [e["event"] for e in logs] == ["mcp.reconnect_needs_sign_in"]
+    await sup.aclose()
+
+
+@pytest.mark.asyncio
+async def test_boot_does_not_retry_a_server_that_needs_sign_in(tmp_path, monkeypatch, logs) -> None:
+    from agentos.mcp.streamable_http import MCPAuthorizationRequiredError
+
+    registry = ToolRegistry()
+
+    async def connect_and_list(config: MCPServerConfig) -> Any:
+        raise MCPAuthorizationRequiredError("sign in again")
+
+    monkeypatch.setattr(discovery, "connect_and_list", connect_and_list)
+    supervisor_mod._supervisor = MCPSupervisor(
+        registry, default_connect_timeout=5.0, sleep=FakeSleep()
+    )
+    config = GatewayConfig(
+        state_dir=str(tmp_path),
+        mcp={"enabled": True, "servers": [{"name": "signed-out", "command": "x"}]},
+    )
+
+    await _discover_configured_mcp_servers(config, registry)
+
+    events = [e["event"] for e in logs]
+    assert "build_services.mcp_server_authentication_required" in events
+    assert "build_services.mcp_server_failed" not in events
+    assert supervisor_mod._supervisor.retry_state("signed-out") is None
+
+
+@pytest.mark.asyncio
 async def test_mcp_status_exposes_retry_state(tmp_path) -> None:
     from agentos.gateway.rpc import RpcContext, get_dispatcher
 

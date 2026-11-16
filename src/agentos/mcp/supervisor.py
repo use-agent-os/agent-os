@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from agentos.mcp import discovery
+from agentos.mcp.streamable_http import MCPAuthorizationRequiredError
 from agentos.mcp.types import MCPServerConfig
 
 if TYPE_CHECKING:
@@ -177,7 +178,14 @@ class MCPSupervisor:
                 names = await self._connect(config)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001 - every failure is retried.
+            except MCPAuthorizationRequiredError as exc:
+                # Only a browser sign-in fixes this; retrying would call the
+                # server every few minutes for as long as the gateway runs.
+                log.warning("mcp.reconnect_needs_sign_in", server=config.name, error=str(exc))
+                self._state.pop(config.name, None)
+                self._retries.pop(config.name, None)
+                return
+            except Exception as exc:  # noqa: BLE001 - every other failure is retried.
                 error = "timed out" if isinstance(exc, TimeoutError) else str(exc)
                 state.last_error = error
                 log.warning(

@@ -10,7 +10,12 @@ from collections.abc import Callable
 from contextlib import AsyncExitStack
 from typing import Any
 
+import anyio
+import structlog
+
 from agentos.mcp.types import MCPServerConfig, MCPToolDef, MCPToolResult
+
+log = structlog.get_logger(__name__)
 
 
 class MCPClient(ABC):
@@ -147,6 +152,9 @@ class MCPSessionClient(MCPClient):
         self._session: Any = None
         self._runner: asyncio.Task[None] | None = None
         self._closing: asyncio.Event | None = None
+        self._reconnect_lock = asyncio.Lock()
+        # Set when a call finds the transport's streams closed under it.
+        self._transport_lost = False
 
     @abstractmethod
     async def _open_session(self, stack: AsyncExitStack) -> Any:
@@ -197,6 +205,18 @@ class MCPSessionClient(MCPClient):
                 session = await self._open_session(stack)
             except asyncio.CancelledError:
                 handed_off.set()
+                # A request that fails inside the SDK transport fails its anyio
+                # task group, which cancels the handshake still awaiting a reply.
+                # That cancel is not ours: only unwinding the stack, where the
+                # group exits, turns it back into the error that caused it.
+                try:
+                    await stack.aclose()
+                except asyncio.CancelledError:
+                    pass
+                except BaseException as exc:
+                    if not ready.done():
+                        ready.set_exception(_root_cause(exc))
+                    return
                 if not ready.done():
                     ready.cancel()
                 raise
@@ -257,6 +277,46 @@ class MCPSessionClient(MCPClient):
             raise RuntimeError(f"{self.transport_label} client is not connected")
         return self._session
 
+    @property
+    def is_alive(self) -> bool:
+        """Whether the transport is still up, not just whether ``connect()`` once succeeded.
+
+        One failed HTTP request (an auth error, a 5xx, a dropped socket) fails
+        the SDK transport's task group, which closes its streams for good. The
+        runner task then ends while ``_session`` still points at the dead
+        session, and every later call fails with ``ClosedResourceError``.
+        """
+        if self._session is None or self._runner is None or self._runner.done():
+            return False
+        if self._transport_lost:
+            return False
+        # SDK versions that log a failed request instead of failing the task
+        # group close the session's send stream and leave the runner up.
+        send_stream = getattr(self._session, "_write_stream", None)
+        return not getattr(send_stream, "_closed", False)
+
+    async def _live_session(self) -> Any:
+        if self._session is not None and not self.is_alive:
+            return await self._reconnect()
+        return self._require_session()
+
+    async def _reconnect(self) -> Any:
+        """Replace a dead transport with a fresh one, once, however many calls noticed."""
+        async with self._reconnect_lock:
+            if self.is_alive:
+                return self._session
+            if self._session is None and self._runner is None:
+                # ``close()`` ran while this call waited; it was not a crash.
+                raise RuntimeError(f"{self.transport_label} client is not connected")
+            log.warning("mcp.transport_reconnecting", server=self.config.name)
+            # ``close()`` rather than ``_teardown``: a runner whose streams the
+            # SDK closed is still parked on ``closing`` and only that wakes it.
+            with contextlib.suppress(Exception):
+                await self.close()
+            self._transport_lost = False
+            await self.connect()
+            return self._require_session()
+
     async def _on_session_message(self, message: Any) -> None:
         """``ClientSession`` message handler: only the catalog change matters here."""
         root = getattr(message, "root", None)
@@ -265,7 +325,7 @@ class MCPSessionClient(MCPClient):
 
     async def list_tools(self) -> list[MCPToolDef]:
         """List tools from the MCP server."""
-        session = self._require_session()
+        session = await self._live_session()
         tools: list[MCPToolDef] = []
         cursor: str | None = None
         for _ in range(_MAX_LIST_PAGES):
@@ -277,7 +337,7 @@ class MCPSessionClient(MCPClient):
         return tools
 
     async def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        session = self._require_session()
+        session = await self._live_session()
         params = params or {}
         cursor = params.get("cursor")
         if method == "resources/list":
@@ -302,8 +362,22 @@ class MCPSessionClient(MCPClient):
         return dumped if isinstance(dumped, dict) else {}
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
-        """Call a tool on the MCP server."""
-        result = await self._require_session().call_tool(name, arguments)
+        """Call a tool on the MCP server, reconnecting first if the transport died."""
+        session = await self._live_session()
+        try:
+            result = await session.call_tool(name, arguments)
+        except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+            # Raised while handing the request to a transport that is already
+            # gone, so the server never saw it and sending it again is safe.
+            self._transport_lost = True
+            session = await self._reconnect()
+            result = await session.call_tool(name, arguments)
+        except Exception as exc:
+            # The transport died with this request in flight. The server may
+            # have run it, so it is not resent; the next call reconnects.
+            if _is_connection_closed(exc):
+                self._transport_lost = True
+            raise
         chunks: list[str] = []
         for block in result.content:
             text = getattr(block, "text", None)
@@ -319,3 +393,19 @@ class MCPSessionClient(MCPClient):
             content="\n".join(chunks),
             is_error=bool(getattr(result, "isError", False)),
         )
+
+
+def _root_cause(exc: BaseException) -> BaseException:
+    """Unwrap single-member exception groups that anyio task groups add."""
+    while isinstance(exc, BaseExceptionGroup) and len(exc.exceptions) == 1:
+        exc = exc.exceptions[0]
+    return exc
+
+
+def _is_connection_closed(exc: BaseException) -> bool:
+    error = getattr(exc, "error", None)
+    try:
+        from mcp.types import CONNECTION_CLOSED
+    except ImportError:  # pragma: no cover - the SDK is a hard dependency
+        return False
+    return getattr(error, "code", None) == CONNECTION_CLOSED

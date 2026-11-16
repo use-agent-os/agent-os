@@ -2115,7 +2115,7 @@ async def _discover_configured_mcp_servers(
         return
 
     from agentos.mcp import discovery
-    from agentos.mcp.streamable_http import FileOAuthStorage
+    from agentos.mcp.streamable_http import FileOAuthStorage, MCPAuthorizationRequiredError
     from agentos.mcp.supervisor import INITIAL_BACKOFF_SECONDS, install_supervisor
     from agentos.mcp.types import MCPServerConfig
 
@@ -2191,6 +2191,14 @@ async def _discover_configured_mcp_servers(
                 )
                 supervisor.watch(mcp_cfg)
                 continue
+        if isinstance(outcome, MCPAuthorizationRequiredError):
+            # The saved sign-in could not be refreshed. Retrying cannot fix
+            # that; only the user signing in again from Settings > MCP can.
+            log.info(
+                "build_services.mcp_server_authentication_required",
+                server=mcp_cfg.name,
+            )
+            continue
         if isinstance(outcome, TimeoutError):
             log.warning(
                 "build_services.mcp_server_timeout",
