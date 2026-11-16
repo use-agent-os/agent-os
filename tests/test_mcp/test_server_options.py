@@ -44,6 +44,9 @@ class _FakeClient(MCPClient):
 @pytest.fixture(autouse=True)
 async def _no_leaked_clients():
     yield
+    from agentos.mcp.supervisor import shutdown_supervisor
+
+    await shutdown_supervisor()
     await discovery.close_active_clients()
 
 
@@ -164,8 +167,8 @@ def _boot_config(tmp_path, servers: list[dict[str, Any]]) -> GatewayConfig:
 
 @pytest.mark.asyncio
 async def test_boot_skips_disabled_server(tmp_path, monkeypatch) -> None:
-    discover = AsyncMock(return_value=[])
-    monkeypatch.setattr(discovery, "discover_and_register", discover)
+    discover = AsyncMock(side_effect=ConnectionError("unreachable in tests"))
+    monkeypatch.setattr(discovery, "connect_and_list", discover)
 
     await _discover_configured_mcp_servers(
         _boot_config(
@@ -192,7 +195,9 @@ async def test_boot_uses_per_server_connect_timeout(tmp_path, monkeypatch) -> No
         seen.append(timeout)
         return await real_wait_for(aw, timeout)
 
-    monkeypatch.setattr(discovery, "discover_and_register", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        discovery, "connect_and_list", AsyncMock(side_effect=ConnectionError("unreachable"))
+    )
     monkeypatch.setattr(boot.asyncio, "wait_for", wait_for)
 
     await _discover_configured_mcp_servers(

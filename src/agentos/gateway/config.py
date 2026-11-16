@@ -1796,6 +1796,9 @@ class MCPServerEntry(BaseSettings):
     # Overrides ``mcp.connect_timeout_seconds`` for this server.
     connect_timeout_seconds: float | None = Field(default=None, gt=0)
     tool_filter: MCPToolFilterConfig = Field(default_factory=MCPToolFilterConfig)
+    # Keep this server's tool schemas out of requests until ``tool_search``
+    # loads them. "auto" defers past the ``[mcp]`` thresholds below.
+    defer_loading: Literal["auto"] | bool = "auto"
 
 
 class MCPConfig(BaseSettings):
@@ -1804,6 +1807,15 @@ class MCPConfig(BaseSettings):
     enabled: bool = False
     servers: list[MCPServerEntry] = Field(default_factory=list)
     connect_timeout_seconds: float = 5.0
+    # ``defer_loading = "auto"``: a server's tools are deferred when it exposes
+    # more than ``defer_tool_threshold`` of them, or when all connected MCP
+    # servers together expose more than ``defer_total_tool_threshold``.
+    defer_tool_threshold: int = Field(default=8, ge=0)
+    defer_total_tool_threshold: int = Field(default=20, ge=0)
+    # Budget for the server-authored text (``instructions``) the system
+    # prompt's "Connected MCP Servers" section quotes, across all servers.
+    # 0 leaves the instructions out and keeps the server list.
+    instructions_max_chars: int = Field(default=2000, ge=0)
 
 
 class HeartbeatConfig(BaseSettings):

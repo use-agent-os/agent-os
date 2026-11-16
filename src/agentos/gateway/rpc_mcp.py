@@ -78,7 +78,10 @@ def _runtime_config(
     ctx: RpcContext, entry: Any, redirect_uri: str | None = None
 ) -> MCPServerConfig:
     return MCPServerConfig.from_entry(
-        entry, state_dir=ctx.config.state_dir, oauth_redirect_uri=redirect_uri
+        entry,
+        state_dir=ctx.config.state_dir,
+        oauth_redirect_uri=redirect_uri,
+        defaults=ctx.config.mcp,
     )
 
 
@@ -180,6 +183,13 @@ async def _handle_mcp_status(params: dict | None, ctx: RpcContext) -> dict[str, 
                     "include": list(runtime.tool_filter.include),
                     "exclude": list(runtime.tool_filter.exclude),
                 },
+                # Whether the server's tools wait behind ``tool_search``, and
+                # what else the agent was given for it.
+                "deferLoading": entry.defer_loading,
+                "deferred": active[entry.name].deferred if connected else False,
+                "hasInstructions": bool(active[entry.name].instructions) if connected else False,
+                "resources": active[entry.name].has_resources if connected else False,
+                "prompts": active[entry.name].has_prompts if connected else False,
                 # Set while the server waits to reconnect after a failed
                 # connect or a crash: attempts, last error, next retry time.
                 "retry": retry.to_dict() if retry is not None else None,

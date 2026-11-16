@@ -207,6 +207,10 @@ async def test_boot_failure_schedules_a_background_retry(tmp_path, monkeypatch, 
             raise ConnectionError("not yet")
         return ["mcp_ok"]
 
+    async def connect_and_list(config: MCPServerConfig) -> Any:
+        await discover(config, registry)
+
+    monkeypatch.setattr(discovery, "connect_and_list", connect_and_list)
     monkeypatch.setattr(discovery, "discover_and_register", discover)
     supervisor_mod._supervisor = MCPSupervisor(registry, default_connect_timeout=5.0, sleep=sleep)
     config = GatewayConfig(

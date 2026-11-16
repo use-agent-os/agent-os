@@ -63,7 +63,7 @@ def _require(cfg: Any, name: str, *, json_output: bool) -> Any:
 def _runtime(cfg: Any, entry: Any) -> MCPServerConfig:
     from agentos.mcp.types import MCPServerConfig
 
-    return MCPServerConfig.from_entry(entry, state_dir=cfg.state_dir)
+    return MCPServerConfig.from_entry(entry, state_dir=cfg.state_dir, defaults=cfg.mcp)
 
 
 def _server_row(entry: Any) -> dict[str, Any]:
