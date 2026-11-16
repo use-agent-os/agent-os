@@ -7,7 +7,7 @@ import pytest
 
 from agentos.trading import service as service_module
 from agentos.trading.chains import BASE, NATIVE_ADDRESS, ROBINHOOD
-from agentos.trading.service import TradingError, TradingService
+from agentos.trading.service import DUST_USD, TradingError, TradingService
 from tests.test_trading.conftest import PASSWORD
 from tests.test_trading.fakes import (
     AAPL,
@@ -2070,6 +2070,38 @@ class TestPortfolioTotals:
         assert portfolio["totals"]["unrealizedUsd"] == pytest.approx(300.0)
         assert portfolio["wallets"][0]["totals"]["unrealizedUsd"] == pytest.approx(300.0)
         assert portfolio["unpricedCount"] == 0
+
+    async def test_dust_is_listed_but_never_counted_in_the_totals(
+        self,
+        funded_service: TradingService,
+        base_chain: FakeChain,
+        fake_prices: FakePrices,
+    ) -> None:
+        """A position worth under DUST_USD is shown on request, never summed.
+
+        Phantom-balance airdrops report the same few tokens in every wallet; a
+        brand-new wallet must not read as holding their fraction of a cent.
+        """
+        service = funded_service
+        wallet = service.test_wallet  # type: ignore[attr-defined]
+        self._list(fake_prices, base_chain)
+        fake_prices.spot[("base", self.LISTED)] = 0.004
+        base_chain.set_erc20(self.LISTED, wallet, 9 * 10**18)
+        base_chain.add_transfer(
+            token=self.LISTED, sender=OTHER, recipient=wallet, amount=9 * 10**18
+        )
+        await service.sync_all()  # opening lot: 9 LST at $0.004 = $0.036 of cost
+        portfolio = await service.portfolio(wallet)
+        row = next(h for h in portfolio["holdings"] if h["token"]["address"] == self.LISTED)
+        assert row["valueUsd"] == pytest.approx(0.036)
+        assert row["valueUsd"] < DUST_USD
+        assert row["allocationPct"] == 0.0
+        assert portfolio["totals"]["valueUsd"] == pytest.approx(3000.0)
+        assert portfolio["totals"]["costUsd"] == pytest.approx(3000.0)
+        assert portfolio["totals"]["unrealizedUsd"] == pytest.approx(0.0)
+        assert portfolio["wallets"][0]["totals"]["valueUsd"] == pytest.approx(3000.0)
+        whole = await service.portfolio()
+        assert whole["totals"]["valueUsd"] == pytest.approx(3000.0)
 
 
 class TestApprovalGasInitiator:

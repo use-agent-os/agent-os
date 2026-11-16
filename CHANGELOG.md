@@ -350,6 +350,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   instead of the caller's unparsed `amountIn`. (WAL-13)
 
 ### Fixed
+- Trading: a holding worth under $0.10 is listed but no longer counted in the
+  portfolio totals, the allocation bar or the wallet list. Phantom-balance
+  airdrops answer `balanceOf` with the same few tokens for every address, so
+  a wallet nobody had funded showed their fraction of a cent as its balance.
+  Realized PnL from such a position still counts.
 - Settings › Channels lists pairing requests for Discord, Slack and MS Teams
   channels with `pairing_enabled`, next to Telegram, with Approve, Deny and
   Revoke. The gateway already reported and accepted them; the panel showed
