@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import signal
 import sys
 from pathlib import Path
 from typing import Any
@@ -271,12 +269,16 @@ async def test_mcp_status_exposes_retry_state(tmp_path) -> None:
 # ── a real stdio server that dies ────────────────────────────────────
 
 
-def _pid(name: str) -> int:
+def _process(name: str) -> asyncio.subprocess.Process:
     entry = next(e for e in discovery.active_clients_snapshot() if e.server_name == name)
     assert isinstance(entry.client, MCPStdioClient)
     process = entry.client._process
     assert process is not None
-    return process.pid
+    return process
+
+
+def _pid(name: str) -> int:
+    return _process(name).pid
 
 
 @pytest.mark.asyncio
@@ -287,7 +289,8 @@ async def test_crashed_stdio_server_is_marked_unavailable_and_revived(logs) -> N
     config = _demo()
     await discovery.discover_and_register(config, registry)
     sup.watch(config)
-    first_pid = _pid("demo")
+    first = _process("demo")
+    first_pid = first.pid
     assert registry.get("mcp_search") is not None
 
     unregistered = asyncio.Event()
@@ -301,7 +304,10 @@ async def test_crashed_stdio_server_is_marked_unavailable_and_revived(logs) -> N
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(discovery, "disconnect_and_unregister", spy_disconnect)
-        os.kill(first_pid, signal.SIGKILL)
+        # Through the client's own handle, not ``os.kill(pid, SIGKILL)``:
+        # ``signal.SIGKILL`` does not exist on Windows, while ``kill()`` is
+        # SIGKILL on POSIX and TerminateProcess there.
+        first.kill()
         await asyncio.wait_for(unregistered.wait(), 15)
         await _until(
             lambda: registry.get("mcp_search") is not None and sup.retry_state("demo") is None
