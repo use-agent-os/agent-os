@@ -50,6 +50,7 @@ available without `uv tool list` or `pip show`.
 | `agentos migrate` | Import state from external agent runtimes. |
 | `agentos models` | Inspect available models. |
 | `agentos agents` | Manage durable agents. |
+| `agentos mcp` | Manage the MCP servers AgentOS connects to as a client: `list`, `status`, `add`, `remove`, `enable`, `disable`, `probe`, `doctor`. |
 | `agentos mcp-server` | Run the AgentOS MCP server bridge. |
 | `agentos dist` | Emit a reproducible workspace-state inventory. |
 | `agentos reset` | Reset a session, rotating it to a fresh transcript. |
@@ -2010,6 +2011,40 @@ directory as `--source` instead. Every form is a dry-run report until
 transcript through the gateway (`--gateway`, default
 `http://localhost:18791`). It exits 1 when the gateway refuses the reset,
 and the session is then preserved.
+
+## MCP Client Servers
+
+`agentos mcp` edits the `[[mcp.servers]]` entries in the config file; no
+gateway is needed. `probe` and `doctor --probe` open a one-off connection from
+the CLI process itself (a stdio server is spawned as a child of your shell),
+list the server's tools, and close it.
+
+```sh
+agentos mcp list [--json]
+agentos mcp status [--json]
+agentos mcp add fs --command npx --arg -y --arg @modelcontextprotocol/server-filesystem \
+  --arg /srv/data --cwd /srv --env LOG_LEVEL=warn --include 'read_*,list_*' --exclude write_file
+agentos mcp add docs --url https://mcp.example.com/mcp [--transport sse] [--header K=V] [--oauth]
+agentos mcp disable fs
+agentos mcp enable fs
+agentos mcp probe fs [--timeout 20] [--json]
+agentos mcp doctor fs [--probe] [--json]
+agentos mcp remove fs
+```
+
+| Command | Notes |
+|---|---|
+| `list` / `status` | Config-only view; `status` adds counts. `--json` rows carry `envKeys`/`headerKeys` (names only, never values). |
+| `add <name>` | Exactly one of `--command` (stdio; with `--arg` repeatable, `--cwd`, `--env K=V` repeatable) or `--url` (`--transport sse\|streamable_http`, default `streamable_http`; `--header K=V`, `--oauth`). `--include`/`--exclude` take globs, repeatable or comma-separated. Also `--tool-timeout`, `--connect-timeout`, `--disabled`, `--replace` (overwrite in place). The first server added switches `mcp.enabled` on; an explicit `mcp.enabled = false` next to existing servers is kept. |
+| `remove` / `enable` / `disable <name>` | Edit one entry; a disabled server is kept but never connected. |
+| `probe <name>` | Connect, list tools, mark which the tool filter registers, close. Exit 1 when unreachable. |
+| `doctor <name> [--probe]` | Validate the definition (command on PATH, `cwd` exists, URL shape, misplaced fields), then optionally probe and flag filter patterns that match no tool. Exit 1 on any error. |
+
+Every write validates the whole config, backs the file up, and rewrites it
+(comments are not preserved). `mcp` is operator-only: with a gateway running
+the change is held until `agentos config reload`, then applies on restart.
+Errors with `--json` go to stderr as `{"error":{"code":…}}` — `INVALID_ARGUMENT`
+(exit 2), `NOT_FOUND` / `ALREADY_EXISTS` (exit 1). Guide: [`mcp.md`](mcp.md).
 
 ## MCP Server Bridge
 
