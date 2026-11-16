@@ -3,7 +3,9 @@ import {
   Circle,
   CircleCheck,
   Copy,
+  Download,
   ExternalLink,
+  Fingerprint,
   KeyRound,
   Lock,
   Pencil,
@@ -32,6 +34,15 @@ import { ChainBadge } from './ChainMark'
 import { activeFirst, errorText, formatPct, pnlTone, shortAddress, walletLabel } from './logic'
 import { Money, Sheet } from './parts'
 import type { ChainStatus, Totals, UnlockMode, Wallet } from './types'
+import {
+  downloadFile,
+  MAX_BATCH_CREATE,
+  MAX_BATCH_IMPORT,
+  type MintedSecret,
+  parseKeyRows,
+  walletsCsv,
+  walletsCsvName,
+} from './wallet-batch'
 
 export type WalletSheetMode =
   | { kind: 'setup' }
@@ -605,69 +616,474 @@ function UnlockSheet({ onClose }: { onClose: () => void }) {
   )
 }
 
+function Tabs<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: T
+  options: readonly { value: T; label: string; testId?: string }[]
+  onChange: (value: T) => void
+}) {
+  return (
+    <div className="trd-field">
+      <span className="trd-field__label">{label}</span>
+      <div role="radiogroup" aria-label={label} className="mac-segmented self-start">
+        {options.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={value === o.value}
+            className="mac-segment"
+            data-testid={o.testId}
+            onClick={() => onChange(o.value)}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+const fill = (text: string, values: Record<string, string | number>): string =>
+  text.replace(/\{(\w+)\}/g, (whole, k: string) => (k in values ? String(values[k]) : whole))
+
+/** A whole number from 1 to `max`, or null. */
+function wholeCount(text: string, max: number): number | null {
+  if (!/^\d+$/.test(text.trim())) return null
+  const n = Number(text.trim())
+  return n >= 1 && n <= max ? n : null
+}
+
+interface CreatedBatch {
+  batchId: string
+  wallets: Wallet[]
+}
+
+/**
+ * New wallets: one, or a batch of up to `MAX_BATCH_CREATE`. A batch ends on
+ * its own page, where its keys and recovery phrases download as a CSV.
+ */
 function CreateSheet({ onClose }: { onClose: () => void }) {
-  const id = useId()
+  const ids = { label: useId(), count: useId(), prefix: useId() }
+  const [tab, setTab] = useState<'one' | 'bulk'>('one')
   const [label, setLabel] = useState('')
+  const [countText, setCountText] = useState('10')
+  const [prefix, setPrefix] = useState('')
+  const [batch, setBatch] = useState<CreatedBatch | null>(null)
   const m = useWalletMutation<{ wallet: Wallet }>()
+  const bulk = useWalletMutation<CreatedBatch>()
+  const pending = m.isPending || bulk.isPending
+  const count = wholeCount(countText, MAX_BATCH_CREATE)
+
+  if (batch) return <BatchCreatedSheet batch={batch} onClose={onClose} />
+
+  function createOne() {
+    m.mutate(
+      // Empty: the engine names it after its address (0xAbC_1234).
+      { method: 'wallet.create', params: { label: label.trim() } },
+      {
+        onSuccess: (res) => {
+          toast.success(t('trading.sheet.create.done'), {
+            description: res?.wallet ? shortAddress(res.wallet.address) : undefined,
+          })
+          onClose()
+        },
+        onError: (err) => toast.error(`${t('trading.sheet.error')}: ${errorText(err)}`),
+      },
+    )
+  }
+
+  function createBatch() {
+    if (count === null) return
+    bulk.mutate(
+      { method: 'wallet.createBatch', params: { count, label: prefix.trim() } },
+      {
+        onSuccess: (res) => {
+          if (!res?.batchId) return
+          toast.success(
+            fill(t('trading.sheet.create.bulk.done'), { count: res.wallets?.length ?? count }),
+          )
+          setBatch({ batchId: res.batchId, wallets: res.wallets ?? [] })
+        },
+        onError: (err) => toast.error(`${t('trading.sheet.error')}: ${errorText(err)}`),
+      },
+    )
+  }
+
   return (
     <Sheet
       title={t('trading.sheet.create.title')}
       onClose={onClose}
       foot={
         <>
-          <Button onClick={onClose} disabled={m.isPending}>
+          <Button onClick={onClose} disabled={pending}>
             {t('trading.sheet.cancel')}
           </Button>
-          <Button
-            variant="primary"
-            disabled={m.isPending}
-            data-testid="create-submit"
-            onClick={() =>
-              m.mutate(
-                {
-                  method: 'wallet.create',
-                  params: { label: label.trim() || t('trading.sheet.create.label.placeholder') },
-                },
-                {
-                  onSuccess: (res) => {
-                    toast.success(t('trading.sheet.create.done'), {
-                      description: res?.wallet ? shortAddress(res.wallet.address) : undefined,
-                    })
-                    onClose()
-                  },
-                  onError: (err) => toast.error(`${t('trading.sheet.error')}: ${errorText(err)}`),
-                },
-              )
-            }
-          >
-            {m.isPending ? t('trading.sheet.working') : t('trading.sheet.create.cta')}
-          </Button>
+          {tab === 'one' ? (
+            <Button
+              variant="primary"
+              disabled={pending}
+              data-testid="create-submit"
+              onClick={createOne}
+            >
+              {m.isPending ? t('trading.sheet.working') : t('trading.sheet.create.cta')}
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              disabled={pending || count === null}
+              data-testid="create-bulk-submit"
+              onClick={createBatch}
+            >
+              {bulk.isPending
+                ? t('trading.sheet.working')
+                : fill(t('trading.sheet.create.bulk.cta'), { count: count ?? '' })}
+            </Button>
+          )}
         </>
       }
     >
-      <Field id={id} label={t('trading.sheet.create.label')}>
-        <input
-          id={id}
-          className="mac-input"
-          autoFocus
-          placeholder={t('trading.sheet.create.label.placeholder')}
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-        />
-      </Field>
+      <Tabs
+        label={t('trading.sheet.create.tabs')}
+        value={tab}
+        onChange={(v) => !pending && setTab(v)}
+        options={[
+          { value: 'one', label: t('trading.sheet.create.tab.one'), testId: 'create-tab-one' },
+          { value: 'bulk', label: t('trading.sheet.create.tab.bulk'), testId: 'create-tab-bulk' },
+        ]}
+      />
+      {tab === 'one' ? (
+        <Field
+          id={ids.label}
+          label={t('trading.sheet.create.label')}
+          help={t('trading.sheet.create.label.help')}
+        >
+          <input
+            id={ids.label}
+            className="mac-input"
+            autoFocus
+            placeholder={t('trading.sheet.create.label.placeholder')}
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+          />
+        </Field>
+      ) : (
+        <>
+          <Field
+            id={ids.count}
+            label={t('trading.sheet.create.count')}
+            help={fill(t('trading.sheet.create.count.help'), { max: MAX_BATCH_CREATE })}
+            error={
+              count === null && countText.trim()
+                ? fill(t('trading.sheet.create.count.bad'), { max: MAX_BATCH_CREATE })
+                : null
+            }
+          >
+            <input
+              id={ids.count}
+              className="mac-input trd-num"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={MAX_BATCH_CREATE}
+              step={1}
+              autoFocus
+              value={countText}
+              data-invalid={count === null && countText.trim() ? 'true' : undefined}
+              onChange={(e) => setCountText(e.target.value)}
+            />
+          </Field>
+          <Field
+            id={ids.prefix}
+            label={t('trading.sheet.create.prefix')}
+            help={t('trading.sheet.create.prefix.help')}
+          >
+            <input
+              id={ids.prefix}
+              className="mac-input"
+              placeholder={t('trading.sheet.create.prefix.placeholder')}
+              value={prefix}
+              onChange={(e) => setPrefix(e.target.value)}
+            />
+          </Field>
+          <p className="trd-field__help">{t('trading.sheet.create.bulk.note')}</p>
+        </>
+      )}
     </Sheet>
   )
 }
 
+/**
+ * A batch just made: its wallets, and its keys and recovery phrases as a
+ * CSV (`no,address,private_key,seed_phrase`). The engine holds them for 15
+ * minutes; the file is built only after the operator confirms, with Touch ID
+ * or the vault password, and the secrets live only as long as that build.
+ */
+function BatchCreatedSheet({ batch, onClose }: { batch: CreatedBatch; onClose: () => void }) {
+  const id = useId()
+  const [pw, setPw] = useState('')
+  const [touchId, setTouchId] = useState(false)
+  const [expired, setExpired] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const m = useWalletMutation<{ wallets: MintedSecret[] }>()
+  const prompting = useTouchIdPrompt((s) => s.key === 'wallet:batch')
+  const [asking, setAsking] = useState(false)
+  const busy = m.isPending || asking
+
+  useEffect(() => {
+    let live = true
+    desktopApi()
+      .app.biometrics()
+      .then((info) => live && setTouchId(info.available))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
+
+  function fetchAndSave(params: Record<string, unknown>) {
+    m.mutate(
+      { method: 'wallet.exportBatch', params: { batchId: batch.batchId, ...params } },
+      {
+        onSuccess: (res) => {
+          setPw('')
+          const rows = res?.wallets ?? []
+          if (!rows.length) return
+          const file = walletsCsvName()
+          downloadFile(walletsCsv(rows), file)
+          setSaved(true)
+          toast.success(fill(t('trading.sheet.create.bulk.downloaded'), { file }))
+        },
+        onError: (err) => {
+          if (isTouchIdDeclined(err)) return
+          if ((err as { code?: string }).code === 'wallet.batch_expired') {
+            setExpired(true)
+            return
+          }
+          toast.error(`${t('trading.sheet.error')}: ${errorText(err)}`)
+        },
+      },
+    )
+  }
+
+  async function withTouchId() {
+    if (busy) return
+    setAsking(true)
+    let ok = false
+    try {
+      const result = await desktopApi().app.authenticate(t('trading.touchId.reason.exportBatch'))
+      ok = result.ok
+      if (!result.ok && result.reason !== 'cancelled') toast.error(t('trading.touchId.failed'))
+    } catch {
+      toast.error(t('trading.touchId.failed'))
+    } finally {
+      setAsking(false)
+    }
+    if (ok) fetchAndSave({ touchId: true })
+  }
+
+  function withPassword() {
+    if (busy || !pw) return
+    fetchAndSave({ password: pw })
+  }
+
+  return (
+    <Sheet
+      title={fill(t('trading.sheet.create.bulk.title'), { count: batch.wallets.length })}
+      onClose={onClose}
+      role="alertdialog"
+      wide
+      foot={
+        <>
+          <Button onClick={onClose} disabled={busy} data-testid="batch-done">
+            {saved || expired ? t('trading.sheet.create.bulk.done.cta') : t('trading.sheet.close')}
+          </Button>
+          {touchId && !expired ? (
+            <Button
+              variant="primary"
+              disabled={busy}
+              aria-busy={asking || undefined}
+              onClick={() => void withTouchId()}
+              data-testid="batch-touchid"
+            >
+              <Fingerprint className="size-3.5" strokeWidth={1.75} aria-hidden />
+              {asking ? t('trading.touchId.prompting') : t('trading.sheet.create.bulk.touchId')}
+            </Button>
+          ) : null}
+        </>
+      }
+    >
+      {expired ? (
+        <div className="trd-warn" role="alert" data-testid="batch-expired">
+          <TriangleAlert className="size-3.5" strokeWidth={2} aria-hidden />
+          <span>{t('trading.sheet.create.bulk.expired')}</span>
+        </div>
+      ) : (
+        <div className="trd-warn" role="alert">
+          <TriangleAlert className="size-3.5" strokeWidth={2} aria-hidden />
+          <span>{t('trading.sheet.create.bulk.warning')}</span>
+        </div>
+      )}
+      <ol className="trd-minted" data-testid="batch-wallets">
+        {batch.wallets.map((w) => (
+          <li key={w.address}>
+            <span className="trd-minted__label">{walletLabel(w)}</span>
+            <code className="trd-num">{w.address}</code>
+          </li>
+        ))}
+      </ol>
+      {expired ? null : (
+        <Field
+          id={id}
+          label={
+            touchId ? t('trading.sheet.create.bulk.or') : t('trading.sheet.create.bulk.password')
+          }
+        >
+          <div className="trd-minted__pw">
+            <input
+              id={id}
+              className="mac-input"
+              type="password"
+              autoComplete="current-password"
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') withPassword()
+              }}
+            />
+            <Button
+              variant={touchId ? undefined : 'primary'}
+              disabled={!pw || busy}
+              aria-busy={(m.isPending && !asking) || prompting || undefined}
+              onClick={withPassword}
+              data-testid="batch-download"
+            >
+              <Download className="size-3.5" strokeWidth={1.75} aria-hidden />
+              {prompting
+                ? t('trading.touchId.prompting')
+                : m.isPending
+                  ? t('trading.sheet.working')
+                  : t('trading.sheet.create.bulk.download')}
+            </Button>
+          </div>
+        </Field>
+      )}
+    </Sheet>
+  )
+}
+
+interface ImportBatchResult {
+  imported: number
+  results: {
+    index: number
+    status: 'imported' | 'exists' | 'invalid' | 'skipped'
+    error?: string
+  }[]
+}
+
 function ImportSheet({ onClose }: { onClose: () => void }) {
-  const ids = { label: useId(), key: useId(), ks: useId(), kspw: useId() }
-  const [kind, setKind] = useState<'key' | 'keystore'>('key')
+  const ids = { label: useId(), key: useId(), ks: useId(), kspw: useId(), bulk: useId() }
+  const [kind, setKind] = useState<'key' | 'keystore' | 'bulk'>('key')
   const [label, setLabel] = useState('')
   const [key, setKey] = useState('')
   const [keystore, setKeystore] = useState('')
   const [ksPassword, setKsPassword] = useState('')
+  const [bulkText, setBulkText] = useState('')
+  const [failures, setFailures] = useState<string[] | null>(null)
   const m = useWalletMutation<{ wallet: Wallet }>()
-  const ready = kind === 'key' ? key.trim().length >= 64 : keystore.trim().length > 0
+  const bulk = useWalletMutation<ImportBatchResult>()
+  const pending = m.isPending || bulk.isPending
+  const rows = useMemo(() => parseKeyRows(bulkText), [bulkText])
+  const tooMany = rows.length > MAX_BATCH_IMPORT
+  const ready =
+    kind === 'key'
+      ? key.trim().length >= 64
+      : kind === 'keystore'
+        ? keystore.trim().length > 0
+        : rows.length > 0 && !tooMany
+
+  function importOne() {
+    m.mutate(
+      {
+        method: 'wallet.import',
+        params:
+          kind === 'key'
+            ? {
+                label: label.trim() || t('trading.sheet.import.label.default'),
+                privateKey: key.trim(),
+              }
+            : {
+                label: label.trim() || t('trading.sheet.import.label.default'),
+                keystoreJson: keystore.trim(),
+                keystorePassword: ksPassword,
+              },
+      },
+      {
+        onSuccess: (res) => {
+          toast.success(t('trading.sheet.import.done'), {
+            description: res?.wallet ? shortAddress(res.wallet.address) : undefined,
+          })
+          onClose()
+        },
+        onError: (err) => toast.error(`${t('trading.sheet.error')}: ${errorText(err)}`),
+      },
+    )
+  }
+
+  function importMany() {
+    const sent = rows
+    setFailures(null)
+    bulk.mutate(
+      { method: 'wallet.importBatch', params: { privateKeys: sent.map((r) => r.key) } },
+      {
+        onSuccess: (res) => {
+          const results = res?.results ?? []
+          const imported = res?.imported ?? 0
+          const done = fill(t('trading.sheet.import.bulk.done'), {
+            imported,
+            total: sent.length,
+          })
+          const failed = results.filter((r) => r.status !== 'imported')
+          if (!failed.length) {
+            toast.success(done)
+            onClose()
+            return
+          }
+          if (imported) toast.success(done)
+          else toast.error(done)
+          // Keep only the rows that did not go in, so a fix-and-retry sends no
+          // key twice; each failure names its row in what is left, never the key.
+          const keep = new Set(failed.map((r) => r.index))
+          setBulkText(
+            sent
+              .filter((_, i) => keep.has(i))
+              .map((r) => r.key)
+              .join('\n'),
+          )
+          setFailures(
+            failed.map((r, i) => {
+              const line = i + 1
+              if (r.status === 'exists')
+                return fill(t('trading.sheet.import.bulk.row.exists'), { line })
+              if (r.status === 'skipped')
+                return fill(t('trading.sheet.import.bulk.row.skipped'), { line })
+              return fill(t('trading.sheet.import.bulk.row.invalid'), {
+                line,
+                error: r.error ?? '',
+              })
+            }),
+          )
+        },
+        onError: (err) => toast.error(`${t('trading.sheet.error')}: ${errorText(err)}`),
+      },
+    )
+  }
+
   return (
     <Sheet
       title={t('trading.sheet.import.title')}
@@ -675,124 +1091,143 @@ function ImportSheet({ onClose }: { onClose: () => void }) {
       wide
       foot={
         <>
-          <Button onClick={onClose} disabled={m.isPending}>
+          <Button onClick={onClose} disabled={pending}>
             {t('trading.sheet.cancel')}
           </Button>
-          <Button
-            variant="primary"
-            disabled={!ready || m.isPending}
-            data-testid="import-submit"
-            onClick={() =>
-              m.mutate(
-                {
-                  method: 'wallet.import',
-                  params:
-                    kind === 'key'
-                      ? {
-                          label: label.trim() || t('trading.sheet.import.label.default'),
-                          privateKey: key.trim(),
-                        }
-                      : {
-                          label: label.trim() || t('trading.sheet.import.label.default'),
-                          keystoreJson: keystore.trim(),
-                          keystorePassword: ksPassword,
-                        },
-                },
-                {
-                  onSuccess: (res) => {
-                    toast.success(t('trading.sheet.import.done'), {
-                      description: res?.wallet ? shortAddress(res.wallet.address) : undefined,
-                    })
-                    onClose()
-                  },
-                  onError: (err) => toast.error(`${t('trading.sheet.error')}: ${errorText(err)}`),
-                },
-              )
-            }
-          >
-            {m.isPending ? t('trading.sheet.working') : t('trading.sheet.import.cta')}
-          </Button>
+          {kind === 'bulk' ? (
+            <Button
+              variant="primary"
+              disabled={!ready || pending}
+              data-testid="import-bulk-submit"
+              onClick={importMany}
+            >
+              {bulk.isPending
+                ? t('trading.sheet.working')
+                : rows.length
+                  ? fill(t('trading.sheet.import.bulk.cta'), { count: rows.length })
+                  : t('trading.sheet.import.bulk.cta.empty')}
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              disabled={!ready || pending}
+              data-testid="import-submit"
+              onClick={importOne}
+            >
+              {m.isPending ? t('trading.sheet.working') : t('trading.sheet.import.cta')}
+            </Button>
+          )}
         </>
       }
     >
-      <div className="trd-field">
-        <span className="trd-field__label">{t('trading.sheet.import.kind')}</span>
-        <div
-          role="radiogroup"
-          aria-label={t('trading.sheet.import.kind')}
-          className="mac-segmented self-start"
-        >
-          <button
-            type="button"
-            role="radio"
-            aria-checked={kind === 'key'}
-            className="mac-segment"
-            onClick={() => setKind('key')}
+      <Tabs
+        label={t('trading.sheet.import.kind')}
+        value={kind}
+        onChange={(v) => !pending && setKind(v)}
+        options={[
+          { value: 'key', label: t('trading.sheet.import.kind.key') },
+          { value: 'keystore', label: t('trading.sheet.import.kind.keystore') },
+          { value: 'bulk', label: t('trading.sheet.import.kind.bulk'), testId: 'import-tab-bulk' },
+        ]}
+      />
+      {kind === 'bulk' ? (
+        <>
+          <Field
+            id={ids.bulk}
+            label={t('trading.sheet.import.bulk.keys')}
+            help={fill(t('trading.sheet.import.bulk.keys.help'), { max: MAX_BATCH_IMPORT })}
+            error={
+              tooMany
+                ? fill(t('trading.sheet.import.bulk.tooMany'), { max: MAX_BATCH_IMPORT })
+                : null
+            }
           >
-            {t('trading.sheet.import.kind.key')}
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={kind === 'keystore'}
-            className="mac-segment"
-            onClick={() => setKind('keystore')}
-          >
-            {t('trading.sheet.import.kind.keystore')}
-          </button>
-        </div>
-      </div>
-      <Field id={ids.label} label={t('trading.sheet.create.label')}>
-        <input
-          id={ids.label}
-          className="mac-input"
-          placeholder={t('trading.sheet.create.label.placeholder')}
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-        />
-      </Field>
-      {kind === 'key' ? (
-        <Field
-          id={ids.key}
-          label={t('trading.sheet.import.key')}
-          help={t('trading.sheet.import.key.help')}
-        >
-          <input
-            id={ids.key}
-            className="mac-input"
-            data-mono="true"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder={t('trading.sheet.import.key.placeholder')}
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-          />
-        </Field>
+            <textarea
+              id={ids.bulk}
+              className="mac-textarea trd-bulk-keys"
+              data-mono="true"
+              rows={8}
+              spellCheck={false}
+              autoComplete="off"
+              autoFocus
+              placeholder={'0x…\n0x…\n0x…'}
+              value={bulkText}
+              data-invalid={tooMany ? 'true' : undefined}
+              onChange={(e) => {
+                setBulkText(e.target.value)
+                setFailures(null)
+              }}
+            />
+          </Field>
+          <span className="trd-field__help trd-num" data-testid="import-bulk-count">
+            {fill(t('trading.sheet.import.bulk.count'), { count: rows.length })}
+          </span>
+          {failures?.length ? (
+            <ul className="trd-warnings" data-testid="import-bulk-failures">
+              {failures.map((f) => (
+                <li key={f}>
+                  <TriangleAlert className="size-3.5" strokeWidth={2} aria-hidden />
+                  {f}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
       ) : (
         <>
-          <Field id={ids.ks} label={t('trading.sheet.import.keystore')}>
-            <textarea
-              id={ids.ks}
-              className="mac-textarea"
-              data-mono="true"
-              rows={5}
-              spellCheck={false}
-              placeholder={t('trading.sheet.import.keystore.placeholder')}
-              value={keystore}
-              onChange={(e) => setKeystore(e.target.value)}
-            />
-          </Field>
-          <Field id={ids.kspw} label={t('trading.sheet.import.keystore.password')}>
+          <Field id={ids.label} label={t('trading.sheet.create.label')}>
             <input
-              id={ids.kspw}
+              id={ids.label}
               className="mac-input"
-              type="password"
-              autoComplete="off"
-              value={ksPassword}
-              onChange={(e) => setKsPassword(e.target.value)}
+              placeholder={t('trading.sheet.import.label.placeholder')}
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
             />
           </Field>
+          {kind === 'key' ? (
+            <Field
+              id={ids.key}
+              label={t('trading.sheet.import.key')}
+              help={t('trading.sheet.import.key.help')}
+            >
+              <input
+                id={ids.key}
+                className="mac-input"
+                data-mono="true"
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={t('trading.sheet.import.key.placeholder')}
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+              />
+            </Field>
+          ) : (
+            <>
+              <Field id={ids.ks} label={t('trading.sheet.import.keystore')}>
+                <textarea
+                  id={ids.ks}
+                  className="mac-textarea"
+                  data-mono="true"
+                  rows={5}
+                  spellCheck={false}
+                  placeholder={t('trading.sheet.import.keystore.placeholder')}
+                  value={keystore}
+                  onChange={(e) => setKeystore(e.target.value)}
+                />
+              </Field>
+              <Field id={ids.kspw} label={t('trading.sheet.import.keystore.password')}>
+                <input
+                  id={ids.kspw}
+                  className="mac-input"
+                  type="password"
+                  autoComplete="off"
+                  value={ksPassword}
+                  onChange={(e) => setKsPassword(e.target.value)}
+                />
+              </Field>
+            </>
+          )}
         </>
       )}
       <p className="trd-field__help">{t('trading.sheet.import.history')}</p>

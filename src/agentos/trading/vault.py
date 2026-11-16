@@ -23,11 +23,14 @@ locked, across gateway restarts too, until :meth:`Vault.unlock` is called with
 the password.
 
 Nothing in this module logs, returns or serialises a private key except
-:meth:`Vault.export`, which re-verifies the password first.
+:meth:`Vault.export`, which re-verifies the password first, and
+:meth:`Vault.create_batch`, which hands the caller the keys and recovery
+phrases of the wallets it has just made (the vault keeps no phrase).
 """
 
 from __future__ import annotations
 
+import builtins
 import hashlib
 import hmac
 import json
@@ -50,6 +53,9 @@ from agentos.trading.chains import checksum_address, normalize_address
 from agentos.trading.durable import fsync_dir, fsync_file
 
 UnlockMode = Literal["auto", "manual"]
+
+#: The most wallets one :meth:`Vault.create_batch` makes.
+MAX_BATCH_CREATE = 30
 
 INDEX_FILE = "index.json"
 UNLOCK_FILE = "unlock.key"
@@ -92,6 +98,10 @@ class WalletNotFoundError(VaultError):
     code = "wallet.not_found"
 
 
+class WalletExistsError(VaultError):
+    """The vault already holds this key."""
+
+
 class UnlockModePolicyError(VaultError):
     """The operator's ``[trading] unlock_mode`` forbids what was asked."""
 
@@ -119,6 +129,29 @@ class WalletRecord:
             "imported": self.imported,
             "createdBlock": dict(self.created_block),
         }
+
+
+def default_label(address: str) -> str:
+    """The name a wallet gets when none is given: ``0xAbC_1234``.
+
+    The address's first five characters and its last four, so two wallets
+    made without a name still read apart in every list.
+    """
+    return f"{address[:5]}_{address[-4:]}"
+
+
+@dataclass(frozen=True)
+class MintedWallet:
+    """A wallet :meth:`Vault.create_batch` just made, with its secrets."""
+
+    record: WalletRecord
+    #: ``0x``-prefixed hex.
+    private_key: str
+    #: The 12-word BIP-39 phrase the key derives from (``m/44'/60'/0'/0/0``).
+    mnemonic: str
+
+    def __repr__(self) -> str:  # never print a key
+        return f"MintedWallet(address={self.record.address!r})"
 
 
 def default_vault_root() -> Path:
@@ -818,15 +851,16 @@ class Vault:
 
         password = self._require_unlocked()
         account = Account.from_key(key)
+        address = checksum_address(account.address)
         record = WalletRecord(
-            address=checksum_address(account.address),
-            label=(label or "").strip() or f"Wallet {account.address[:6]}",
+            address=address,
+            label=(label or "").strip() or default_label(address),
             created_at=time.time(),
             imported=imported,
         )
         index = self._read_index()
         if any(normalize_address(w["address"]) == record.key for w in index["wallets"]):
-            raise VaultError(f"wallet {record.address} already exists")
+            raise WalletExistsError(f"wallet {record.address} already exists")
         _write_private(self.keystore_path(record.address), json.dumps(self._encrypt(key, password)))
         # A fresh id each time the vault learns this key (``incarnation``).
         index["wallets"].append({**self._raw(record), "incarnation": secrets.token_hex(16)})
@@ -840,6 +874,80 @@ class Vault:
         with self._lock:
             key = secrets.token_bytes(32)
             return self._add(key, label, imported=False)
+
+    def create_batch(self, count: int, label: str = "") -> builtins.list[MintedWallet]:
+        """Make *count* wallets, each from its own fresh 12-word recovery phrase.
+
+        Each key is the phrase's first account at ``m/44'/60'/0'/0/0``, so any
+        wallet app that restores the phrase lands on the same address. The
+        vault stores the key, never the phrase: the returned
+        :class:`MintedWallet` rows are the only copy of it.
+
+        A *label* names them ``"<label> 1"`` … ``"<label> N"``; without one each
+        gets :func:`default_label`. The keystores are encrypted outside the vault
+        lock (scrypt is slow and signing must not wait on it), then written and
+        recorded in one ``index.json`` write: either every wallet is added or
+        none is.
+        """
+        from eth_account import Account
+        from eth_account.hdaccount import (
+            ETHEREUM_DEFAULT_PATH,
+            Language,
+            generate_mnemonic,
+            key_from_seed,
+            seed_from_mnemonic,
+        )
+
+        if isinstance(count, bool) or not isinstance(count, int):
+            raise ValueError("count must be a whole number")
+        if not 1 <= count <= MAX_BATCH_CREATE:
+            raise ValueError(f"count must be between 1 and {MAX_BATCH_CREATE}")
+        base = (label or "").strip()
+        with self._lock:
+            password = self._require_unlocked()
+        made: list[tuple[MintedWallet, bytes, dict[str, Any]]] = []
+        for n in range(1, count + 1):
+            mnemonic = generate_mnemonic(12, Language.ENGLISH)
+            key = key_from_seed(seed_from_mnemonic(mnemonic, ""), ETHEREUM_DEFAULT_PATH)
+            address = checksum_address(Account.from_key(key).address)
+            record = WalletRecord(
+                address=address,
+                label=f"{base} {n}" if base else default_label(address),
+                created_at=time.time(),
+                imported=False,
+            )
+            minted = MintedWallet(record=record, private_key="0x" + key.hex(), mnemonic=mnemonic)
+            made.append((minted, bytes(key), self._encrypt(key, password)))
+        with self._lock:
+            if self._require_unlocked() != password:
+                raise VaultError(
+                    "the vault password changed while the wallets were being made; none were added"
+                )
+            index = self._read_index()
+            known = {normalize_address(w["address"]) for w in index["wallets"]}
+            for minted, _key, _keystore in made:
+                if minted.record.key in known:  # pragma: no cover - 2**-128
+                    raise WalletExistsError(f"wallet {minted.record.address} already exists")
+                known.add(minted.record.key)
+            written: list[Path] = []
+            try:
+                for minted, _key, keystore in made:
+                    path = self.keystore_path(minted.record.address)
+                    _write_private(path, json.dumps(keystore))
+                    written.append(path)
+                    index["wallets"].append(
+                        {**self._raw(minted.record), "incarnation": secrets.token_hex(16)}
+                    )
+                if not index.get("primary"):
+                    index["primary"] = made[0][0].record.address
+                self._write_index(index)
+            except BaseException:
+                for path in written:
+                    path.unlink(missing_ok=True)
+                raise
+            for minted, key, _keystore in made:
+                self._keys[minted.record.key] = key
+        return [minted for minted, _key, _keystore in made]
 
     def import_private_key(self, label: str, private_key: str) -> WalletRecord:
         text = private_key.strip().removeprefix("0x")

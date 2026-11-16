@@ -361,6 +361,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (existing rows are cleaned when read), and a failed swap records `0`
   instead of the caller's unparsed `amountIn`. (WAL-13)
 
+### Added
+- Trading: bulk wallets. *Create new* has a *Bulk create* tab that makes 1–30
+  wallets at once (`wallet.createBatch`), each from its own 12-word recovery
+  phrase, and then downloads `no,address,private_key,seed_phrase` as CSV once
+  you confirm with the vault password or Touch ID (`wallet.exportBatch`). The
+  vault keeps the keys, never the phrases; the gateway holds a batch's
+  phrases for download for 15 minutes and forgets them when the vault locks.
+  *Import a wallet* is now *Import Wallets*, with a *Bulk import* tab: one
+  private key per row, up to 100 (`wallet.importBatch`); each row that did
+  not go in is named by its line, never by its key. All three methods are
+  operator-only.
+
+### Changed
+- Trading: a wallet created or imported without a label is named after its
+  address, its first five characters and its last four (`0xAbC_1234`),
+  instead of `Wallet 0xAbCd` from the engine or `Trading` from the desktop.
+
 ### Fixed
 - Wallet vault: a password change that fails part-way no longer leaves a vault
   that no password opens. `change_password` rewrote the keystores one by one
