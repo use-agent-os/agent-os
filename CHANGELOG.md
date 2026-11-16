@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.17] - 2026-11-17
+
 ### Security
 - The container's `compose.yaml` keeps the key that seals the wallet vault's
   auto-unlock password on its own volume (`agentos-vault-keys`,
