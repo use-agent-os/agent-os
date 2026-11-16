@@ -281,6 +281,26 @@ def _get_nested(data: dict[str, Any], *keys: str) -> Any:
     return current
 
 
+def _openclaw_mcp_extras(raw: dict[str, Any]) -> dict[str, Any]:
+    """Map OpenClaw's ``enabled``/``cwd``/``connectionTimeoutMs``/``toolFilter``."""
+    extras: dict[str, Any] = {}
+    if isinstance(raw.get("enabled"), bool):
+        extras["enabled"] = raw["enabled"]
+    if raw.get("command") and isinstance(raw.get("cwd"), str) and raw["cwd"]:
+        extras["cwd"] = raw["cwd"]
+    timeout_ms = raw.get("connectionTimeoutMs")
+    if isinstance(timeout_ms, (int, float)) and not isinstance(timeout_ms, bool) and timeout_ms > 0:
+        extras["connect_timeout_seconds"] = float(timeout_ms) / 1000.0
+    tool_filter = raw.get("toolFilter")
+    if isinstance(tool_filter, dict):
+        extras["tool_filter"] = {
+            key: [str(item) for item in tool_filter.get(key) or [] if item]
+            for key in ("include", "exclude")
+            if isinstance(tool_filter.get(key), list)
+        }
+    return extras
+
+
 def _load_env_file(path: Path) -> dict[str, str]:
     if not path.is_file():
         return {}
@@ -1544,7 +1564,13 @@ class OpenClawMigrator:
                 "headers",
                 "transport",
                 "tool_timeout_seconds",
+                "enabled",
+                "connectionTimeoutMs",
+                "toolFilter",
             }
+            if raw.get("command"):
+                # A working directory only means something for a spawned server.
+                supported.add("cwd")
             extra = sorted(str(key) for key in raw if str(key) not in supported)
             if extra:
                 unsupported_fields[str(name)] = extra
@@ -1572,6 +1598,7 @@ class OpenClawMigrator:
                         str(k): str(v) for k, v in (raw.get("env") or {}).items() if v is not None
                     },
                     tool_timeout_seconds=float(raw.get("tool_timeout_seconds", 30.0)),
+                    **_openclaw_mcp_extras(raw),
                 )
             )
         if not entries:

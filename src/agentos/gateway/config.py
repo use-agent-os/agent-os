@@ -1766,18 +1766,36 @@ class SessionsConfig(BaseSettings):
     suggest_next_timeout_seconds: float = Field(default=15.0, gt=0)
 
 
+class MCPToolFilterConfig(BaseModel):
+    """Which of a server's tools get registered, by ``fnmatch`` glob on the server's name.
+
+    An empty ``include`` admits every tool; ``exclude`` wins over ``include``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    include: list[str] = Field(default_factory=list)
+    exclude: list[str] = Field(default_factory=list)
+
+
 class MCPServerEntry(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENTOS_MCP_SERVER_")
 
     name: str = ""
+    # A disabled server keeps its definition but is never connected.
+    enabled: bool = True
     transport: Literal["stdio", "sse", "streamable_http"] = "stdio"
     command: str | None = None  # for stdio
     args: list[str] = Field(default_factory=list)  # for stdio
+    cwd: str | None = None  # for stdio; the gateway's own when unset
     url: str | None = None  # for HTTP transports
     env: dict[str, str] = Field(default_factory=dict)
     headers: dict[str, str] = Field(default_factory=dict)
     oauth: bool = False
     tool_timeout_seconds: float = 30.0
+    # Overrides ``mcp.connect_timeout_seconds`` for this server.
+    connect_timeout_seconds: float | None = Field(default=None, gt=0)
+    tool_filter: MCPToolFilterConfig = Field(default_factory=MCPToolFilterConfig)
 
 
 class MCPConfig(BaseSettings):

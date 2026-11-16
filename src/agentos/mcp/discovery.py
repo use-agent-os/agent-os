@@ -217,6 +217,26 @@ def resolve_tool_name(tool_name: str, server_name: str, registry: ToolRegistry) 
     return candidate
 
 
+def filter_tools(config: MCPServerConfig, tools: list[MCPToolDef]) -> list[MCPToolDef]:
+    """Drop the tools ``config.tool_filter`` rules out, before any is registered.
+
+    Filtering on the server's own tool name, not the ``mcp_`` one, keeps a
+    filter stable when a name collision moves a tool onto its long form.
+    """
+    tool_filter = config.tool_filter
+    if not tool_filter.active:
+        return tools
+    kept = [tool for tool in tools if tool_filter.allows(tool.name)]
+    if len(kept) != len(tools):
+        log.info(
+            "mcp.tools_filtered",
+            server=config.name,
+            kept=len(kept),
+            dropped=sorted(tool.name for tool in tools if not tool_filter.allows(tool.name)),
+        )
+    return kept
+
+
 def _mcp_error_message(server_name: str, tool_name: str, text: str) -> str:
     detail = text.strip()
     if len(detail) > _MCP_ERROR_TEXT_MAX_CHARS:
@@ -296,7 +316,7 @@ async def discover_and_register(
     registrations: list[MCPToolRegistration] = []
     try:
         await client.connect()
-        tools = await client.list_tools()
+        tools = filter_tools(config, await client.list_tools())
         for t in tools:
             registration = _make_tool_handler(
                 client,

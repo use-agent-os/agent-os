@@ -176,3 +176,25 @@ def test_hermes_command_server_ignores_a_stray_transport(
     )
     assert server["transport"] == "stdio"
     assert server["headers"] == {}
+
+
+def test_openclaw_enabled_cwd_timeout_and_tool_filter_are_migrated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (server,) = _openclaw_servers(
+        tmp_path,
+        monkeypatch,
+        {
+            "local": {
+                "command": "npx",
+                "cwd": "/srv/tools",
+                "enabled": False,
+                "connectionTimeoutMs": 2500,
+                "toolFilter": {"include": ["search", "read_*"], "exclude": ["read_secret"]},
+            }
+        },
+    )
+    assert server["enabled"] is False
+    assert server["cwd"] == "/srv/tools"
+    assert server["connect_timeout_seconds"] == 2.5
+    assert server["tool_filter"] == {"include": ["search", "read_*"], "exclude": ["read_secret"]}

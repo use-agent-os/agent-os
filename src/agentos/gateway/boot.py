@@ -2116,21 +2116,13 @@ async def _discover_configured_mcp_servers(
     from agentos.mcp.streamable_http import FileOAuthStorage
     from agentos.mcp.types import MCPServerConfig
 
-    timeout = config.mcp.connect_timeout_seconds
     for entry in config.mcp.servers:
+        timeout = config.mcp.connect_timeout_seconds
         try:
-            mcp_cfg = MCPServerConfig(
-                name=entry.name,
-                transport=entry.transport,
-                command=entry.command,
-                args=entry.args,
-                url=entry.url,
-                env=entry.env,
-                headers=entry.headers,
-                oauth=entry.oauth,
-                state_dir=config.state_dir,
-                tool_timeout_seconds=entry.tool_timeout_seconds,
-            )
+            mcp_cfg = MCPServerConfig.from_entry(entry, state_dir=config.state_dir)
+            if not mcp_cfg.enabled:
+                log.info("build_services.mcp_server_disabled", server=entry.name)
+                continue
             if mcp_cfg.oauth and mcp_cfg.url:
                 storage = FileOAuthStorage(mcp_cfg.name, mcp_cfg.url, mcp_cfg.state_dir)
                 if not await storage.is_authenticated():
@@ -2140,6 +2132,7 @@ async def _discover_configured_mcp_servers(
                     )
                     continue
 
+            timeout = mcp_cfg.effective_connect_timeout(config.mcp.connect_timeout_seconds)
             names = await asyncio.wait_for(
                 discover_and_register(mcp_cfg, tool_registry),
                 timeout=timeout,

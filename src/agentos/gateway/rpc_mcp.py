@@ -77,18 +77,8 @@ def _server_entry(ctx: RpcContext, name: str) -> Any:
 def _runtime_config(
     ctx: RpcContext, entry: Any, redirect_uri: str | None = None
 ) -> MCPServerConfig:
-    return MCPServerConfig(
-        name=entry.name,
-        transport=entry.transport,
-        command=entry.command,
-        args=list(entry.args),
-        url=entry.url,
-        env=dict(entry.env),
-        headers=dict(entry.headers),
-        oauth=entry.oauth,
-        oauth_redirect_uri=redirect_uri,
-        state_dir=ctx.config.state_dir,
-        tool_timeout_seconds=entry.tool_timeout_seconds,
+    return MCPServerConfig.from_entry(
+        entry, state_dir=ctx.config.state_dir, oauth_redirect_uri=redirect_uri
     )
 
 
@@ -96,8 +86,10 @@ async def _activate(ctx: RpcContext, config: MCPServerConfig) -> list[str]:
     _require_mcp_enabled(ctx)
     if ctx.tool_registry is None:
         raise ValueError("Tool registry unavailable")
+    if not config.enabled:
+        raise ValueError(f"MCP server is disabled: {config.name}")
     await mcp_discovery.disconnect_and_unregister(config.name, ctx.tool_registry)
-    timeout = float(ctx.config.mcp.connect_timeout_seconds)
+    timeout = config.effective_connect_timeout(float(ctx.config.mcp.connect_timeout_seconds))
     return await asyncio.wait_for(
         mcp_discovery.discover_and_register(config, ctx.tool_registry, owner=config.name),
         timeout=max(timeout, config.tool_timeout_seconds),
@@ -154,6 +146,7 @@ async def _handle_mcp_status(params: dict | None, ctx: RpcContext) -> dict[str, 
         servers.append(
             {
                 "name": entry.name,
+                "enabled": runtime.enabled,
                 "transport": entry.transport,
                 "url": entry.url,
                 "oauth": entry.oauth,
@@ -163,6 +156,10 @@ async def _handle_mcp_status(params: dict | None, ctx: RpcContext) -> dict[str, 
                 # Registered AgentOS name -> the server's own tool name. They
                 # differ when another server already held the short name.
                 "toolMap": active[entry.name].tool_map() if connected else {},
+                "toolFilter": {
+                    "include": list(runtime.tool_filter.include),
+                    "exclude": list(runtime.tool_filter.exclude),
+                },
             }
         )
     return {"enabled": ctx.config.mcp.enabled, "servers": servers}

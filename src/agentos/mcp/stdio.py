@@ -154,6 +154,22 @@ class MCPStdioClient(MCPClient):
             )
         return resolved
 
+    def _working_directory(self) -> str | None:
+        """Return the configured ``cwd`` expanded, or ``None`` for the gateway's own.
+
+        A missing directory is reported by name here: left to the spawn, it
+        surfaces as a ``FileNotFoundError`` that reads as if the *command* were
+        missing, which sends the operator looking in the wrong place.
+        """
+        if not self.config.cwd:
+            return None
+        cwd = os.path.expanduser(self.config.cwd)
+        if not os.path.isdir(cwd):
+            raise FileNotFoundError(
+                f"MCP server {self.config.name!r}: working directory {cwd!r} does not exist."
+            )
+        return cwd
+
     async def connect(self) -> None:
         """Spawn the subprocess and perform MCP initialization handshake."""
         assert self.config.command is not None, "stdio transport requires command"
@@ -167,6 +183,7 @@ class MCPStdioClient(MCPClient):
         if self.config.env:
             env = {**env, **self.config.env}
 
+        cwd = self._working_directory()
         self._process = await asyncio.create_subprocess_exec(
             # Unconfigured, the child's PATH is this process's: let which() read it.
             self._launchable_command(env if self.config.env else None),
@@ -174,6 +191,7 @@ class MCPStdioClient(MCPClient):
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             env=env,
+            cwd=cwd,
         )
 
         # MCP initialize handshake
