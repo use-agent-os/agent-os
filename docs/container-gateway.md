@@ -342,10 +342,12 @@ database, so restoring the backup is the reliable way back to an older release.
 
 ### Back Up and Restore
 
-Everything lives in one named volume mounted at `/var/lib/agentos`: config, the
-database, sessions, memory, the workspace, logs, wallets and the home directory
-with any tools you installed. Stop the gateway so
-the database is consistent, then archive the volume:
+Everything except one key lives in the named volume mounted at
+`/var/lib/agentos`: config, the database, sessions, memory, the workspace, logs,
+wallets and the home directory with any tools you installed. The second volume,
+`agentos-vault-keys`, holds only the key that seals the wallet vault's
+auto-unlock password, and is deliberately left out of the archive. Stop the
+gateway so the database is consistent, then archive the state volume:
 
 ```sh
 docker compose stop gateway
@@ -354,16 +356,31 @@ docker compose start gateway
 ```
 
 The archive holds provider keys and encrypted wallets, so store it accordingly.
-Keep your wallet password separately. To restore, on a new host or into an empty
-volume:
+Keep your wallet password separately: the archive does not open the wallets on
+its own, and after a restore onto a new host the vault stays locked until you
+unlock it once with the password (`agentos wallet unlock`), which also turns
+auto unlock back on. A wallet password you no longer have cannot be recovered
+from the archive, so export each wallet's keystore or keep the password where
+you will find it.
+
+A container started without the second volume and without
+`AGENTOS_VAULT_KEK_DIR` (an older `compose.yaml`, a plain `docker run`) keeps
+that key under the home directory inside the state volume. Auto unlock works the
+same, but an archive of that volume then carries the sealed password and its key
+together and opens the wallets by itself; treat it like the wallet password.
+Adopting the two-volume layout needs nothing else: the gateway finds the old key
+at the next start, seals the password again under a key on the new volume and
+deletes the old one.
+
+To restore, on a new host or into an empty volume:
 
 ```sh
 docker compose run --rm --no-deps -u root -v "$PWD:/backup:ro" --entrypoint sh gateway -c 'tar xzf /backup/agentos-state.tgz -C /var/lib/agentos'
 docker compose up -d
 ```
 
-`docker compose down` keeps the volume. `docker compose down -v` deletes it, along
-with any wallets inside that you have not backed up.
+`docker compose down` keeps the volumes. `docker compose down -v` deletes them,
+along with any wallets inside that you have not backed up.
 
 ## What Is in the Image
 

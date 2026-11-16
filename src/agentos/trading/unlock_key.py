@@ -45,7 +45,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from agentos.paths import vault_kek_dir
+from agentos.paths import default_vault_kek_dir, vault_kek_dir
+from agentos.trading.durable import fsync_dir, fsync_file
 
 KEK_ENV = "AGENTOS_VAULT_KEK"
 ENVELOPE_FORMAT = "agentos-unlock-key"
@@ -165,6 +166,19 @@ def _kek_path(kek_id: str, backend: str) -> Path:
     return vault_kek_dir() / f"{kek_id}{suffix}"
 
 
+def _kek_locations(kek_id: str, backend: str) -> list[Path]:
+    """Where a stored KEK may be: the configured directory, then the default one.
+
+    A vault sealed before ``AGENTOS_VAULT_KEK_DIR`` was set has its key in the
+    default directory. It is still read from there (and moved by the vault's
+    next seal) so that pointing the variable at a separate mount does not
+    cost the operator auto unlock.
+    """
+    current = _kek_path(kek_id, backend)
+    legacy = default_vault_kek_dir() / current.name
+    return [current] if legacy == current else [current, legacy]
+
+
 def _secure_kek_dir() -> Path:
     directory = vault_kek_dir()
     directory.mkdir(parents=True, exist_ok=True)
@@ -180,9 +194,12 @@ def _write_new_private(path: Path, data: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
+            handle.flush()
+            fsync_file(handle.fileno())
     except BaseException:
         path.unlink(missing_ok=True)
         raise
+    fsync_dir(path.parent)
 
 
 if sys.platform == "win32":
@@ -253,11 +270,15 @@ def _load_kek(envelope: Envelope) -> bytes:
         return kek
     if envelope.backend not in ("file", "dpapi"):
         raise UnlockKeyError(f"unlock.key names an unknown key store {envelope.backend!r}")
-    path = _kek_path(envelope.kek_id, envelope.backend)
-    try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise UnlockKeyError("the vault's unlock key is missing") from exc
+    raw = None
+    for path in _kek_locations(envelope.kek_id, envelope.backend):
+        try:
+            raw = path.read_bytes()
+            break
+        except OSError:
+            continue
+    if raw is None:
+        raise UnlockKeyError("the vault's unlock key is missing")
     if envelope.backend == "dpapi":
         try:
             raw = _dpapi(raw, envelope.kek_id.encode("ascii"), protect=False)
@@ -313,10 +334,23 @@ def discard_kek(text: str | None) -> None:
         return
     if envelope is None or envelope.backend not in ("file", "dpapi"):
         return
-    try:
-        _kek_path(envelope.kek_id, envelope.backend).unlink(missing_ok=True)
-    except OSError:
-        pass
+    for path in _kek_locations(envelope.kek_id, envelope.backend):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def kek_in_place(envelope: Envelope) -> bool:
+    """Whether *envelope*'s stored KEK is in the configured directory.
+
+    ``False`` only for a file or DPAPI key that exists in the default
+    directory while ``AGENTOS_VAULT_KEK_DIR`` names another.
+    """
+    if envelope.backend not in ("file", "dpapi"):
+        return True
+    locations = _kek_locations(envelope.kek_id, envelope.backend)
+    return locations[0].is_file() or not any(path.is_file() for path in locations[1:])
 
 
 __all__ = [
@@ -325,6 +359,7 @@ __all__ = [
     "Envelope",
     "UnlockKeyError",
     "discard_kek",
+    "kek_in_place",
     "dpapi_available",
     "open_password",
     "parse_envelope",

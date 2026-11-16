@@ -140,7 +140,7 @@ def runtime_sensitive_prefixes() -> tuple[str, ...]:
     pre-upgrade snapshots (``state/snapshots``) carry copies of the ledger and
     of ``config.toml``, and a restore puts them back: they are on it as well.
     """
-    from agentos.paths import default_agentos_home, vault_kek_dir
+    from agentos.paths import default_agentos_home, default_vault_kek_dir, vault_kek_dir
 
     try:
         home = default_agentos_home()
@@ -163,10 +163,16 @@ def runtime_sensitive_prefixes() -> tuple[str, ...]:
         entries = []
     # The key that seals the vault's unlock.key, kept outside the state root
     # (agentos.trading.unlock_key); just as off-limits as the file it opens.
-    try:
-        entries.append(str(vault_kek_dir()))
-    except (OSError, RuntimeError):
-        pass
+    # The platform default too when AGENTOS_VAULT_KEK_DIR points elsewhere: a
+    # vault sealed before the variable was set keeps its key there until its
+    # next auto unlock moves it.
+    for kek_dir in (vault_kek_dir, default_vault_kek_dir):
+        try:
+            entry = str(kek_dir())
+        except (OSError, RuntimeError):
+            continue
+        if entry not in entries:
+            entries.append(entry)
     entries.extend(sorted(_protected_config_paths - set(entries)))
     return tuple(entries)
 

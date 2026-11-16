@@ -198,7 +198,9 @@ Trading** pane has a *Test key* button (`trading.probe`).
   - `auto` — the password sits in `~/.agentos/wallets/unlock.key` (`0600`),
     sealed with AES-256-GCM under a key kept **outside** the state directory
     (`AGENTOS_VAULT_KEK`, else Windows DPAPI, else a `0600` file under the
-    OS state dir; `AGENTOS_VAULT_KEK_DIR` relocates it), and the gateway
+    OS state dir; `AGENTOS_VAULT_KEK_DIR` relocates it, and a key already
+    stored in the default directory is moved on the next auto unlock; the
+    container's `compose.yaml` puts it on its own volume), and the gateway
     unlocks at first use. This is what unattended agent missions need. The
     file and its key are both needed, but a process running code as this OS
     user can read both, exactly as the gateway does — `agentos sandbox` or

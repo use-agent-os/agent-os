@@ -47,6 +47,7 @@ from agentos.paths import default_agentos_home
 from agentos.redact import register_secret_values
 from agentos.trading import unlock_key
 from agentos.trading.chains import checksum_address, normalize_address
+from agentos.trading.durable import fsync_dir, fsync_file
 
 UnlockMode = Literal["auto", "manual"]
 
@@ -58,6 +59,11 @@ LOCK_LATCH = "operator_locked"
 #: ``index.json`` key of the ledger seal's salt (:meth:`Vault.ledger_seal_key`).
 LEDGER_SEAL = "ledger_seal"
 _LEDGER_SEAL_LABEL = b"agentos/trading/ledger-seal/v1\x00"
+#: ``index.json`` key naming the wallets a password change is still moving to
+#: the new password, and the suffix of their staged keystores
+#: (:meth:`Vault.change_password`).
+REKEY_PENDING = "rekey_pending"
+REKEY_SUFFIX = ".rekey"
 
 log = structlog.get_logger(__name__)
 
@@ -137,6 +143,10 @@ def _write_private(path: Path, text: str) -> None:
         # unlocked (#3504).
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
             handle.write(text)
+            # Flushed before the rename: a keystore can be the only copy of a
+            # key, and a rename alone may survive a power cut as an empty file.
+            handle.flush()
+            fsync_file(handle.fileno())
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
@@ -145,6 +155,7 @@ def _write_private(path: Path, text: str) -> None:
         os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
     except OSError:  # pragma: no cover
         pass
+    fsync_dir(path.parent)
 
 
 class Vault:
@@ -188,6 +199,10 @@ class Vault:
 
     def keystore_path(self, address: str) -> Path:
         return self.root / f"{normalize_address(address)}.json"
+
+    def _rekey_path(self, address: str) -> Path:
+        path = self.keystore_path(address)
+        return path.with_name(path.name + REKEY_SUFFIX)
 
     # ── index ──────────────────────────────────────────────────────────
 
@@ -361,6 +376,9 @@ class Vault:
 
     def _open_verifier(self, password: str) -> bytes:
         """The verifier's secret: decrypting it is what proves the password."""
+        # Every password-proven path starts here, so an interrupted password
+        # change is settled before any keystore is read.
+        self._settle_rekey()
         index = self._read_index()
         verifier = index.get("verifier")
         if not isinstance(verifier, dict):
@@ -465,7 +483,9 @@ class Vault:
             try:
                 envelope = unlock_key.parse_envelope(stored)
                 if envelope is not None:
-                    self._unlock(unlock_key.open_password(envelope))
+                    password = unlock_key.open_password(envelope)
+                    self._unlock(password)
+                    self._move_unlock_key_if_displaced(envelope, password)
                     return True
             except (unlock_key.UnlockKeyError, VaultError, ValueError) as exc:
                 self._warn_unlock_key_unavailable(exc)
@@ -532,6 +552,22 @@ class Vault:
             log.warning("vault.unlock_key_migration_failed", error=type(exc).__name__)
             return
         log.warning("vault.unlock_key_migrated", protection=self._unlock_key_protection())
+
+    def _move_unlock_key_if_displaced(self, envelope: unlock_key.Envelope, password: str) -> None:
+        """Seal again when the key was found outside the configured directory.
+
+        ``AGENTOS_VAULT_KEK_DIR`` set (or changed) on a vault that already
+        auto-unlocks: the old key still opens it, once, and the fresh seal
+        puts the key where the operator now wants it and deletes the old one.
+        """
+        if unlock_key.kek_in_place(envelope):
+            return
+        try:
+            self._store_unlock_key(password)
+        except (OSError, VaultError) as exc:
+            log.warning("vault.unlock_key_move_failed", error=type(exc).__name__)
+            return
+        log.warning("vault.unlock_key_moved", protection=self._unlock_key_protection())
 
     def _unlock_key_opens_to(self, password: str) -> bool:
         stored = self._read_unlock_key()
@@ -606,6 +642,17 @@ class Vault:
             self._clear_lock_latch()
 
     def change_password(self, password: str, new_password: str) -> None:
+        """Re-encrypt every keystore and the verifier under *new_password*.
+
+        All or nothing across the files. The new keystores are staged beside
+        the live ones, then one ``index.json`` write carries the new verifier
+        and the list of wallets being moved: that write is the commit. Before
+        it the old password opens everything and the staged files are dropped;
+        after it the new one does, and whoever next proves the password moves
+        the staged files into place (:meth:`_settle_rekey`). Rewriting the
+        live keystores one by one left a failure in between (a full disk, a
+        kill) with wallets under both passwords, and no password unlocked.
+        """
         new_password = _require_password(new_password)
         with self._lock:
             secret = self._open_verifier(password)
@@ -616,26 +663,73 @@ class Vault:
                 path = self.keystore_path(record.address)
                 keystore = json.loads(path.read_text(encoding="utf-8"))
                 keys[record.key] = self._decrypt(keystore, password)
-            for record in records:
-                _write_private(
-                    self.keystore_path(record.address),
-                    json.dumps(self._encrypt(keys[record.key], new_password)),
-                )
-            # The same secret under the new password: the ledger seal key is
-            # derived from it, and every live order and mandate stays sealed.
-            index["verifier"] = self._encrypt(secret, new_password)
-            seal, _created = self._ledger_seal(index)
-            index[LOCK_LATCH] = False
-            self._write_index(index)
+            try:
+                for record in records:
+                    _write_private(
+                        self._rekey_path(record.address),
+                        json.dumps(self._encrypt(keys[record.key], new_password)),
+                    )
+                # The same secret under the new password: the ledger seal key
+                # is derived from it, and every live order and mandate stays
+                # sealed.
+                index["verifier"] = self._encrypt(secret, new_password)
+                seal, _created = self._ledger_seal(index)
+                index[LOCK_LATCH] = False
+                index[REKEY_PENDING] = [record.address for record in records]
+                self._write_index(index)
+            except BaseException:
+                # Not committed: the old password still opens every keystore.
+                try:
+                    self._settle_rekey()
+                except Exception as exc:  # the next unlock drops what is left
+                    log.warning("vault.rekey_cleanup_failed", error=type(exc).__name__)
+                raise
+            # Committed. This process holds the new password from here on,
+            # whatever happens to the moves below.
+            self._keys = keys
+            self._password = new_password
+            register_secret_values(new_password)
+            self._seal_key = _derive_seal_key(secret, seal)
+            try:
+                self._settle_rekey()
+            except (OSError, VaultError) as exc:
+                # The keys are in memory and the next password-proven call
+                # retries the move.
+                log.warning("vault.rekey_finish_deferred", error=type(exc).__name__)
             # Under a manual policy the stored password is not refreshed: the
             # old one no longer opens anything, and writing the new one would
             # be the very thing the operator configured away.
             if index.get("unlock_mode") == "auto" and self.policy_mode() != "manual":
                 self._store_unlock_key(new_password)
-            self._keys = keys
-            self._password = new_password
-            register_secret_values(new_password)
-            self._seal_key = _derive_seal_key(secret, seal)
+
+    def _settle_rekey(self) -> None:
+        """Finish a committed password change, or drop what an uncommitted one staged.
+
+        ``index.json`` decides which: while it lists ``rekey_pending`` wallets
+        its verifier is already the new one, so each staged keystore replaces
+        the live one (a missing staged file was moved before the interruption).
+        Without the list, staged files belong to a change that never
+        committed and are deleted.
+        """
+        with self._lock:
+            if not self.initialized:
+                return
+            index = self._read_index()
+            pending = index.get(REKEY_PENDING)
+            if isinstance(pending, list):
+                for address in pending:
+                    staged = self._rekey_path(str(address))
+                    if staged.is_file():
+                        os.replace(staged, self.keystore_path(str(address)))
+                fsync_dir(self.root)
+                del index[REKEY_PENDING]
+                self._write_index(index)
+                log.info("vault.rekey_finished", wallets=len(pending))
+            elif REKEY_PENDING in index:
+                del index[REKEY_PENDING]
+                self._write_index(index)
+            for stray in self.root.glob(f"*.json{REKEY_SUFFIX}"):
+                stray.unlink(missing_ok=True)
 
     # ── ledger seal (agentos.trading.integrity) ────────────────────────
 
