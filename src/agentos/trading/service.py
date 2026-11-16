@@ -19,6 +19,7 @@ import contextlib
 import json
 import math
 import re
+import secrets
 import sqlite3
 import time
 from collections.abc import Awaitable, Callable
@@ -30,6 +31,7 @@ import httpx
 import structlog
 
 from agentos import __version__
+from agentos.redact import register_secret_values
 from agentos.trading import binding, dca, guardrails, integrity, permits, triggers
 from agentos.trading.aggregator import AGGREGATOR_BASE, AggregatorClient, AggregatorProvider
 from agentos.trading.bridge import (
@@ -125,7 +127,13 @@ from agentos.trading.uniswap import (
     UniswapError,
     validate_transaction,
 )
-from agentos.trading.vault import Vault, VaultError, WalletNotFoundError, WalletRecord
+from agentos.trading.vault import (
+    Vault,
+    VaultError,
+    WalletExistsError,
+    WalletNotFoundError,
+    WalletRecord,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -189,6 +197,11 @@ GAS_CEILING_SHARE = 0.05
 # What a caller's idempotency key may look like.
 CLIENT_ORDER_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 BROADCAST_REJECTED = "broadcast rejected:"
+# The keys and recovery phrases of a batch of new wallets wait this long in
+# memory for the operator to download them (``minted_secrets``), then go.
+MINTED_TTL_S = 900.0
+# The most private keys one ``import_wallets`` call takes.
+MAX_BATCH_IMPORT = 100
 # Ledger log index for a native (ETH) leg of an LP write: it has no Transfer
 # log of its own, and must not collide with an ERC-20 leg's index.
 LP_NATIVE_LOG_INDEX = 1_000_000
@@ -465,6 +478,8 @@ class TradingService:
         # The wallet sync the loop last started; it runs beside the loop, not in it.
         self._sync_task: asyncio.Task[None] | None = None
         self._confirm_tasks: set[asyncio.Task[Any]] = set()
+        # batch id -> (monotonic expiry, secret rows): see ``create_wallets``.
+        self._minted: dict[str, tuple[float, list[dict[str, str]]]] = {}
         self._order_events: dict[str, asyncio.Event] = {}
         # One lock per wallet around sign-and-send: two orders for the same
         # wallet in flight at once would read the same pending nonce.
@@ -1496,6 +1511,15 @@ class TradingService:
         self._sync_new_wallet(record)
         return record.to_dict(primary=(self.vault.primary_address() == record.address))
 
+    def _sync_new_wallets(self) -> None:
+        """Many wallets just appeared: one pass over all of them, not one each."""
+        if not self._background:
+            return
+        try:
+            self.request_sync()
+        except RuntimeError:  # no running loop (tests, CLI helpers)
+            pass
+
     def _sync_new_wallet(self, record: WalletRecord) -> None:
         """A wallet that just appeared should not wait a whole tick to show a balance."""
         if not self._background:
@@ -1506,13 +1530,131 @@ class TradingService:
             pass
 
     async def _stamp_created_block(self, record: WalletRecord) -> None:
+        await self._stamp_created_blocks([record])
+
+    async def _stamp_created_blocks(self, records: list[WalletRecord]) -> None:
+        """Each new wallet's history starts at the head: one block read per chain."""
         for chain in self.chains():
             try:
                 block = await self.evm(chain).block_number()
             except Exception:
                 continue
-            self.vault.set_created_block(record.address, chain.chain_id, block)
-            record.created_block[str(chain.chain_id)] = block
+            for record in records:
+                self.vault.set_created_block(record.address, chain.chain_id, block)
+                record.created_block[str(chain.chain_id)] = block
+
+    async def create_wallets(self, count: int, label: str = "") -> dict[str, Any]:
+        """Make *count* wallets at once, each from its own recovery phrase.
+
+        The vault keeps the keys and no phrase. The keys and phrases of this
+        batch wait in memory under the returned ``batchId`` for
+        ``MINTED_TTL_S`` so the operator can download them once
+        (:meth:`minted_secrets`); after that they exist only in the vault (the
+        keys) or nowhere (the phrases).
+        """
+        self.ensure_unlocked()
+        minted = await asyncio.to_thread(self.vault.create_batch, count, label)
+        records = [m.record for m in minted]
+        register_secret_values(*(m.private_key for m in minted), *(m.mnemonic for m in minted))
+        await self._stamp_created_blocks(records)
+        for record in records:
+            self._mirror_wallet(record)
+        self._prune_minted()
+        batch_id = secrets.token_urlsafe(16)
+        self._minted[batch_id] = (
+            time.monotonic() + MINTED_TTL_S,
+            [
+                {"address": m.record.address, "privateKey": m.private_key, "mnemonic": m.mnemonic}
+                for m in minted
+            ],
+        )
+        await self._emit("trading.changed", {"reason": "wallet"})
+        self._sync_new_wallets()
+        primary = self.vault.primary_address()
+        return {
+            "batchId": batch_id,
+            "expiresInS": int(MINTED_TTL_S),
+            "wallets": [r.to_dict(primary=(r.address == primary)) for r in records],
+        }
+
+    def _prune_minted(self) -> None:
+        now = time.monotonic()
+        for batch_id in [b for b, (expires, _rows) in self._minted.items() if expires <= now]:
+            del self._minted[batch_id]
+
+    def forget_minted(self) -> None:
+        """Drop every batch's secrets (the vault was locked)."""
+        self._minted.clear()
+
+    def minted_secrets(self, batch_id: str, password: str | None = None) -> list[dict[str, str]]:
+        """The keys and phrases of a batch :meth:`create_wallets` made, in order.
+
+        Only while the vault is open and the batch is fresh. A *password* is
+        checked against the vault; without one the caller vouches for the
+        operator itself (the desktop asks Touch ID first, as it does in front
+        of every vault write).
+        """
+        self._prune_minted()
+        entry = self._minted.get(batch_id)
+        if entry is None:
+            raise TradingError(
+                "wallet.batch_expired",
+                "Those wallets' keys are no longer held for download; export each wallet instead",
+            )
+        if not self.ensure_unlocked():
+            raise TradingError("wallet.locked", "Wallet vault is locked")
+        if password is not None:
+            self.vault.verify_password(password)
+        return [dict(row) for row in entry[1]]
+
+    async def import_wallets(self, private_keys: list[str], label: str = "") -> dict[str, Any]:
+        """Import many raw private keys; one bad or known key does not stop the rest.
+
+        Each result names its row (``index``) and never echoes the key. A
+        *label* names the imported wallets ``"<label> 1"`` … in row order;
+        without one each gets the vault's default name.
+        """
+        self.ensure_unlocked()
+        if not private_keys:
+            raise TradingError("trading.invalid", "privateKeys is empty")
+        if len(private_keys) > MAX_BATCH_IMPORT:
+            raise TradingError(
+                "trading.invalid", f"at most {MAX_BATCH_IMPORT} private keys per import"
+            )
+        base = (label or "").strip()
+        results: list[dict[str, Any]] = []
+        records: list[WalletRecord] = []
+        for index, key in enumerate(private_keys):
+            name = f"{base} {len(records) + 1}" if base else ""
+            try:
+                record = await asyncio.to_thread(self.vault.import_private_key, name, str(key))
+            except WalletExistsError:
+                results.append({"index": index, "status": "exists"})
+                continue
+            except ValueError as exc:
+                results.append({"index": index, "status": "invalid", "error": str(exc)})
+                continue
+            except VaultError:
+                if not records:
+                    raise
+                # The vault closed (or broke) mid-way: say what made it in.
+                results.extend(
+                    {"index": i, "status": "skipped"} for i in range(index, len(private_keys))
+                )
+                break
+            records.append(record)
+            results.append({"index": index, "status": "imported", "address": record.address})
+        for record in records:
+            self._mirror_wallet(record)
+        if records:
+            await self._emit("trading.changed", {"reason": "wallet"})
+            self._sync_new_wallets()
+        primary = self.vault.primary_address()
+        return {
+            "imported": len(records),
+            "results": results,
+            "wallets": [r.to_dict(primary=(r.address == primary)) for r in records],
+        }
 
     async def import_wallet(
         self,

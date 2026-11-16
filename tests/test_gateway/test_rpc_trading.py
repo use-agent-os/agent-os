@@ -924,3 +924,111 @@ class TestOperatorLockHolds:
         assert res.ok, res.error
         assert res.payload["orders"][0]["status"] == "submitted"
         assert len(stack["base"].sent) == 1
+
+
+class TestWalletBatchRpc:
+    async def test_create_batch_then_download_with_password(self, ctx: RpcContext) -> None:
+        await call("wallet.setup", {"password": PASSWORD}, ctx)
+        made = await call("wallet.createBatch", {"count": 3}, ctx)
+        assert made.ok, made.error
+        wallets = made.payload["wallets"]
+        assert len(wallets) == 3 and made.payload["batchId"]
+        assert wallets[0]["primary"] is True
+        assert all(w["label"] == f"{w['address'][:5]}_{w['address'][-4:]}" for w in wallets)
+        # Nothing secret comes back with the wallets themselves.
+        assert "privateKey" not in str(made.payload) and "mnemonic" not in str(made.payload)
+        batch = made.payload["batchId"]
+        # An empty password is not a password, and is not Touch ID either.
+        empty = await call("wallet.exportBatch", {"batchId": batch, "password": ""}, ctx)
+        assert empty.ok is False
+        wrong = await call("wallet.exportBatch", {"batchId": batch, "password": "nope nope"}, ctx)
+        assert wrong.ok is False and wrong.error.code == "wallet.bad_password"
+        got = await call("wallet.exportBatch", {"batchId": batch, "password": PASSWORD}, ctx)
+        assert got.ok, got.error
+        rows = got.payload["wallets"]
+        assert [r["address"] for r in rows] == [w["address"] for w in wallets]
+        for row in rows:
+            assert len(row["mnemonic"].split()) == 12
+            exported = await call(
+                "wallet.export",
+                {"address": row["address"], "password": PASSWORD, "format": "privateKey"},
+                ctx,
+            )
+            assert exported.payload["privateKey"] == row["privateKey"]
+        touch = await call("wallet.exportBatch", {"batchId": batch, "touchId": True}, ctx)
+        assert touch.ok and touch.payload["wallets"] == rows
+        listed = await call("wallet.list", {}, ctx)
+        assert len(listed.payload["wallets"]) == 3
+
+    async def test_create_batch_bounds_and_locks(self, ctx: RpcContext) -> None:
+        await call("wallet.setup", {"password": PASSWORD, "unlockMode": "manual"}, ctx)
+        for count in (0, 31, "x"):
+            res = await call("wallet.createBatch", {"count": count}, ctx)
+            assert res.ok is False, count
+        made = await call("wallet.createBatch", {"count": 2, "label": "Bot"}, ctx)
+        assert [w["label"] for w in made.payload["wallets"]] == ["Bot 1", "Bot 2"]
+        batch = made.payload["batchId"]
+        # Locking forgets the batch's secrets.
+        await call("wallet.lock", {}, ctx)
+        await call("wallet.unlock", {"password": PASSWORD}, ctx)
+        gone = await call("wallet.exportBatch", {"batchId": batch, "password": PASSWORD}, ctx)
+        assert gone.ok is False and gone.error.code == "wallet.batch_expired"
+        unknown = await call("wallet.exportBatch", {"batchId": "nope", "touchId": True}, ctx)
+        assert unknown.error.code == "wallet.batch_expired"
+        await call("wallet.lock", {}, ctx)
+        locked = await call("wallet.createBatch", {"count": 2}, ctx)
+        assert locked.ok is False and locked.error.code == "wallet.locked"
+
+    async def test_batch_secrets_expire(
+        self, ctx: RpcContext, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import agentos.trading.service as service_mod
+
+        await call("wallet.setup", {"password": PASSWORD}, ctx)
+        monkeypatch.setattr(service_mod, "MINTED_TTL_S", -1.0)
+        made = await call("wallet.createBatch", {"count": 1}, ctx)
+        res = await call(
+            "wallet.exportBatch", {"batchId": made.payload["batchId"], "password": PASSWORD}, ctx
+        )
+        assert res.ok is False and res.error.code == "wallet.batch_expired"
+
+    async def test_import_batch_reports_each_row(self, ctx: RpcContext) -> None:
+        await call("wallet.setup", {"password": PASSWORD}, ctx)
+        await call("wallet.import", {"label": "Known", "privateKey": "0x" + "11" * 32}, ctx)
+        keys = ["0x" + "22" * 32, "not a key", "11" * 32, "33" * 32, "0x" + "22" * 32]
+        res = await call("wallet.importBatch", {"privateKeys": keys}, ctx)
+        assert res.ok, res.error
+        statuses = [(r["index"], r["status"]) for r in res.payload["results"]]
+        assert statuses == [
+            (0, "imported"),
+            (1, "invalid"),
+            (2, "exists"),
+            (3, "imported"),
+            (4, "exists"),
+        ]
+        assert res.payload["imported"] == 2
+        # No row echoes a key back.
+        assert "22" * 32 not in str(res.payload) and "33" * 32 not in str(res.payload)
+        labels = [w["label"] for w in res.payload["wallets"]]
+        assert labels == [f"{w['address'][:5]}_{w['address'][-4:]}" for w in res.payload["wallets"]]
+        listed = await call("wallet.list", {}, ctx)
+        assert len(listed.payload["wallets"]) == 3
+        assert (await call("wallet.importBatch", {"privateKeys": []}, ctx)).ok is False
+        assert (await call("wallet.importBatch", {"privateKeys": "abc"}, ctx)).ok is False
+        too_many = await call("wallet.importBatch", {"privateKeys": ["x"] * 101}, ctx)
+        assert too_many.ok is False
+
+    async def test_batch_methods_are_operator_only(
+        self, ctx: RpcContext, stack: dict[str, Any]
+    ) -> None:
+        await call("wallet.setup", {"password": PASSWORD}, ctx)
+        made = await call("wallet.createBatch", {"count": 1}, ctx)
+        agent = _agent_ctx(stack)
+        for method, params in [
+            ("wallet.createBatch", {"count": 2}),
+            ("wallet.exportBatch", {"batchId": made.payload["batchId"], "touchId": True}),
+            ("wallet.importBatch", {"privateKeys": ["0x" + "44" * 32]}),
+        ]:
+            res = await call(method, params, agent)
+            assert res.ok is False, method
+            assert res.error.code == "trading.operator_required", (method, res.error)

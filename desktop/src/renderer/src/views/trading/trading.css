@@ -2621,6 +2621,66 @@ tr:focus-within .trd-row__actions {
   font-size: 11.5px;
   color: var(--danger);
 }
+/* A batch of new wallets: name over full address, numbered. */
+.trd-minted {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  list-style: none;
+  counter-reset: minted;
+}
+.trd-minted li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-areas: 'n label' 'n addr';
+  column-gap: 6px;
+  padding: 5px 8px;
+  border-radius: var(--radius-control);
+  counter-increment: minted;
+}
+.trd-minted li:nth-child(odd) {
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+.trd-minted li::before {
+  grid-area: n;
+  content: counter(minted);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: right;
+}
+.trd-minted__label {
+  grid-area: label;
+  font-size: 12px;
+  font-weight: 500;
+}
+.trd-minted code {
+  grid-area: addr;
+  overflow-wrap: anywhere;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  user-select: text;
+}
+.trd-minted__pw {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.trd-minted__pw .mac-input {
+  flex: 1;
+  min-width: 0;
+}
+.trd-bulk-keys {
+  white-space: pre;
+  overflow-x: auto;
+}
+
 .trd-warn {
   display: flex;
   gap: 9px;

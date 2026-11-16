@@ -349,6 +349,7 @@ async def _wallet_unlock(params: dict | None, ctx: RpcContext) -> dict[str, Any]
 async def _wallet_lock(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     service = _service(ctx)
     service.vault.lock()
+    service.forget_minted()
     await service._emit("trading.changed", {"reason": "wallet"})
     return {"unlocked": False}
 
@@ -404,6 +405,58 @@ async def _wallet_create(params: dict | None, ctx: RpcContext) -> dict[str, Any]
     service = _service(ctx)
     try:
         return {"wallet": await service.create_wallet(label)}
+    except Exception as exc:
+        raise _raise(exc) from exc
+
+
+@_d.method("wallet.createBatch")
+@_operator_only
+async def _wallet_create_batch(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """Make up to 30 wallets at once; their keys and phrases wait for ``wallet.exportBatch``."""
+    p = _params(params)
+    count = _int(p, "count", 0)
+    label = _str(p, "label") or ""
+    service = _service(ctx)
+    try:
+        return await service.create_wallets(count, label)
+    except Exception as exc:
+        raise _raise(exc) from exc
+
+
+@_d.method("wallet.exportBatch")
+@_operator_only
+async def _wallet_export_batch(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """The keys and recovery phrases of a batch ``wallet.createBatch`` just made.
+
+    Needs the vault password, or ``touchId: true`` from a client that has just
+    had the operator confirm with Touch ID (the desktop's gate, as in front
+    of every vault write). Never an empty password standing in for either.
+    """
+    p = _params(params)
+    batch_id = _str(p, "batchId", required=True) or ""
+    password = _str(p, "password")
+    if password is None and p.get("touchId") is not True:
+        raise ValueError("params.password is required")
+    service = _service(ctx)
+    try:
+        rows = service.minted_secrets(batch_id, password)
+    except Exception as exc:
+        raise _raise(exc) from exc
+    return {"wallets": rows}
+
+
+@_d.method("wallet.importBatch")
+@_operator_only
+async def _wallet_import_batch(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """Import many raw private keys; each row's outcome comes back by its index."""
+    p = _params(params)
+    keys = p.get("privateKeys")
+    if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
+        raise ValueError("params.privateKeys must be a list of strings")
+    label = _str(p, "label") or ""
+    service = _service(ctx)
+    try:
+        return await service.import_wallets(keys, label)
     except Exception as exc:
         raise _raise(exc) from exc
 

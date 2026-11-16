@@ -18,6 +18,20 @@ gateway RPC surface (`wallet.*`, `trading.*`).
 - **Wallets** — create new keys or import a private key / keystore JSON;
   export either form after re-entering the vault password; label, rename,
   remove; one wallet is *primary* and is the default for every command.
+  A wallet made or imported without a label is named after its address:
+  its first five characters and its last four (`0xAbC_1234`).
+- **Bulk wallets** (desktop: *Create new › Bulk create* and *Import Wallets ›
+  Bulk import*) — `wallet.createBatch` makes 1–30 wallets at once, each from
+  its own 12-word BIP-39 phrase (the key is the phrase's first account,
+  `m/44'/60'/0'/0/0`, so any wallet app that restores the phrase lands on the
+  same address). The vault keeps the keys and never the phrases: the
+  batch's keys and phrases wait in gateway memory for 15 minutes (forgotten
+  on `wallet.lock`) and `wallet.exportBatch` hands them over once the
+  operator confirms with the vault password, or with Touch ID in the
+  desktop, which downloads them as `no,address,private_key,seed_phrase` CSV.
+  `wallet.importBatch` imports up to 100 raw private keys (one per row in
+  the app) and answers each row by its index — `imported`, `exists`,
+  `invalid` (with why) or `skipped` — without echoing a key back.
 - **Balances and portfolio** — native ETH and every ERC-20 the wallet
   holds, priced through DexScreener (CoinGecko as fallback), with cost
   basis, realized (FIFO) and unrealized PnL, 24h change, gas spent, and
@@ -215,7 +229,12 @@ Trading** pane has a *Test key* button (`trading.probe`).
   the order left parked. `wallet.status` says `lockedByOperator`.
 - Export (keystore or raw private key) and wallet removal always ask for
   the vault password, whatever the mode. Private keys never appear in logs,
-  RPC responses (other than `wallet.export`), or the ledger.
+  RPC responses (other than `wallet.export` and `wallet.exportBatch`), or
+  the ledger. `wallet.exportBatch` serves only a batch `wallet.createBatch`
+  made in the last 15 minutes, only while the vault is unlocked, and only
+  with the vault password or `touchId: true` — the desktop sends that after
+  its own Touch ID prompt, the same renderer-side gate that stands in front
+  of every vault write. An empty password is refused, not read as either.
 - Removing a wallet stops every DCA mandate, trigger and bracket bound to it
   (`wallet removed`) and rejects what they parked. Importing the same key
   again is a new wallet as far as approvals go: nothing comes back.
@@ -327,7 +346,8 @@ An agent-bound connection is `initiator: agent` whatever it declares, and
 its orders are filed under the session the binding names. These RPCs are
 **operator-only** and answer an agent with `trading.operator_required`:
 `wallet.setup`, `unlock`, `lock`, `setUnlockMode`, `changePassword`,
-`create`, `import`, `export`, `rename`, `remove`, `setPrimary`;
+`create`, `createBatch`, `import`, `importBatch`, `export`, `exportBatch`,
+`rename`, `remove`, `setPrimary`;
 `trading.orders.approve`, `trading.orders.reject`, `trading.tokens.hide`,
 `trading.unwrap`, `trading.lot.setCost`, `trading.probe` with an `apiKey`
 (testing a key that is not in config) and `trading.sync` with `full`

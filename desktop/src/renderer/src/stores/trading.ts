@@ -850,7 +850,17 @@ export const TRADING_WRITE_GATES: Readonly<Record<string, WriteGate>> = {
   'wallet.export': vaultGate('export'),
   'wallet.remove': vaultGate('remove'),
   'wallet.create': null,
+  'wallet.createBatch': null,
+  // The keys and phrases of the wallets just made. With the vault password it
+  // is an export like any other; `touchId: true` means the sheet has just had
+  // the operator confirm with Touch ID itself (whatever Settings › Security
+  // says), so it is not asked twice.
+  'wallet.exportBatch': async (params) =>
+    params.touchId === true
+      ? null
+      : { kind: 'vault', reason: t('trading.touchId.reason.exportBatch'), key: 'wallet:batch' },
   'wallet.import': null,
+  'wallet.importBatch': null,
   'wallet.lock': null,
   'wallet.rename': null,
   'wallet.setPrimary': null,
