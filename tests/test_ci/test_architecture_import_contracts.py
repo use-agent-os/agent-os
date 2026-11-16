@@ -44,6 +44,10 @@ APPROVED_PACKAGE_IMPORTS: frozenset[tuple[str, str]] = frozenset({
     ("cli", "gateway"),
     ("cli", "health"),
     ("cli", "memory"),
+    # ``agentos mcp`` manages client-side MCP servers (probe + config types),
+    # parallel to cli->mcp_server. agentos.mcp depends only on leaf packages
+    # (env, env_policy, paths, safety, tools), so this edge cannot form a cycle.
+    ("cli", "mcp"),
     ("cli", "mcp_server"),
     ("cli", "migration"),
     ("cli", "observability"),
@@ -63,6 +67,10 @@ APPROVED_PACKAGE_IMPORTS: frozenset[tuple[str, str]] = frozenset({
     ("engine", "contracts"),
     ("engine", "gateway"),
     ("engine", "identity"),
+    # The runtime lazily imports agentos.mcp.prompt to render the Connected
+    # MCP Servers system-prompt section. agentos.mcp never imports the engine
+    # (only leaf packages), so this edge cannot form a cycle.
+    ("engine", "mcp"),
     ("engine", "memory"),
     ("engine", "observability"),
     ("engine", "persistence"),
