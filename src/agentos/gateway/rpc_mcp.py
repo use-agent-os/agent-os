@@ -10,11 +10,14 @@ from urllib.parse import parse_qs, urlparse
 
 from agentos.gateway.agent_surface import recognized_agent
 from agentos.gateway.rpc import RpcContext, RpcHandlerError, get_dispatcher
-from agentos.mcp.discovery import (
-    active_clients_snapshot,
-    disconnect_and_unregister,
-    discover_and_register,
-)
+
+# The module, not its names: ``agentos.mcp.discovery`` imports the tool
+# registry, whose package import loads the builtin tools, and two of those
+# (``agents``, ``sessions``) import the gateway -- which imports this module.
+# When discovery is the first thing a process imports, it is still partially
+# initialized here, so a ``from ... import name`` would fail and drop those
+# builtin tools. Attribute lookups at call time see the finished module.
+from agentos.mcp import discovery as mcp_discovery
 from agentos.mcp.streamable_http import (
     FileOAuthStorage,
     MCPAuthorizationRequiredError,
@@ -78,31 +81,42 @@ def _server_entry(ctx: RpcContext, name: str) -> Any:
 def _runtime_config(
     ctx: RpcContext, entry: Any, redirect_uri: str | None = None
 ) -> MCPServerConfig:
-    return MCPServerConfig(
-        name=entry.name,
-        transport=entry.transport,
-        command=entry.command,
-        args=list(entry.args),
-        url=entry.url,
-        env=dict(entry.env),
-        headers=dict(entry.headers),
-        oauth=entry.oauth,
-        oauth_redirect_uri=redirect_uri,
+    return MCPServerConfig.from_entry(
+        entry,
         state_dir=ctx.config.state_dir,
-        tool_timeout_seconds=entry.tool_timeout_seconds,
+        oauth_redirect_uri=redirect_uri,
+        defaults=ctx.config.mcp,
     )
+
+
+def _forget_supervision(name: str) -> None:
+    """The operator is taking *name* over: stop any background retry or watch."""
+    from agentos.mcp.supervisor import get_supervisor
+
+    supervisor = get_supervisor()
+    if supervisor is not None:
+        supervisor.forget(name)
 
 
 async def _activate(ctx: RpcContext, config: MCPServerConfig) -> list[str]:
     _require_mcp_enabled(ctx)
     if ctx.tool_registry is None:
         raise ValueError("Tool registry unavailable")
-    await disconnect_and_unregister(config.name, ctx.tool_registry)
-    timeout = float(ctx.config.mcp.connect_timeout_seconds)
-    return await asyncio.wait_for(
-        discover_and_register(config, ctx.tool_registry, owner=config.name),
+    if not config.enabled:
+        raise ValueError(f"MCP server is disabled: {config.name}")
+    _forget_supervision(config.name)
+    await mcp_discovery.disconnect_and_unregister(config.name, ctx.tool_registry)
+    timeout = config.effective_connect_timeout(float(ctx.config.mcp.connect_timeout_seconds))
+    tools = await asyncio.wait_for(
+        mcp_discovery.discover_and_register(config, ctx.tool_registry, owner=config.name),
         timeout=max(timeout, config.tool_timeout_seconds),
     )
+    from agentos.mcp.supervisor import get_supervisor
+
+    supervisor = get_supervisor()
+    if supervisor is not None:
+        supervisor.watch(config)
+    return tools
 
 
 async def _authenticate_and_activate(ctx: RpcContext, flow: _PendingOAuth) -> list[str]:
@@ -147,16 +161,21 @@ async def _handle_mcp_status(params: dict | None, ctx: RpcContext) -> dict[str, 
     del params
     if ctx.config is None:
         return {"enabled": False, "servers": []}
-    active = {entry.server_name: entry for entry in active_clients_snapshot()}
+    from agentos.mcp.supervisor import get_supervisor
+
+    supervisor = get_supervisor()
+    active = {entry.server_name: entry for entry in mcp_discovery.active_clients_snapshot()}
     servers = []
     for entry in ctx.config.mcp.servers:
         runtime = _runtime_config(ctx, entry)
         # Registered is not the same as reachable: a transport that died keeps
         # its entry (the next call reconnects it), so ask the client itself.
         connected = entry.name in active and getattr(active[entry.name].client, "is_alive", True)
+        retry = supervisor.retry_state(entry.name) if supervisor is not None else None
         servers.append(
             {
                 "name": entry.name,
+                "enabled": runtime.enabled,
                 "transport": entry.transport,
                 "url": entry.url,
                 "oauth": entry.oauth,
@@ -166,6 +185,20 @@ async def _handle_mcp_status(params: dict | None, ctx: RpcContext) -> dict[str, 
                 # Registered AgentOS name -> the server's own tool name. They
                 # differ when another server already held the short name.
                 "toolMap": active[entry.name].tool_map() if connected else {},
+                "toolFilter": {
+                    "include": list(runtime.tool_filter.include),
+                    "exclude": list(runtime.tool_filter.exclude),
+                },
+                # Whether the server's tools wait behind ``tool_search``, and
+                # what else the agent was given for it.
+                "deferLoading": entry.defer_loading,
+                "deferred": active[entry.name].deferred if connected else False,
+                "hasInstructions": bool(active[entry.name].instructions) if connected else False,
+                "resources": active[entry.name].has_resources if connected else False,
+                "prompts": active[entry.name].has_prompts if connected else False,
+                # Set while the server waits to reconnect after a failed
+                # connect or a crash: attempts, last error, next retry time.
+                "retry": retry.to_dict() if retry is not None else None,
             }
         )
     return {"enabled": ctx.config.mcp.enabled, "servers": servers}
@@ -198,7 +231,8 @@ async def _handle_mcp_disconnect(params: dict | None, ctx: RpcContext) -> dict[s
         raise ValueError("params.name is required")
     if ctx.tool_registry is None:
         raise ValueError("Tool registry unavailable")
-    closed = await disconnect_and_unregister(name, ctx.tool_registry)
+    _forget_supervision(name)
+    closed = await mcp_discovery.disconnect_and_unregister(name, ctx.tool_registry)
     return {"disconnected": bool(closed)}
 
 
@@ -287,6 +321,7 @@ async def _handle_mcp_oauth_clear(params: dict | None, ctx: RpcContext) -> dict[
     config = _runtime_config(ctx, entry)
     if config.url:
         FileOAuthStorage(config.name, config.url, config.state_dir).clear()
+    _forget_supervision(name)
     if ctx.tool_registry is not None:
-        await disconnect_and_unregister(name, ctx.tool_registry)
+        await mcp_discovery.disconnect_and_unregister(name, ctx.tool_registry)
     return {"cleared": True}

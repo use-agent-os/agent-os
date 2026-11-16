@@ -1735,10 +1735,12 @@ class GatewayServer:
             for task in stuck:
                 task.cancel()
 
-        # Close MCP clients
+        # Close MCP clients; stop reconnecting them first.
         try:
             from agentos.mcp.discovery import close_active_clients
+            from agentos.mcp.supervisor import shutdown_supervisor
 
+            await shutdown_supervisor()
             await close_active_clients()
             log.info("gateway.mcp_clients_closed")
         except ImportError:
@@ -2112,55 +2114,107 @@ async def _discover_configured_mcp_servers(
         log.info("build_services.mcp_enabled_no_servers")
         return
 
-    from agentos.mcp.discovery import discover_and_register
-    from agentos.mcp.streamable_http import FileOAuthStorage
+    from agentos.mcp import discovery
+    from agentos.mcp.streamable_http import FileOAuthStorage, MCPAuthorizationRequiredError
+    from agentos.mcp.supervisor import INITIAL_BACKOFF_SECONDS, install_supervisor
     from agentos.mcp.types import MCPServerConfig
 
-    timeout = config.mcp.connect_timeout_seconds
-    for entry in config.mcp.servers:
-        try:
-            mcp_cfg = MCPServerConfig(
-                name=entry.name,
-                transport=entry.transport,
-                command=entry.command,
-                args=entry.args,
-                url=entry.url,
-                env=entry.env,
-                headers=entry.headers,
-                oauth=entry.oauth,
-                state_dir=config.state_dir,
-                tool_timeout_seconds=entry.tool_timeout_seconds,
-            )
-            if mcp_cfg.oauth and mcp_cfg.url:
-                storage = FileOAuthStorage(mcp_cfg.name, mcp_cfg.url, mcp_cfg.state_dir)
-                if not await storage.is_authenticated():
-                    log.info(
-                        "build_services.mcp_server_authentication_required",
-                        server=entry.name,
-                    )
-                    continue
+    supervisor = install_supervisor(
+        tool_registry, default_connect_timeout=config.mcp.connect_timeout_seconds
+    )
 
-            names = await asyncio.wait_for(
-                discover_and_register(mcp_cfg, tool_registry),
-                timeout=timeout,
-            )
+    async def connect(mcp_cfg: MCPServerConfig) -> Any:
+        """Connect one server; ``None`` when it is waiting for the user to authenticate."""
+        if mcp_cfg.oauth and mcp_cfg.url:
+            storage = FileOAuthStorage(mcp_cfg.name, mcp_cfg.url, mcp_cfg.state_dir)
+            if not await storage.is_authenticated():
+                log.info(
+                    "build_services.mcp_server_authentication_required",
+                    server=mcp_cfg.name,
+                )
+                return None
+        timeout = mcp_cfg.effective_connect_timeout(config.mcp.connect_timeout_seconds)
+        return await asyncio.wait_for(discovery.connect_and_list(mcp_cfg), timeout=timeout)
+
+    enabled: list[MCPServerConfig] = []
+    for entry in config.mcp.servers:
+        mcp_cfg = MCPServerConfig.from_entry(entry, state_dir=config.state_dir, defaults=config.mcp)
+        if not mcp_cfg.enabled:
+            log.info("build_services.mcp_server_disabled", server=entry.name)
+            continue
+        enabled.append(mcp_cfg)
+
+    # Every server connects at once, each under its own timeout, so boot waits
+    # for the slowest one rather than for the sum. Boot still waits: a turn
+    # that started before the tools were registered would run without them,
+    # and their arrival a moment later would change that session's system
+    # prompt and tool list mid-conversation (a prompt-cache miss, and a cron
+    # or channel turn at startup silently missing its tools).
+    tasks = [asyncio.ensure_future(connect(cfg)) for cfg in enabled]
+    try:
+        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+    except BaseException:
+        # Boot itself was cancelled: the servers that had already connected
+        # are not registered anywhere yet, so nothing else would close them.
+        for task in tasks:
+            if task.done() and not task.cancelled() and task.exception() is None:
+                connected = task.result()
+                if connected is not None:
+                    await connected.client.close()
+        raise
+
+    # Registration is serial and in config order: the first configured server
+    # keeps the short ``mcp_{tool}`` name whatever order the connects finished in.
+    total_tools = sum(
+        len(outcome.tools)
+        for outcome in outcomes
+        if outcome is not None and not isinstance(outcome, BaseException)
+    )
+    for mcp_cfg, outcome in zip(enabled, outcomes, strict=True):
+        if outcome is None:
+            continue
+        if isinstance(outcome, BaseException) and not isinstance(outcome, Exception):
+            raise outcome
+        if not isinstance(outcome, Exception):
+            try:
+                names = discovery.register_connected(
+                    outcome, tool_registry, total_tools=total_tools
+                )
+            except Exception as exc:  # noqa: BLE001 - one server must not stop the others.
+                await outcome.client.close()
+                outcome = exc
+            else:
+                log.info(
+                    "build_services.mcp_server_registered",
+                    server=mcp_cfg.name,
+                    tools=len(names),
+                )
+                supervisor.watch(mcp_cfg)
+                continue
+        if isinstance(outcome, MCPAuthorizationRequiredError):
+            # The saved sign-in could not be refreshed. Retrying cannot fix
+            # that; only the user signing in again from Settings > MCP can.
             log.info(
-                "build_services.mcp_server_registered",
-                server=entry.name,
-                tools=len(names),
+                "build_services.mcp_server_authentication_required",
+                server=mcp_cfg.name,
             )
-        except TimeoutError:
+            continue
+        if isinstance(outcome, TimeoutError):
             log.warning(
                 "build_services.mcp_server_timeout",
-                server=entry.name,
-                timeout=timeout,
+                server=mcp_cfg.name,
+                timeout=mcp_cfg.effective_connect_timeout(config.mcp.connect_timeout_seconds),
+                retry_in_seconds=INITIAL_BACKOFF_SECONDS,
             )
-        except Exception as exc:
+            supervisor.schedule_retry(mcp_cfg, error="timed out", reason="boot")
+        else:
             log.warning(
                 "build_services.mcp_server_failed",
-                server=entry.name,
-                error=str(exc),
+                server=mcp_cfg.name,
+                error=str(outcome),
+                retry_in_seconds=INITIAL_BACKOFF_SECONDS,
             )
+            supervisor.schedule_retry(mcp_cfg, error=str(outcome), reason="boot")
 
 
 async def build_services(

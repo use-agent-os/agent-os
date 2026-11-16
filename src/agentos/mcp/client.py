@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -22,6 +23,40 @@ class MCPClient(ABC):
 
     def __init__(self, config: MCPServerConfig) -> None:
         self.config = config
+        # From the server's ``initialize`` result. ``instructions`` is text the
+        # server wrote for the model: quote it as untrusted, never follow it.
+        self.server_instructions: str = ""
+        self.server_capabilities: dict[str, Any] = {}
+        # Called (no arguments, must not block) when the server announces
+        # ``notifications/tools/list_changed``.
+        self.on_tools_changed: Callable[[], None] | None = None
+
+    def _capture_initialize(self, result: Any) -> None:
+        """Keep what ``initialize`` said about the server: raw JSON or the SDK model."""
+        if result is None:
+            return
+        if not isinstance(result, dict):
+            dump = getattr(result, "model_dump", None)
+            result = dump(by_alias=True, exclude_none=True) if callable(dump) else {}
+        if not isinstance(result, dict):
+            return
+        instructions = result.get("instructions")
+        self.server_instructions = instructions.strip() if isinstance(instructions, str) else ""
+        capabilities = result.get("capabilities")
+        self.server_capabilities = dict(capabilities) if isinstance(capabilities, dict) else {}
+
+    def has_capability(self, name: str) -> bool:
+        """Whether the server advertised capability *name* (``resources``, ``prompts``)."""
+        return self.server_capabilities.get(name) is not None
+
+    def _tools_changed(self) -> None:
+        callback = self.on_tools_changed
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception:  # noqa: BLE001 - a listener must not break the reader.
+            pass
 
     @abstractmethod
     async def connect(self) -> None:
@@ -38,6 +73,54 @@ class MCPClient(ABC):
     @abstractmethod
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
         """Call a tool on the MCP server."""
+
+    async def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Send one of the resource/prompt requests and return its JSON result.
+
+        Raises on a JSON-RPC error. Transports that cannot do this keep the
+        default, and no resource or prompt tools are registered for them.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support {method}")
+
+    async def _list_all(self, method: str, key: str) -> list[dict[str, Any]]:
+        """Follow ``nextCursor`` through a paginated list request."""
+        items: list[dict[str, Any]] = []
+        cursor: str | None = None
+        for _ in range(_MAX_LIST_PAGES):
+            result = await self.request(method, {"cursor": cursor} if cursor else None)
+            page = result.get(key)
+            items.extend(item for item in page or [] if isinstance(item, dict))
+            cursor = result.get("nextCursor")
+            if not cursor:
+                break
+        return items
+
+    async def list_resources(self) -> dict[str, list[dict[str, Any]]]:
+        """The server's resources and resource templates."""
+        resources = await self._list_all("resources/list", "resources")
+        try:
+            templates = await self._list_all("resources/templates/list", "resourceTemplates")
+        except Exception:  # noqa: BLE001 - templates are optional; many servers have none.
+            templates = []
+        return {"resources": resources, "resourceTemplates": templates}
+
+    async def read_resource(self, uri: str) -> dict[str, Any]:
+        return await self.request("resources/read", {"uri": uri})
+
+    async def list_prompts(self) -> list[dict[str, Any]]:
+        return await self._list_all("prompts/list", "prompts")
+
+    async def get_prompt(
+        self, name: str, arguments: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"name": name}
+        if arguments:
+            params["arguments"] = arguments
+        return await self.request("prompts/get", params)
+
+
+# A server that keeps handing out cursors must not page forever.
+_MAX_LIST_PAGES = 50
 
 
 class MCPSessionClient(MCPClient):
@@ -234,17 +317,49 @@ class MCPSessionClient(MCPClient):
             await self.connect()
             return self._require_session()
 
+    async def _on_session_message(self, message: Any) -> None:
+        """``ClientSession`` message handler: only the catalog change matters here."""
+        root = getattr(message, "root", None)
+        if getattr(root, "method", None) == "notifications/tools/list_changed":
+            self._tools_changed()
+
     async def list_tools(self) -> list[MCPToolDef]:
         """List tools from the MCP server."""
-        result = await (await self._live_session()).list_tools()
-        return [
-            MCPToolDef(
-                name=tool.name,
-                description=tool.description or "",
-                input_schema=tool.inputSchema,
+        session = await self._live_session()
+        tools: list[MCPToolDef] = []
+        cursor: str | None = None
+        for _ in range(_MAX_LIST_PAGES):
+            result = await (session.list_tools(cursor) if cursor else session.list_tools())
+            tools.extend(MCPToolDef.from_wire(tool) for tool in result.tools)
+            cursor = getattr(result, "nextCursor", None)
+            if not isinstance(cursor, str) or not cursor:
+                break
+        return tools
+
+    async def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        session = await self._live_session()
+        params = params or {}
+        cursor = params.get("cursor")
+        if method == "resources/list":
+            result = await (session.list_resources(cursor) if cursor else session.list_resources())
+        elif method == "resources/templates/list":
+            result = await (
+                session.list_resource_templates(cursor)
+                if cursor
+                else session.list_resource_templates()
             )
-            for tool in result.tools
-        ]
+        elif method == "resources/read":
+            from pydantic import AnyUrl
+
+            result = await session.read_resource(AnyUrl(params["uri"]))
+        elif method == "prompts/list":
+            result = await (session.list_prompts(cursor) if cursor else session.list_prompts())
+        elif method == "prompts/get":
+            result = await session.get_prompt(params["name"], params.get("arguments"))
+        else:
+            raise NotImplementedError(f"{self.transport_label} client does not support {method}")
+        dumped = result.model_dump(by_alias=True, exclude_none=True, mode="json")
+        return dumped if isinstance(dumped, dict) else {}
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
         """Call a tool on the MCP server, reconnecting first if the transport died."""

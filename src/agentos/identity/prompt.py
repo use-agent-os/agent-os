@@ -31,6 +31,7 @@ def assemble_system_prompt(
     *,
     tools: list[str] | None = None,
     deferred_tools: Mapping[str, str] | Sequence[str] | None = None,
+    mcp_servers: str | None = None,
     skills: list[str] | None = None,
     memory: str | None = None,
     runtime_info: dict[str, str] | None = None,
@@ -58,6 +59,10 @@ def assemble_system_prompt(
             ``tool_search`` loads them, as name -> one-line summary (a plain
             list of names renders without summaries). Listed under their own
             "load first" heading rather than with the loaded tools.
+        mcp_servers: Pre-rendered body of the "Connected MCP Servers" section
+            (``agentos.mcp.prompt.render_mcp_servers_section``); omitted when
+            empty. Deferred MCP tools are described there, per server, and are
+            left out of ``tools`` / ``deferred_tools`` by the caller.
         skills: List of available skill names.
         memory: Memory section content (omitted in minimal mode).
         runtime_info: OS/shell/workspace metadata for Runtime section.
@@ -94,6 +99,7 @@ def assemble_system_prompt(
             if isinstance(deferred_tools, Mapping)
             else dict.fromkeys(deferred_tools or (), "")
         ),
+        "mcp_servers": mcp_servers or "",
         "skills": skills or [],
         "memory": memory,
         "prompt_mode": profile.prompt_mode,

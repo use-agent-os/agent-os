@@ -42,6 +42,7 @@ async def test_mcp_status_reports_configured_oauth_server(tmp_path) -> None:
         "servers": [
             {
                 "name": "robinhood-trading",
+                "enabled": True,
                 "transport": "streamable_http",
                 "url": "https://agent.robinhood.com/mcp/trading",
                 "oauth": True,
@@ -49,6 +50,13 @@ async def test_mcp_status_reports_configured_oauth_server(tmp_path) -> None:
                 "connected": False,
                 "tools": [],
                 "toolMap": {},
+                "toolFilter": {"include": [], "exclude": []},
+                "deferLoading": "auto",
+                "deferred": False,
+                "hasInstructions": False,
+                "resources": False,
+                "prompts": False,
+                "retry": None,
             }
         ],
     }
@@ -107,7 +115,7 @@ async def test_mcp_status_reports_a_dead_transport_as_disconnected(
         client=client,
         registered_tools=("mcp_get_me",),
     )
-    monkeypatch.setattr(rpc_mcp, "active_clients_snapshot", lambda: (entry,))
+    monkeypatch.setattr(rpc_mcp.mcp_discovery, "active_clients_snapshot", lambda: (entry,))
 
     result = await get_dispatcher().dispatch("r1", "mcp.status", {}, _ctx(tmp_path))
 
