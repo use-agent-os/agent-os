@@ -7,6 +7,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from datetime import timedelta
@@ -26,6 +27,15 @@ class MCPDependencyError(RuntimeError):
     """Raised when the required MCP SDK is missing from the installation."""
 
 
+class MCPAuthorizationRequiredError(RuntimeError):
+    """The server wants a browser sign-in, which only the ``mcp.oauth.start`` flow can run.
+
+    The client that serves tools has no browser redirect to offer. Without a
+    handler of its own the SDK raises ``No redirect handler provided``, which
+    tells nobody what to do.
+    """
+
+
 class FileOAuthStorage:
     """Persist MCP OAuth credentials in a private, server-scoped JSON file."""
 
@@ -36,6 +46,10 @@ class FileOAuthStorage:
         self.path = base / "mcp" / f"{safe_name}-{digest}.oauth.json"
         self._tokens: Any = None
         self._client_info: Any = None
+        # Wall-clock time the access token stops working. ``expires_in`` alone
+        # is relative to an issue time the SDK never stores, so a provider that
+        # loads these tokens back would treat them as valid forever.
+        self._expires_at: float | None = None
         self._loaded = False
 
     def _load(self) -> None:
@@ -59,12 +73,28 @@ class FileOAuthStorage:
         except (ImportError, ValueError):
             self._tokens = None
             self._client_info = None
+            return
+        self._expires_at = self._restore_expiry(payload.get("expires_at"))
+
+    def _restore_expiry(self, stamp: Any) -> float | None:
+        if isinstance(stamp, int | float) and not isinstance(stamp, bool):
+            return float(stamp)
+        lifetime = _token_lifetime(self._tokens)
+        if lifetime is None:
+            return None
+        # Written before the stamp existed: the file was last saved when these
+        # tokens arrived, so age them from there.
+        try:
+            return self.path.stat().st_mtime + lifetime
+        except OSError:
+            return None
 
     def _write(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.path.parent, 0o700)
         payload = {
             "tokens": self._tokens.model_dump(mode="json") if self._tokens else None,
+            "expires_at": self._expires_at,
             "client_info": (
                 self._client_info.model_dump(mode="json") if self._client_info else None
             ),
@@ -92,6 +122,22 @@ class FileOAuthStorage:
     async def set_tokens(self, tokens: Any) -> None:
         self._load()
         self._tokens = tokens
+        lifetime = _token_lifetime(tokens)
+        self._expires_at = None if lifetime is None else time.time() + lifetime
+        self._write()
+
+    def token_expiry_time(self) -> float | None:
+        """When the saved access token expires (epoch seconds), or None if it never does."""
+        self._load()
+        return self._expires_at if self._tokens else None
+
+    def clear_tokens(self) -> None:
+        """Forget the saved tokens but keep the client registration for the next sign-in."""
+        self._load()
+        if self._tokens is None:
+            return
+        self._tokens = None
+        self._expires_at = None
         self._write()
 
     async def get_client_info(self) -> Any:
@@ -110,11 +156,50 @@ class FileOAuthStorage:
     def clear(self) -> None:
         self._tokens = None
         self._client_info = None
+        self._expires_at = None
         self._loaded = True
         try:
             self.path.unlink()
         except FileNotFoundError:
             pass
+
+
+def _token_lifetime(tokens: Any) -> float | None:
+    expires_in = getattr(tokens, "expires_in", None)
+    if expires_in is None:
+        return None
+    try:
+        return float(expires_in)
+    except (TypeError, ValueError):
+        return None
+
+
+_provider_class: type | None = None
+
+
+def _oauth_provider_class() -> type:
+    """``OAuthClientProvider`` that keeps a loaded token's expiry.
+
+    The SDK only learns when a token expires from a token response it handled
+    itself; ``_initialize`` loads saved tokens with no expiry at all. A client
+    that serves tools from tokens another client obtained therefore never
+    refreshes them, and once the server rejects the stale token the SDK goes
+    straight to a full browser sign-in, which that client cannot run. Restoring
+    the saved expiry lets the SDK refresh ahead of time, as it does in-process.
+    """
+    global _provider_class
+    if _provider_class is None:
+        from mcp.client.auth import OAuthClientProvider
+
+        class StoredExpiryOAuthClientProvider(OAuthClientProvider):
+            async def _initialize(self) -> None:
+                await super()._initialize()
+                storage = self.context.storage
+                if isinstance(storage, FileOAuthStorage):
+                    self.context.token_expiry_time = storage.token_expiry_time()
+
+        _provider_class = StoredExpiryOAuthClientProvider
+    return _provider_class
 
 
 class MCPStreamableHTTPClient(MCPSessionClient):
@@ -130,8 +215,30 @@ class MCPStreamableHTTPClient(MCPSessionClient):
         callback_handler: Callable[[], Awaitable[tuple[str, str | None]]] | None = None,
     ) -> None:
         super().__init__(config)
-        self._redirect_handler = redirect_handler
-        self._callback_handler = callback_handler
+        # The SDK refuses to start a sign-in unless both handlers exist, so the
+        # serving client gets a pair whose redirect explains what to do.
+        self._redirect_handler = redirect_handler or self._sign_in_required
+        self._callback_handler = callback_handler or self._no_sign_in_callback
+
+    async def _sign_in_required(self, _authorization_url: str) -> None:
+        """Stand-in redirect for a client that has no browser to send anyone to.
+
+        Reached only once a refresh failed or the server rejected the token
+        outright, so the saved tokens are dropped: status then reports the
+        server as signed out and the console offers sign-in instead of a
+        connect that would fail the same way.
+        """
+        if self.config.url:
+            self.oauth_storage().clear_tokens()
+        raise MCPAuthorizationRequiredError(
+            f"MCP server {self.config.name!r} needs to be signed in again: its saved "
+            "OAuth session expired or was revoked. Sign in to it from Settings > MCP."
+        )
+
+    async def _no_sign_in_callback(self) -> tuple[str, str | None]:
+        raise MCPAuthorizationRequiredError(
+            f"MCP server {self.config.name!r} needs to be signed in again from Settings > MCP."
+        )
 
     def oauth_storage(self) -> FileOAuthStorage:
         if not self.config.url:
@@ -150,7 +257,6 @@ class MCPStreamableHTTPClient(MCPSessionClient):
         assert_supported_mcp_url(self.config.url)
 
         try:
-            from mcp.client.auth import OAuthClientProvider
             from mcp.client.session import ClientSession
             from mcp.client.streamable_http import streamable_http_client
             from mcp.shared.auth import OAuthClientMetadata
@@ -170,7 +276,7 @@ class MCPStreamableHTTPClient(MCPSessionClient):
                     "software_version": __version__,
                 }
             )
-            auth = OAuthClientProvider(
+            auth = _oauth_provider_class()(
                 self.config.url,
                 metadata,
                 self.oauth_storage(),

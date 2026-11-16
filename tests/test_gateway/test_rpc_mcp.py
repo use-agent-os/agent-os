@@ -69,6 +69,57 @@ async def test_mcp_connect_requests_authorization_before_network(tmp_path) -> No
 
 
 @pytest.mark.asyncio
+async def test_mcp_connect_asks_for_sign_in_when_the_saved_session_cannot_refresh(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentos.gateway import rpc_mcp
+    from agentos.mcp.streamable_http import MCPAuthorizationRequiredError
+
+    monkeypatch.setattr(rpc_mcp, "_authenticated", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        rpc_mcp,
+        "_activate",
+        AsyncMock(side_effect=MCPAuthorizationRequiredError("sign in again")),
+    )
+
+    result = await get_dispatcher().dispatch(
+        "r1", "mcp.connect", {"name": "robinhood-trading"}, _ctx(tmp_path)
+    )
+
+    assert result.error is None
+    assert result.payload == {"connected": False, "authorizationRequired": True, "tools": []}
+
+
+@pytest.mark.asyncio
+async def test_mcp_status_reports_a_dead_transport_as_disconnected(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The tools stay registered, but the console must not claim the server is up."""
+    from agentos.gateway import rpc_mcp
+    from agentos.mcp.discovery import ActiveMCPClient
+
+    client = MagicMock()
+    client.is_alive = False
+    entry = ActiveMCPClient(
+        owner="robinhood-trading",
+        server_name="robinhood-trading",
+        transport="streamable_http",
+        client=client,
+        registered_tools=("mcp_get_me",),
+    )
+    monkeypatch.setattr(rpc_mcp, "active_clients_snapshot", lambda: (entry,))
+
+    result = await get_dispatcher().dispatch("r1", "mcp.status", {}, _ctx(tmp_path))
+
+    assert result.payload["servers"][0]["connected"] is False
+
+    client.is_alive = True
+    result = await get_dispatcher().dispatch("r1", "mcp.status", {}, _ctx(tmp_path))
+
+    assert result.payload["servers"][0]["connected"] is True
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("method", "params"),
     [

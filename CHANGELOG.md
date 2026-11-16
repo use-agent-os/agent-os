@@ -379,6 +379,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   instead of `Wallet 0xAbCd` from the engine or `Trading` from the desktop.
 
 ### Fixed
+- MCP servers behind OAuth no longer stop working once the first access token
+  expires. The client that serves tools loads the tokens the sign-in saved,
+  and the MCP SDK loads them with no expiry, so it never refreshed them: with a
+  ten-minute token (Typefully) every call failed from the eleventh minute with
+  `ClosedResourceError` until the next browser sign-in. The token file now
+  records when the access token expires (files saved before this age from
+  their last write) and the token is refreshed ahead of time. When a refresh
+  is refused, the call fails with "needs to be signed in again" instead of
+  `No redirect handler provided`, the saved tokens are dropped, and Settings ›
+  MCP offers sign-in.
+- An MCP HTTP transport that dies after one failed request (an auth error, a
+  5xx, a dropped connection) reconnects on the next tool call instead of
+  failing every call with `ClosedResourceError`, and `mcp.status` reports
+  `connected: false` while it is down; it used to say connected for as long as
+  the tools were registered. A request that was in flight when the transport
+  died is reported as failed, not resent. A handshake that fails inside the
+  SDK transport now raises that failure from `connect()` rather than a bare
+  `CancelledError`.
 - Wallet vault: a password change that fails part-way no longer leaves a vault
   that no password opens. `change_password` rewrote the keystores one by one
   and the verifier last, so a full disk or a kill in between left wallets under

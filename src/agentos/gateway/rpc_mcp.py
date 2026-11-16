@@ -15,7 +15,11 @@ from agentos.mcp.discovery import (
     disconnect_and_unregister,
     discover_and_register,
 )
-from agentos.mcp.streamable_http import FileOAuthStorage, MCPStreamableHTTPClient
+from agentos.mcp.streamable_http import (
+    FileOAuthStorage,
+    MCPAuthorizationRequiredError,
+    MCPStreamableHTTPClient,
+)
 from agentos.mcp.types import MCPServerConfig
 
 _d = get_dispatcher()
@@ -147,7 +151,9 @@ async def _handle_mcp_status(params: dict | None, ctx: RpcContext) -> dict[str, 
     servers = []
     for entry in ctx.config.mcp.servers:
         runtime = _runtime_config(ctx, entry)
-        connected = entry.name in active
+        # Registered is not the same as reachable: a transport that died keeps
+        # its entry (the next call reconnects it), so ask the client itself.
+        connected = entry.name in active and getattr(active[entry.name].client, "is_alive", True)
         servers.append(
             {
                 "name": entry.name,
@@ -176,7 +182,11 @@ async def _handle_mcp_connect(params: dict | None, ctx: RpcContext) -> dict[str,
     config = _runtime_config(ctx, entry)
     if config.oauth and not await _authenticated(config):
         return {"connected": False, "authorizationRequired": True, "tools": []}
-    tools = await _activate(ctx, config)
+    try:
+        tools = await _activate(ctx, config)
+    except MCPAuthorizationRequiredError:
+        # The saved session could not be refreshed; only a browser sign-in helps.
+        return {"connected": False, "authorizationRequired": True, "tools": []}
     return {"connected": True, "authorizationRequired": False, "tools": tools}
 
 

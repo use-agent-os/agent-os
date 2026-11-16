@@ -1030,6 +1030,15 @@ file mode `0600` inside a `0700` directory on POSIX systems. On Windows, the
 credential file inherits the current user's state-directory ACL. Removing the
 server from the MCP screen also clears that credential file.
 
+The file also records when the access token expires, and AgentOS refreshes it
+with the saved refresh token before it does, so a short-lived token (some
+servers issue ten-minute ones) keeps working without another sign-in. If the
+server refuses the refresh, the call fails with a message that the server
+needs to be signed in again, the saved tokens are dropped, and `mcp.status`
+reports `authenticated: false`, so Settings › MCP offers sign-in. A transport
+that drops after a failed request reconnects on the next tool call; until then
+`mcp.status` reports the server as `connected: false`.
+
 ## Memory Configuration
 
 Useful commands:
