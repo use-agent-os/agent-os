@@ -863,6 +863,9 @@ cron_default_mode = "bypass"            # off | bypass | full
 # [mcp]
 # enabled = true
 # connect_timeout_seconds = 5.0          # default for every server
+# defer_tool_threshold = 8               # "auto": defer a server with more tools than this
+# defer_total_tool_threshold = 20        # "auto": ... or when all MCP servers together have more
+# instructions_max_chars = 2000          # server-written text quoted in the system prompt (0 = none)
 # [[mcp.servers]]
 # name = "fetch"
 # transport = "stdio"
@@ -875,6 +878,7 @@ cron_default_mode = "bypass"            # off | bypass | full
 # tool_timeout_seconds = 30.0
 # tool_filter.include = ["fetch*"]       # fnmatch globs on the server's tool names
 # tool_filter.exclude = []               # exclude wins over include
+# defer_loading = "auto"                # "auto" | true | false: keep tool schemas behind tool_search
 
 # [budgets]
 # Money spend ceilings, in US dollars of estimated (or provider-billed) model

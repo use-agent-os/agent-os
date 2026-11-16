@@ -2046,6 +2046,12 @@ the change is held until `agentos config reload`, then applies on restart.
 Errors with `--json` go to stderr as `{"error":{"code":…}}` — `INVALID_ARGUMENT`
 (exit 2), `NOT_FOUND` / `ALREADY_EXISTS` (exit 1). Guide: [`mcp.md`](mcp.md).
 
+Settings without an `add` flag are edited in the file: per-server
+`defer_loading` (`"auto"` | `true` | `false`: keep the server's tool schemas
+behind `tool_search`), and under `[mcp]` `defer_tool_threshold` (8),
+`defer_total_tool_threshold` (20) and `instructions_max_chars` (2000; server
+text quoted in the system prompt, `0` = none).
+
 ## MCP Server Bridge
 
 ```sh

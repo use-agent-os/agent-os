@@ -983,6 +983,12 @@ Per-server keys (all optional; an existing config keeps working unchanged):
 | `connect_timeout_seconds` | unset | Per-server connect timeout; unset uses `mcp.connect_timeout_seconds`. |
 | `tool_filter.include` | `[]` | `fnmatch` globs on the server's own tool names; empty registers every tool. |
 | `tool_filter.exclude` | `[]` | Globs to skip; wins over `include`. Matching is case-sensitive. |
+| `defer_loading` | `"auto"` | `true` keeps the server's tool schemas out of requests until `tool_search` loads them, `false` always sends them. `"auto"` defers when the server has more than `mcp.defer_tool_threshold` tools (default 8) or all MCP servers together have more than `mcp.defer_total_tool_threshold` (default 20). |
+
+`mcp.instructions_max_chars` (default 2000, `0` = none) caps the server-written
+`instructions` quoted in the system prompt's "Connected MCP Servers" section.
+All enabled servers connect concurrently at boot, and calls to one stdio server
+no longer queue behind each other; see [`mcp.md`](mcp.md#how-the-agent-sees-mcp-servers).
 
 The filter runs before registration, so a filtered tool never reaches the model
 or the tool registry. If a server cannot be reached at boot, or a `stdio`
