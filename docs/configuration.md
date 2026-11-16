@@ -961,7 +961,36 @@ transport = "streamable_http"
 url = "https://agent.robinhood.com/mcp/trading"
 oauth = true
 tool_timeout_seconds = 30
+
+[[mcp.servers]]
+name = "filesystem"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/srv/data"]
+cwd = "/srv"                     # stdio only; default: the gateway's own
+enabled = true                   # false keeps the definition, never connects
+connect_timeout_seconds = 20     # overrides mcp.connect_timeout_seconds
+tool_filter.include = ["read_*", "list_*"]
+tool_filter.exclude = ["read_secret"]
 ```
+
+Per-server keys (all optional; an existing config keeps working unchanged):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | A disabled server is skipped at boot and `mcp.connect` refuses it. |
+| `cwd` | unset | Working directory for a `stdio` server (`~` expands). A missing directory is reported by name. |
+| `connect_timeout_seconds` | unset | Per-server connect timeout; unset uses `mcp.connect_timeout_seconds`. |
+| `tool_filter.include` | `[]` | `fnmatch` globs on the server's own tool names; empty registers every tool. |
+| `tool_filter.exclude` | `[]` | Globs to skip; wins over `include`. Matching is case-sensitive. |
+
+The filter runs before registration, so a filtered tool never reaches the model
+or the tool registry. If a server cannot be reached at boot, or a `stdio`
+server's process exits on its own, the gateway reconnects it in the background
+after 30 s, doubling up to 10 min, logging once per failed attempt; a crashed
+server's tools are unregistered until it is back. `mcp.status` reports the
+pending retry. Manage entries from the terminal with `agentos mcp` — see
+[`mcp.md`](mcp.md).
 
 `mcp` is an operator-only setting: a stdio server is a command the gateway
 itself runs, so an agent's connection cannot register or enable one through a

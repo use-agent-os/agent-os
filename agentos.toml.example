@@ -858,13 +858,23 @@ cron_default_mode = "bypass"            # off | bypass | full
 # max_messages_per_poll = 10
 # mark_seen = true
 
-# MCP (Model Context Protocol) external servers.
+# MCP (Model Context Protocol) external servers. Manage them with
+# `agentos mcp add|list|enable|disable|probe|doctor` (see docs/mcp.md).
+# [mcp]
+# enabled = true
+# connect_timeout_seconds = 5.0          # default for every server
 # [[mcp.servers]]
 # name = "fetch"
 # transport = "stdio"
 # command = "uvx"
 # args = ["mcp-server-fetch"]
 # env = {}
+# cwd = "~/mcp"                          # stdio working directory (default: the gateway's)
+# enabled = true                         # false = keep the definition, never connect
+# connect_timeout_seconds = 15.0         # overrides [mcp].connect_timeout_seconds
+# tool_timeout_seconds = 30.0
+# tool_filter.include = ["fetch*"]       # fnmatch globs on the server's tool names
+# tool_filter.exclude = []               # exclude wins over include
 
 # [budgets]
 # Money spend ceilings, in US dollars of estimated (or provider-billed) model
