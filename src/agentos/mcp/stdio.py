@@ -32,6 +32,14 @@ def _path_of(env: dict[str, str] | None) -> str | None:
     return None
 
 
+class MCPConnectionLost(ConnectionError):  # noqa: N818 - reads as an event, like the stdlib's.
+    """The server process is gone, or was disconnected, with requests unanswered."""
+
+
+class MCPRequestError(RuntimeError):
+    """The server answered a request with a JSON-RPC error."""
+
+
 class MCPStdioClient(MCPClient):
     """MCP client using stdio transport (subprocess + newline-delimited JSON-RPC).
 
@@ -50,7 +58,12 @@ class MCPStdioClient(MCPClient):
         super().__init__(config)
         self._process: asyncio.subprocess.Process | None = None
         self._request_id = 0
-        self._lock = asyncio.Lock()
+        self._write_lock = asyncio.Lock()
+        self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
+        self._reader: asyncio.Task[None] | None = None
+        self._background: set[asyncio.Task[None]] = set()
+        # Why the server can no longer answer, once its stdout has ended.
+        self._dead: BaseException | None = None
 
     @staticmethod
     def _encode_message(message: dict[str, Any]) -> bytes:
@@ -193,9 +206,10 @@ class MCPStdioClient(MCPClient):
             env=env,
             cwd=cwd,
         )
+        self._dead = None
 
         # MCP initialize handshake
-        await self._send_request(
+        response = await self._send_request(
             "initialize",
             {
                 "protocolVersion": "2024-11-05",
@@ -203,6 +217,7 @@ class MCPStdioClient(MCPClient):
                 "clientInfo": {"name": "agentos", "version": __version__},
             },
         )
+        self._capture_initialize(response.get("result"))
         # Send initialized notification
         await self._send_notification("notifications/initialized")
 
@@ -223,6 +238,10 @@ class MCPStdioClient(MCPClient):
         """Terminate the subprocess."""
         process = self._process
         self._process = None
+        reader, self._reader = self._reader, None
+        if reader is not None and reader is not asyncio.current_task():
+            reader.cancel()
+        self._fail_pending(MCPConnectionLost(f"MCP server {self.config.name!r} was disconnected"))
         if process is None:
             return
         if process.returncode is None:
@@ -240,72 +259,161 @@ class MCPStdioClient(MCPClient):
                     pass
             await process.wait()
 
+    # ── JSON-RPC multiplexing ────────────────────────────────────────
+    #
+    # One reader task owns stdout and hands each reply to the future waiting
+    # on its id, so a slow ``tools/call`` no longer holds up every other
+    # request to the same server. Only the write of a frame is serialized.
+
+    def _ensure_reader(self) -> None:
+        if self._reader is None or self._reader.done():
+            self._reader = asyncio.get_running_loop().create_task(
+                self._read_loop(), name=f"mcp-stdio-reader-{self.config.name}"
+            )
+
+    def _fail_pending(self, exc: BaseException) -> None:
+        pending, self._pending = self._pending, {}
+        for future in pending.values():
+            if not future.done():
+                future.set_exception(exc)
+
+    async def _read_loop(self) -> None:
+        """Dispatch every message the server sends until its stdout ends."""
+        process = self._process
+        assert process is not None
+        assert process.stdout is not None
+        try:
+            while True:
+                line = await self._read_line(process.stdout)
+                # Servers occasionally flush a bare newline between messages.
+                if not line.strip():
+                    continue
+                try:
+                    message = self._decode_response(line)
+                except ValueError as exc:
+                    # Whose reply this was meant to be cannot be known, and a
+                    # server that frames with ``Content-Length`` would otherwise
+                    # leave the handshake waiting for its timeout: everything
+                    # in flight fails with the reason, the stream stays open.
+                    self._fail_pending(exc)
+                    continue
+                await self._dispatch(message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - whatever ended the stream ends the requests.
+            # Stdout is gone (the process died, or sent a frame that cannot be
+            # delimited): nothing in flight will ever be answered. Later
+            # requests fail at once instead of writing into a dead pipe.
+            lost = MCPConnectionLost(f"MCP server {self.config.name!r}: {exc}")
+            lost.__cause__ = exc
+            if self._process is process:
+                self._dead = lost
+            self._fail_pending(lost)
+
+    async def _dispatch(self, message: dict[str, Any]) -> None:
+        method = message.get("method")
+        if isinstance(method, str):
+            if "id" not in message:
+                if method == "notifications/tools/list_changed":
+                    self._tools_changed()
+                return
+            # A request from the server (``ping``, ``roots/list``, sampling).
+            # Its id comes from the server's own id space, so it can never
+            # resolve one of ours; unanswered, some servers stall on it.
+            reply: dict[str, Any] = {"jsonrpc": "2.0", "id": message["id"]}
+            if method == "ping":
+                reply["result"] = {}
+            else:
+                reply["error"] = {"code": -32601, "message": f"Method not found: {method}"}
+            try:
+                await self._write(reply)
+            except Exception:  # noqa: BLE001 - a dead stdin shows up on the read side.
+                pass
+            return
+        future = self._pending.pop(message.get("id"), None)  # type: ignore[arg-type]
+        if future is not None and not future.done():
+            future.set_result(message)
+
+    async def _write(self, message: dict[str, Any]) -> None:
+        process = self._process
+        if process is None or process.stdin is None:
+            raise MCPConnectionLost(f"MCP server {self.config.name!r} is not connected")
+        async with self._write_lock:
+            process.stdin.write(self._encode_message(message))
+            await process.stdin.drain()
+
     async def _send_request(
         self, method: str, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        """Send a JSON-RPC request and read the response."""
-        assert self._process is not None
-        assert self._process.stdin is not None
-        assert self._process.stdout is not None
+        """Send a JSON-RPC request and wait for the reply carrying its id."""
+        if self._dead is not None:
+            raise MCPConnectionLost(str(self._dead)) from self._dead
+        if self._process is None:
+            raise MCPConnectionLost(f"MCP server {self.config.name!r} is not connected")
+        self._ensure_reader()
 
-        async with self._lock:
-            req_id = self._next_id()
-            request: dict[str, Any] = {"jsonrpc": "2.0", "id": req_id, "method": method}
-            if params is not None:
-                request["params"] = params
+        req_id = self._next_id()
+        request: dict[str, Any] = {"jsonrpc": "2.0", "id": req_id, "method": method}
+        if params is not None:
+            request["params"] = params
+        future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+        self._pending[req_id] = future
+        try:
+            try:
+                await self._write(request)
+            except (BrokenPipeError, ConnectionError) as exc:
+                if isinstance(exc, MCPConnectionLost):
+                    raise
+                raise MCPConnectionLost(
+                    f"MCP server {self.config.name!r} closed its stdin: {exc}"
+                ) from exc
+            return await future
+        except asyncio.CancelledError:
+            # The caller gave up (a timeout, a cancelled turn). Tell the server
+            # so it can stop working on a result nobody will read.
+            if method != "initialize" and self._pending.get(req_id) is future:
+                self._send_cancelled(req_id)
+            raise
+        finally:
+            self._pending.pop(req_id, None)
 
-            self._process.stdin.write(self._encode_message(request))
-            await self._process.stdin.drain()
+    def _send_cancelled(self, req_id: int) -> None:
+        """Send ``notifications/cancelled`` for *req_id* without holding up the caller."""
+        if self._process is None or self._dead is not None:
+            return
 
-            return await self._read_response(req_id)
+        async def _notify() -> None:
+            try:
+                await self._send_notification(
+                    "notifications/cancelled",
+                    {"requestId": req_id, "reason": "client cancelled the request"},
+                )
+            except Exception:  # noqa: BLE001 - best effort; the request is abandoned either way.
+                pass
 
-    async def _send_notification(self, method: str) -> None:
+        task = asyncio.get_running_loop().create_task(_notify())
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+
+    async def _send_notification(self, method: str, params: dict[str, Any] | None = None) -> None:
         """Send a JSON-RPC notification (no response expected)."""
-        assert self._process is not None
-        assert self._process.stdin is not None
+        notification: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
+        if params is not None:
+            notification["params"] = params
+        await self._write(notification)
 
-        async with self._lock:
-            notification = {"jsonrpc": "2.0", "method": method}
-            self._process.stdin.write(self._encode_message(notification))
-            await self._process.stdin.drain()
-
-    async def _read_response(self, req_id: int) -> dict[str, Any]:
-        """Read newline-delimited messages until the reply to ``req_id`` arrives.
-
-        A server may interleave its own traffic with the reply — a
-        ``notifications/message`` log line, ``notifications/tools/list_changed``
-        after a catalog change, or a request of its own. Returning whatever
-        arrived first would hand a notification back as the result and leave
-        every later read one message behind, so replies are matched on their
-        JSON-RPC id the way the SSE client does. Each iteration consumes at
-        least one byte and EOF raises, so this cannot spin.
-        """
-        assert self._process is not None
-        assert self._process.stdout is not None
-
-        while True:
-            line = await self._read_line(self._process.stdout)
-            # Servers occasionally flush a bare newline between messages.
-            if not line.strip():
-                continue
-            message = self._decode_response(line)
-            # A server-originated request carries ``method`` next to an id from
-            # the server's own id space; only a reply can match ours.
-            if "method" not in message and message.get("id") == req_id:
-                return message
+    async def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        response = await self._send_request(method, params)
+        error = response.get("error")
+        if error is not None:
+            message = error.get("message") if isinstance(error, dict) else None
+            raise MCPRequestError(str(message or error))
+        result = response.get("result")
+        return result if isinstance(result, dict) else {}
 
     async def list_tools(self) -> list[MCPToolDef]:
         """List tools from the MCP server."""
-        response = await self._send_request("tools/list")
-        tools_data = response.get("result", {}).get("tools", [])
-        return [
-            MCPToolDef(
-                name=t["name"],
-                description=t.get("description", ""),
-                input_schema=t.get("inputSchema", {}),
-            )
-            for t in tools_data
-        ]
+        return [MCPToolDef.from_wire(tool) for tool in await self._list_all("tools/list", "tools")]
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
         """Call a tool on the MCP server."""
