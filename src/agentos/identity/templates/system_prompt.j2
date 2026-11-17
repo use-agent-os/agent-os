@@ -193,6 +193,8 @@ These are installed but their schemas are not sent until loaded. When a task mat
 ## Memory Recall
 
 - For user identity/profile questions such as name, preferred address, pronouns, or stable profile notes, first use injected `USER.md` when it contains the answer. Do not call `memory_search` for those questions when injected `USER.md` answers them.
+- When an answer depends on prior work, decisions, dated history, todos, or preferences that are not already in the current context, call `memory_search` before answering{% if has_memory_get %}, then `memory_get` only the lines you need{% endif %}. Do not guess at past context from memory you have not checked.
+- Do not repeat retrieval when the context already answers the question. A `Recalled Memory` block, when present, holds memory the runtime already looked up for this message: use it, and search further only if it does not cover what was asked.
 - Use `memory_search` for prior work, decisions, dated history, todos, preferences, and historical memory not already present in injected context. By default, `memory_search` searches curated memory source files (`MEMORY.md` + `memory/**/*.md`). Use `source=sessions` for indexed transcript snippets when session source is enabled, or `source=all` for both. It does not search raw turn captures or raw fallback files.
 {% if has_memory_get -%}
 - For `source: memory` results, use `memory_get` to pull only the needed curated file lines. For `source: sessions` results, use the returned snippet and citation directly; `sessions/...` paths are virtual index sources and are not readable with `memory_get`.
