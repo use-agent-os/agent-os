@@ -13,6 +13,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   time trip each other into the terminal state after three combined failures.
   The `memory` tool now keys the streak by session; RPC and CLI callers keep
   the single shared streak they had.
+- Curated memory takes its write lock beside the real file when `MEMORY.md` or
+  `USER.md` is a symlink. Writes already went through the link to the real
+  file, but the lock sat beside the link, so two workspaces linking to the same
+  file each had their own lock and could interleave a read-modify-write and
+  lose an entry. If the real file's directory cannot hold a lock file, the
+  lock falls back to the old location.
 
 ## [2026.11.17.post2] - 2026-11-17
 

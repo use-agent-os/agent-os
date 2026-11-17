@@ -170,6 +170,78 @@ def test_write_through_symlink_keeps_the_symlink(tmp_path: Path):
     assert "persisted fact" in real_file.read_text(encoding="utf-8")
 
 
+# -- lock follows symlinks to the real file --------------------------------
+
+
+def _two_workspaces_sharing(tmp_path: Path) -> tuple[Path, Path, Path]:
+    real_dir = tmp_path / "shared"
+    real_dir.mkdir()
+    real_file = real_dir / "MEMORY.md"
+    real_file.write_text("", encoding="utf-8")
+    workspaces = []
+    for name in ("ws-a", "ws-b"):
+        ws = tmp_path / name
+        ws.mkdir()
+        (ws / "MEMORY.md").symlink_to(real_file)
+        workspaces.append(ws)
+    return workspaces[0], workspaces[1], real_file
+
+
+@pytest.mark.skipif(os.name != "posix", reason="flock + unprivileged symlinks are POSIX-only")
+def test_symlinked_stores_contend_for_one_lock(tmp_path: Path):
+    """Two workspaces whose MEMORY.md points at one file must share its lock.
+
+    Locking beside the symlink gave each workspace its own lock file, so their
+    read-modify-writes of the same real file could interleave and lose one.
+    """
+    import fcntl
+
+    ws_a, ws_b, real_file = _two_workspaces_sharing(tmp_path)
+
+    with CuratedMemoryStore._file_lock(ws_a / "MEMORY.md"):
+        assert (real_file.parent / "MEMORY.md.lock").exists()
+        assert not (ws_a / "MEMORY.md.lock").exists()
+        other = CuratedMemoryStore._open_lock_file(ws_b / "MEMORY.md")
+        try:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            other.close()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="unprivileged symlinks are POSIX-only")
+def test_symlinked_stores_both_writes_land(tmp_path: Path):
+    ws_a, ws_b, real_file = _two_workspaces_sharing(tmp_path)
+    a = CuratedMemoryStore(memory_dir=ws_a, memory_char_limit=200, user_char_limit=100)
+    b = CuratedMemoryStore(memory_dir=ws_b, memory_char_limit=200, user_char_limit=100)
+    a.load_from_disk()
+    b.load_from_disk()
+
+    assert a.add("memory", "from a")["success"] is True
+    assert b.add("memory", "from b")["success"] is True
+
+    text = real_file.read_text(encoding="utf-8")
+    assert "from a" in text and "from b" in text
+
+
+@pytest.mark.skipif(os.name != "posix", reason="unprivileged symlinks are POSIX-only")
+def test_lock_falls_back_beside_the_link_when_real_dir_is_unusable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    ws_a, _ws_b, real_file = _two_workspaces_sharing(tmp_path)
+    real_lock = real_file.with_suffix(".md.lock")
+    builtin_open = open
+
+    def refuse_real_lock(file, *args, **kwargs):
+        if Path(file) == real_lock:
+            raise PermissionError(errno.EACCES, "read-only")
+        return builtin_open(file, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", refuse_real_lock)
+    with CuratedMemoryStore._file_lock(ws_a / "MEMORY.md"):
+        assert (ws_a / "MEMORY.md.lock").exists()
+
+
 def test_cross_device_rename_falls_back_to_copy(
     store: CuratedMemoryStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

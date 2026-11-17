@@ -23,7 +23,7 @@ from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 import structlog
 
@@ -921,13 +921,18 @@ class CuratedMemoryStore:
         bare ``yield``, so two concurrent sessions on Windows interleaved
         their read-modify-write and one of the writes was lost. Only a
         platform with neither primitive falls through unlocked.
+
+        The lock sits beside the REAL file, not the name we were given:
+        ``_atomic_replace`` writes through a symlink, so two workspaces whose
+        MEMORY.md symlinks to one shared file edit the same bytes and must
+        contend for the same lock. A path that cannot be resolved, or a real
+        directory we cannot create the lock in, falls back to locking beside
+        the given path.
         """
-        lock_path = path.with_suffix(path.suffix + ".lock")
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
         if fcntl is None and msvcrt is None:  # pragma: no cover - exotic platform
             yield
             return
-        fd = open(lock_path, "a+", encoding="utf-8")
+        fd = CuratedMemoryStore._open_lock_file(path)
         try:
             if fcntl is not None:
                 fcntl.flock(fd, fcntl.LOCK_EX)  # type: ignore[attr-defined]
@@ -945,6 +950,30 @@ class CuratedMemoryStore:
             except OSError:  # pragma: no cover
                 pass
             fd.close()
+
+    @staticmethod
+    def _lock_paths(path: Path) -> list[Path]:
+        """Candidate lock files for *path*: beside its real target, then beside it."""
+        given = path.with_suffix(path.suffix + ".lock")
+        try:
+            real = Path(os.path.realpath(path))
+        except (OSError, RuntimeError, ValueError):  # pragma: no cover - loop / bad path
+            return [given]
+        real_lock = real.with_suffix(real.suffix + ".lock")
+        return [real_lock] if real_lock == given else [real_lock, given]
+
+    @staticmethod
+    def _open_lock_file(path: Path) -> IO[str]:
+        """Open the first usable lock file from ``_lock_paths(path)``."""
+        *preferred, last = CuratedMemoryStore._lock_paths(path)
+        for lock_path in preferred:
+            try:
+                lock_path.parent.mkdir(parents=True, exist_ok=True)
+                return open(lock_path, "a+", encoding="utf-8")
+            except OSError:
+                log.debug("curated_memory_lock_fallback", path=str(path), lock=str(lock_path))
+        last.parent.mkdir(parents=True, exist_ok=True)
+        return open(last, "a+", encoding="utf-8")
 
     @staticmethod
     def _read_raw_checked(path: Path) -> str | None:
