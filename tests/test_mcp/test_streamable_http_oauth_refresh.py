@@ -4,6 +4,11 @@ The gateway signs in with one client (the one that holds the browser redirect)
 and then serves tools from a second client that only reads the saved tokens.
 These tests drive that second client against an in-memory MCP server whose
 access tokens expire, the way a short-lived provider token (ten minutes) does.
+
+The fake is laid out like Typefully's: the authorization server is on another
+host (``api.typefully.com`` for ``mcp.typefully.com``), so ``/token`` on the
+MCP server's own origin is a 404. A fake that answered there hid a refresh that
+could never reach the real token endpoint.
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ import json
 import os
 import time
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -25,8 +31,26 @@ from agentos.mcp.streamable_http import (
 from agentos.mcp.types import MCPServerConfig
 
 SERVER_URL = "https://mcp.example.test/mcp"
-TOKEN_URL = "https://mcp.example.test/token"
+AUTH_ISSUER = "https://auth.example.test"
+TOKEN_URL = f"{AUTH_ISSUER}/oauth2/token"
 TOKEN_LIFETIME = 600
+
+RESOURCE_METADATA = {
+    "resource": SERVER_URL,
+    "authorization_servers": [AUTH_ISSUER],
+    "scopes_supported": ["full_access"],
+}
+AUTH_METADATA = {
+    "issuer": AUTH_ISSUER,
+    "authorization_endpoint": f"{AUTH_ISSUER}/oauth2/authorize",
+    "token_endpoint": TOKEN_URL,
+    "registration_endpoint": f"{AUTH_ISSUER}/oauth2/register",
+    "scopes_supported": ["full_access"],
+    "response_types_supported": ["code"],
+    "grant_types_supported": ["authorization_code", "refresh_token"],
+    "code_challenge_methods_supported": ["S256"],
+    "token_endpoint_auth_methods_supported": ["none"],
+}
 
 
 class FakeOAuthMCPServer:
@@ -43,12 +67,20 @@ class FakeOAuthMCPServer:
         self.valid_access_tokens.add(access)
 
     def handle(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(f"{request.method} {request.url.path}")
-        if str(request.url) == TOKEN_URL:
+        url = str(request.url.copy_with(query=None))
+        self.requests.append(f"{request.method} {url}")
+        if url == TOKEN_URL:
             return self._token(request)
-        if request.url.path.startswith("/.well-known/"):
-            return httpx.Response(404)
-        if str(request.url) != SERVER_URL:
+        if url == f"{AUTH_ISSUER}/oauth2/register":
+            registration = json.loads(request.content)
+            return httpx.Response(201, json={**registration, "client_id": "client-id"})
+        if url == f"{AUTH_ISSUER}/.well-known/oauth-authorization-server":
+            return httpx.Response(200, json=AUTH_METADATA)
+        if url.startswith("https://mcp.example.test/.well-known/oauth-protected-resource"):
+            return httpx.Response(200, json=RESOURCE_METADATA)
+        if url != SERVER_URL:
+            # Includes ``https://mcp.example.test/token``, where the SDK sends a
+            # refresh when it has not discovered the real token endpoint.
             return httpx.Response(404)
         bearer = request.headers.get("authorization", "").removeprefix("Bearer ")
         if bearer not in self.valid_access_tokens:
@@ -61,6 +93,19 @@ class FakeOAuthMCPServer:
 
     def _token(self, request: httpx.Request) -> httpx.Response:
         form = dict(httpx.QueryParams(request.content.decode()))
+        if form.get("grant_type") == "authorization_code":
+            if form.get("code") != "code-1":
+                return httpx.Response(400, json={"error": "invalid_grant"})
+            self.issue("access-0")
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "access-0",
+                    "token_type": "Bearer",
+                    "expires_in": TOKEN_LIFETIME,
+                    "refresh_token": "refresh-1",
+                },
+            )
         if form.get("grant_type") != "refresh_token":
             return httpx.Response(400, json={"error": "unsupported_grant_type"})
         if form.get("refresh_token") not in self.valid_refresh_tokens:
@@ -142,29 +187,25 @@ def _config(tmp_path: Any, timeout: float = 5.0) -> MCPServerConfig:
     )
 
 
-async def _sign_in(tmp_path: Any, server: FakeOAuthMCPServer, access: str = "access-0") -> None:
-    """Save tokens the way the sign-in client does after the browser redirect."""
-    from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+async def _sign_in(tmp_path: Any, server: FakeOAuthMCPServer) -> None:
+    """Sign in the way ``mcp.oauth.start`` does: a client holding the browser redirect."""
+    state: dict[str, str] = {}
 
-    storage = FileOAuthStorage("Typefully", SERVER_URL, str(tmp_path))
-    await storage.set_client_info(
-        OAuthClientInformationFull.model_validate(
-            {
-                "redirect_uris": ["http://127.0.0.1/control/mcp/oauth/callback"],
-                "client_id": "client-id",
-                "token_endpoint_auth_method": "none",
-            }
-        )
+    async def redirect_handler(url: str) -> None:
+        state["value"] = parse_qs(urlparse(url).query)["state"][0]
+
+    async def callback_handler() -> tuple[str, str | None]:
+        return "code-1", state["value"]
+
+    client = MCPStreamableHTTPClient(
+        _config(tmp_path),
+        redirect_handler=redirect_handler,
+        callback_handler=callback_handler,
     )
-    await storage.set_tokens(
-        OAuthToken(
-            access_token=access,
-            token_type="Bearer",
-            expires_in=TOKEN_LIFETIME,
-            refresh_token="refresh-1",
-        )
-    )
-    server.issue(access)
+    await client.connect()
+    await client.close()
+    assert "access-0" in server.valid_access_tokens
+    server.requests.clear()
 
 
 def _expire(server: FakeOAuthMCPServer, clock: list[float]) -> None:
@@ -188,6 +229,9 @@ async def test_a_connected_client_refreshes_a_token_that_expires_while_it_runs(
         assert (await client.call_tool("get_me", {})).content == "ok"
         assert server.refreshes == 1
         assert server.tool_calls == ["get_me", "get_me"]
+        # Refreshed at the authorization server, without rediscovering it.
+        assert f"POST {TOKEN_URL}" in server.requests
+        assert not [r for r in server.requests if "/.well-known/" in r]
     finally:
         await client.close()
 
@@ -234,6 +278,24 @@ async def test_a_token_file_without_an_expiry_stamp_ages_from_its_write_time(
     finally:
         await client.close()
     assert server.refreshes == 1
+
+
+@pytest.mark.asyncio
+async def test_the_token_endpoint_survives_a_restart(
+    tmp_path: Any, server: FakeOAuthMCPServer, clock: list[float]
+) -> None:
+    """The second refresh comes from a new process that only has the token file."""
+    await _sign_in(tmp_path, server)
+    for refreshes in (1, 2):
+        _expire(server, clock)
+        client = MCPStreamableHTTPClient(_config(tmp_path))
+        await client.connect()
+        try:
+            assert (await client.call_tool("get_me", {})).content == "ok"
+        finally:
+            await client.close()
+        assert server.refreshes == refreshes
+    assert "POST https://mcp.example.test/token" not in server.requests
 
 
 @pytest.mark.asyncio

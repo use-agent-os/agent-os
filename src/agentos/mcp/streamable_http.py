@@ -50,6 +50,11 @@ class FileOAuthStorage:
         # is relative to an issue time the SDK never stores, so a provider that
         # loads these tokens back would treat them as valid forever.
         self._expires_at: float | None = None
+        # Where the authorization server lives, as the sign-in discovered it.
+        # The SDK only discovers this on a 401; without it a refresh is sent
+        # to ``/token`` on the MCP server's own origin, which is wrong for any
+        # server whose authorization server is elsewhere.
+        self._discovery: dict[str, Any] | None = None
         self._loaded = False
 
     def _load(self) -> None:
@@ -75,6 +80,8 @@ class FileOAuthStorage:
             self._client_info = None
             return
         self._expires_at = self._restore_expiry(payload.get("expires_at"))
+        discovery = payload.get("discovery")
+        self._discovery = discovery if isinstance(discovery, dict) else None
 
     def _restore_expiry(self, stamp: Any) -> float | None:
         if isinstance(stamp, int | float) and not isinstance(stamp, bool):
@@ -95,6 +102,7 @@ class FileOAuthStorage:
         payload = {
             "tokens": self._tokens.model_dump(mode="json") if self._tokens else None,
             "expires_at": self._expires_at,
+            "discovery": self._discovery,
             "client_info": (
                 self._client_info.model_dump(mode="json") if self._client_info else None
             ),
@@ -131,6 +139,18 @@ class FileOAuthStorage:
         self._load()
         return self._expires_at if self._tokens else None
 
+    def discovery(self) -> dict[str, Any] | None:
+        """The authorization-server metadata saved at the last sign-in or refresh."""
+        self._load()
+        return self._discovery
+
+    def set_discovery(self, discovery: dict[str, Any]) -> None:
+        self._load()
+        if discovery == self._discovery:
+            return
+        self._discovery = discovery
+        self._write()
+
     def clear_tokens(self) -> None:
         """Forget the saved tokens but keep the client registration for the next sign-in."""
         self._load()
@@ -157,6 +177,7 @@ class FileOAuthStorage:
         self._tokens = None
         self._client_info = None
         self._expires_at = None
+        self._discovery = None
         self._loaded = True
         try:
             self.path.unlink()
@@ -178,28 +199,87 @@ _provider_class: type | None = None
 
 
 def _oauth_provider_class() -> type:
-    """``OAuthClientProvider`` that keeps a loaded token's expiry.
+    """``OAuthClientProvider`` that can refresh tokens another client obtained.
 
-    The SDK only learns when a token expires from a token response it handled
-    itself; ``_initialize`` loads saved tokens with no expiry at all. A client
-    that serves tools from tokens another client obtained therefore never
-    refreshes them, and once the server rejects the stale token the SDK goes
-    straight to a full browser sign-in, which that client cannot run. Restoring
-    the saved expiry lets the SDK refresh ahead of time, as it does in-process.
+    The client that serves tools only loads what the browser sign-in saved, and
+    the SDK keeps two things it learned during that sign-in in memory only:
+
+    - **When the token expires.** ``_initialize`` loads saved tokens with no
+      expiry, so they look valid forever and are never refreshed; once the
+      server rejects one, the SDK starts a browser sign-in this client cannot
+      run.
+    - **Where the token endpoint is.** Without the discovered metadata a
+      refresh goes to ``/token`` on the MCP server's origin. Typefully's
+      authorization server is ``api.typefully.com``, so that request was a 404
+      and every refresh failed.
+
+    Both are saved with the tokens and restored on load, so the SDK refreshes
+    ahead of time, at the right endpoint, as it does in-process.
     """
     global _provider_class
     if _provider_class is None:
         from mcp.client.auth import OAuthClientProvider
 
-        class StoredExpiryOAuthClientProvider(OAuthClientProvider):
+        class StoredStateOAuthClientProvider(OAuthClientProvider):
             async def _initialize(self) -> None:
                 await super()._initialize()
                 storage = self.context.storage
                 if isinstance(storage, FileOAuthStorage):
                     self.context.token_expiry_time = storage.token_expiry_time()
+                    _restore_discovery(self.context, storage.discovery())
 
-        _provider_class = StoredExpiryOAuthClientProvider
+            async def _handle_token_response(self, response: httpx.Response) -> None:
+                await super()._handle_token_response(response)
+                _remember_discovery(self.context)
+
+            async def _handle_refresh_response(self, response: httpx.Response) -> bool:
+                refreshed = await super()._handle_refresh_response(response)
+                if refreshed:
+                    _remember_discovery(self.context)
+                return bool(refreshed)
+
+        _provider_class = StoredStateOAuthClientProvider
     return _provider_class
+
+
+def _remember_discovery(context: Any) -> None:
+    storage = getattr(context, "storage", None)
+    metadata = getattr(context, "oauth_metadata", None)
+    if not isinstance(storage, FileOAuthStorage) or metadata is None:
+        return
+    resource = getattr(context, "protected_resource_metadata", None)
+    storage.set_discovery(
+        {
+            "oauth_metadata": metadata.model_dump(mode="json", exclude_none=True),
+            "protected_resource_metadata": (
+                resource.model_dump(mode="json", exclude_none=True) if resource else None
+            ),
+            "auth_server_url": getattr(context, "auth_server_url", None),
+        }
+    )
+
+
+def _restore_discovery(context: Any, discovery: dict[str, Any] | None) -> None:
+    """Fill in what this process has not discovered yet; never override fresher metadata."""
+    if not discovery:
+        return
+    try:
+        from mcp.shared.auth import OAuthMetadata, ProtectedResourceMetadata
+    except ImportError:  # pragma: no cover - the SDK is a hard dependency
+        return
+    try:
+        metadata = discovery.get("oauth_metadata")
+        if metadata and getattr(context, "oauth_metadata", None) is None:
+            context.oauth_metadata = OAuthMetadata.model_validate(metadata)
+        resource = discovery.get("protected_resource_metadata")
+        if resource and getattr(context, "protected_resource_metadata", None) is None:
+            context.protected_resource_metadata = ProtectedResourceMetadata.model_validate(resource)
+    except ValueError:
+        # A file this SDK cannot read back: fall back to discovering again.
+        return
+    auth_server_url = discovery.get("auth_server_url")
+    if isinstance(auth_server_url, str) and getattr(context, "auth_server_url", None) is None:
+        context.auth_server_url = auth_server_url
 
 
 class MCPStreamableHTTPClient(MCPSessionClient):
