@@ -155,13 +155,16 @@ def _ancestors() -> list[tuple[int, list[str]]]:
     # macOS and other POSIX systems without /proc: one ``ps`` for the table.
     import subprocess
 
+    # ``ww`` plus no ``COLUMNS``: a truncated command line would hide the gateway.
+    ps_env = {k: v for k, v in os.environ.items() if k != "COLUMNS"}
     try:
         listing = subprocess.run(
-            ["ps", "-axo", "pid=,ppid=,command="],
+            ["ps", "-axwwo", "pid=,ppid=,command="],
             capture_output=True,
             text=True,
             timeout=5,
             check=False,
+            env=ps_env,
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return chain
