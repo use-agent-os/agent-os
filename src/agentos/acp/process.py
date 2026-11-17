@@ -558,17 +558,34 @@ class ProcInfo:
     command: str
 
 
+def _ps_env() -> dict[str, str]:
+    """Environment for ``ps``: no ``COLUMNS``, so output width never follows the caller's tty.
+
+    ``ps`` truncates the command column to ``COLUMNS``; a cut-off command line
+    would make :func:`command_matches_lease` mistake a stale harness for a
+    reused PID and leave it running.
+    """
+    env = dict(os.environ)
+    env.pop("COLUMNS", None)
+    return env
+
+
 def list_processes() -> list[ProcInfo] | None:
-    """``ps -axo pid=,ppid=,command=`` parsed; ``None`` when unavailable."""
+    """``ps -axwwo pid=,ppid=,command=`` parsed; ``None`` when unavailable.
+
+    ``ww`` (unlimited width, on both procps and BSD ``ps``) keeps the full
+    command line, which the reaper matches against lease argv.
+    """
     if not _IS_POSIX:
         return None
     try:
         out = subprocess.run(
-            ["ps", "-axo", "pid=,ppid=,command="],
+            ["ps", "-axwwo", "pid=,ppid=,command="],
             capture_output=True,
             text=True,
             timeout=5,
             check=False,
+            env=_ps_env(),
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return None
@@ -588,6 +605,7 @@ def _process_elapsed_s(pid: int) -> float | None:
             text=True,
             timeout=5,
             check=False,
+            env=_ps_env(),
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return None
@@ -634,6 +652,7 @@ def _process_env_has_marker(pid: int, lease_id: str) -> bool | None:
                 text=True,
                 timeout=5,
                 check=False,
+                env=_ps_env(),
             ).stdout
         except (OSError, subprocess.SubprocessError):
             return None

@@ -264,6 +264,34 @@ async def test_reaper_kills_stale_tree_and_removes_lease(tmp_path: Path) -> None
 
 
 @posix_only
+def test_list_processes_reads_full_command_despite_columns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A narrow COLUMNS used to make ps cut the command column, so a harness
+    # with a long argv[0] path lost its distinctive basename and the reaper
+    # mistook it for a reused PID.
+    monkeypatch.setenv("COLUMNS", "80")
+    nested = tmp_path.joinpath(*(f"deeply-nested-directory-level-{i:02d}" for i in range(8)))
+    nested.mkdir(parents=True)
+    link = nested / "acp-harness-long-path-python"
+    link.symlink_to(os.path.realpath(sys.executable))
+    marker_arg = str(nested / "distinctive-harness-argument")
+    argv = [str(link), "-c", "import time; time.sleep(30)", marker_arg]
+    child = subprocess.Popen(argv)
+    try:
+        rows = proc_mod.list_processes()
+        assert rows is not None
+        command = next(r.command for r in rows if r.pid == child.pid)
+        assert len(command) > 80
+        assert command.startswith(str(link))
+        assert command.endswith(marker_arg)
+        assert proc_mod.command_matches_lease(command, [str(link), marker_arg])
+    finally:
+        child.kill()
+        child.wait()
+
+
+@posix_only
 async def test_reaper_never_kills_a_pid_running_something_else(tmp_path: Path) -> None:
     other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
