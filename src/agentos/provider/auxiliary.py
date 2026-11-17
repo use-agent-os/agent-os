@@ -33,7 +33,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import structlog
@@ -61,6 +61,8 @@ class AuxResult:
     model: str
     input_tokens: int = 0
     output_tokens: int = 0
+    #: Which resolution rule picked the model (see :meth:`AuxiliaryClient.target`).
+    source: str = ""
 
 
 class AuxiliaryError(RuntimeError):
@@ -77,8 +79,10 @@ class AuxiliaryError(RuntimeError):
         self.kind = kind
 
 
-@dataclass
-class _Resolution:
+@dataclass(frozen=True)
+class AuxTarget:
+    """Where an auxiliary call goes, and the resolution rule that chose it."""
+
     provider: str
     model: str
     source: str
@@ -138,7 +142,8 @@ class AuxiliaryClient:
         preferred_provider: str = "",
         preferred_model: str = "",
         default_model: str = "",
-    ) -> _Resolution:
+        inherit: ProviderConfig | None = None,
+    ) -> AuxTarget:
         """Pick the provider and model for *task*.
 
         Order, highest first:
@@ -148,27 +153,49 @@ class AuxiliaryClient:
         3. the caller's hint — a capability-aware choice such as the router's
            image-capable tier, which has to outrank a generic default because a
            text model cannot do the job
-        4. ``[auxiliary]``
-        5. ``AGENTOS_LLM_PROVIDER`` / ``AGENTOS_LLM_MODEL``
-        6. the configured ``[llm]`` section
-        7. the caller's ``default_model``, then :data:`DEFAULT_AUXILIARY_MODEL`
+        4. the caller's ``inherit`` target — a complete provider config the
+           caller already holds (memory recall passes the session's chat
+           model). Taken as a whole, and only when none of 1-3 names a
+           provider or a model, so it is never mixed with a model from above
+        5. ``[auxiliary]``
+        6. ``AGENTOS_LLM_PROVIDER`` / ``AGENTOS_LLM_MODEL``
+        7. the configured ``[llm]`` section
+        8. the caller's ``default_model``, then :data:`DEFAULT_AUXILIARY_MODEL`
         """
 
         task_cfg = self._task_config(task)
         env_provider, env_model = _env_scope(task)
+        task_provider = str(_config_value(task_cfg, "provider", "") or "").strip()
+        task_model = str(_config_value(task_cfg, "model", "") or "").strip()
+        hint_provider = str(preferred_provider or "").strip()
+        hint_model = str(preferred_model or "").strip()
+
+        if (
+            inherit is not None
+            and str(inherit.model or "").strip()
+            and str(inherit.provider or "").strip()
+            and not any(
+                (env_provider, env_model, task_provider, task_model, hint_provider, hint_model)
+            )
+        ):
+            return AuxTarget(
+                provider=str(inherit.provider).strip().lower(),
+                model=str(inherit.model).strip(),
+                source="inherit",
+            )
 
         provider_candidates = (
             (env_provider, "env_scope"),
-            (str(_config_value(task_cfg, "provider", "") or "").strip(), "auxiliary_task"),
-            (str(preferred_provider or "").strip(), "caller_hint"),
+            (task_provider, "auxiliary_task"),
+            (hint_provider, "caller_hint"),
             (str(_config_value(self.config, "provider", "") or "").strip(), "auxiliary"),
             (str(os.environ.get("AGENTOS_LLM_PROVIDER", "") or "").strip(), "env_llm"),
             (str(_config_value(self.llm_config, "provider", "") or "").strip(), "llm_config"),
         )
         model_candidates = (
             (env_model, "env_scope"),
-            (str(_config_value(task_cfg, "model", "") or "").strip(), "auxiliary_task"),
-            (str(preferred_model or "").strip(), "caller_hint"),
+            (task_model, "auxiliary_task"),
+            (hint_model, "caller_hint"),
             (str(_config_value(self.config, "model", "") or "").strip(), "auxiliary"),
             (str(os.environ.get("AGENTOS_LLM_MODEL", "") or "").strip(), "env_llm"),
             (str(_config_value(self.llm_config, "model", "") or "").strip(), "llm_config"),
@@ -178,7 +205,31 @@ class AuxiliaryClient:
         provider = next((value for value, _ in provider_candidates if value), "openrouter")
         model = next((value for value, _ in model_candidates if value), DEFAULT_AUXILIARY_MODEL)
         source = next((name for value, name in model_candidates if value), "builtin_default")
-        return _Resolution(provider=provider.lower(), model=model, source=source)
+        return AuxTarget(provider=provider.lower(), model=model, source=source)
+
+    def target(
+        self,
+        task: str,
+        *,
+        preferred_provider: str = "",
+        preferred_model: str = "",
+        default_model: str = "",
+        inherit: ProviderConfig | None = None,
+    ) -> AuxTarget:
+        """Where :meth:`complete` would send *task*, without calling it.
+
+        ``source`` names the rule: ``env_scope``, ``auxiliary_task``,
+        ``caller_hint``, ``inherit``, ``auxiliary``, ``env_llm``,
+        ``llm_config``, ``caller_default`` or ``builtin_default``.
+        """
+
+        return self._resolve_target(
+            task,
+            preferred_provider=preferred_provider,
+            preferred_model=preferred_model,
+            default_model=default_model,
+            inherit=inherit,
+        )
 
     def _credentials(self, provider: str) -> tuple[str, str, str, dict[str, str]]:
         """Find the key, base URL, proxy and routing for *provider*.
@@ -240,16 +291,32 @@ class AuxiliaryClient:
         preferred_provider: str = "",
         preferred_model: str = "",
         default_model: str = "",
+        inherit: ProviderConfig | None = None,
     ) -> ProviderConfig:
-        """Resolve *task* to a fully populated provider config."""
+        """Resolve *task* to a fully populated provider config.
+
+        An inherited target keeps its own credentials and endpoint (the
+        environment fills only what it leaves empty).
+        """
 
         target = self._resolve_target(
             task,
             preferred_provider=preferred_provider,
             preferred_model=preferred_model,
             default_model=default_model,
+            inherit=inherit,
         )
         api_key, base_url, proxy, routing = self._credentials(target.provider)
+        if target.source == "inherit" and inherit is not None:
+            return ProviderConfig(
+                provider=target.provider,
+                model=target.model,
+                api_key=inherit.api_key or api_key,
+                base_url=inherit.base_url or base_url,
+                org_id=inherit.org_id,
+                proxy=inherit.proxy or proxy,
+                provider_routing=dict(inherit.provider_routing or routing),
+            )
         return ProviderConfig(
             provider=target.provider,
             model=target.model,
@@ -333,19 +400,31 @@ class AuxiliaryClient:
         chat_config: ChatConfig | None = None,
         timeout: float | None = None,
         session_key: str | None = None,
+        inherit: ProviderConfig | None = None,
     ) -> AuxResult:
         """Run one side-task completion and return the assembled text.
+
+        ``inherit`` is a complete target the caller already holds (see
+        :meth:`_resolve_target`, rule 4).
 
         Raises:
             AuxiliaryError: the provider could not be built, the stream failed,
                 or the call exceeded its timeout.
         """
 
+        target = self.target(
+            task,
+            preferred_provider=preferred_provider,
+            preferred_model=preferred_model,
+            default_model=default_model,
+            inherit=inherit,
+        )
         cfg = self.provider_config(
             task,
             preferred_provider=preferred_provider,
             preferred_model=preferred_model,
             default_model=default_model,
+            inherit=inherit,
         )
         self._require_credentials(task, cfg)
         try:
@@ -383,8 +462,9 @@ class AuxiliaryClient:
             provider=cfg.provider,
             model=cfg.model,
             output_tokens=result.output_tokens,
+            source=target.source,
         )
-        return result
+        return replace(result, source=target.source)
 
     async def _drain(
         self,

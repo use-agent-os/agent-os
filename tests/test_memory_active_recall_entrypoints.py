@@ -37,11 +37,12 @@ from agentos.gateway.config import (
 )
 from agentos.gateway.rpc import RpcContext, get_dispatcher
 from agentos.gateway.task_runtime import TERMINAL_STATUSES, TaskRuntime
+from agentos.memory.active_recall import get_active_recall_state
 from agentos.memory.retrieval import MemoryRetriever
 from agentos.memory.store import LongTermMemoryStore
 from agentos.memory.sync_manager import MemorySyncManager
 from agentos.provider import DoneEvent as ProviderDone
-from agentos.provider import Message
+from agentos.provider import Message, auxiliary
 from agentos.provider import TextDeltaEvent as ProviderText
 from agentos.scheduler.delivery import DeliveryChain
 from agentos.scheduler.handlers import make_agent_run_handler
@@ -104,10 +105,10 @@ class _Selector:
         provider = self.provider
 
         class _Clone:
-            current_config = SimpleNamespace(model="test/model")
+            current_config = SimpleNamespace(provider="test", model="test/model")
 
             def override_model(self, model: str) -> None:
-                self.current_config = SimpleNamespace(model=model)
+                self.current_config = SimpleNamespace(provider="test", model=model)
 
             def resolve(self) -> _Provider:
                 return provider
@@ -254,6 +255,35 @@ async def test_webchat_sessions_send_recalls_memory(gateway: _Gateway) -> None:
 
     assert gateway.decision_for(KEY) == (run_kinds.SESSION_TURN, None)
     assert gateway.provider.saw_recalled_memory()
+
+
+async def test_deep_recall_uses_the_sessions_pinned_model(
+    gateway: _Gateway, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With ``[memory.recall] model`` empty, the deep lane calls the session's model."""
+    for name in ("AGENTOS_MEMORY_RECALL_PROVIDER", "AGENTOS_MEMORY_RECALL_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    recall_provider = _Provider()
+    built: list[dict[str, Any]] = []
+
+    def _factory(**kwargs: Any) -> _Provider:
+        built.append(kwargs)
+        return recall_provider
+
+    monkeypatch.setattr(auxiliary, "_client", auxiliary.AuxiliaryClient(provider_factory=_factory))
+    gateway.config.memory.recall.mode = "always"
+    patched = await get_dispatcher().dispatch(
+        "p1", "sessions.patch", {"key": KEY, "model": "pinned/session-model"}, gateway.rpc_context()
+    )
+    assert patched.ok, patched.error
+
+    await gateway.sessions_send({})
+
+    assert [kwargs["model"] for kwargs in built] == ["pinned/session-model"]
+    assert recall_provider.requests, "the deep lane made no model call"
+    record = get_active_recall_state().last(KEY)
+    assert record is not None
+    assert (record.deep_model, record.deep_model_rule) == ("pinned/session-model", "session_model")
 
 
 async def test_cli_chat_sessions_send_recalls_memory(gateway: _Gateway) -> None:

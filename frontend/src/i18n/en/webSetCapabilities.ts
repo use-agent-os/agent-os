@@ -273,5 +273,6 @@ export const webSetCapabilities = defineNamespace('webSetCapabilities', {
   memRecallMaxCharsHelp: 'The most recalled memory added to one turn.',
   memRecallTimeout: 'Deep recall timeout (seconds)',
   memRecallModel: 'Deep recall model',
-  memRecallModelHelp: 'Leave empty to use the auxiliary model.',
+  memRecallModelHelp:
+    "Leave empty to use the session's chat model (with thinking off). If you chat with a large or slow model, set a fast one here.",
 } as const)

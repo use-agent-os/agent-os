@@ -179,12 +179,37 @@ channels. Heartbeat, cron and other background runs, sub-agent and ACP
 children, inter-session messages and child-completion deliveries, group and
 channel conversations, and stateless prompts are skipped.
 
-**Model.** Deep recall is the auxiliary task `memory_recall`. It uses
-`[memory.recall] provider`/`model` when set, otherwise the usual auxiliary
-resolution (`AGENTOS_MEMORY_RECALL_MODEL`, `[auxiliary.tasks.memory_recall]`,
-`[auxiliary]`, then `[llm]`). Its tokens are recorded as `aux:memory_recall`.
-The model gets no tools: AgentOS runs the memory search and line reads
-itself and hands it only those excerpts.
+**Model.** Deep recall is the auxiliary task `memory_recall`. By default it
+uses the model the session is chatting with. The model is chosen in this
+order, highest first:
+
+1. `AGENTOS_MEMORY_RECALL_PROVIDER` / `AGENTOS_MEMORY_RECALL_MODEL`, then
+   `[auxiliary.tasks.memory_recall]`: the operator's override.
+2. `[memory.recall] provider` / `model`, when set.
+3. The session's chat model for this turn. That is the model pinned on the
+   session (`sessions.patch` / the session's model setting), else the agent's
+   model, else a router hold already in place (`/use <model>` or
+   `router_control`, while `[agentos_router]` is on), else the primary
+   `[llm]` model. The call goes through the same provider, API key and base
+   URL as the turn.
+4. The auxiliary chain (`[auxiliary]`, then `[llm]`, then the built-in
+   default). This applies only when there is no chat provider at all.
+
+The router's per-turn tier choice is made after recall runs, so recall does
+not wait for it. Without a pinned model, an agent model or a hold, recall uses
+the primary `[llm]` model even when the router later sends the turn to another
+tier.
+
+Thinking is always off for the recall call, whatever the session's thinking
+level. Providers whose models reason by default are sent their explicit
+"no reasoning" setting (or the lowest effort the model accepts), so a
+reasoning model does not run past `deep_timeout_seconds`. Recall still pays
+the chat model's latency. If you chat with a large or slow model, set
+`[memory.recall] model` to a fast one (or raise `deep_timeout_seconds`).
+
+Tokens are recorded as `aux:memory_recall`. The model gets no tools: AgentOS
+runs the memory search and line reads itself and hands it only those
+excerpts.
 
 ```toml
 [memory.recall]
@@ -196,7 +221,7 @@ max_injected_chars = 1800
 deep_timeout_seconds = 8.0
 deep_max_summary_chars = 400
 deep_max_results = 6
-provider = ""
+provider = ""                  # empty: inherit the session's chat model
 model = ""
 ```
 
@@ -212,8 +237,8 @@ agentos memory recall resume --session <session-key>
 ```
 
 `status` shows the last outcome per session — `injected`, `none`,
-`unavailable` or `error`, the lane decision, hit counts, elapsed time — and
-with `--show-block` the exact block that was injected. A pause applies to
+`unavailable` or `error`, the lane decision, hit counts, elapsed time, the
+deep-recall model with the rule that chose it — and with `--show-block` the exact block that was injected. A pause applies to
 one session until it is resumed or the gateway restarts. Each turn also logs
 a `memory.active_recall` event with the same fields. Over RPC these are
 `memory.recall.status` and `memory.recall.set`.

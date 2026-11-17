@@ -472,6 +472,7 @@ class TurnHarness:
             input_provenance=req.input_provenance,
             bootstrap_context_mode=req.bootstrap_context_mode,
             tool_context=req.tool_context,
+            model=req.model,
         )
         extra_prompt_context = await pre_io.extra_prompt_context(extra_prompt_context)
         await pre_io.hydrate_tools()

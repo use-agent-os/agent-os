@@ -24,6 +24,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   not have in context, and not to search again when the context already
   answers.
 
+### Changed
+- Deep memory recall uses the session's chat model by default. With
+  `[memory.recall] provider`/`model` empty, it calls the model the session is
+  chatting with this turn: the pinned session model, else the agent's model,
+  else a router hold, else the primary `[llm]` model. It goes through the
+  turn's own provider credentials, so `[auxiliary]` no longer applies.
+  `AGENTOS_MEMORY_RECALL_MODEL` / `[auxiliary.tasks.memory_recall]` and
+  `[memory.recall] model` still take precedence. The recall call always runs
+  with thinking off. `agentos memory recall status` and
+  `memory.recall.status` show which model ran and the rule that chose it.
+
 ### Fixed
 - MCP OAuth refresh reaches the authorization server's token endpoint. The
   2026.11.17 fix refreshed tokens on time but sent the refresh to `/token` on

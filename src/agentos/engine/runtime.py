@@ -24,7 +24,7 @@ from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, SupportsInt, TypeGuard, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Final, SupportsInt, TypeGuard, cast
 
 import structlog
 
@@ -3062,13 +3062,15 @@ class TurnRunner:
         )
 
     async def _active_recall_block_for_turn(
-        self, *, agent_id: str, session_key: str, message: str
+        self, *, agent_id: str, session_key: str, message: str, model: str | None = None
     ) -> str:
         """Proactive recall for one eligible turn: the fenced block or ``""``.
 
         The trigger lane shares the provider recall's deadline and
         :class:`RecallBudget` (keyed per session *and* message); the deep lane
-        is bounded by ``[memory.recall] deep_timeout_seconds``.
+        is bounded by ``[memory.recall] deep_timeout_seconds``. ``model`` is
+        the turn's explicit model (``TurnRequest.model``), which the deep lane
+        inherits by default.
         """
         from agentos.memory.active_recall import message_budget_key
 
@@ -3081,11 +3083,12 @@ class TurnRunner:
         except Exception:  # noqa: BLE001 -- excerpt expansion is best-effort
             workspace_dir = None
         mode = str(getattr(cfg, "mode", "escalate") or "escalate")
-        complete = (
-            None
-            if mode == "off"
-            else self._deep_recall_completer(session_key=session_key, config=cfg)
-        )
+        complete = None
+        deep_target = None
+        if mode != "off":
+            complete, deep_target = self._deep_recall_completer(
+                agent_id=agent_id, session_key=session_key, config=cfg, turn_model=model
+            )
         return str(
             await self._active_recall().recall(
                 session_key=session_key,
@@ -3097,33 +3100,175 @@ class TurnRunner:
                 workspace_dir=workspace_dir,
                 budget=self._recall_budget().recall,
                 budget_key=message_budget_key(agent_id, session_key, message),
+                deep_target=deep_target,
             )
         )
 
-    def _deep_recall_completer(self, *, session_key: str, config: Any) -> Any:
-        """``complete(system, user)`` for the deep lane, via the auxiliary client.
+    # Auxiliary resolution source -> ``DeepRecallTarget.rule``.
+    _DEEP_RECALL_RULES: ClassVar[dict[str, str]] = {
+        "env_scope": "env",
+        "auxiliary_task": "auxiliary_task",
+        "caller_hint": "memory_recall",
+        "auxiliary": "auxiliary",
+        "env_llm": "env_llm",
+        "llm_config": "llm_config",
+        "caller_default": "default",
+        "builtin_default": "default",
+    }
 
-        Task ``memory_recall``: ``AGENTOS_MEMORY_RECALL_MODEL`` and
-        ``[auxiliary.tasks.memory_recall]`` override, then ``[memory.recall]
-        provider/model``, then the usual auxiliary resolution.
+    def _deep_recall_completer(
+        self, *, agent_id: str, session_key: str, config: Any, turn_model: str | None = None
+    ) -> tuple[Any, Any]:
+        """``(complete(system, user), DeepRecallTarget)`` for the deep lane.
+
+        Auxiliary task ``memory_recall``, resolved highest first:
+
+        1. ``AGENTOS_MEMORY_RECALL_PROVIDER/_MODEL`` and
+           ``[auxiliary.tasks.memory_recall]``;
+        2. ``[memory.recall] provider/model``;
+        3. the session's chat model for this turn, with its credentials
+           (:meth:`_session_chat_target`);
+        4. the auxiliary chain (``[auxiliary]``, ``[llm]``, default) -- only
+           reached without a provider selector.
+
+        Thinking is always off for the call (and sent as off to providers
+        whose models reason by default), so a reasoning chat model cannot run
+        the recall past ``deep_timeout_seconds``.
         """
+        from agentos.memory.active_recall import DeepRecallTarget
+        from agentos.provider.auxiliary import get_auxiliary_client
+
+        preferred_provider = str(getattr(config, "provider", "") or "")
+        preferred_model = str(getattr(config, "model", "") or "")
+        inherit, inherit_rule = (None, "")
+        if not preferred_provider.strip() and not preferred_model.strip():
+            inherit, inherit_rule = self._session_chat_target(
+                session_key=session_key, agent_id=agent_id, turn_model=turn_model
+            )
+        resolved = get_auxiliary_client().target(
+            "memory_recall",
+            preferred_provider=preferred_provider,
+            preferred_model=preferred_model,
+            inherit=inherit,
+        )
+        rule = (
+            inherit_rule
+            if resolved.source == "inherit"
+            else self._DEEP_RECALL_RULES.get(resolved.source, resolved.source)
+        )
+        target = DeepRecallTarget(provider=resolved.provider, model=resolved.model, rule=rule)
 
         async def _complete(system: str, user: str) -> str:
-            from agentos.provider.auxiliary import get_auxiliary_client
             from agentos.provider.types import ChatConfig, Message
 
             result = await get_auxiliary_client().complete(
                 task="memory_recall",
                 messages=[Message(role="user", content=user)],
-                preferred_provider=str(getattr(config, "provider", "") or ""),
-                preferred_model=str(getattr(config, "model", "") or ""),
-                chat_config=ChatConfig(max_tokens=512, temperature=0.0, system=system),
+                preferred_provider=preferred_provider,
+                preferred_model=preferred_model,
+                inherit=inherit,
+                chat_config=ChatConfig(
+                    max_tokens=512,
+                    temperature=0.0,
+                    system=system,
+                    thinking=False,
+                    thinking_budget_tokens=0,
+                    thinking_level=None,
+                    # With capabilities, adapters send an explicit "no
+                    # reasoning" to models that otherwise reason by default.
+                    model_capabilities=self._deep_recall_capabilities(target),
+                ),
                 timeout=float(getattr(config, "deep_timeout_seconds", 8.0) or 8.0),
                 session_key=session_key,
             )
             return str(result.text or "")
 
-        return _complete
+        return _complete, target
+
+    def _deep_recall_capabilities(self, target: Any) -> Any | None:
+        catalog = self._model_catalog
+        if catalog is None:
+            return None
+        llm_cfg = getattr(self._config, "llm", None) if self._config else None
+        same_provider = str(getattr(llm_cfg, "provider", "") or "").lower() == target.provider
+        try:
+            return catalog.get_capabilities(
+                target.model,
+                provider_name=target.provider,
+                base_url=getattr(llm_cfg, "base_url", "") if same_provider else "",
+            )
+        except Exception:  # noqa: BLE001 -- capabilities only sharpen the request
+            return None
+
+    def _session_chat_target(
+        self, *, session_key: str, agent_id: str, turn_model: str | None
+    ) -> tuple[Any | None, str]:
+        """The model this turn will chat with, as a credentialed config, and why.
+
+        The turn's own precedence (``PromptAssemblerStage`` step 6): its
+        explicit model -- the session's pinned model, else the agent's model,
+        both resolved by the caller with ``resolve_agent_model`` -- beats a
+        router hold, which beats the primary ``[llm]`` model. The model is
+        applied with the turn's ``override_model`` on a clone of the turn's
+        selector, so provider, key and base URL are exactly the turn's.
+
+        The router's per-turn classification runs later, inside the prompt
+        assembler; recall runs before it and does not wait. Without an
+        explicit model or a hold, recall uses the primary ``[llm]`` model.
+        Returns ``(None, "")`` without a selector.
+        """
+        selector = self._provider_selector
+        if selector is None:
+            return None, ""
+        explicit = str(turn_model or "").strip()
+        rule = "llm"
+        model = ""
+        try:
+            if explicit:
+                from agentos.agents.scope import resolve_agent_model
+
+                model = explicit
+                agent_model = resolve_agent_model(agent_id, self._config) or ""
+                rule = "agent_model" if explicit == agent_model else "session_model"
+            else:
+                model = self._router_hold_model(session_key)
+                if model:
+                    rule = "router_hold"
+            cloned = selector.clone()
+            if model:
+                cloned.override_model(model)
+            current = cloned.current_config
+        except Exception:  # noqa: BLE001 -- fall through to the auxiliary chain
+            log.debug("memory.active_recall_target_failed", session_key=session_key, exc_info=True)
+            return None, ""
+        from agentos.provider.selector import ProviderConfig
+
+        if isinstance(current, ProviderConfig):
+            return current, rule
+        return (
+            ProviderConfig(
+                provider=str(getattr(current, "provider", "") or ""),
+                model=str(getattr(current, "model", "") or model),
+                api_key=str(getattr(current, "api_key", "") or ""),
+                base_url=str(getattr(current, "base_url", "") or ""),
+            ),
+            rule,
+        )
+
+    def _router_hold_model(self, session_key: str) -> str:
+        """The model of a router hold already set for ``session_key``, or ``""``.
+
+        A pure peek (no turn consumed); only while ``agentos_router`` is on.
+        """
+        router_cfg = getattr(self._config, "agentos_router", None) if self._config else None
+        if not getattr(router_cfg, "enabled", False):
+            return ""
+        from agentos.session.keys import canonicalize_session_key
+
+        hold = self._router_control_hold_store.get_valid(
+            canonicalize_session_key(session_key) or session_key
+        )
+        return str(getattr(hold, "model", "") or "") if hold is not None else ""
 
     def _concurrent_turn_setup(self) -> bool:
         task_runtime = getattr(self._config, "task_runtime", None)
@@ -3141,6 +3286,7 @@ class TurnRunner:
         input_provenance: dict[str, Any] | None = None,
         bootstrap_context_mode: str | None = None,
         tool_context: ToolContext | None = None,
+        model: str | None = None,
     ) -> PreProviderIO:
         """Start the independent pre-provider reads (see ``pre_provider_io``)."""
         from agentos.tools.deferred import hydrate_loaded_tools
@@ -3192,6 +3338,7 @@ class TurnRunner:
                         agent_id=agent_id,
                         session_key=session_key,
                         message=runtime_message,
+                        model=model,
                     )
                 )
                 if recall_skip is None

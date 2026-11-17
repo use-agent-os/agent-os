@@ -1127,14 +1127,20 @@ max_injected_chars = 1800      # cap on the whole fenced block
 deep_timeout_seconds = 8.0
 deep_max_summary_chars = 400
 deep_max_results = 6
-provider = ""                  # deep-lane model; empty uses [auxiliary] / [llm]
+provider = ""                  # deep-lane model; empty inherits the session's chat model
 model = ""
 ```
 
 Environment overrides follow the nested convention, e.g.
-`AGENTOS_MEMORY_RECALL__MODE=off`. The deep-lane model call is the auxiliary
-task `memory_recall`, so `AGENTOS_MEMORY_RECALL_MODEL` and
-`[auxiliary.tasks.memory_recall]` also apply. See
+`AGENTOS_MEMORY_RECALL__MODE=off`. With `provider` and `model` empty, the deep
+lane uses the model the session is chatting with this turn: the session's
+pinned model, else the agent's model, else a router hold, else the primary
+`[llm]` model. It uses the turn's own provider credentials and always runs
+with thinking off. If you chat with a large or slow model, set `model` to a
+fast one. The call is the auxiliary task `memory_recall`, so
+`AGENTOS_MEMORY_RECALL_PROVIDER` / `AGENTOS_MEMORY_RECALL_MODEL` and
+`[auxiliary.tasks.memory_recall]` override both. `[auxiliary]` applies only
+when no chat provider is configured. See
 [`features/memory.md`](features/memory.md#proactive-recall).
 
 ### Turn setup concurrency

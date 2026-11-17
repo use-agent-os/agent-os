@@ -543,6 +543,11 @@ class RecallRecord:
     elapsed_ms: int = 0
     injected_chars: int = 0
     block: str = ""
+    # The deep-lane model, when the deep lane ran: provider, model, and the
+    # rule that chose it (see :class:`DeepRecallTarget`).
+    deep_provider: str = ""
+    deep_model: str = ""
+    deep_model_rule: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -610,6 +615,22 @@ def get_active_recall_state() -> ActiveRecallState:
 
 CompleteFn = Callable[[str, str], Awaitable[str]]
 BudgetFn = Callable[..., Awaitable[str]]
+
+
+@dataclass(frozen=True)
+class DeepRecallTarget:
+    """The model the deep lane calls, and the rule that chose it.
+
+    ``rule`` is one of ``env`` / ``auxiliary_task`` (the operator's
+    ``memory_recall`` task override), ``memory_recall`` (``[memory.recall]
+    provider/model``), ``session_model``, ``agent_model``, ``router_hold``,
+    ``llm`` (the session's chat model, in that order), or the auxiliary
+    fallbacks ``auxiliary`` / ``env_llm`` / ``llm_config`` / ``default``.
+    """
+
+    provider: str
+    model: str
+    rule: str
 
 
 def _setting(config: Any, name: str, default: Any) -> Any:
@@ -696,13 +717,15 @@ class ActiveRecall:
         workspace_dir: Path | None = None,
         budget: BudgetFn | None = None,
         budget_key: Any = None,
+        deep_target: DeepRecallTarget | None = None,
     ) -> str:
         """Run the lanes for one eligible turn; never raises.
 
         ``budget`` is :meth:`RecallBudget.recall` (or a stand-in): the trigger
         lane runs through it so a slow index search cannot hold the turn past
         ``trigger_timeout``. ``complete(system, user)`` makes the deep-lane
-        model call; ``None`` disables the deep lane.
+        model call; ``None`` disables the deep lane. ``deep_target`` describes
+        the model ``complete`` calls, for the turn's :class:`RecallRecord`.
         """
         started = time.monotonic()
         record = RecallRecord(session_key=session_key, status="none")
@@ -717,6 +740,7 @@ class ActiveRecall:
                 workspace_dir=workspace_dir,
                 budget=budget,
                 budget_key=budget_key,
+                deep_target=deep_target,
             )
         except Exception as exc:  # noqa: BLE001 -- recall must never fail the turn
             record.status = "error"
@@ -738,6 +762,8 @@ class ActiveRecall:
             deep_hits=record.deep_hits,
             elapsed_ms=record.elapsed_ms,
             injected_chars=record.injected_chars,
+            deep_model=record.deep_model or None,
+            deep_model_rule=record.deep_model_rule or None,
         )
         return block
 
@@ -753,6 +779,7 @@ class ActiveRecall:
         workspace_dir: Path | None,
         budget: BudgetFn | None,
         budget_key: Any,
+        deep_target: DeepRecallTarget | None = None,
     ) -> str:
         mode = str(_setting(config, "mode", "escalate"))
         max_chars = int(_setting(config, "max_injected_chars", 1800))
@@ -789,6 +816,10 @@ class ActiveRecall:
             parts.append(trigger_text)
 
         if decision == "recall" and complete is not None:
+            if deep_target is not None:
+                record.deep_provider = deep_target.provider
+                record.deep_model = deep_target.model
+                record.deep_model_rule = deep_target.rule
             deep_timeout = float(_setting(config, "deep_timeout_seconds", 8.0))
             try:
                 summary, record.deep_hits = await asyncio.wait_for(

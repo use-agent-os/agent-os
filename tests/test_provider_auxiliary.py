@@ -12,6 +12,7 @@ from agentos.provider.auxiliary import (
     get_auxiliary_client,
 )
 from agentos.provider.failures import ProviderFailureKind
+from agentos.provider.selector import ProviderConfig
 from agentos.provider.types import DoneEvent, ErrorEvent, Message
 
 _ENV_KEYS = (
@@ -141,6 +142,64 @@ def test_generic_llm_env_sits_below_the_auxiliary_section(monkeypatch: pytest.Mo
 
     assert client.provider_config("llm").model == "cheap-1"
     assert AuxiliaryClient().provider_config("llm").model == "env-generic-1"
+
+
+_INHERIT = ProviderConfig(
+    provider="Anthropic",
+    model="session-1",
+    api_key="sk-session",
+    base_url="https://session.example/v1",
+    org_id="org-1",
+)
+
+
+def test_inherited_target_beats_the_auxiliary_section_with_its_own_credentials() -> None:
+    client = AuxiliaryClient(
+        config=_config(provider="openrouter", model="cheap-1"),
+        llm_config=SimpleNamespace(provider="openrouter", model="gpt-x", api_key="sk-or"),
+    )
+
+    cfg = client.provider_config("vision", inherit=_INHERIT)
+
+    assert (cfg.provider, cfg.model) == ("anthropic", "session-1")
+    assert (cfg.api_key, cfg.base_url, cfg.org_id) == (
+        "sk-session",
+        "https://session.example/v1",
+        "org-1",
+    )
+    assert client.target("vision", inherit=_INHERIT).source == "inherit"
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"preferred_model": "sees-1"}, {"preferred_provider": "openrouter"}],
+)
+def test_any_caller_hint_suppresses_the_inherited_target(kwargs: dict[str, str]) -> None:
+    target = AuxiliaryClient().target("vision", inherit=_INHERIT, **kwargs)
+
+    assert target.source != "inherit"
+    assert target.model != "session-1"
+
+
+def test_task_scoped_provider_alone_suppresses_the_inherited_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A provider without a model must not be paired with the inherited model.
+    monkeypatch.setenv("AGENTOS_VISION_PROVIDER", "openrouter")
+
+    target = AuxiliaryClient().target("vision", inherit=_INHERIT)
+
+    assert (target.provider, target.source) == ("openrouter", "builtin_default")
+
+
+async def test_complete_reports_the_resolution_source() -> None:
+    client = AuxiliaryClient(provider_factory=_stream(DoneEvent(stop_reason="end_turn")))
+
+    result = await client.complete(
+        task="vision", messages=[Message(role="user", content="hi")], inherit=_INHERIT
+    )
+
+    assert (result.model, result.source) == ("session-1", "inherit")
 
 
 # ---------------------------------------------------------------------------

@@ -463,6 +463,12 @@ def memory_recall_status_cmd(
             f"hits={record.get('triggerHits', 0)}+{record.get('deepHits', 0)} "
             f"{record.get('elapsedMs', 0)}ms {record.get('injectedChars', 0)} chars{reason}",
         )
+        if record.get("deepModel"):
+            _print_stored_text(
+                console,
+                f"    deep model: {record['deepModel']} via {record.get('deepProvider') or '-'} "
+                f"(rule: {record.get('deepModelRule') or '-'})",
+            )
         if show_block and record.get("block"):
             _print_stored_text(console, record["block"])
 
