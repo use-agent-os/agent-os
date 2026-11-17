@@ -58,6 +58,31 @@ def _reset_redaction_secret_registry():
 
 
 @pytest.fixture(autouse=True)
+def _restore_process_globals(monkeypatch: pytest.MonkeyPatch):
+    """Undo process-wide state that production entry points set and never reset.
+
+    Gateway boot calls ``structlog.configure`` (DEBUG filtering, spliced
+    processors) and registers the channel manager for the ``cron`` tool; the
+    ACP command configures structlog at WARNING. A test that runs one of those
+    leaks it into every later test in the same process, so ``capture_logs``
+    sees no INFO lines and cron validation sees a stranger's channels. Which
+    tests come later depends on how pytest-xdist schedules them.
+    """
+    import structlog
+
+    config = structlog.get_config()
+    config["processors"] = list(config["processors"])
+
+    control = sys.modules.get("agentos.tools.builtin.control")
+    if control is not None:
+        monkeypatch.setattr(control, "_channel_manager_ref", control._channel_manager_ref)
+
+    yield
+
+    structlog.configure(**config)
+
+
+@pytest.fixture(autouse=True)
 def _fresh_config_approval():
     """Each test starts with no operator config approval on file.
 
