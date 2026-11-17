@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- MCP OAuth refresh reaches the authorization server's token endpoint. The
+  2026.11.17 fix refreshed tokens on time but sent the refresh to `/token` on
+  the MCP server's own origin, because the SDK only learns the real endpoint
+  while signing in and the client serving tools never signs in. For a server
+  whose authorization server is on another host (Typefully:
+  `mcp.typefully.com` signs in at `api.typefully.com`) that request was a 404,
+  so every refresh failed and the server asked for sign-in again within the
+  hour. The discovered metadata is now saved with the tokens and used for
+  refreshes. A sign-in made on 2026.11.17 did not save it, so such a server
+  asks for one more sign-in after upgrading.
+
 ## [2026.11.17.post1] - 2026-11-17
 
 ### Added
