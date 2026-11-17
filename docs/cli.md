@@ -1623,6 +1623,11 @@ agentos memory recall resume --session <session-key>
 `memory recall status` shows the `[memory.recall]` settings, paused sessions,
 and the last proactive-recall outcome per session (or for one session with
 `--session`); `--show-block` prints the fenced block that was injected.
+When the deep lane ran, the outcome also names its model, the provider, and
+the rule that chose it (`env`, `auxiliary_task`, `memory_recall`,
+`session_model`, `agent_model`, `router_hold`, `llm`, or an auxiliary
+fallback). The same values are in `--json` as `deepProvider` / `deepModel` /
+`deepModelRule`.
 `pause` / `resume` switch proactive recall off and on for one session only;
 the switch lives in the gateway until it restarts and does not change
 `[memory.recall] enabled`.

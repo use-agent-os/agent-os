@@ -790,6 +790,10 @@ def _recall_record_wire(record: Any) -> dict[str, Any] | None:
         "elapsedMs": data["elapsed_ms"],
         "injectedChars": data["injected_chars"],
         "block": data["block"],
+        # The deep-lane model and the rule that picked it ("" when it did not run).
+        "deepProvider": data["deep_provider"],
+        "deepModel": data["deep_model"],
+        "deepModelRule": data["deep_model_rule"],
     }
 
 
