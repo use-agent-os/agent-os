@@ -322,6 +322,7 @@ module = [
     "botbuilder.*",
     "cachetools.*",
     "jieba",
+    "mem0.*",
     "numpy.*",
     "onnxruntime.*",
     "readability.*",

@@ -1,7 +1,8 @@
 """Tests for the mem0 memory provider (Task B5, Plan B).
 
-Strictly offline and deterministic: the real ``mem0`` package is NEVER
-imported. ``is_available`` is probed via a monkeypatched
+Strictly offline and deterministic: the real ``mem0`` package is imported by
+one test only, to read ``Memory``'s method signatures (skipped when the extra
+is absent); no client is ever built from it. ``is_available`` is probed via a monkeypatched
 ``importlib.util.find_spec`` and the client is injected through the
 ``client_factory`` seam, so these tests pin OUR config dict and call
 arguments — not mem0's parser.
@@ -21,7 +22,12 @@ from agentos.memory.providers.mem0_provider import Mem0Provider
 
 
 class _FakeMem0Client:
-    """Records ``add`` / ``search`` / ``delete`` calls; ``search`` is scripted."""
+    """Records ``add`` / ``search`` / ``delete`` calls; ``search`` is scripted.
+
+    ``search`` has mem0 2.x's shape: scope goes in ``filters``, the limit is
+    ``top_k``, and a top-level entity keyword is rejected with the same
+    ``ValueError`` mem0 2.x raises.
+    """
 
     def __init__(self, search_result: Any = None) -> None:
         self.add_calls: list[dict[str, Any]] = []
@@ -33,8 +39,14 @@ class _FakeMem0Client:
         self.add_calls.append(kwargs)
         return {"results": []}
 
-    def search(self, query: str, **kwargs: Any) -> Any:
-        self.search_calls.append({"query": query, **kwargs})
+    def search(self, query: str, *, top_k: int = 20, filters: Any = None, **kwargs: Any) -> Any:
+        rejected = {"user_id", "agent_id", "run_id"} & set(kwargs)
+        if rejected:
+            raise ValueError(
+                f"Top-level entity parameters {rejected} are not supported in search(). "
+                "Use filters={'user_id': '...'} instead."
+            )
+        self.search_calls.append({"query": query, "filters": filters, "top_k": top_k, **kwargs})
         return self._search_result
 
     def delete(self, memory_id: str) -> None:
@@ -42,12 +54,55 @@ class _FakeMem0Client:
 
 
 class _LegacySearchMem0Client(_FakeMem0Client):
-    """mem0 0.1.x shape: ``search`` takes ``user_id`` / ``limit``, not filters."""
+    """mem0 0.1.x / 1.x shape: ``search`` takes ``user_id`` / ``limit`` keywords."""
 
     def search(  # type: ignore[override]
-        self, query: str, user_id: str | None = None, limit: int = 100, filters: Any = None
+        self,
+        query: str,
+        *,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+        limit: int = 100,
+        filters: Any = None,
+        threshold: float | None = None,
     ) -> Any:
-        return super().search(query, user_id=user_id, limit=limit, filters=filters)
+        self.search_calls.append(
+            {"query": query, "user_id": user_id, "limit": limit, "filters": filters}
+        )
+        return self._search_result
+
+
+class _StoreMixin:
+    """Keeps added memories per ``user_id`` and searches only that scope."""
+
+    def __init__(self) -> None:
+        self.records: list[dict[str, Any]] = []
+
+    def add(self, *, messages: list[dict[str, str]], user_id: str, **_: Any) -> dict[str, Any]:
+        for message in messages:
+            self.records.append({"memory": message["content"], "user_id": user_id})
+        return {"results": []}
+
+    def _scoped(self, user_id: Any) -> dict[str, Any]:
+        if not user_id:
+            raise ValueError("One of the filters: user_id, agent_id or run_id is required!")
+        hits = [{"memory": r["memory"]} for r in self.records if r["user_id"] == user_id]
+        return {"results": hits}
+
+
+class _StoreMem0V2(_StoreMixin):
+    def search(self, query: str, *, top_k: int = 20, filters: Any = None, **kwargs: Any) -> Any:
+        if {"user_id", "agent_id", "run_id"} & set(kwargs):
+            raise ValueError("Top-level entity parameters are not supported in search().")
+        return self._scoped((filters or {}).get("user_id"))
+
+
+class _StoreMem0V1(_StoreMixin):
+    def search(
+        self, query: str, *, user_id: str | None = None, limit: int = 100, filters: Any = None
+    ) -> Any:
+        return self._scoped(user_id or (filters or {}).get("user_id"))
 
 
 def _curated_hit(memory_id: str, target: str, entry: str) -> dict[str, Any]:
@@ -98,9 +153,14 @@ def _make_provider(
 # -- is_available -----------------------------------------------------------
 
 
-def test_is_available_false_without_mem0_installed() -> None:
-    """Real state: mem0 is not installed in the test env, so probe is False."""
-    assert importlib.util.find_spec("mem0") is None
+def test_is_available_false_without_mem0_installed(monkeypatch: Any) -> None:
+    """mem0 absent (faked, so this holds with the extra installed too) -> False."""
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name, *a, **k: None if name == "mem0" else real_find_spec(name, *a, **k),
+    )
     provider = Mem0Provider(memory_config=_make_config(), agent_state_dir=Path("/tmp/x"))
     assert provider.is_available() is False
 
@@ -259,9 +319,174 @@ async def test_prefetch_formats_dict_result_shape(tmp_path: Path) -> None:
     await provider.initialize("s1", agent_state_dir=str(tmp_path), agent_identity="a")
     out = await provider.prefetch("who am i?")
     assert out == "- User is Alice.\n- Likes tea."
-    assert client.search_calls[0]["query"] == "who am i?"
-    assert client.search_calls[0]["user_id"] == "a"
-    assert client.search_calls[0]["limit"] == 5
+    assert client.search_calls == [{"query": "who am i?", "filters": {"user_id": "a"}, "top_k": 5}]
+
+
+@pytest.mark.asyncio
+async def test_prefetch_uses_keyword_scope_on_legacy_mem0(tmp_path: Path) -> None:
+    client = _LegacySearchMem0Client(search_result={"results": [{"memory": "User is Alice."}]})
+    provider = _make_provider(tmp_path, client=client)
+    await provider.initialize("s1", agent_state_dir=str(tmp_path), agent_identity="a")
+    assert await provider.prefetch("who am i?") == "- User is Alice."
+    assert client.search_calls == [
+        {"query": "who am i?", "user_id": "a", "limit": 5, "filters": None}
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store_cls", [_StoreMem0V2, _StoreMem0V1], ids=["mem0-2x", "mem0-1x"])
+async def test_prefetch_recalls_only_this_agents_memories(
+    tmp_path: Path, store_cls: type[_StoreMixin]
+) -> None:
+    """Both API shapes: each agent recalls its own turns and never another's."""
+    store = store_cls()
+    alice = Mem0Provider(
+        memory_config=_make_config(), agent_state_dir=tmp_path, client_factory=lambda _: store
+    )
+    bob = Mem0Provider(
+        memory_config=_make_config(), agent_state_dir=tmp_path, client_factory=lambda _: store
+    )
+    await alice.initialize("s1", agent_identity="alice")
+    await bob.initialize("s2", agent_identity="bob")
+
+    await alice.sync_turn("I live in Lisbon.", "Noted.")
+
+    assert await alice.prefetch("where do I live?") == "- I live in Lisbon.\n- Noted."
+    assert await bob.prefetch("where do I live?") == ""
+
+
+@pytest.mark.asyncio
+async def test_search_shape_is_detected_once(tmp_path: Path, monkeypatch: Any) -> None:
+    from agentos.memory.providers import mem0_provider
+
+    calls: list[Any] = []
+    real = mem0_provider._detect_search_shape
+
+    def _counting(client: Any) -> Any:
+        calls.append(client)
+        return real(client)
+
+    monkeypatch.setattr(mem0_provider, "_detect_search_shape", _counting)
+    client = _FakeMem0Client()
+    provider = _make_provider(tmp_path, client=client)
+    await provider.initialize("s1", agent_state_dir=str(tmp_path))
+    for _ in range(3):
+        await provider.prefetch("q")
+    await provider.on_memory_write("remove", "memory", "", {"old_entry": "x"})
+
+    assert calls == [client]
+    assert len(client.search_calls) == 4
+
+
+def test_detect_search_shape_per_mem0_api() -> None:
+    from agentos.memory.providers.mem0_provider import _detect_search_shape
+
+    modern = _detect_search_shape(_FakeMem0Client())
+    assert (modern.scope_in_filters, modern.limit_param) == (True, "top_k")
+    legacy = _detect_search_shape(_LegacySearchMem0Client())
+    assert (legacy.scope_in_filters, legacy.limit_param) == (False, "limit")
+
+    class _KwargsOnly:
+        def search(self, query: str, **kwargs: Any) -> Any:
+            return []
+
+    # An opaque ``**kwargs`` signature gets the current (filters) API.
+    opaque = _detect_search_shape(_KwargsOnly())
+    assert (opaque.scope_in_filters, opaque.limit_param) == (True, "top_k")
+
+
+@pytest.mark.asyncio
+async def test_prefetch_scope_rejection_is_a_warning_with_a_hint(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """A rejected scope must not pass for "no memories" without saying so."""
+    from unittest.mock import MagicMock
+
+    from agentos.memory.providers import mem0_provider
+
+    class _Rejecting(_FakeMem0Client):
+        def search(self, query: str, **kwargs: Any) -> Any:
+            raise ValueError("filters must contain at least one of: user_id, agent_id, run_id.")
+
+    mock_logger = MagicMock()
+    monkeypatch.setattr(mem0_provider, "logger", mock_logger)
+    provider = _make_provider(tmp_path, client=_Rejecting())
+    await provider.initialize("s1", agent_state_dir=str(tmp_path))
+
+    assert await provider.prefetch("q") == ""
+
+    mock_logger.warning.assert_called_once()
+    event = mock_logger.warning.call_args.args[0]
+    fields = mock_logger.warning.call_args.kwargs
+    assert event == "mem0_provider.prefetch_failed"
+    assert "filters" in fields["search_shape"]
+    assert "mem0_version" in fields
+    assert "recall stays empty" in fields["hint"]
+
+
+@pytest.mark.asyncio
+async def test_prefetch_call_binds_to_installed_mem0_signature(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Offline: the real installed ``mem0.Memory`` accepts the exact call we make.
+
+    No client is built (no LLM, embedder, or vector store). A recorder carrying
+    the real ``search`` / ``add`` signatures stands in for the client, and each
+    recorded call must bind to a NAMED parameter -- mem0 2.x's ``search`` takes
+    ``**kwargs``, which is exactly where a stray ``user_id`` or ``limit`` would
+    otherwise slip through unnoticed.
+    """
+    import inspect
+
+    # mem0 creates its config dir at import time; keep it out of $HOME.
+    monkeypatch.setenv("MEM0_DIR", str(tmp_path / "mem0-home"))
+    monkeypatch.setenv("MEM0_TELEMETRY", "false")
+    mem0 = pytest.importorskip("mem0")
+    real_search = inspect.signature(mem0.Memory.search)
+    real_add = inspect.signature(mem0.Memory.add)
+    calls: dict[str, list[dict[str, Any]]] = {"search": [], "add": []}
+
+    class _Recorder:
+        def search(self, *args: Any, **kwargs: Any) -> Any:
+            calls["search"].append(kwargs)
+            return {"results": [{"memory": "recalled"}]}
+
+        def add(self, *args: Any, **kwargs: Any) -> Any:
+            calls["add"].append(kwargs)
+            return {"results": []}
+
+    recorder = _Recorder()
+    # Present the real signatures (minus ``self``) for shape detection.
+    for name, sig in (("search", real_search), ("add", real_add)):
+        method = getattr(recorder, name)
+        params = list(sig.parameters.values())[1:]
+        method.__func__.__signature__ = sig.replace(parameters=params)
+
+    provider = Mem0Provider(
+        memory_config=_make_config(), agent_state_dir=tmp_path, client_factory=lambda _: recorder
+    )
+    await provider.initialize("s1", agent_identity="alice")
+    assert await provider.prefetch("who am i?") == "- recalled"
+    await provider.sync_turn("hi", "hey")
+    await provider.on_memory_write("add", "user", "Alice prefers dark mode.")
+
+    def _assert_binds(sig: inspect.Signature, kwargs: dict[str, Any], *args: Any) -> None:
+        bound = sig.bind(None, *args, **kwargs)
+        stray = {
+            name: value
+            for name, value in bound.arguments.items()
+            if sig.parameters[name].kind is inspect.Parameter.VAR_KEYWORD and value
+        }
+        assert stray == {}, f"mem0 would not honor {stray}"
+
+    assert calls["search"]
+    for kwargs in calls["search"]:
+        _assert_binds(real_search, kwargs, "who am i?")
+        scope = kwargs.get("filters") or {}
+        assert kwargs.get("user_id", scope.get("user_id")) == "alice"
+    assert len(calls["add"]) == 2
+    for kwargs in calls["add"]:
+        _assert_binds(real_add, kwargs)
 
 
 @pytest.mark.asyncio
@@ -382,7 +607,7 @@ async def test_on_memory_write_without_old_entry_never_deletes(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
-async def test_on_memory_write_remove_falls_back_to_legacy_search(tmp_path: Path) -> None:
+async def test_on_memory_write_remove_uses_legacy_search_shape(tmp_path: Path) -> None:
     client = _LegacySearchMem0Client(
         search_result=[_curated_hit("m-old", "memory", "uses npm")]
     )
@@ -392,8 +617,10 @@ async def test_on_memory_write_remove_falls_back_to_legacy_search(tmp_path: Path
     await provider.on_memory_write("remove", "memory", "", {"old_entry": "uses npm"})
 
     assert client.delete_calls == ["m-old"]
-    assert client.search_calls[-1]["user_id"] == "a"
-    assert client.search_calls[-1]["limit"] == 20
+    # Detected up front: one search in the keyword shape, no failed first try.
+    assert client.search_calls == [
+        {"query": "[curated memory] uses npm", "user_id": "a", "limit": 20, "filters": None}
+    ]
 
 
 @pytest.mark.asyncio
