@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Proactive memory recall (`[memory.recall]`, on by default). Before each
+  interactive turn a keyword search of the memory notes runs with the user's
+  message and strong matches are added to the turn as a fenced
+  `## Recalled Memory` block. When the message asks about the past ("what did
+  we decide last time", "hôm trước mình chốt gì") and nothing strong turned
+  up, a deep recall runs a wider search and one small-model call that
+  summarises what is relevant or answers NONE (`mode = "escalate"`; also
+  `always` / `off`). Both lanes have hard deadlines and never fail the turn.
+  Heartbeat, cron, sub-agent, inter-session, group and channel turns are
+  skipped. `agentos memory recall status|pause|resume --session <key>` (RPC
+  `memory.recall.status` / `memory.recall.set`) shows what was injected and
+  pauses it per session; the settings are under Settings › Memory.
+- The system prompt's Memory Recall section tells the agent to call
+  `memory_search` before answering anything that depends on past work it does
+  not have in context, and not to search again when the context already
+  answers.
+
 ### Fixed
 - MCP OAuth refresh reaches the authorization server's token endpoint. The
   2026.11.17 fix refreshed tokens on time but sent the refresh to `/token` on
@@ -17,6 +35,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   hour. The discovered metadata is now saved with the tokens and used for
   refreshes. A sign-in made on 2026.11.17 did not save it, so such a server
   asks for one more sign-in after upgrading.
+- Lowering `curated_memory_char_limit` / `curated_user_char_limit` below an
+  existing entry no longer makes the curated store treat the clean file as
+  drift and refuse every write (remove included) while writing a `.bak` each
+  time. The oversized entry can be removed or replaced; the limit still
+  applies to the result.
+- `memory.curated.batch` and the `memory` tool's `operations` return an error
+  instead of raising `TypeError` when an operation's `action`, `content` or
+  `old_text` is not a string.
+- Curated memory RPC/CLI operations and memory status read the curated char
+  limits from the live config, so a limit changed with `config.patch` applies
+  without a restart, as it already did for the `memory` tool.
 
 ## [2026.11.17.post1] - 2026-11-17
 

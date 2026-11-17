@@ -42,6 +42,8 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import structlog
 
+from agentos import run_kinds
+
 if TYPE_CHECKING:
     from agentos.engine.turn_runner.outcome import StageOutcome
     from agentos.engine.types import DoneEvent, ErrorEvent
@@ -54,7 +56,7 @@ _UNCONFIRMED_BACKGROUND_TOOL_NAMES = frozenset({"background_process", "process"}
 # Turn kinds whose reply belongs to the harness rather than the conversation.
 # Their output must not be persisted: it would show up as unexplained
 # assistant lines in the user's transcript and then be replayed as context.
-_INTERNAL_TURN_KINDS = frozenset({"memory_nudge"})
+_INTERNAL_TURN_KINDS = frozenset({run_kinds.MEMORY_NUDGE})
 
 
 def _is_internal_turn(run_kind: str | None) -> bool:

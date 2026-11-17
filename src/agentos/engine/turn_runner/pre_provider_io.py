@@ -8,6 +8,9 @@ Data dependencies between the pre-provider stages of ``TurnRunner._run_turn``
   transcript, so every transcript read below must start after it.
 * memory provider recall (``prefetch_all``): runtime_message, session_id ->
   the ``Memory Context`` block of extra_prompt_context. Network bound.
+* proactive recall (``agentos.memory.active_recall``): runtime_message ->
+  the ``Recalled Memory`` block. Index search, plus one bounded model call
+  when the message asks about the past.
 * project knowledge: session_key -> the ``Project Knowledge`` block of
   extra_prompt_context. One session + one project row read.
 * ``hydrate_loaded_tools``: session_key -> the process-wide deferred-tool set
@@ -52,6 +55,7 @@ log = structlog.get_logger(__name__)
 T = TypeVar("T")
 
 MEMORY_CONTEXT_KEY = "Memory Context"
+RECALLED_MEMORY_KEY = "Recalled Memory"
 PROJECT_KNOWLEDGE_KEY = "Project Knowledge"
 
 
@@ -198,9 +202,11 @@ class PreProviderIO:
         hydrate_tools: Callable[[], Coroutine[Any, Any, Any]],
         router_context: Callable[[], Coroutine[Any, Any, dict[str, Any]]] | None = None,
         memory_warm: Callable[[], Coroutine[Any, Any, None]] | None = None,
+        active_recall: Callable[[], Coroutine[Any, Any, str]] | None = None,
     ) -> None:
         self._concurrent = concurrent
         self._recall = recall
+        self._active_recall = active_recall
         self._project_knowledge = project_knowledge
         self._hydrate_tools = hydrate_tools
         self._router_context = router_context
@@ -208,6 +214,8 @@ class PreProviderIO:
         if concurrent:
             if recall is not None:
                 self._start("recall", recall)
+            if active_recall is not None:
+                self._start("active_recall", active_recall)
             self._start("project_knowledge", project_knowledge)
             self._start("hydrate_tools", hydrate_tools)
             if router_context is not None:
@@ -236,10 +244,13 @@ class PreProviderIO:
         self,
         extra_context: dict[str, str] | None,
     ) -> dict[str, str] | None:
-        """Apply the recall block, then the project-knowledge block."""
+        """Apply the provider recall, proactive recall, then project-knowledge blocks."""
         if self._recall is not None:
             block = await self._take("recall", self._recall)
             extra_context = merge_extra_context_block(extra_context, MEMORY_CONTEXT_KEY, block)
+        if self._active_recall is not None:
+            block = await self._take("active_recall", self._active_recall)
+            extra_context = merge_extra_context_block(extra_context, RECALLED_MEMORY_KEY, block)
         knowledge = await self._take("project_knowledge", self._project_knowledge)
         return merge_extra_context_block(extra_context, PROJECT_KNOWLEDGE_KEY, knowledge)
 

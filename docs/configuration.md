@@ -1110,10 +1110,37 @@ turn if that turn's recall is late too.
 recall_timeout_seconds = 1.5
 ```
 
+Proactive recall (`[memory.recall]`) searches the built-in memory index for
+the user's message before each interactive turn and adds strong matches as a
+fenced `## Recalled Memory` block. Its quick trigger search shares
+`recall_timeout_seconds`; the deep lane (a wider search plus one small-model
+summary, run for questions about the past) has its own deadline. Heartbeat,
+cron, sub-agent, inter-session, group and channel turns never run it.
+
+```toml
+[memory.recall]
+enabled = true                 # proactive recall before each interactive turn
+mode = "escalate"              # deep lane: escalate | always | off
+trigger_min_score = 0.65       # 0-1; how strong a trigger hit must be to inject
+trigger_max_hits = 3
+max_injected_chars = 1800      # cap on the whole fenced block
+deep_timeout_seconds = 8.0
+deep_max_summary_chars = 400
+deep_max_results = 6
+provider = ""                  # deep-lane model; empty uses [auxiliary] / [llm]
+model = ""
+```
+
+Environment overrides follow the nested convention, e.g.
+`AGENTOS_MEMORY_RECALL__MODE=off`. The deep-lane model call is the auxiliary
+task `memory_recall`, so `AGENTOS_MEMORY_RECALL_MODEL` and
+`[auxiliary.tasks.memory_recall]` also apply. See
+[`features/memory.md`](features/memory.md#proactive-recall).
+
 ### Turn setup concurrency
 
 Before a turn's first model request AgentOS reads several independent things:
-the memory-provider recall, the session's project knowledge, the deferred tools
+the memory-provider recall, proactive memory recall, the session's project knowledge, the deferred tools
 the session has loaded, the recent transcript for the router, and on the first
 turn of a session the memory index warm-up. `[task_runtime]
 concurrent_turn_setup` (default `true`) runs them concurrently and applies the

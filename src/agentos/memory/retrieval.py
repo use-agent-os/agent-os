@@ -204,12 +204,16 @@ class MemoryRetriever:
         opts: MemorySearchOpts | None = None,
         *,
         intent: SearchIntent = SearchIntent.TOOL,
+        lexical_only: bool = False,
     ) -> list[MemorySearchResult]:
         if self._sync_manager is not None:
             await self._sync_manager.sync(reason=f"search:{intent.value}")
         opts = opts or MemorySearchOpts()
         source_filter = getattr(opts, "source", None)
 
+        search_kwargs: dict[str, Any] = {}
+        if lexical_only:
+            search_kwargs["lexical_only"] = True
         raw_results, _mode = await self._store.search(
             query=query,
             max_results=min(200, opts.max_results * 10),
@@ -217,6 +221,7 @@ class MemoryRetriever:
             vector_weight=self._vector_weight,
             text_weight=self._text_weight,
             source=source_filter,
+            **search_kwargs,
         )
 
         if self._temporal_decay_enabled:

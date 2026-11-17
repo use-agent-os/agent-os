@@ -296,6 +296,9 @@ class MemoryManager:
     # External memory provider (Plan B). ``None`` unless a provider is
     # configured AND available at boot; see ``build_memory_managers``.
     provider_manager: Any | None = None
+    # ROOT ``GatewayConfig`` (or a zero-arg getter returning it). Curated char
+    # limits are read through it on every call; see ``live_memory_config``.
+    config_root: Any | None = None
     degraded: list[MemoryDegradation] = field(default_factory=list, init=False)
 
     def _record_degradation(
@@ -399,6 +402,30 @@ class MemoryManager:
             status["curated"] = curated
         return status
 
+    def live_memory_config(self) -> Any | None:
+        """Return the ``[memory]`` section currently attached to the root config.
+
+        ``config.patch`` replaces ``config.memory`` with a new object
+        (``update_config_in_place`` copies fields onto the ROOT config), so
+        ``self.memory_config`` -- captured at boot -- goes stale after the
+        first patch. Only the root survives a patch, so it is traversed fresh
+        on each call; ``memory_config`` is the fallback for callers that did
+        not pass a root.
+        """
+        root = self.config_root() if callable(self.config_root) else self.config_root
+        if root is not None:
+            live = getattr(root, "memory", None)
+            if live is not None:
+                return live
+        return self.memory_config
+
+    def _curated_char_limits(self) -> tuple[int, int]:
+        cfg = self.live_memory_config()
+        return (
+            getattr(cfg, "curated_memory_char_limit", 4000),
+            getattr(cfg, "curated_user_char_limit", 2000),
+        )
+
     async def _curated_status(self) -> dict[str, Any] | None:
         # The curated store's ``memory_dir`` is the *workspace root* -- the
         # same directory the ``memory`` tool and runtime injection resolve
@@ -415,8 +442,7 @@ class MemoryManager:
             return None
         from .curated import CuratedMemoryStore
 
-        memory_limit = getattr(self.memory_config, "curated_memory_char_limit", 4000)
-        user_limit = getattr(self.memory_config, "curated_user_char_limit", 2000)
+        memory_limit, user_limit = self._curated_char_limits()
         store = CuratedMemoryStore(
             memory_dir=Path(curated_root),
             memory_char_limit=memory_limit,
@@ -443,8 +469,7 @@ class MemoryManager:
             curated_root = self.memory_dir
         from .curated import CuratedMemoryStore
 
-        memory_limit = getattr(self.memory_config, "curated_memory_char_limit", 4000)
-        user_limit = getattr(self.memory_config, "curated_user_char_limit", 2000)
+        memory_limit, user_limit = self._curated_char_limits()
         store = CuratedMemoryStore(
             memory_dir=Path(curated_root or "."),
             memory_char_limit=memory_limit,
@@ -743,6 +768,7 @@ async def build_memory_managers(
                 embedding_decision=embedding_decision,
                 vector_weight=effective_vector_weight,
                 text_weight=effective_text_weight,
+                config_root=config,
             )
 
             # ── External memory provider (Plan B, disabled by default) ────

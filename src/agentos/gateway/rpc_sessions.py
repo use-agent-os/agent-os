@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import structlog
 
+from agentos import run_kinds
 from agentos.compat.inspect_utils import accepts_keyword_arg
 from agentos.engine.cache_break_monitor import notify_compaction
 from agentos.engine.start_turn import start_turn_via_runtime
@@ -1250,7 +1251,7 @@ async def _sessions_send_impl(params: dict | None, ctx: RpcContext) -> dict:
             route_envelope,
             input_provenance=input_provenance,
         )
-    run_kind = capture_controls["run_kind"] or "session_turn"
+    run_kind = capture_controls["run_kind"] or run_kinds.SESSION_TURN
 
     task_runtime = getattr(ctx, "task_runtime", None)
     requested_mode = (

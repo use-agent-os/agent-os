@@ -467,6 +467,11 @@ class TurnHarness:
             session_key=req.session_key,
             runtime_message=runtime_message,
             router_exclude_last_user=req.history_has_persisted_user or req.persist_input,
+            input_mode=req.input_mode,
+            run_kind=req.run_kind,
+            input_provenance=req.input_provenance,
+            bootstrap_context_mode=req.bootstrap_context_mode,
+            tool_context=req.tool_context,
         )
         extra_prompt_context = await pre_io.extra_prompt_context(extra_prompt_context)
         await pre_io.hydrate_tools()

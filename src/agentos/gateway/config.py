@@ -749,6 +749,44 @@ class MemoryProviderSettings(BaseModel):
     mem0: Mem0ProviderSettings = Field(default_factory=Mem0ProviderSettings)
 
 
+class MemoryRecallConfig(BaseModel):
+    """Proactive memory recall before each eligible user turn.
+
+    Two lanes run before the model sees the turn:
+
+    * **trigger** -- a cheap lexical search of the built-in memory index with
+      the user's message; a strong match is injected as a fenced, bounded
+      ``## Recalled Memory`` block. Bounded by ``[memory]
+      recall_timeout_seconds``.
+    * **deep** -- only when the message asks about the past and the trigger
+      lane had no strong match (``mode="escalate"``), or on every eligible
+      turn (``mode="always"``): a wider search plus one small-model call that
+      summarizes what is relevant or answers NONE. Bounded by
+      ``deep_timeout_seconds``. ``mode="off"`` keeps only the trigger lane.
+
+    Only interactive, user-facing, private sessions run it: heartbeat, cron,
+    sub-agent, inter-session and other internal turns are skipped.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    mode: Literal["escalate", "always", "off"] = "escalate"
+    # Trigger lane: minimum match score (0-1) for a hit to be injected, and
+    # how many hits may be injected.
+    trigger_min_score: float = Field(default=0.65, ge=0.0, le=1.0)
+    trigger_max_hits: int = Field(default=3, ge=1, le=10)
+    # Hard cap on the characters one recall block may add to the prompt.
+    max_injected_chars: int = Field(default=1800, ge=200, le=8000)
+    # Deep lane: hard deadline, summary cap, and optional model override
+    # (otherwise the [auxiliary] / [llm] model resolution applies).
+    deep_timeout_seconds: float = Field(default=8.0, gt=0, le=120)
+    deep_max_summary_chars: int = Field(default=400, ge=40, le=2000)
+    deep_max_results: int = Field(default=6, ge=1, le=20)
+    provider: str = ""
+    model: str = ""
+
+
 class MemoryConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="AGENTOS_MEMORY_",
@@ -826,6 +864,8 @@ class MemoryConfig(BaseSettings):
     # recall finishes in the background, standing in on the next turn if that
     # one is late too.
     recall_timeout_seconds: float = Field(default=1.5, gt=0)
+    # Proactive recall from the built-in index (trigger + deep lanes).
+    recall: MemoryRecallConfig = Field(default_factory=MemoryRecallConfig)
 
 
 def _tier(

@@ -752,6 +752,93 @@ async def _handle_memory_curated_batch(params: dict | None, ctx: RpcContext) -> 
     }
 
 
+# ── Proactive recall: status and per-session pause ──────────────────────────────
+
+
+def _recall_config_wire(ctx: RpcContext) -> dict[str, Any]:
+    cfg = getattr(getattr(getattr(ctx, "config", None), "memory", None), "recall", None)
+    if cfg is None:
+        return {"enabled": True, "mode": "escalate"}
+    dump = getattr(cfg, "model_dump", None)
+    data = dump() if callable(dump) else dict(vars(cfg))
+    return {
+        "enabled": bool(data.get("enabled", True)),
+        "mode": str(data.get("mode", "escalate")),
+        "triggerMinScore": data.get("trigger_min_score"),
+        "triggerMaxHits": data.get("trigger_max_hits"),
+        "maxInjectedChars": data.get("max_injected_chars"),
+        "deepTimeoutSeconds": data.get("deep_timeout_seconds"),
+        "deepMaxSummaryChars": data.get("deep_max_summary_chars"),
+        "deepMaxResults": data.get("deep_max_results"),
+        "provider": data.get("provider") or "",
+        "model": data.get("model") or "",
+    }
+
+
+def _recall_record_wire(record: Any) -> dict[str, Any] | None:
+    if record is None:
+        return None
+    data = record.as_dict()
+    return {
+        "sessionKey": data["session_key"],
+        "status": data["status"],
+        "at": data["at"],
+        "reason": data["reason"],
+        "decision": data["decision"],
+        "triggerHits": data["trigger_hits"],
+        "deepHits": data["deep_hits"],
+        "elapsedMs": data["elapsed_ms"],
+        "injectedChars": data["injected_chars"],
+        "block": data["block"],
+    }
+
+
+@_d.method("memory.recall.status")
+async def _handle_memory_recall_status(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """Proactive recall config, paused sessions, and what was last injected."""
+    from agentos.memory.active_recall import get_active_recall_state
+
+    params = params or {}
+    state = get_active_recall_state()
+    payload: dict[str, Any] = {
+        "config": _recall_config_wire(ctx),
+        "pausedSessions": state.paused_sessions(),
+    }
+    session_key = str(params.get("sessionKey") or "").strip()
+    if session_key:
+        payload["session"] = {
+            "sessionKey": session_key,
+            "paused": state.is_paused(session_key),
+            "last": _recall_record_wire(state.last(session_key)),
+        }
+    else:
+        limit = max(1, min(100, int(params.get("limit") or 20)))
+        payload["recent"] = [_recall_record_wire(r) for r in state.recent(limit)]
+    return payload
+
+
+@_d.method("memory.recall.set")
+async def _handle_memory_recall_set(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """Pause (``enabled=false``) or resume proactive recall for one session.
+
+    Held in gateway memory until resumed or the gateway restarts; it does not
+    change ``[memory.recall] enabled``.
+    """
+    from agentos.memory.active_recall import get_active_recall_state
+
+    if not isinstance(params, dict):
+        raise ValueError("params must be an object")
+    session_key = str(params.get("sessionKey") or "").strip()
+    if not session_key:
+        raise ValueError("params.sessionKey is required")
+    enabled = params.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ValueError("params.enabled must be a boolean")
+    state = get_active_recall_state()
+    state.set_paused(session_key, not enabled)
+    return {"sessionKey": session_key, "paused": state.is_paused(session_key)}
+
+
 # ── Knowledge Base ingestion and management ───────────────────────────────────
 
 

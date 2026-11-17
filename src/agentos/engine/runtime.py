@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, Final, SupportsInt, TypeGuard, cast
 
 import structlog
 
+from agentos import run_kinds
 from agentos.artifacts import artifact_marker
 from agentos.attachment_refs import (
     is_attachment_ref,
@@ -966,7 +967,7 @@ def _normalize_heartbeat_text(
     if stripped in _SENTINELS:
         log.debug("turn_runner.sentinel_suppressed", sentinel=stripped)
         return ""
-    if run_kind != "heartbeat":
+    if run_kind != run_kinds.HEARTBEAT:
         return text
 
     def _suppressed(payload: str) -> bool:
@@ -3009,6 +3010,121 @@ class TurnRunner:
             message=message,
         )
 
+    # -- proactive recall (``agentos.memory.active_recall``) ------------------
+
+    _active_recall_state: Any = None
+
+    def _memory_recall_config(self) -> Any | None:
+        """The live ``[memory.recall]`` section (re-read: config.patch swaps it)."""
+        return getattr(getattr(self._config, "memory", None), "recall", None)
+
+    def _memory_retriever_for(self, agent_id: str) -> Any | None:
+        retrievers = self._memory_retrievers or {}
+        return retrievers.get(agent_id) or retrievers.get("main")
+
+    def _active_recall(self) -> Any:
+        recall = self._active_recall_state
+        if recall is None:
+            from agentos.memory.active_recall import ActiveRecall
+
+            recall = self._active_recall_state = ActiveRecall()
+        return recall
+
+    def _active_recall_skip_reason(
+        self,
+        *,
+        agent_id: str,
+        session_key: str,
+        message: str,
+        input_mode: str,
+        run_kind: str,
+        input_provenance: dict[str, Any] | None,
+        bootstrap_context_mode: str | None,
+        tool_context: ToolContext | None,
+    ) -> str | None:
+        from agentos.memory.active_recall import recall_skip_reason
+
+        cfg = self._memory_recall_config()
+        if self._memory_retriever_for(agent_id) is None:
+            return "no_index"
+        return recall_skip_reason(
+            enabled=bool(getattr(cfg, "enabled", True)) if cfg is not None else True,
+            session_key=session_key,
+            input_mode=input_mode,
+            run_kind=run_kind,
+            input_provenance=input_provenance,
+            bootstrap_context_mode=bootstrap_context_mode,
+            subagent_caller=(
+                tool_context is not None and tool_context.caller_kind is CallerKind.SUBAGENT
+            ),
+            paused=self._active_recall().state.is_paused(session_key),
+            message=message,
+        )
+
+    async def _active_recall_block_for_turn(
+        self, *, agent_id: str, session_key: str, message: str
+    ) -> str:
+        """Proactive recall for one eligible turn: the fenced block or ``""``.
+
+        The trigger lane shares the provider recall's deadline and
+        :class:`RecallBudget` (keyed per session *and* message); the deep lane
+        is bounded by ``[memory.recall] deep_timeout_seconds``.
+        """
+        from agentos.memory.active_recall import message_budget_key
+
+        retriever = self._memory_retriever_for(agent_id)
+        if retriever is None:
+            return ""
+        cfg = self._memory_recall_config()
+        try:
+            workspace_dir: Path | None = Path(self._resolve_memory_source_dir(agent_id))
+        except Exception:  # noqa: BLE001 -- excerpt expansion is best-effort
+            workspace_dir = None
+        mode = str(getattr(cfg, "mode", "escalate") or "escalate")
+        complete = (
+            None
+            if mode == "off"
+            else self._deep_recall_completer(session_key=session_key, config=cfg)
+        )
+        return str(
+            await self._active_recall().recall(
+                session_key=session_key,
+                message=message,
+                retriever=retriever,
+                config=cfg,
+                trigger_timeout=self._recall_timeout_seconds(),
+                complete=complete,
+                workspace_dir=workspace_dir,
+                budget=self._recall_budget().recall,
+                budget_key=message_budget_key(agent_id, session_key, message),
+            )
+        )
+
+    def _deep_recall_completer(self, *, session_key: str, config: Any) -> Any:
+        """``complete(system, user)`` for the deep lane, via the auxiliary client.
+
+        Task ``memory_recall``: ``AGENTOS_MEMORY_RECALL_MODEL`` and
+        ``[auxiliary.tasks.memory_recall]`` override, then ``[memory.recall]
+        provider/model``, then the usual auxiliary resolution.
+        """
+
+        async def _complete(system: str, user: str) -> str:
+            from agentos.provider.auxiliary import get_auxiliary_client
+            from agentos.provider.types import ChatConfig, Message
+
+            result = await get_auxiliary_client().complete(
+                task="memory_recall",
+                messages=[Message(role="user", content=user)],
+                preferred_provider=str(getattr(config, "provider", "") or ""),
+                preferred_model=str(getattr(config, "model", "") or ""),
+                chat_config=ChatConfig(max_tokens=512, temperature=0.0, system=system),
+                timeout=float(getattr(config, "deep_timeout_seconds", 8.0) or 8.0),
+                session_key=session_key,
+            )
+            return str(result.text or "")
+
+        return _complete
+
     def _concurrent_turn_setup(self) -> bool:
         task_runtime = getattr(self._config, "task_runtime", None)
         return getattr(task_runtime, "concurrent_turn_setup", True) is not False
@@ -3020,11 +3136,28 @@ class TurnRunner:
         session_key: str,
         runtime_message: str,
         router_exclude_last_user: bool,
+        input_mode: str = "user",
+        run_kind: str = "default",
+        input_provenance: dict[str, Any] | None = None,
+        bootstrap_context_mode: str | None = None,
+        tool_context: ToolContext | None = None,
     ) -> PreProviderIO:
         """Start the independent pre-provider reads (see ``pre_provider_io``)."""
         from agentos.tools.deferred import hydrate_loaded_tools
 
         concurrent = self._concurrent_turn_setup()
+        recall_skip = self._active_recall_skip_reason(
+            agent_id=agent_id,
+            session_key=session_key,
+            message=runtime_message,
+            input_mode=input_mode,
+            run_kind=run_kind,
+            input_provenance=input_provenance,
+            bootstrap_context_mode=bootstrap_context_mode,
+            tool_context=tool_context,
+        )
+        if recall_skip is not None and recall_skip != "no_index":
+            log.debug("memory.active_recall_skipped", session_key=session_key, reason=recall_skip)
         return PreProviderIO(
             concurrent=concurrent,
             # Gated on provider presence so the disabled default adds only a
@@ -3053,6 +3186,17 @@ class TurnRunner:
                 else None
             ),
             memory_warm=self._memory_warm_for(agent_id, session_key) if concurrent else None,
+            active_recall=(
+                (
+                    lambda: self._active_recall_block_for_turn(
+                        agent_id=agent_id,
+                        session_key=session_key,
+                        message=runtime_message,
+                    )
+                )
+                if recall_skip is None
+                else None
+            ),
         )
 
     def _memory_warm_for(
@@ -3410,7 +3554,7 @@ class TurnRunner:
                 tool_context=tool_context,
                 agent_id=agent_id,
                 input_mode="system_event",
-                run_kind="memory_nudge",
+                run_kind=run_kinds.MEMORY_NUDGE,
                 no_memory_capture=True,
                 persist_input=False,
                 max_iterations=int(getattr(nudge_cfg, "max_iterations", 6)),

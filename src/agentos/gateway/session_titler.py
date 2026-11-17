@@ -30,6 +30,7 @@ from typing import Any
 
 import structlog
 
+from agentos import run_kinds
 from agentos.provider.auxiliary import AuxiliaryError, get_auxiliary_client
 from agentos.provider.types import ChatConfig, Message
 from agentos.session.naming import normalize_session_name
@@ -219,13 +220,7 @@ class SessionTitler:
             return False
         # Only a person's own turn names a session; cron, heartbeat and
         # subagent runs keep whatever name the session already has.
-        if run_kind and run_kind not in (
-            "session_turn",
-            "chat",
-            "interactive",
-            "user",
-            "channel_turn",
-        ):
+        if run_kind and run_kind not in run_kinds.USER_RUN_KINDS:
             return False
         if session_key in self._inflight:
             return False

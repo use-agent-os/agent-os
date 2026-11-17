@@ -6,6 +6,7 @@ import {
   Database,
   FileText,
   FolderPlus,
+  History,
   Layers,
   Link2,
   Loader2,
@@ -1241,6 +1242,45 @@ function EmbeddingSettings() {
         <ConfigField
           {...field('memory.curated_user_char_limit', t('webSetCapabilities.memUserLimit'))}
           type={{ kind: 'number' }}
+        />
+      </SettingsCard>
+      <SettingsCard
+        title={t('webSetCapabilities.memRecallTitle')}
+        description={t('webSetCapabilities.memRecallBody')}
+        icon={<History />}
+      >
+        <ConfigField
+          {...field('memory.recall.enabled', t('webSetCapabilities.memRecallEnabled'))}
+          type={{ kind: 'boolean' }}
+        />
+        <ConfigField
+          {...field(
+            'memory.recall.mode',
+            t('webSetCapabilities.memRecallMode'),
+            t('webSetCapabilities.memRecallModeHelp'),
+          )}
+          type={{ kind: 'enum', options: ['escalate', 'always', 'off'] }}
+        />
+        <ConfigField
+          {...field(
+            'memory.recall.max_injected_chars',
+            t('webSetCapabilities.memRecallMaxChars'),
+            t('webSetCapabilities.memRecallMaxCharsHelp'),
+          )}
+          type={{ kind: 'number' }}
+        />
+        <ConfigField
+          {...field('memory.recall.deep_timeout_seconds', t('webSetCapabilities.memRecallTimeout'))}
+          type={{ kind: 'number' }}
+        />
+        <ConfigField
+          {...field(
+            'memory.recall.model',
+            t('webSetCapabilities.memRecallModel'),
+            t('webSetCapabilities.memRecallModelHelp'),
+          )}
+          optional
+          type={{ kind: 'string' }}
         />
       </SettingsCard>
       <SaveBar editor={editor} />

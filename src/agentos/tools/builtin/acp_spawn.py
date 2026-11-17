@@ -25,6 +25,7 @@ from typing import Any
 
 import structlog
 
+from agentos import run_kinds
 from agentos.acp.registry import get_harness, normalize_agent_id
 from agentos.acp.types import AcpAgentNotAllowedError, AcpError
 from agentos.gateway.acp_wiring import acp_config_of, acp_state_dir
@@ -470,7 +471,7 @@ async def spawn_acp_session(
         origin="sessions_spawn_acp",
     )
     message_id = getattr(entry, "message_id", None)
-    enqueue_kwargs: dict[str, Any] = {"mode": "followup", "run_kind": "acp"}
+    enqueue_kwargs: dict[str, Any] = {"mode": "followup", "run_kind": run_kinds.ACP}
     if isinstance(message_id, str) and message_id:
         enqueue_kwargs["persisted_user_message_id"] = message_id
     handle = await runtime.enqueue(envelope, task, **enqueue_kwargs)
@@ -616,7 +617,7 @@ async def send_to_acp_session(
             spawn_depth=int(_field(session, "spawn_depth") or 1),
             origin=source_tool,
         )
-        handle = await runtime.enqueue(envelope, message, mode="followup", run_kind="acp")
+        handle = await runtime.enqueue(envelope, message, mode="followup", run_kind=run_kinds.ACP)
     else:
         handle = await runtime.send(
             session_key, message, provenance={"kind": "inter_session", "source_tool": source_tool}
