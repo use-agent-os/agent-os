@@ -262,4 +262,16 @@ export const webSetCapabilities = defineNamespace('webSetCapabilities', {
   memInjectLimitHelp: 'The most memory placed into the system prompt each turn.',
   memAgentLimit: 'Agent memory limit (characters)',
   memUserLimit: 'User profile limit (characters)',
+  memRecallTitle: 'Proactive recall',
+  memRecallBody:
+    'Before each chat turn, search memory for the message and add strong matches to the context. Questions about the past also get a short summary from a small model.',
+  memRecallEnabled: 'Recall before each turn',
+  memRecallMode: 'Deep recall',
+  memRecallModeHelp:
+    'escalate runs it only for questions about the past with no strong match; always runs it every turn; off keeps only the quick search.',
+  memRecallMaxChars: 'Recall limit (characters)',
+  memRecallMaxCharsHelp: 'The most recalled memory added to one turn.',
+  memRecallTimeout: 'Deep recall timeout (seconds)',
+  memRecallModel: 'Deep recall model',
+  memRecallModelHelp: 'Leave empty to use the auxiliary model.',
 } as const)
