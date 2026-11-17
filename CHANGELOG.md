@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.17.post2] - 2026-11-17
+
 ### Added
 - Proactive memory recall (`[memory.recall]`, on by default). Before each
   interactive turn a keyword search of the memory notes runs with the user's
