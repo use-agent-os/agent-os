@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.17.post1] - 2026-11-17
+
 ### Added
 - Desktop: *Manage wallets* can tick several wallets (or *Select all*) and
   remove them together under one vault password, through the new
