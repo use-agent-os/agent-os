@@ -21,6 +21,13 @@ if _XDIST_WORKER:
         _preset = os.environ.get(_name)
         if _preset:
             os.environ[_name] = str(Path(_preset) / _XDIST_WORKER)
+    # On Linux an xdist worker starts with COLUMNS=80 / LINES=24 already in
+    # its environment. Rich reads COLUMNS once, when the shared CLI console in
+    # ``agentos.ui`` is built at collection, and then ignores the width a test
+    # passes later, so every CLI table renders at 80 columns. A worker has no
+    # terminal; tests that need a width set COLUMNS themselves.
+    os.environ.pop("COLUMNS", None)
+    os.environ.pop("LINES", None)
 
 os.environ.setdefault("AGENTOS_STATE_DIR", str(_PYTEST_STATE_ROOT / "state"))
 os.environ.setdefault("AGENTOS_LOG_DIR", str(_PYTEST_STATE_ROOT / "logs"))
