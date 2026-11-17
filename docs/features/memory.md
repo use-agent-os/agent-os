@@ -27,6 +27,7 @@ graph TB
     end
 
     PROMPT["💬 System prompt<br/>frozen snapshots + fenced recall"]
+    RECALL["🔁 Proactive recall<br/>trigger search · deep recall"]
     TOOLS["🛠️ Tools<br/>memory · memory_save · memory_search"]
 
     CUR -->|frozen snapshot| PROMPT
@@ -35,6 +36,8 @@ graph TB
     NOTES --> IDX
     EMB --> IDX
     IDX -->|memory_search| TOOLS
+    IDX --> RECALL
+    RECALL -->|fenced recall block| PROMPT
     TOOLS -->|memory tool writes| CUR
     TOOLS -->|memory_save| NOTES
     MEM0 -->|fenced recall block| PROMPT
@@ -45,7 +48,7 @@ graph TB
     classDef ext fill:#FFE4B5,stroke:#333,stroke-width:2px,color:#5e3a00
     classDef out fill:#87CEEB,stroke:#333,stroke-width:2px,color:#003554
     class CUR,USR,NOTES store
-    class IDX,EMB engine
+    class IDX,EMB,RECALL engine
     class MEM0 ext
     class PROMPT,TOOLS out
 ```
@@ -128,11 +131,92 @@ Later, refer to the preference:
 Use my usual release-note format for this changelog.
 ```
 
-When memory seems stale, ask the agent to search explicitly:
+You do not have to ask the agent to search: proactive recall (below) looks
+up memory for each message, and the agent is told to call `memory_search`
+itself whenever an answer depends on past work it does not have in context.
+When memory still seems stale, ask explicitly:
 
 ```text
 Search memory for my release-note preferences before drafting this.
 ```
+
+## Proactive recall
+
+`MEMORY.md` and `USER.md` are always in the prompt, but notes under
+`memory/**/*.md`, indexed sessions and the knowledge base are only reached by
+search. Proactive recall runs that search for the agent before each
+interactive turn, in two lanes:
+
+1. **Trigger search** — every eligible turn. A lexical (keyword) search of
+   the curated notes with the user's message. A note is injected only when
+   it is a strong match: enough of the message's key terms appear in it (or
+   its heading's terms appear in the message), scored deterministically
+   against `trigger_min_score`. No embedding or model call, and bounded by
+   `[memory] recall_timeout_seconds`.
+2. **Deep recall** — only when the message asks about the past ("what did we
+   decide last time", "do you remember", "hôm trước mình chốt gì", "còn nhớ
+   … không") *and* the trigger search found nothing strong. A wider search
+   (all sources, hybrid), the matching lines read from each note, and one
+   small-model call that returns a short summary or `NONE`. Bounded by
+   `deep_timeout_seconds`. Recall intent is detected by phrase patterns for
+   English, Vietnamese (with or without diacritics), Spanish, Portuguese,
+   French, German, Chinese, Japanese, Korean and Russian.
+
+What is found goes into the turn's dynamic context (not the cached system
+prompt) as a `## Recalled Memory` block, fenced in `<memory-context>` with a
+note that it is background data, not user input, and capped at
+`max_injected_chars`. If deep recall times out or fails, a one-line note says
+so, so the agent does not take silence as "no memory". Nothing in either lane
+can fail or block the turn beyond its deadline.
+
+`mode` controls the deep lane: `escalate` (default) as above, `always` on
+every eligible turn, `off` never (the trigger search still runs). Set
+`enabled = false` to turn proactive recall off entirely.
+
+**Which turns run it.** Only turns a person typed into a private,
+interactive conversation: the web chat, the CLI, and direct messages on
+channels. Heartbeat, cron and other background runs, sub-agent and ACP
+children, inter-session messages and child-completion deliveries, group and
+channel conversations, and stateless prompts are skipped.
+
+**Model.** Deep recall is the auxiliary task `memory_recall`. It uses
+`[memory.recall] provider`/`model` when set, otherwise the usual auxiliary
+resolution (`AGENTOS_MEMORY_RECALL_MODEL`, `[auxiliary.tasks.memory_recall]`,
+`[auxiliary]`, then `[llm]`). Its tokens are recorded as `aux:memory_recall`.
+The model gets no tools: AgentOS runs the memory search and line reads
+itself and hands it only those excerpts.
+
+```toml
+[memory.recall]
+enabled = true
+mode = "escalate"              # escalate | always | off
+trigger_min_score = 0.65
+trigger_max_hits = 3
+max_injected_chars = 1800
+deep_timeout_seconds = 8.0
+deep_max_summary_chars = 400
+deep_max_results = 6
+provider = ""
+model = ""
+```
+
+The same keys are in the web console under **Settings › Memory › Settings ›
+Proactive recall**.
+
+**Per-session control and inspection.**
+
+```sh
+agentos memory recall status --session <session-key> --show-block
+agentos memory recall pause --session <session-key>
+agentos memory recall resume --session <session-key>
+```
+
+`status` shows the last outcome per session — `injected`, `none`,
+`unavailable` or `error`, the lane decision, hit counts, elapsed time — and
+with `--show-block` the exact block that was injected. A pause applies to
+one session until it is resumed or the gateway restarts. Each turn also logs
+a `memory.active_recall` event with the same fields. Over RPC these are
+`memory.recall.status` and `memory.recall.set`.
 
 ## Session-Derived Memory
 
@@ -318,6 +402,11 @@ that snapshot instead of writing another. Every write stays refused until the
 file is rewritten by hand as a clean §-delimited list (entries separated by a
 line holding only `§`, no blank lines around it) — even a whitespace-only edit
 such as a blank line before a `§` counts as drift.
+
+Lowering `curated_memory_char_limit` / `curated_user_char_limit` below an
+entry that is already in the file is not drift: that entry can still be
+removed or replaced to get back under the new limit. The limit still applies
+to what an add, replace or batch would leave behind.
 
 ### Migration note
 

@@ -1615,7 +1615,17 @@ agentos memory show <path>
 agentos memory embedding-download
 agentos memory raw-fallbacks list
 agentos memory raw-fallbacks show <path>
+agentos memory recall status [--session <session-key>] [--show-block] [--json]
+agentos memory recall pause --session <session-key>
+agentos memory recall resume --session <session-key>
 ```
+
+`memory recall status` shows the `[memory.recall]` settings, paused sessions,
+and the last proactive-recall outcome per session (or for one session with
+`--session`); `--show-block` prints the fenced block that was injected.
+`pause` / `resume` switch proactive recall off and on for one session only;
+the switch lives in the gateway until it restarts and does not change
+`[memory.recall] enabled`.
 
 Read: [`features/memory.md`](features/memory.md)
 
