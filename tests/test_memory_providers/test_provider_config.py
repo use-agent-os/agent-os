@@ -7,6 +7,7 @@ and the enabled-but-unavailable path (provider module missing → boots anyway,
 """
 from __future__ import annotations
 
+import importlib.util
 import sys
 from pathlib import Path
 from typing import Any
@@ -152,6 +153,13 @@ async def test_enabled_but_module_missing_boots_with_none(
     tmp_path: Path,
 ) -> None:
     """provider.name='mem0' but mem0_provider module missing → boots, None."""
+    # Fake the extra away so this holds when mem0ai is installed too.
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name, *a, **k: None if name == "mem0" else real_find_spec(name, *a, **k),
+    )
     config = GatewayConfig(memory={"provider": {"name": "mem0"}})
     managers = await _build(config, monkeypatch, tmp_path)
     try:

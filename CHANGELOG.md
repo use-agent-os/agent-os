@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- mem0 recall works on mem0 2.x. mem0 2.x moved search scoping into
+  `filters={"user_id": ...}` and rejects a top-level `user_id` with a
+  `ValueError`, which the provider caught and logged, so with the mem0
+  provider enabled every turn recalled nothing. The provider now reads the
+  installed client's `search` signature once at startup and calls it in the
+  matching shape (`filters` + `top_k` on 2.x, `user_id` + `limit` on 0.1.x and
+  1.x); the curated replace/remove lookup uses the same shape. A search mem0
+  rejects for its scope is logged as a warning naming the call shape, the
+  installed mem0ai version, and what to do.
 - Curated memory's "stop retrying" cutoff is counted per session. The
   workspace's `MEMORY.md` / `USER.md` store is shared by every session in the
   process, and one failure counter let two sessions consolidating at the same

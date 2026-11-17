@@ -518,6 +518,14 @@ never imported unless the provider is selected):
 pip install 'use-agent-os[mem0]'
 ```
 
+The extra accepts `mem0ai` 0.1.70 up to (not including) 3.0. mem0 changed its
+search API in 2.0 — the user scope moved from a `user_id=` keyword into
+`filters={"user_id": ...}` and `limit` became `top_k` — and the provider
+detects which one the installed client takes when it starts, so either works.
+If a search is still rejected for its scope, the gateway log has a
+`mem0_provider.prefetch_failed` warning with the call shape and the installed
+`mem0ai` version; recall is empty until it is fixed.
+
 Make sure Ollama is running and the two models are pulled:
 
 ```sh

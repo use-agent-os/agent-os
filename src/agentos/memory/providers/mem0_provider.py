@@ -36,15 +36,18 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.metadata
 import importlib.util
+import inspect
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from agentos.gateway.config import Mem0ProviderSettings
 
@@ -77,6 +80,55 @@ _CURATED_HASH_KEY = "agentos_curated_sha256"
 # lookup query is the record's own text, so its copies rank at the top.
 _CURATED_LOOKUP_LIMIT = 20
 
+# How many hits a turn's recall asks for.
+_PREFETCH_LIMIT = 5
+
+# mem0 2.x rejects these as top-level ``search`` keywords; they go in
+# ``filters``. Up to 1.x they were explicit keyword parameters.
+_ENTITY_PARAMS = frozenset({"user_id", "agent_id", "run_id"})
+
+
+@dataclass(frozen=True)
+class _SearchShape:
+    """How this mem0 client's ``search`` takes its scope and result limit.
+
+    mem0 <= 1.x: ``search(query, user_id=..., limit=...)``.
+    mem0 2.x:    ``search(query, filters={"user_id": ...}, top_k=...)``; a
+    top-level ``user_id`` raises ``ValueError`` and ``limit`` is swallowed by
+    ``**kwargs`` and ignored.
+    """
+
+    scope_in_filters: bool
+    limit_param: str
+
+    @property
+    def label(self) -> str:
+        if self.scope_in_filters:
+            return f"filters={{'user_id': ...}}, {self.limit_param}=..."
+        return f"user_id=..., {self.limit_param}=..."
+
+
+def _detect_search_shape(client: Any) -> _SearchShape:
+    """Read the client's ``search`` signature once to pick the call shape.
+
+    An explicit ``user_id`` parameter means the pre-2.x keyword API; anything
+    else (including a signature that cannot be read, or one that is only
+    ``**kwargs``) gets the current filters API.
+    """
+    params: Mapping[str, inspect.Parameter]
+    try:
+        params = inspect.signature(client.search).parameters
+    except (TypeError, ValueError):
+        params = {}
+    scope_in_filters = "user_id" not in params
+    if "top_k" in params:
+        limit_param = "top_k"
+    elif "limit" in params:
+        limit_param = "limit"
+    else:
+        limit_param = "top_k" if scope_in_filters else "limit"
+    return _SearchShape(scope_in_filters=scope_in_filters, limit_param=limit_param)
+
 
 class Mem0Provider(MemoryProvider):
     """Local-first mem0 external memory provider.
@@ -99,6 +151,7 @@ class Mem0Provider(MemoryProvider):
         self._agent_state_dir = Path(agent_state_dir)
         self._client_factory = client_factory
         self._client: Any | None = None
+        self._search_shape = _SearchShape(scope_in_filters=True, limit_param="top_k")
         self._user_id: str = "main"
 
     @property
@@ -132,12 +185,17 @@ class Mem0Provider(MemoryProvider):
             if factory is not None:
                 return factory(config_dict)
             # Lazy import: only reached in production with the extra installed.
-            from mem0 import Memory  # type: ignore[import-not-found]
+            from mem0 import Memory
 
             return Memory.from_config(config_dict)
 
         self._client = await asyncio.to_thread(_construct)
-        logger.info("mem0_provider.initialized", user_id=self._user_id)
+        self._search_shape = _detect_search_shape(self._client)
+        logger.info(
+            "mem0_provider.initialized",
+            user_id=self._user_id,
+            search_shape=self._search_shape.label,
+        )
 
     def _build_config_dict(self) -> dict[str, Any]:
         """Assemble the mem0 ``from_config`` dict from settings (see module docstring)."""
@@ -179,12 +237,12 @@ class Mem0Provider(MemoryProvider):
         client = self._client
 
         def _search() -> Any:
-            return client.search(query, user_id=self._user_id, limit=5)
+            return self._search(client, query, _PREFETCH_LIMIT)
 
         try:
             result = await asyncio.to_thread(_search)
         except Exception as exc:  # noqa: BLE001 — recall must never break a turn
-            logger.warning("mem0_provider.prefetch_failed", error=str(exc))
+            self._log_search_failure("mem0_provider.prefetch_failed", exc)
             return ""
 
         lines = [f"- {text}" for text in _iter_memory_texts(result)]
@@ -272,14 +330,7 @@ class Mem0Provider(MemoryProvider):
         tags = _curated_tags(target, entry)
 
         def _run() -> int:
-            try:
-                # mem0 >= 1.x scopes search through ``filters``.
-                result = client.search(
-                    query, filters={"user_id": self._user_id}, top_k=_CURATED_LOOKUP_LIMIT
-                )
-            except TypeError:
-                # 0.1.x takes the entity id and limit as keywords.
-                result = client.search(query, user_id=self._user_id, limit=_CURATED_LOOKUP_LIMIT)
+            result = self._search(client, query, _CURATED_LOOKUP_LIMIT)
             ids = _tagged_memory_ids(result, tags)
             for memory_id in ids:
                 client.delete(memory_id)
@@ -288,10 +339,55 @@ class Mem0Provider(MemoryProvider):
         try:
             deleted = await asyncio.to_thread(_run)
         except Exception as exc:  # noqa: BLE001 — a write must never break a turn
-            logger.warning("mem0_provider.delete_failed", error=str(exc))
+            self._log_search_failure("mem0_provider.delete_failed", exc)
             return
         if not deleted:
             logger.debug("mem0_provider.curated_record_not_found", target=target)
+
+    def _search(self, client: Any, query: str, limit: int) -> Any:
+        """Call ``client.search`` scoped to this agent, in the detected shape."""
+        shape = self._search_shape
+        kwargs: dict[str, Any] = {shape.limit_param: limit}
+        if shape.scope_in_filters:
+            kwargs["filters"] = {"user_id": self._user_id}
+        else:
+            kwargs["user_id"] = self._user_id
+        return client.search(query, **kwargs)
+
+    def _log_search_failure(self, event: str, exc: Exception) -> None:
+        """Warn about a failed mem0 call; spell out a rejected search scope.
+
+        A scope mem0 refuses is not "no memories": recall stays empty until
+        it is fixed, so the warning says which call shape was used and what
+        to do about it.
+        """
+        message = str(exc)
+        if isinstance(exc, ValueError) and (
+            "filters" in message or any(name in message for name in _ENTITY_PARAMS)
+        ):
+            logger.warning(
+                event,
+                error=message,
+                search_shape=self._search_shape.label,
+                mem0_version=_installed_mem0_version(),
+                hint=(
+                    "mem0 rejected how AgentOS scoped the search: recall stays "
+                    "empty and curated removes are not mirrored. Check that mem0ai "
+                    "is inside the range the 'use-agent-os[mem0]' extra declares "
+                    "(pip install -U 'use-agent-os[mem0]'); if it is, report this "
+                    "mem0ai version."
+                ),
+            )
+            return
+        logger.warning(event, error=message)
+
+
+def _installed_mem0_version() -> str:
+    """The installed ``mem0ai`` distribution version, or ``"unknown"``."""
+    try:
+        return importlib.metadata.version("mem0ai")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
 
 
 def _curated_text(target: str, entry: str) -> str:
