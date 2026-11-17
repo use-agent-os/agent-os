@@ -80,6 +80,7 @@ class SearchIntent(StrEnum):
 
     TOOL = "tool"  # memory_search tool path
     CONTROL = "control"  # Control RPC / CLI queries
+    AUTO_RECALL = "auto_recall"  # proactive recall before a user turn
 
 
 @dataclass

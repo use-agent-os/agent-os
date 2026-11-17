@@ -860,14 +860,20 @@ class LongTermMemoryStore:
         vector_weight: float = 0.7,
         text_weight: float = 0.3,
         source: MemorySource | None = None,
+        lexical_only: bool = False,
     ) -> tuple[list[MemorySearchResult], SearchMode]:
         """
         Hybrid search: vector + FTS5. Returns (results, mode_used).
-        Falls back to FTS-only if vector not available.
+        Falls back to FTS-only if vector not available. ``lexical_only``
+        skips the query embedding (and any remote embedding call) entirely.
         """
         assert self._db is not None
 
-        use_vector = self._vec_available and not isinstance(self._provider, NullEmbeddingProvider)
+        use_vector = (
+            not lexical_only
+            and self._vec_available
+            and not isinstance(self._provider, NullEmbeddingProvider)
+        )
 
         if use_vector:
             try:

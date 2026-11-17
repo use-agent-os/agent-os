@@ -412,6 +412,95 @@ def memory_curated_remove_cmd(
     console.print(f"[green]{payload.get('message', 'Entry removed.')}[/green]")
 
 
+recall_app = typer.Typer(help="Proactive recall: status, and pause/resume per session.")
+memory_app.add_typer(recall_app, name="recall")
+
+
+@recall_app.command("status")
+def memory_recall_status_cmd(
+    session: str = typer.Option(
+        "", "--session", "-s", help="Session key (default: recent turns across sessions)"
+    ),
+    show_block: bool = typer.Option(False, "--show-block", help="Print the injected block"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Show proactive recall config and what it injected recently."""
+
+    from agentos.cli.gateway_rpc import run_gateway_sync
+    from agentos.cli.output import print_json
+    from agentos.cli.ui import console
+
+    params: dict[str, str] = {"sessionKey": session} if session else {}
+
+    async def _run(client):
+        return await client.call("memory.recall.status", params)
+
+    payload = run_gateway_sync(_run, json_output=json_output)
+    if json_output:
+        print_json(payload)
+        return
+
+    config = payload.get("config", {})
+    console.print(f"[bold]recall[/bold] enabled={config.get('enabled')} mode={config.get('mode')}")
+    paused = payload.get("pausedSessions") or []
+    if paused:
+        console.print(f"paused sessions: {', '.join(paused)}")
+    if session:
+        info = payload.get("session") or {}
+        console.print(f"session {session}: paused={info.get('paused')}")
+        records: list[dict] = [info["last"]] if info.get("last") else []
+    else:
+        records = [record for record in payload.get("recent") or [] if record]
+    if not records:
+        console.print("no recall recorded yet")
+        return
+    for record in records:
+        reason = f" ({record.get('reason')})" if record.get("reason") else ""
+        _print_stored_text(
+            console,
+            f"  {record.get('sessionKey')}: {record.get('status')} "
+            f"decision={record.get('decision') or '-'} "
+            f"hits={record.get('triggerHits', 0)}+{record.get('deepHits', 0)} "
+            f"{record.get('elapsedMs', 0)}ms {record.get('injectedChars', 0)} chars{reason}",
+        )
+        if show_block and record.get("block"):
+            _print_stored_text(console, record["block"])
+
+
+def _set_recall_enabled(session: str, enabled: bool, json_output: bool) -> None:
+    from agentos.cli.gateway_rpc import run_gateway_sync
+    from agentos.cli.output import print_json
+    from agentos.cli.ui import console
+
+    async def _run(client):
+        return await client.call("memory.recall.set", {"sessionKey": session, "enabled": enabled})
+
+    payload = run_gateway_sync(_run, json_output=json_output)
+    if json_output:
+        print_json(payload)
+        return
+    state = "paused" if payload.get("paused") else "resumed"
+    console.print(f"[green]Proactive recall {state} for {session}.[/green]")
+
+
+@recall_app.command("pause")
+def memory_recall_pause_cmd(
+    session: str = typer.Option(..., "--session", "-s", help="Session key to pause"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Pause proactive recall for one session (until resumed or gateway restart)."""
+    _set_recall_enabled(session, False, json_output)
+
+
+@recall_app.command("resume")
+def memory_recall_resume_cmd(
+    session: str = typer.Option(..., "--session", "-s", help="Session key to resume"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Resume proactive recall for a paused session."""
+    _set_recall_enabled(session, True, json_output)
+
+
 @memory_app.command("ingest")
 def memory_ingest_cmd(
     path: str = typer.Argument(

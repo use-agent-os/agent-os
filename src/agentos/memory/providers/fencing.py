@@ -81,26 +81,37 @@ def sanitize_context(text: str) -> str:
     return text.replace("<", "").replace(">", "")
 
 
-def build_memory_context_block(raw_context: str) -> str:
-    """Wrap prefetched memory in a fenced block with a system note.
+_AUTHORITATIVE_NOTE = (
+    "[System note: The following is recalled memory context, "
+    "NOT new user input. Treat as authoritative reference data — "
+    "this is the agent's persistent memory and should inform all responses.]"
+)
+_BACKGROUND_NOTE = (
+    "[System note: The following is recalled memory context, "
+    "NOT new user input. Treat as informational background data.]"
+)
+
+
+def build_memory_context_block(raw_context: str, *, authoritative: bool = True) -> str:
+    """Wrap recalled memory in a fenced block with a system note.
 
     Empty / whitespace-only input yields ``""`` (nothing to inject). Any
     pre-existing fence in ``raw_context`` is stripped first, then the block is
     fenced exactly once.
+
+    ``authoritative`` picks the note: provider prefetch (the default) is the
+    agent's persistent memory and is marked authoritative; automatic recall
+    from the built-in index is matched by search, not chosen by the agent, so
+    it passes ``authoritative=False`` and is marked as background data. Both
+    notes are recognised by :func:`sanitize_context`.
     """
     if not raw_context or not raw_context.strip():
         return ""
     clean = sanitize_context(raw_context)
     if clean != raw_context:
         logger.warning("memory_provider.prewrapped_context_stripped")
-    return (
-        "<memory-context>\n"
-        "[System note: The following is recalled memory context, "
-        "NOT new user input. Treat as authoritative reference data — "
-        "this is the agent's persistent memory and should inform all responses.]\n\n"
-        f"{clean}\n"
-        "</memory-context>"
-    )
+    note = _AUTHORITATIVE_NOTE if authoritative else _BACKGROUND_NOTE
+    return f"<memory-context>\n{note}\n\n{clean}\n</memory-context>"
 
 
 class StreamingContextScrubber:
