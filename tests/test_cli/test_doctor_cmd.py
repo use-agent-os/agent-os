@@ -425,7 +425,12 @@ def test_doctor_table_shows_gateway_config_and_agent_context(tmp_path, monkeypat
 
     assert result.exit_code == 0
     assert "Gateway: ws://127.0.0.1:20003/ws" in result.stdout
-    assert f"Config: {target}" in result.stdout
+    # Rich wraps (and folds) a long tmp path, e.g. under pytest-xdist's
+    # popen-gwN directory, so compare with all whitespace removed.
+    def squash(text: str) -> str:
+        return "".join(text.split())
+
+    assert squash(f"Config: {target}") in squash(result.stdout)
     assert "Agent: worker" in " ".join(result.stdout.split())
 
 

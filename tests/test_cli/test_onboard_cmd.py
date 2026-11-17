@@ -66,7 +66,7 @@ def test_onboard_finish_commands_remain_copyable_with_long_config_path(
     from agentos.cli import onboard_cmd
 
     target = tmp_path / "very-long-config-name-for-onboard-output.toml"
-    monkeypatch.setattr(onboard_cmd.console, "width", 48)
+    monkeypatch.setattr(onboard_cmd.console, "_width", 48)
 
     result = runner.invoke(
         app,
@@ -102,7 +102,7 @@ def test_onboard_status_paths_remain_copyable_with_long_config_path(
     from agentos.cli import onboard_cmd
 
     target = tmp_path / "very-long-config-name-for-onboard-status-output.toml"
-    monkeypatch.setattr(onboard_cmd.console, "width", 48)
+    monkeypatch.setattr(onboard_cmd.console, "_width", 48)
 
     result = runner.invoke(app, ["onboard", "status", "--config", str(target)])
 

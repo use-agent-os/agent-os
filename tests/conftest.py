@@ -11,6 +11,24 @@ if str(_REPO_ROOT) not in sys.path:
 
 _PYTEST_STATE_ROOT = Path(tempfile.gettempdir()) / f"agentos-pytest-{os.getpid()}"
 
+# Under pytest-xdist every worker is its own process. The pid-based defaults
+# below already differ per worker, but CI exports one state/log directory for
+# the whole job, and workers sharing it race on the same SQLite files and the
+# per-state-dir config approval. Give each worker its own subdirectory.
+_XDIST_WORKER = os.environ.get("PYTEST_XDIST_WORKER", "")
+if _XDIST_WORKER:
+    for _name in ("AGENTOS_STATE_DIR", "AGENTOS_LOG_DIR", "AGENTOS_VAULT_KEK_DIR"):
+        _preset = os.environ.get(_name)
+        if _preset:
+            os.environ[_name] = str(Path(_preset) / _XDIST_WORKER)
+    # On Linux an xdist worker starts with COLUMNS=80 / LINES=24 already in
+    # its environment. Rich reads COLUMNS once, when the shared CLI console in
+    # ``agentos.ui`` is built at collection, and then ignores the width a test
+    # passes later, so every CLI table renders at 80 columns. A worker has no
+    # terminal; tests that need a width set COLUMNS themselves.
+    os.environ.pop("COLUMNS", None)
+    os.environ.pop("LINES", None)
+
 os.environ.setdefault("AGENTOS_STATE_DIR", str(_PYTEST_STATE_ROOT / "state"))
 os.environ.setdefault("AGENTOS_LOG_DIR", str(_PYTEST_STATE_ROOT / "logs"))
 # The vault seals unlock.key with a key kept outside the state root, by
@@ -44,6 +62,31 @@ def _reset_redaction_secret_registry():
     clear_registered_secret_values()
     yield
     clear_registered_secret_values()
+
+
+@pytest.fixture(autouse=True)
+def _restore_process_globals(monkeypatch: pytest.MonkeyPatch):
+    """Undo process-wide state that production entry points set and never reset.
+
+    Gateway boot calls ``structlog.configure`` (DEBUG filtering, spliced
+    processors) and registers the channel manager for the ``cron`` tool; the
+    ACP command configures structlog at WARNING. A test that runs one of those
+    leaks it into every later test in the same process, so ``capture_logs``
+    sees no INFO lines and cron validation sees a stranger's channels. Which
+    tests come later depends on how pytest-xdist schedules them.
+    """
+    import structlog
+
+    config = structlog.get_config()
+    config["processors"] = list(config["processors"])
+
+    control = sys.modules.get("agentos.tools.builtin.control")
+    if control is not None:
+        monkeypatch.setattr(control, "_channel_manager_ref", control._channel_manager_ref)
+
+    yield
+
+    structlog.configure(**config)
 
 
 @pytest.fixture(autouse=True)

@@ -814,8 +814,13 @@ class AcpRuntimeImpl:
                 outcome = self._build_result(live, turn, None, stop_reason="cancelled")
             else:
                 exited = not live.proc.alive
-                if exited:
+                if exited or isinstance(err, ConnectionError):
+                    # A closed pipe usually means the agent died, but asyncio
+                    # may not have reaped it yet; until it has, the process
+                    # still reads as alive and the session would be left
+                    # "idle" on a dead agent instead of being closed.
                     await live.proc.wait(0.5)
+                    exited = not live.proc.alive
                 tail = live.proc.stderr_tail(10)
                 if exited or isinstance(err, ConnectionError):
                     failure = AcpTurnError(
