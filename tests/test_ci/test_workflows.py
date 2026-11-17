@@ -104,7 +104,7 @@ def _classify_changed_files(
     return outputs
 
 
-def test_default_ci_blocks_pull_requests_and_main_and_dev_pushes() -> None:
+def test_default_ci_blocks_pull_requests_and_main_pushes() -> None:
     ci_path = WORKFLOW_DIR / "ci.yml"
     if not ci_path.exists():
         return
@@ -112,8 +112,8 @@ def test_default_ci_blocks_pull_requests_and_main_and_dev_pushes() -> None:
     data = _workflow("ci.yml")
     text = ci_path.read_text(encoding="utf-8")
 
-    assert {"pull_request", "push", "workflow_dispatch"} <= _trigger_keys(data)
-    assert "branches: [main, dev]" in text
+    assert {"pull_request", "push", "schedule", "workflow_dispatch"} <= _trigger_keys(data)
+    assert "branches: [main]" in text
     assert "PYTHONPATH: ${{ github.workspace }}" in text
     assert "Configure runtime directories" in text
     assert 'AGENTOS_STATE_DIR=%s/agentos-state\\n' in text
@@ -153,6 +153,7 @@ def test_ci_change_classifier_allows_root_and_docs_markdown_only(tmp_path: Path)
         "ci_changed": "false",
         "dependency_changed": "false",
         "release_changed": "false",
+        "frontend_changed": "false",
     }
 
 
@@ -261,6 +262,43 @@ def test_ci_change_classifier_treats_control_ui_as_runtime_and_release_surface(
     assert outputs["ci_changed"] == "false"
     assert outputs["dependency_changed"] == "false"
     assert outputs["release_changed"] == "true"
+    assert outputs["frontend_changed"] == "true"
+
+
+def test_ci_change_classifier_skips_frontend_gate_for_python_only_changes(
+    tmp_path: Path,
+) -> None:
+    """The frontend gate reads only frontend/; Python-side Control UI files,
+    dependency pins and other workflows must not pay for it."""
+    outputs = _classify_changed_files(
+        tmp_path,
+        [
+            "src/agentos/gateway/control_ui.py",
+            "scripts/build_control_ui.py",
+            "pyproject.toml",
+            "uv.lock",
+            "tests/test_scripts/test_build_control_ui.py",
+            ".github/workflows/docker-image.yml",
+        ],
+    )
+
+    assert outputs["docs_only"] == "false"
+    assert outputs["frontend_changed"] == "false"
+
+
+def test_ci_change_classifier_runs_frontend_gate_when_its_definition_changes(
+    tmp_path: Path,
+) -> None:
+    for path in (".github/workflows/ci.yml", ".github/scripts/classify-ci-changes.sh"):
+        outputs = _classify_changed_files(tmp_path, [path])
+        assert outputs["ci_changed"] == "true", path
+        assert outputs["frontend_changed"] == "true", path
+
+
+def test_ci_change_classifier_runs_frontend_gate_for_run_all(tmp_path: Path) -> None:
+    outputs = _classify_changed_files(tmp_path, [".ci/run-all"])
+
+    assert outputs["frontend_changed"] == "true"
 
 
 def test_ci_change_classifier_tracks_control_ui_release_contract_files(
@@ -285,6 +323,7 @@ def test_ci_change_classifier_tracks_control_ui_release_contract_files(
     assert outputs["ci_changed"] == "false"
     assert outputs["dependency_changed"] == "false"
     assert outputs["release_changed"] == "true"
+    assert outputs["frontend_changed"] == "false"
 
 
 def test_manual_workflows_reference_existing_test_files() -> None:
@@ -338,12 +377,36 @@ def test_ubuntu_quality_runs_frontend_source_gate_without_rebuilding() -> None:
     assert commands.count("npm --prefix frontend run check") == 1
     assert commands.count("python scripts/build_control_ui.py build") == 1
 
+    check = next(step for step in steps if step.get("run") == "npm --prefix frontend run check")
+    assert check["if"] == "needs.classify-changes.outputs.frontend_changed == 'true'"
+
+
+def test_ci_routes_expensive_jobs_by_event_and_change_class() -> None:
+    """Runner minutes go where they buy signal.
+
+    Windows tests run on pull requests and the daily main run, not on every
+    merge. actionlint runs only when a workflow or CI script changed, and the
+    gate accepts its skip otherwise. Scheduled and push runs on main must not
+    share a concurrency group, or a merge would cancel the daily run.
+    """
+    data = _workflow("ci.yml")
+    jobs = data["jobs"]
+    text = (WORKFLOW_DIR / "ci.yml").read_text(encoding="utf-8")
+
+    assert "github.event_name != 'push'" in jobs["windows-compat"]["if"]
+    assert jobs["workflow-lint"]["if"] == "needs.classify-changes.outputs.ci_changed == 'true'"
+    assert "github.event_name" in data["concurrency"]["group"]
+    assert '"${ci_changed}" == "true" && "${workflow_lint_result}" != "success"' in text
+    assert '"${EVENT_NAME}" != "push" && "${windows_result}" != "success"' in text
+    assert not (WORKFLOW_DIR / "frontend.yml").exists(), (
+        "frontend.yml duplicated ubuntu-quality's Control UI build and frontend check"
+    )
+
 
 def test_control_ui_is_built_before_runtime_and_release_validation() -> None:
     shared_build = "python scripts/build_control_ui.py build"
     workflows = {
         "ci.yml": 3,
-        "frontend.yml": 1,
         "pypi-publish.yml": 1,
         "wheelhouse-release.yml": 1,
         "webui-browser-smoke.yml": 1,

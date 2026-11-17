@@ -3,14 +3,20 @@ name: CI
 "on":
   pull_request:
   push:
-    branches: [main, dev]
+    branches: [main]
+  # Windows runs on pull requests, not on every merge to main. A daily run on
+  # main catches the rare Windows break that only appears once branches meet.
+  schedule:
+    - cron: "17 3 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # The event is part of the key so a merge to main never cancels the daily
+  # scheduled run (or the reverse): both share refs/heads/main.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -25,11 +31,15 @@ jobs:
       ci_changed: ${{ steps.classify.outputs.ci_changed }}
       dependency_changed: ${{ steps.classify.outputs.dependency_changed }}
       release_changed: ${{ steps.classify.outputs.release_changed }}
+      frontend_changed: ${{ steps.classify.outputs.frontend_changed }}
     steps:
+      # Full history keeps the PR merge base reachable; blob:none skips file
+      # contents, which a name-only diff does not read.
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          filter: blob:none
 
       - name: List changed files
         shell: bash
@@ -53,6 +63,8 @@ jobs:
 
   workflow-lint:
     name: Validate GitHub Actions workflows
+    needs: classify-changes
+    if: needs.classify-changes.outputs.ci_changed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -159,6 +171,7 @@ jobs:
         run: python scripts/build_control_ui.py build
 
       - name: Check frontend source
+        if: needs.classify-changes.outputs.frontend_changed == 'true'
         shell: bash
         run: npm --prefix frontend run check
 
@@ -174,9 +187,12 @@ jobs:
         shell: bash
         run: uv run mypy src/agentos --show-error-codes
 
+      # The suite is mostly I/O wait (about 1/2 CPU serially), so xdist
+      # workers cut wall time ~3x; tests/conftest.py gives each worker its own
+      # state dir. --durations keeps the slow tail visible in the log.
       - name: Test
         shell: bash
-        run: uv run pytest tests -q
+        run: uv run pytest tests -q -n auto --durations=25
 
       - name: Verify metric counter names unchanged
         shell: bash
@@ -204,7 +220,9 @@ jobs:
   windows-compat:
     name: Lint, test, and build (windows-latest, 3.12)
     needs: classify-changes
-    if: needs.classify-changes.outputs.docs_only != 'true'
+    if: >-
+      needs.classify-changes.outputs.docs_only != 'true'
+      && github.event_name != 'push'
     runs-on: windows-latest
     timeout-minutes: 30
 
@@ -303,7 +321,7 @@ jobs:
 
       - name: Test
         shell: bash
-        run: uv run pytest tests -q
+        run: uv run pytest tests -q -n auto
 
   release-packaging:
     name: Release packaging contracts
@@ -426,6 +444,8 @@ jobs:
     steps:
       - name: Check required CI results
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
 
@@ -440,22 +460,23 @@ jobs:
           ci_changed="${{ needs.classify-changes.outputs.ci_changed }}"
           dependency_changed="${{ needs.classify-changes.outputs.dependency_changed }}"
           release_changed="${{ needs.classify-changes.outputs.release_changed }}"
+          frontend_changed="${{ needs.classify-changes.outputs.frontend_changed }}"
 
           printf 'classify-changes: %s\n' "${classify_result}"
           printf 'workflow-lint: %s\n' "${workflow_lint_result}"
           printf 'ubuntu-quality: %s\n' "${ubuntu_result}"
           printf 'windows-compat: %s\n' "${windows_result}"
           printf 'release-packaging: %s\n' "${release_result}"
-          printf 'docs_only=%s runtime_changed=%s test_changed=%s ci_changed=%s dependency_changed=%s release_changed=%s\n' \
-            "${docs_only}" "${runtime_changed}" "${test_changed}" "${ci_changed}" "${dependency_changed}" "${release_changed}"
+          printf 'event=%s docs_only=%s runtime_changed=%s test_changed=%s ci_changed=%s dependency_changed=%s release_changed=%s frontend_changed=%s\n' \
+            "${EVENT_NAME}" "${docs_only}" "${runtime_changed}" "${test_changed}" "${ci_changed}" "${dependency_changed}" "${release_changed}" "${frontend_changed}"
 
           if [[ "${classify_result}" != "success" ]]; then
             echo "Classify changed files must succeed."
             exit 1
           fi
 
-          if [[ "${workflow_lint_result}" != "success" ]]; then
-            echo "Workflow lint must succeed."
+          if [[ "${ci_changed}" == "true" && "${workflow_lint_result}" != "success" ]]; then
+            echo "Workflow lint must succeed for workflow changes."
             exit 1
           fi
 
@@ -464,7 +485,7 @@ jobs:
             exit 1
           fi
 
-          if [[ "${docs_only}" != "true" && "${windows_result}" != "success" ]]; then
+          if [[ "${docs_only}" != "true" && "${EVENT_NAME}" != "push" && "${windows_result}" != "success" ]]; then
             echo "Windows compatibility tests must succeed for non-documentation changes."
             exit 1
           fi

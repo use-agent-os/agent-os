@@ -28,7 +28,7 @@ python scripts/build_control_ui.py build        # clean, build, license, verify 
 npm --prefix frontend run check                 # tsc, eslint, prettier, vitest
 uv run ruff check src tests                    # lint (E, F, I, N, W, UP; line-length 100)
 uv run mypy src/agentos --show-error-codes     # type check
-uv run pytest -q                               # full test suite (~490 test files)
+uv run pytest -q -n auto                       # full test suite, parallel (pytest-xdist)
 uv build --wheel                               # packaging must not break
 ```
 

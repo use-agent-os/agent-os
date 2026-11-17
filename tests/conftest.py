@@ -11,6 +11,17 @@ if str(_REPO_ROOT) not in sys.path:
 
 _PYTEST_STATE_ROOT = Path(tempfile.gettempdir()) / f"agentos-pytest-{os.getpid()}"
 
+# Under pytest-xdist every worker is its own process. The pid-based defaults
+# below already differ per worker, but CI exports one state/log directory for
+# the whole job, and workers sharing it race on the same SQLite files and the
+# per-state-dir config approval. Give each worker its own subdirectory.
+_XDIST_WORKER = os.environ.get("PYTEST_XDIST_WORKER", "")
+if _XDIST_WORKER:
+    for _name in ("AGENTOS_STATE_DIR", "AGENTOS_LOG_DIR", "AGENTOS_VAULT_KEK_DIR"):
+        _preset = os.environ.get(_name)
+        if _preset:
+            os.environ[_name] = str(Path(_preset) / _XDIST_WORKER)
+
 os.environ.setdefault("AGENTOS_STATE_DIR", str(_PYTEST_STATE_ROOT / "state"))
 os.environ.setdefault("AGENTOS_LOG_DIR", str(_PYTEST_STATE_ROOT / "logs"))
 # The vault seals unlock.key with a key kept outside the state root, by
