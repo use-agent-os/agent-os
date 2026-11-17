@@ -2594,6 +2594,53 @@ tr:focus-within .trd-row__actions {
 .trd-wman__locked:hover {
   background: color-mix(in srgb, var(--warn) 18%, transparent);
 }
+/* Bulk selection: a strip above the cards. Off, it is one quiet "Select" at
+   the end; on, it carries the tri-state "all" box, the count, and the one
+   destructive action, so nothing on the cards themselves changes meaning. */
+.trd-wman__bulk {
+  /* Pinned to the top of the scrolling body: with a dozen wallets the ticks
+     are made far down the list, and the action must still be in reach. */
+  position: sticky;
+  top: -4px;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-height: 28px;
+  margin: -4px -20px 0;
+  padding: 6px 20px;
+  background: var(--popover);
+  box-shadow: 0 0.5px 0 var(--hairline);
+}
+.trd-wman__act--end {
+  margin-left: auto;
+}
+.trd-wman__pickall {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--foreground);
+  cursor: pointer;
+}
+.trd-wman__count {
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+.trd-wman__pick {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--danger);
+  cursor: pointer;
+}
+.trd-wman__row[data-picked] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent);
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
+}
 .trd-wman__empty {
   display: flex;
   align-items: center;
@@ -2704,6 +2751,41 @@ tr:focus-within .trd-row__actions {
 }
 .trd-warn[data-tone='danger'] svg {
   color: var(--danger);
+}
+.trd-remove-many {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+}
+.trd-remove-many li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.trd-remove-many li + li {
+  border-top: 1px solid var(--hairline);
+}
+.trd-remove-many li[data-funded] {
+  color: var(--danger);
+}
+.trd-remove-many__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.trd-remove-many__addr {
+  font-size: 11px;
+  color: var(--muted-foreground);
 }
 .trd-remove__worth {
   display: flex;

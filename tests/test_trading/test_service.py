@@ -339,6 +339,36 @@ class TestTokensAndBalances:
             await service.set_token_hidden(BASE, NATIVE_ADDRESS, True)
         assert _events(service, "trading.changed")[-1]["reason"] == "token"
 
+    async def test_portfolio_judges_a_wallet_of_airdrops_in_batches(
+        self, funded_service: TradingService, base_chain: FakeChain, fake_prices: FakePrices
+    ) -> None:
+        """Seen live: ~370 unlisted tokens across 15 wallets fell due on the same
+        day and the first portfolio read judged them one DexScreener request at a
+        time, holding the desk on "loading" for three minutes."""
+        service = funded_service
+        wallet = service.test_wallet  # type: ignore[attr-defined]
+        junk = [f"0x9999{i:036x}" for i in range(1, 41)]
+        for i, token in enumerate(junk):
+            base_chain.tokens[token] = (f"J{i}", "Visit site to claim", 18)
+            base_chain.set_erc20(token, wallet, 10**18)
+            base_chain.add_transfer(token=token, sender=OTHER, recipient=wallet, amount=10**18)
+        await service.sync_all()
+        assert service.ledger.hidden_tokens(8453) >= set(junk)
+        for token in junk:  # all due again, as on the next day
+            service.ledger.set_token_hidden(8453, token, True, by="auto", classified_at=0.0)
+
+        before = len(fake_prices.requests)
+        portfolio = await service.portfolio()
+        dex = [
+            r
+            for r in fake_prices.requests[before:]
+            if r.url.host == "api.dexscreener.com" and "/tokens/v1/base/" in r.url.path
+        ]
+        # 40 junk tokens and the priced ones: two batches to judge, one to price.
+        assert len(dex) <= 4, len(dex)
+        assert portfolio["hiddenCount"] == len(junk)
+        assert service.ledger.hidden_tokens(8453) >= set(junk)
+
     async def test_unreachable_node_marks_the_chain_failed(
         self, funded_service: TradingService, base_chain: FakeChain
     ) -> None:

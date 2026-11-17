@@ -858,6 +858,20 @@ export const trading = {
   'trading.sheet.export.clipboard': 'Copied. The clipboard clears in 60 s.',
   'trading.sheet.export.close': 'Close',
   'trading.sheet.manage.lockedAction': 'Unlock the vault first',
+  'trading.sheet.manage.select': 'Select',
+  'trading.sheet.manage.selectAll': 'Select all',
+  'trading.sheet.manage.selected': '{n} selected',
+  'trading.sheet.manage.done': 'Done',
+  'trading.sheet.manage.pick': 'Select {wallet}',
+  'trading.sheet.manage.removeSelected': 'Remove selected',
+  'trading.sheet.removeMany.title': 'Remove {n} wallets',
+  'trading.sheet.removeMany.body':
+    'Their keystores are deleted from this Mac. Export any you may need again first.',
+  'trading.sheet.removeMany.worth': 'These wallets hold',
+  'trading.sheet.removeMany.funded':
+    '{n} of them still hold funds. Removing the keys here does not move them: without an export they are gone for good.',
+  'trading.sheet.removeMany.cta': 'Remove {n} wallets',
+  'trading.sheet.removeMany.done': '{n} wallets removed',
   'trading.sheet.remove.worth': 'This wallet holds',
   'trading.sheet.remove.funded':
     'It still holds funds. Removing the key here does not move them: without an export they are gone for good.',
@@ -1232,6 +1246,7 @@ export const trading = {
   'trading.touchId.reason.exportKeystore': 'export the keystore of {wallet}',
   'trading.touchId.reason.exportBatch': 'download the keys of the wallets just created',
   'trading.touchId.reason.remove': 'remove the wallet {wallet}',
+  'trading.touchId.reason.removeBatch': 'remove {n} wallets',
   'trading.touchId.reason.test': 'test Touch ID',
   'trading.touchId.prompting': 'Touch ID…',
   'trading.touchId.cancelled': 'Approval cancelled — Touch ID was dismissed',

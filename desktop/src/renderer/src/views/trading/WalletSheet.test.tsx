@@ -308,6 +308,35 @@ describe('WalletSheet · Touch ID', () => {
   })
 })
 
+describe('WalletSheet · Touch ID · bulk removal', () => {
+  beforeEach(() => {
+    resetBiometricGateForTests()
+    useSettings.setState({
+      loaded: true,
+      settings: { ...structuredClone(DEFAULT_SETTINGS), security: { touchId: 'high' } },
+    })
+    return () => {
+      useSettings.setState({ settings: structuredClone(DEFAULT_SETTINGS) })
+    }
+  })
+
+  it('asks once for the whole batch, and a cancel sends nothing', async () => {
+    const authenticate = vi
+      .spyOn(desktopApi().app, 'authenticate')
+      .mockResolvedValue({ ok: false, reason: 'cancelled' } satisfies AuthResult)
+    const second = { ...WALLET, address: '0x2222222222222222222222222222222222222222' }
+    renderDesk(
+      <WalletSheet mode={{ kind: 'removeMany', wallets: [WALLET, second] }} onClose={vi.fn()} />,
+    )
+    fireEvent.change(screen.getByLabelText('Vault password'), { target: { value: 'pw' } })
+    fireEvent.click(screen.getByTestId('remove-many-submit'))
+    await waitFor(() => expect(authenticate).toHaveBeenCalledWith('remove 2 wallets'))
+    expect(authenticate).toHaveBeenCalledTimes(1)
+    expect(rpcCall).not.toHaveBeenCalledWith('wallet.removeBatch', expect.anything())
+    authenticate.mockRestore()
+  })
+})
+
 /* The desk's rails are 300–520 px wide and only ever showed a wallet's name,
    so this sheet is where the address and everything that acts on a wallet
    lives. The address must be the whole address: shortening it here would
@@ -482,5 +511,71 @@ describe('WalletSheet · manage', () => {
     await screen.findAllByTestId('manage-address')
     // Closing the sub-flow must not close the sheet the caller opened.
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('ticks several wallets and removes them in one batch, with one password', async () => {
+    mockVault()
+    const base = rpcCall.getMockImplementation()!
+    rpcCall.mockImplementation(async (method: string, params: unknown) =>
+      method === 'wallet.removeBatch'
+        ? { removed: [WALLET.address, SECOND.address] }
+        : base(method, params),
+    )
+    const onClose = vi.fn()
+    renderDesk(<WalletSheet mode={{ kind: 'manage' }} onClose={onClose} />)
+    await screen.findAllByTestId('manage-address')
+    expect(screen.queryAllByTestId('manage-pick')).toHaveLength(0)
+
+    fireEvent.click(screen.getByTestId('manage-select'))
+    const boxes = screen.getAllByTestId('manage-pick')
+    expect(boxes).toHaveLength(2)
+    expect(screen.getByTestId('manage-remove-selected')).toBeDisabled()
+    fireEvent.click(screen.getByLabelText(`Select ${SECOND.label}`))
+    expect(screen.getByTestId('manage-picked-count')).toHaveTextContent('1 selected')
+    fireEvent.click(screen.getByTestId('manage-pick-all'))
+    expect(screen.getByTestId('manage-picked-count')).toHaveTextContent('2 selected')
+
+    fireEvent.click(screen.getByTestId('manage-remove-selected'))
+    expect(screen.getByText('Remove 2 wallets', { selector: 'h2' })).toBeInTheDocument()
+    expect(screen.getByTestId('remove-many-list')).toHaveTextContent(SECOND.label)
+    const submit = screen.getByTestId('remove-many-submit')
+    expect(submit).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Vault password'), { target: { value: 'pw' } })
+    fireEvent.click(submit)
+    await waitFor(() =>
+      expect(rpcCall).toHaveBeenCalledWith('wallet.removeBatch', {
+        addresses: [WALLET.address, SECOND.address],
+        password: 'pw',
+      }),
+    )
+    expect(rpcCall).not.toHaveBeenCalledWith('wallet.remove', expect.anything())
+    // Back in the manager, out of selection mode; the caller's sheet stays open.
+    await screen.findByTestId('manage-select')
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('keeps the selection when the bulk removal is cancelled, and Done drops it', async () => {
+    mockVault()
+    renderDesk(<WalletSheet mode={{ kind: 'manage' }} onClose={vi.fn()} />)
+    await screen.findAllByTestId('manage-address')
+    fireEvent.click(screen.getByTestId('manage-select'))
+    fireEvent.click(screen.getByLabelText(`Select ${SECOND.label}`))
+    fireEvent.click(screen.getByTestId('manage-remove-selected'))
+    fireEvent.click(screen.getByText('Cancel'))
+    await screen.findAllByTestId('manage-address')
+    expect(screen.getByTestId('manage-picked-count')).toHaveTextContent('1 selected')
+    expect(screen.getByLabelText(`Select ${SECOND.label}`)).toBeChecked()
+    fireEvent.click(screen.getByTestId('manage-select-done'))
+    expect(screen.queryAllByTestId('manage-pick')).toHaveLength(0)
+    expect(rpcCall).not.toHaveBeenCalledWith('wallet.removeBatch', expect.anything())
+  })
+
+  it('will not bulk-remove while the vault is locked', async () => {
+    mockVault(false)
+    renderDesk(<WalletSheet mode={{ kind: 'manage' }} onClose={vi.fn()} />)
+    await screen.findAllByTestId('manage-address')
+    fireEvent.click(screen.getByTestId('manage-select'))
+    fireEvent.click(screen.getByTestId('manage-pick-all'))
+    expect(screen.getByTestId('manage-remove-selected')).toBeDisabled()
   })
 })

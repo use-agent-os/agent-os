@@ -7,6 +7,7 @@ import {
   ExternalLink,
   Fingerprint,
   KeyRound,
+  ListChecks,
   Lock,
   Pencil,
   Plus,
@@ -53,6 +54,7 @@ export type WalletSheetMode =
   | { kind: 'rename'; wallet: Wallet }
   | { kind: 'export'; wallet: Wallet }
   | { kind: 'remove'; wallet: Wallet }
+  | { kind: 'removeMany'; wallets: Wallet[] }
   | { kind: 'receive'; wallet: Wallet }
 
 /**
@@ -67,11 +69,16 @@ export type WalletSheetMode =
  */
 export function WalletSheet({ mode, onClose }: { mode: WalletSheetMode; onClose: () => void }) {
   const [sub, setSub] = useState<WalletSheetMode | null>(null)
+  // The manager's selection (lowercase addresses), or null when it is not
+  // selecting. Held here, not in the manager, so it survives a trip to the
+  // bulk-remove sheet and back on Cancel.
+  const [picked, setPicked] = useState<ReadonlySet<string> | null>(null)
   const [seenMode, setSeenMode] = useState(mode)
   // The caller moved the sheet itself: whatever the hub had open is stale.
   if (seenMode !== mode) {
     setSeenMode(mode)
     if (sub) setSub(null)
+    if (picked) setPicked(null)
   }
   const active = sub ?? mode
   const close = sub ? () => setSub(null) : onClose
@@ -82,7 +89,7 @@ export function WalletSheet({ mode, onClose }: { mode: WalletSheetMode; onClose:
     case 'unlock':
       return <UnlockSheet onClose={close} />
     case 'manage':
-      return <ManageSheet onClose={close} onOpen={setSub} />
+      return <ManageSheet onClose={close} onOpen={setSub} picked={picked} onPick={setPicked} />
     case 'create':
       return <CreateSheet onClose={close} />
     case 'import':
@@ -93,6 +100,17 @@ export function WalletSheet({ mode, onClose }: { mode: WalletSheetMode; onClose:
       return <ExportSheet wallet={active.wallet} onClose={close} />
     case 'remove':
       return <RemoveSheet wallet={active.wallet} onClose={close} />
+    case 'removeMany':
+      return (
+        <RemoveManySheet
+          wallets={active.wallets}
+          onClose={close}
+          onRemoved={() => {
+            setPicked(null)
+            close()
+          }}
+        />
+      )
     case 'receive':
       return <ReceiveSheet wallet={active.wallet} onClose={close} />
   }
@@ -167,9 +185,14 @@ function ReceiveSheet({ wallet, onClose }: { wallet: Wallet; onClose: () => void
 function ManageSheet({
   onClose,
   onOpen,
+  picked,
+  onPick,
 }: {
   onClose: () => void
   onOpen: (m: WalletSheetMode) => void
+  /** Lowercase addresses ticked for a bulk removal; null when not selecting. */
+  picked: ReadonlySet<string> | null
+  onPick: (next: ReadonlySet<string> | null) => void
 }) {
   const { wallets, isPending } = useWallets()
   const portfolio = usePortfolio(undefined, true)
@@ -187,6 +210,22 @@ function ManageSheet({
   }, [portfolio.data])
 
   const ordered = useMemo(() => activeFirst(wallets), [wallets])
+  // Only wallets still in the vault count: a removal elsewhere (the rail, the
+  // CLI) must not leave a ghost address in the batch.
+  const selected = useMemo(
+    () => (picked ? ordered.filter((w) => picked.has(w.address.toLowerCase())) : []),
+    [ordered, picked],
+  )
+  const selecting = picked !== null
+  const allPicked = selected.length > 0 && selected.length === ordered.length
+
+  function toggle(wallet: Wallet) {
+    const key = wallet.address.toLowerCase()
+    const next = new Set(selected.map((w) => w.address.toLowerCase()))
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    onPick(next)
+  }
 
   // Activating a wallet moves its card to the top, out of a view that is
   // usually scrolled down to it: follow it, or the press looks like it did
@@ -232,6 +271,64 @@ function ManageSheet({
         </button>
       ) : null}
 
+      {!isPending && ordered.length > 1 ? (
+        <div className="trd-wman__bulk" data-testid="manage-bulk">
+          {selecting ? (
+            <>
+              <label className="trd-wman__pickall">
+                <input
+                  type="checkbox"
+                  className="trd-wman__pick"
+                  checked={allPicked}
+                  ref={(el) => {
+                    if (el) el.indeterminate = selected.length > 0 && !allPicked
+                  }}
+                  onChange={() =>
+                    onPick(
+                      allPicked ? new Set() : new Set(ordered.map((w) => w.address.toLowerCase())),
+                    )
+                  }
+                  data-testid="manage-pick-all"
+                />
+                {t('trading.sheet.manage.selectAll')}
+              </label>
+              <span className="trd-wman__count trd-num" data-testid="manage-picked-count">
+                {t('trading.sheet.manage.selected').replace('{n}', String(selected.length))}
+              </span>
+              <button
+                type="button"
+                className="trd-wman__act trd-wman__act--danger"
+                disabled={locked || selected.length === 0}
+                title={locked ? t('trading.sheet.manage.lockedAction') : undefined}
+                onClick={() => onOpen({ kind: 'removeMany', wallets: selected })}
+                data-testid="manage-remove-selected"
+              >
+                <Trash2 className="size-3.5" strokeWidth={1.75} aria-hidden />
+                {t('trading.sheet.manage.removeSelected')}
+              </button>
+              <button
+                type="button"
+                className="trd-wman__act"
+                onClick={() => onPick(null)}
+                data-testid="manage-select-done"
+              >
+                {t('trading.sheet.manage.done')}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="trd-wman__act trd-wman__act--end"
+              onClick={() => onPick(new Set())}
+              data-testid="manage-select"
+            >
+              <ListChecks className="size-3.5" strokeWidth={1.75} aria-hidden />
+              {t('trading.sheet.manage.select')}
+            </button>
+          )}
+        </div>
+      ) : null}
+
       {isPending ? (
         <div className="trd-wman">
           {[0, 1].map((i) => (
@@ -256,6 +353,8 @@ function ManageSheet({
               chains={chains}
               locked={locked}
               onOpen={onOpen}
+              picked={picked ? picked.has(w.address.toLowerCase()) : null}
+              onPick={() => toggle(w)}
             />
           ))}
         </div>
@@ -270,6 +369,8 @@ function ManageRow({
   chains,
   locked,
   onOpen,
+  picked,
+  onPick,
 }: {
   wallet: Wallet
   totals: Totals | undefined
@@ -277,6 +378,9 @@ function ManageRow({
   /** Export and Remove need the vault open; the buttons say so rather than fail. */
   locked: boolean
   onOpen: (m: WalletSheetMode) => void
+  /** Ticked for a bulk removal; null when the manager is not selecting. */
+  picked: boolean | null
+  onPick: () => void
 }) {
   const [copied, setCopied] = useState(false)
   const write = useWalletMutation()
@@ -295,9 +399,23 @@ function ManageRow({
   }
 
   return (
-    <section className="trd-wman__row" data-primary={wallet.primary || undefined}>
+    <section
+      className="trd-wman__row"
+      data-primary={wallet.primary || undefined}
+      data-picked={picked || undefined}
+    >
       <header className="trd-wman__top">
         <span className="trd-wman__name">
+          {picked !== null ? (
+            <input
+              type="checkbox"
+              className="trd-wman__pick"
+              checked={picked}
+              onChange={onPick}
+              aria-label={t('trading.sheet.manage.pick').replace('{wallet}', label)}
+              data-testid="manage-pick"
+            />
+          ) : null}
           {wallet.primary ? (
             <CircleCheck
               className="trd-wman__active size-3.5"
@@ -1503,6 +1621,127 @@ function RemoveSheet({ wallet, onClose }: { wallet: Wallet; onClose: () => void 
         <span>{t('trading.sheet.remove.worth')}</span>
         <b>
           <Money value={worth} />
+        </b>
+      </p>
+      <Field id={id} label={t('trading.sheet.remove.password')}>
+        <input
+          id={id}
+          className="mac-input"
+          type="password"
+          autoComplete="current-password"
+          autoFocus
+          value={pw}
+          onChange={(e) => setPw(e.target.value)}
+        />
+      </Field>
+    </Sheet>
+  )
+}
+
+/**
+ * Remove every wallet the manager has ticked, under one password. The engine
+ * takes the list all or none, so a wrong password or a wallet removed
+ * meanwhile leaves every one of them in place.
+ */
+function RemoveManySheet({
+  wallets,
+  onClose,
+  onRemoved,
+}: {
+  wallets: Wallet[]
+  onClose: () => void
+  onRemoved: () => void
+}) {
+  const id = useId()
+  const [pw, setPw] = useState('')
+  const m = useWalletMutation<{ removed: string[] }>()
+  const prompting = useTouchIdPrompt((s) => s.key === 'wallet:remove-batch')
+  const portfolio = usePortfolio(undefined, true)
+  const worthOf = useMemo(() => {
+    const out = new Map<string, number | null>()
+    for (const row of portfolio.data?.wallets ?? [])
+      out.set(row.wallet.address.toLowerCase(), row.totals?.valueUsd ?? null)
+    return out
+  }, [portfolio.data])
+  const known = portfolio.data !== undefined
+  const worths = wallets.map((w) => worthOf.get(w.address.toLowerCase()) ?? null)
+  const total = known ? worths.reduce<number>((sum, v) => sum + (v ?? 0), 0) : null
+  const fundedCount = worths.filter((v) => v !== null && v >= 0.01).length
+  const n = String(wallets.length)
+
+  return (
+    <Sheet
+      title={t('trading.sheet.removeMany.title').replace('{n}', n)}
+      onClose={onClose}
+      role="alertdialog"
+      foot={
+        <>
+          <Button onClick={onClose} disabled={m.isPending}>
+            {t('trading.sheet.cancel')}
+          </Button>
+          <Button
+            variant="danger"
+            disabled={!pw || m.isPending || wallets.length === 0}
+            data-testid="remove-many-submit"
+            onClick={() =>
+              m.mutate(
+                {
+                  method: 'wallet.removeBatch',
+                  params: { addresses: wallets.map((w) => w.address), password: pw },
+                },
+                {
+                  onSuccess: (res) => {
+                    const count = res?.removed?.length ?? wallets.length
+                    toast.success(t('trading.sheet.removeMany.done').replace('{n}', String(count)))
+                    onRemoved()
+                  },
+                  onError: (err) => {
+                    if (isTouchIdDeclined(err)) return
+                    toast.error(`${t('trading.sheet.error')}: ${errorText(err)}`)
+                  },
+                },
+              )
+            }
+            aria-busy={prompting || undefined}
+          >
+            {prompting
+              ? t('trading.touchId.prompting')
+              : m.isPending
+                ? t('trading.sheet.working')
+                : t('trading.sheet.removeMany.cta').replace('{n}', n)}
+          </Button>
+        </>
+      }
+    >
+      <div className="trd-warn" role="alert" data-tone={fundedCount ? 'danger' : undefined}>
+        <TriangleAlert className="size-3.5" strokeWidth={2} aria-hidden />
+        <span>
+          {t('trading.sheet.removeMany.body')}
+          {fundedCount
+            ? ` ${t('trading.sheet.removeMany.funded').replace('{n}', String(fundedCount))}`
+            : ''}
+        </span>
+      </div>
+      <ul className="trd-remove-many" data-testid="remove-many-list">
+        {wallets.map((w, i) => {
+          const worth = worths[i] ?? null
+          return (
+            <li key={w.address} data-funded={(worth !== null && worth >= 0.01) || undefined}>
+              <span className="trd-remove-many__name">{walletLabel(w)}</span>
+              <span className="trd-mono trd-remove-many__addr">{shortAddress(w.address)}</span>
+              <Money value={known ? worth : null} />
+            </li>
+          )
+        })}
+      </ul>
+      <p
+        className="trd-remove__worth"
+        data-testid="remove-many-worth"
+        data-funded={fundedCount > 0 || undefined}
+      >
+        <span>{t('trading.sheet.removeMany.worth')}</span>
+        <b>
+          <Money value={total} />
         </b>
       </p>
       <Field id={id} label={t('trading.sheet.remove.password')}>

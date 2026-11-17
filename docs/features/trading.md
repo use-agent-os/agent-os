@@ -32,6 +32,10 @@ gateway RPC surface (`wallet.*`, `trading.*`).
   `wallet.importBatch` imports up to 100 raw private keys (one per row in
   the app) and answers each row by its index — `imported`, `exists`,
   `invalid` (with why) or `skipped` — without echoing a key back.
+  `wallet.removeBatch` (desktop: *Manage wallets › Select*) removes up to
+  100 wallets under one vault-password check, all or none: an address the
+  vault does not hold refuses the whole list. Each removed wallet's DCA
+  mandates and triggers end with it, as with `wallet.remove`.
 - **Balances and portfolio** — native ETH and every ERC-20 the wallet
   holds, priced through DexScreener (CoinGecko as fallback), with cost
   basis, realized (FIFO) and unrealized PnL, 24h change, gas spent, and
