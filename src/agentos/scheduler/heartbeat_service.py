@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from agentos import run_kinds
 from agentos.scheduler.delivery import infer_delivery
 from agentos.scheduler.types import DeliveryMode
 
@@ -219,7 +220,7 @@ class HeartbeatService:
             input_mode="system_event",
             persist_input=False,
             history_has_persisted_user=False,
-            run_kind="heartbeat",
+            run_kind=run_kinds.HEARTBEAT,
             heartbeat_ack_max_chars=heartbeat_ack_max_chars,
             bootstrap_context_mode=("heartbeat_light" if heartbeat_light_context else None),
         ):

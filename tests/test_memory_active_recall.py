@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from agentos import run_kinds
 from agentos.engine.runtime import TurnRunner
 from agentos.engine.turn_runner.pre_provider_io import RECALLED_MEMORY_KEY, RecallBudget
 from agentos.gateway.config import MemoryConfig, MemoryRecallConfig
@@ -180,6 +181,22 @@ def test_session_policy_allows_interactive_private_turns() -> None:
 )
 def test_session_policy_skips(overrides: dict[str, Any], reason: str) -> None:
     assert _skip(**overrides) == reason
+
+
+@pytest.mark.parametrize("run_kind", sorted(run_kinds.INTERACTIVE_RUN_KINDS))
+def test_session_policy_allows_every_interactive_run_kind(run_kind: str) -> None:
+    assert _skip(run_kind=run_kind) is None
+
+
+@pytest.mark.parametrize("run_kind", sorted(run_kinds.BACKGROUND_RUN_KINDS))
+def test_session_policy_skips_every_background_run_kind(run_kind: str) -> None:
+    assert _skip(run_kind=run_kind) == f"run_kind:{run_kind}"
+
+
+def test_run_kind_sets_are_disjoint_and_cover_the_gateway_labels() -> None:
+    assert not run_kinds.INTERACTIVE_RUN_KINDS & run_kinds.BACKGROUND_RUN_KINDS
+    assert run_kinds.SESSION_TURN in run_kinds.INTERACTIVE_RUN_KINDS
+    assert run_kinds.CHANNEL_TURN in run_kinds.INTERACTIVE_RUN_KINDS
 
 
 def test_pause_state_is_per_session() -> None:

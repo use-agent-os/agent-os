@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, Final, SupportsInt, TypeGuard, cast
 
 import structlog
 
+from agentos import run_kinds
 from agentos.artifacts import artifact_marker
 from agentos.attachment_refs import (
     is_attachment_ref,
@@ -966,7 +967,7 @@ def _normalize_heartbeat_text(
     if stripped in _SENTINELS:
         log.debug("turn_runner.sentinel_suppressed", sentinel=stripped)
         return ""
-    if run_kind != "heartbeat":
+    if run_kind != run_kinds.HEARTBEAT:
         return text
 
     def _suppressed(payload: str) -> bool:
@@ -3553,7 +3554,7 @@ class TurnRunner:
                 tool_context=tool_context,
                 agent_id=agent_id,
                 input_mode="system_event",
-                run_kind="memory_nudge",
+                run_kind=run_kinds.MEMORY_NUDGE,
                 no_memory_capture=True,
                 persist_input=False,
                 max_iterations=int(getattr(nudge_cfg, "max_iterations", 6)),

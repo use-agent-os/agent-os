@@ -12,6 +12,7 @@ from typing import Any
 
 import structlog
 
+from agentos import run_kinds
 from agentos.engine.stream_wrappers import wrap_stream
 from agentos.scheduler.delivery import (
     DeliveryChain,
@@ -367,7 +368,7 @@ def make_agent_run_handler(
                     route_envelope,
                     task,
                     mode="followup",
-                    run_kind="cron_turn",
+                    run_kind=run_kinds.CRON_TURN,
                 )
                 try:
                     record = await task_runtime.wait(handle.task_id, timeout=job.timeout_seconds)
@@ -422,7 +423,7 @@ def make_agent_run_handler(
                         tool_context=tool_context,
                         agent_id=agent_id,
                         timeout=job.timeout_seconds,
-                        run_kind="cron_turn",
+                        run_kind=run_kinds.CRON_TURN,
                         input_provenance={"kind": "cron_job", "job_id": job.id},
                     ),
                     idle_timeout=None,

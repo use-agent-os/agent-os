@@ -10,6 +10,7 @@ from typing import Any
 
 import structlog
 
+from agentos import run_kinds
 from agentos.gateway.session_lifecycle import session_status_for_task_status
 from agentos.gateway.subagent_wakes import Report, get_wake_outbox, wake_idempotency_key
 from agentos.gateway.task_runtime import SubagentCompletionEvent
@@ -206,7 +207,7 @@ async def announce_subagent_completion(
 #: ``details`` key marking a child already announced after a restart, so a
 #: second restart inside the recovery window does not wake its parent again.
 RESTART_ANNOUNCED_KEY = "restart_announced"
-_RESTART_CHILD_RUN_KINDS = frozenset({"subagent", "acp"})
+_RESTART_CHILD_RUN_KINDS = run_kinds.CHILD_RUN_KINDS
 
 
 async def announce_restart_abandoned_children(
@@ -970,7 +971,9 @@ async def _list_latest_task_rows_for_sessions(
 def _select_latest_task_row(rows: list[Any]) -> Any | None:
     if not rows:
         return None
-    subagent_rows = [row for row in rows if _row_value(row, "run_kind") in ("subagent", "acp")]
+    subagent_rows = [
+        row for row in rows if _row_value(row, "run_kind") in run_kinds.CHILD_RUN_KINDS
+    ]
     terminal_subagent_rows = [
         row for row in subagent_rows if _task_status_value(_row_value(row, "status"))
     ]

@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
+from agentos import run_kinds
 from agentos.agents.scope import resolve_agent_model
 from agentos.artifacts import artifact_payload
 from agentos.ask_user import format_questions_as_text, questions_from_tool_result
@@ -628,7 +629,7 @@ async def run_channel_dispatch(
                         msg.content,
                         attachments=ingested.attachments,
                         mode="followup",
-                        run_kind="channel_turn",
+                        run_kind=run_kinds.CHANNEL_TURN,
                         semantic_message=raw_content,
                         stream_event_sink=stream_relay.emit if stream_relay is not None else None,
                     )
@@ -1003,7 +1004,7 @@ async def _dispatch_combined_message_after_debounce(channel: Any, combined: Any,
                 apply_policy = getattr(task_runtime, "apply_overflow_policy", None)
                 if callable(apply_policy):
                     await apply_policy(session_key, policy=channel_overflow_policy)
-            handle = await start_turn_via_runtime(task_runtime, route_envelope, msg.content, attachments=ingested.attachments, mode="followup", run_kind="channel_turn", semantic_message=raw_content, stream_event_sink=stream_relay.emit if stream_relay is not None else None)  # noqa: E501
+            handle = await start_turn_via_runtime(task_runtime, route_envelope, msg.content, attachments=ingested.attachments, mode="followup", run_kind=run_kinds.CHANNEL_TURN, semantic_message=raw_content, stream_event_sink=stream_relay.emit if stream_relay is not None else None)  # noqa: E501
             _persisted, persisted_content = await _append_channel_user_message(
                 session_manager=session_manager,
                 session_key=session_key,
@@ -1084,7 +1085,9 @@ def _schedule_channel_session_title(
 
         timeout = float(getattr(sessions_cfg, "auto_title_timeout_seconds", 30.0) or 30.0)
         titler = titler_for(session_manager, timeout=timeout, hint=fast_model_hint(config))
-        titler.maybe_schedule(session_key, message, run_kind="channel_turn", broadcast=broadcast)
+        titler.maybe_schedule(
+            session_key, message, run_kind=run_kinds.CHANNEL_TURN, broadcast=broadcast
+        )
     except Exception:
         log.exception("channel_dispatch.session_title_schedule_failed", session_key=session_key)
 

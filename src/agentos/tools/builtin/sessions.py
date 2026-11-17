@@ -10,6 +10,7 @@ from typing import Any
 
 import structlog
 
+from agentos import run_kinds
 from agentos.agents.limits import MAX_SPAWN_DEPTH
 from agentos.gateway.routing import build_subagent_route_envelope
 from agentos.result_budget import register_persisted_result_budget
@@ -725,7 +726,7 @@ async def sessions_spawn(
             envelope,
             grounded_task,
             mode="followup",
-            run_kind="subagent",
+            run_kind=run_kinds.SUBAGENT,
         )
         return json.dumps(
             {

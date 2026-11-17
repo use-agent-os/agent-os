@@ -30,6 +30,7 @@ from typing import Any, cast
 
 import structlog
 
+from agentos import run_kinds
 from agentos.engine.outcome import completed_outcome, outcome_from_error
 from agentos.engine.steering import SteeringMessage, bind_steering
 from agentos.engine.turn_progress import TurnStopSignal, bind_turn_stop_signal
@@ -106,7 +107,7 @@ TERMINAL_STATUSES = frozenset(
 #: Run kinds that are children of another session: they share the subagent
 #: reserved-slot budget and announce completion to the parent. ``acp`` is a
 #: coding-harness child spawned by ``sessions_spawn(runtime="acp")``.
-_CHILD_RUN_KINDS = frozenset({"subagent", "acp"})
+_CHILD_RUN_KINDS = run_kinds.CHILD_RUN_KINDS
 
 #: ``cancel_source`` of a task the gateway's own shutdown cancels.
 SHUTDOWN_CANCEL_SOURCE = "gateway_shutdown"

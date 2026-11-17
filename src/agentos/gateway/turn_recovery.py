@@ -50,6 +50,7 @@ from typing import Any, Final, Literal
 
 import structlog
 
+from agentos import run_kinds
 from agentos.engine.turn_progress import TurnTail, classify_transcript_tail
 from agentos.gateway.task_runtime import (
     DEFERRED_USER_TEXT_KEY,
@@ -86,9 +87,7 @@ _NEWEST_TASKS_WINDOW = 50
 #: Sources whose turns a person is waiting on. Cron and system work is not
 #: resumed; their own schedulers re-run what matters.
 _USER_FACING_SOURCES: Final = frozenset({"web", "cli", "channel"})
-_EXCLUDED_RUN_KINDS: Final = frozenset(
-    {"acp", "subagent", "cron_turn", "heartbeat", "memory_nudge"}
-)
+_EXCLUDED_RUN_KINDS: Final = run_kinds.BACKGROUND_RUN_KINDS
 
 #: Tools a resumed turn may call when the interrupted turn left calls with an
 #: unknown outcome. An allowlist, so a tool added later is never granted by

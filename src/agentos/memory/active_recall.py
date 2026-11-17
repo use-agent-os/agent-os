@@ -44,6 +44,8 @@ from typing import Any, Literal
 import structlog
 
 from agentos.memory.types import MemorySearchOpts, MemorySearchResult, MemorySource, SearchIntent
+from agentos.run_kinds import DEFAULT as DEFAULT_RUN_KIND
+from agentos.run_kinds import INTERACTIVE_RUN_KINDS
 
 log = structlog.get_logger(__name__)
 
@@ -64,8 +66,6 @@ DEEP_CONTEXT_LINES = 2
 #: Curated root files are already in the system prompt as a snapshot.
 _CURATED_ROOT_FILES = frozenset({"memory.md", "user.md"})
 
-#: Run kinds whose turns come from a person typing in a conversation.
-_INTERACTIVE_RUN_KINDS = frozenset({"default", "channel_turn"})
 #: Prompt modes that deliberately run without private memory.
 _NON_INTERACTIVE_BOOTSTRAP_MODES = frozenset(
     {"stateless", "stateless_keep_project_rules", "heartbeat_light", "unattended"}
@@ -220,7 +220,7 @@ def recall_skip_reason(
     enabled: bool,
     session_key: str | None,
     input_mode: str = "user",
-    run_kind: str = "default",
+    run_kind: str = DEFAULT_RUN_KIND,
     input_provenance: dict[str, Any] | None = None,
     bootstrap_context_mode: str | None = None,
     subagent_caller: bool = False,
@@ -241,7 +241,9 @@ def recall_skip_reason(
         return "paused"
     if input_mode != "user":
         return f"input_mode:{input_mode}"
-    if run_kind not in _INTERACTIVE_RUN_KINDS:
+    # The run kind only rules out machine-started turns (agentos.run_kinds);
+    # a delivery into an interactive session is caught by its provenance.
+    if run_kind not in INTERACTIVE_RUN_KINDS:
         return f"run_kind:{run_kind}"
     provenance_kind = str((input_provenance or {}).get("kind") or "")
     if provenance_kind in _NON_USER_PROVENANCE:
