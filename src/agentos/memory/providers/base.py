@@ -233,10 +233,17 @@ class MemoryProvider(ABC):
 
         ``action``: ``'add'``, ``'replace'``, or ``'remove'``.
         ``target``: ``'memory'`` or ``'user'``.
-        ``content``: the entry content.
-        ``metadata``: structured provenance for the write, when available
-          (common keys: ``write_origin``, ``execution_context``,
-          ``session_id``, ``parent_session_id``, ``platform``, ``tool_name``).
+        ``content``: the new entry text (``''`` for ``'remove'``).
+        ``metadata``: structured provenance for the write, when available.
+          For ``'replace'`` and ``'remove'`` it carries ``old_entry`` (the
+          full text of the entry that was replaced or removed) and
+          ``old_text`` (the substring the caller matched it with). Other
+          common keys: ``write_origin``, ``execution_context``,
+          ``session_id``, ``parent_session_id``, ``platform``, ``tool_name``.
 
-        Use to mirror curated memory writes to your backend. Default no-op.
+        Use to mirror curated memory writes to your backend. A provider that
+        keeps its own copy of curated entries should drop the copy of
+        ``old_entry`` on replace/remove so it does not keep recalling an
+        edited or deleted fact. Called on the manager's background worker;
+        failures are logged and never reach the tool call. Default no-op.
         """

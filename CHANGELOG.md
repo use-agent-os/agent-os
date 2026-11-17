@@ -19,6 +19,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   file each had their own lock and could interleave a read-modify-write and
   lose an entry. If the real file's directory cannot hold a lock file, the
   lock falls back to the old location.
+- The external memory provider no longer keeps facts the curated `memory` tool
+  has replaced or removed. Only adds used to be mirrored, so mem0 went on
+  recalling edited and deleted entries. Replace and remove are now mirrored
+  too, with the full text of the old entry. mem0 stores each curated entry
+  verbatim, tagged with a hash of its text, and on replace or remove deletes
+  only the records carrying that tag. Entries mirrored by earlier versions
+  have no tag and are left in place; see `docs/features/memory.md`.
 
 ## [2026.11.17.post2] - 2026-11-17
 

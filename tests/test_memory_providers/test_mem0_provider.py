@@ -21,11 +21,12 @@ from agentos.memory.providers.mem0_provider import Mem0Provider
 
 
 class _FakeMem0Client:
-    """Records ``add`` / ``search`` calls; ``search`` returns a scripted shape."""
+    """Records ``add`` / ``search`` / ``delete`` calls; ``search`` is scripted."""
 
     def __init__(self, search_result: Any = None) -> None:
         self.add_calls: list[dict[str, Any]] = []
         self.search_calls: list[dict[str, Any]] = []
+        self.delete_calls: list[str] = []
         self._search_result = search_result if search_result is not None else {"results": []}
 
     def add(self, **kwargs: Any) -> dict[str, Any]:
@@ -35,6 +36,29 @@ class _FakeMem0Client:
     def search(self, query: str, **kwargs: Any) -> Any:
         self.search_calls.append({"query": query, **kwargs})
         return self._search_result
+
+    def delete(self, memory_id: str) -> None:
+        self.delete_calls.append(memory_id)
+
+
+class _LegacySearchMem0Client(_FakeMem0Client):
+    """mem0 0.1.x shape: ``search`` takes ``user_id`` / ``limit``, not filters."""
+
+    def search(  # type: ignore[override]
+        self, query: str, user_id: str | None = None, limit: int = 100, filters: Any = None
+    ) -> Any:
+        return super().search(query, user_id=user_id, limit=limit, filters=filters)
+
+
+def _curated_hit(memory_id: str, target: str, entry: str) -> dict[str, Any]:
+    """A search hit for the record a curated mirror wrote for *entry*."""
+    from agentos.memory.providers.mem0_provider import _curated_tags
+
+    return {
+        "id": memory_id,
+        "memory": f"[curated {target}] {entry}",
+        "metadata": _curated_tags(target, entry),
+    }
 
 
 def _make_config(**mem0_overrides: Any) -> MemoryConfig:
@@ -282,16 +306,112 @@ async def test_on_memory_write_mirrors_add_action(tmp_path: Path) -> None:
         {"role": "user", "content": "[curated user] Alice prefers dark mode."}
     ]
     assert call["user_id"] == "a"
+    # Stored verbatim and tagged so a later replace/remove can find it.
+    assert call["infer"] is False
+    assert call["metadata"]["agentos_curated_target"] == "user"
+    assert len(call["metadata"]["agentos_curated_sha256"]) == 64
 
 
 @pytest.mark.asyncio
-async def test_on_memory_write_ignores_replace_and_remove(tmp_path: Path) -> None:
-    client = _FakeMem0Client()
+async def test_on_memory_write_remove_deletes_only_the_tagged_record(tmp_path: Path) -> None:
+    client = _FakeMem0Client(
+        search_result={
+            "results": [
+                _curated_hit("m-old", "memory", "deploys go through staging"),
+                # Same text, other target: not this entry's mirror.
+                _curated_hit("m-user", "user", "deploys go through staging"),
+                # A turn extraction with no curated tags is never deleted.
+                {"id": "m-turn", "memory": "deploys go through staging"},
+                _curated_hit("m-other", "memory", "something else"),
+            ]
+        }
+    )
+    provider = _make_provider(tmp_path, client=client)
+    await provider.initialize("s1", agent_state_dir=str(tmp_path), agent_identity="a")
+
+    await provider.on_memory_write(
+        "remove",
+        "memory",
+        "",
+        {"old_text": "staging", "old_entry": "deploys go through staging"},
+    )
+
+    assert client.delete_calls == ["m-old"]
+    assert client.add_calls == []
+    assert client.search_calls == [
+        {
+            "query": "[curated memory] deploys go through staging",
+            "filters": {"user_id": "a"},
+            "top_k": 20,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_on_memory_write_replace_deletes_old_then_adds_new(tmp_path: Path) -> None:
+    client = _FakeMem0Client(
+        search_result={"results": [_curated_hit("m-old", "memory", "uses npm")]}
+    )
     provider = _make_provider(tmp_path, client=client)
     await provider.initialize("s1", agent_state_dir=str(tmp_path))
-    await provider.on_memory_write("replace", "memory", "x")
-    await provider.on_memory_write("remove", "memory", "y")
-    assert client.add_calls == []
+
+    await provider.on_memory_write(
+        "replace", "memory", "uses pnpm", {"old_text": "npm", "old_entry": "uses npm"}
+    )
+
+    assert client.delete_calls == ["m-old"]
+    assert [c["messages"][0]["content"] for c in client.add_calls] == [
+        "[curated memory] uses pnpm"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_on_memory_write_without_old_entry_never_deletes(tmp_path: Path) -> None:
+    """A bare ``old_text`` substring is not enough to pick a record to delete."""
+    client = _FakeMem0Client(
+        search_result={"results": [_curated_hit("m-old", "memory", "uses npm")]}
+    )
+    provider = _make_provider(tmp_path, client=client)
+    await provider.initialize("s1", agent_state_dir=str(tmp_path))
+
+    await provider.on_memory_write("remove", "memory", "", {"old_text": "npm"})
+    await provider.on_memory_write("replace", "memory", "uses pnpm", {"old_text": "npm"})
+
+    assert client.search_calls == [] and client.delete_calls == []
+    assert len(client.add_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_on_memory_write_remove_falls_back_to_legacy_search(tmp_path: Path) -> None:
+    client = _LegacySearchMem0Client(
+        search_result=[_curated_hit("m-old", "memory", "uses npm")]
+    )
+    provider = _make_provider(tmp_path, client=client)
+    await provider.initialize("s1", agent_state_dir=str(tmp_path), agent_identity="a")
+
+    await provider.on_memory_write("remove", "memory", "", {"old_entry": "uses npm"})
+
+    assert client.delete_calls == ["m-old"]
+    assert client.search_calls[-1]["user_id"] == "a"
+    assert client.search_calls[-1]["limit"] == 20
+
+
+@pytest.mark.asyncio
+async def test_on_memory_write_delete_failure_is_swallowed(tmp_path: Path) -> None:
+    class _Boom(_FakeMem0Client):
+        def delete(self, memory_id: str) -> None:
+            raise RuntimeError("vector store down")
+
+    client = _Boom(search_result={"results": [_curated_hit("m-old", "memory", "uses npm")]})
+    provider = _make_provider(tmp_path, client=client)
+    await provider.initialize("s1", agent_state_dir=str(tmp_path))
+
+    await provider.on_memory_write(
+        "replace", "memory", "uses pnpm", {"old_entry": "uses npm"}
+    )
+
+    # The failed delete does not stop the new entry from being mirrored.
+    assert len(client.add_calls) == 1
 
 
 # -- static surfaces --------------------------------------------------------

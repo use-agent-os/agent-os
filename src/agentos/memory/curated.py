@@ -239,7 +239,14 @@ class CuratedMemoryStore:
 
     # -- mutations --------------------------------------------------------
 
-    def add(self, target: str, content: str, *, caller_key: str | None = None) -> dict[str, Any]:
+    def add(
+        self,
+        target: str,
+        content: str,
+        *,
+        caller_key: str | None = None,
+        changes: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
         content = content.strip()
         if not content:
             return {"success": False, "error": "Content cannot be empty."}
@@ -281,6 +288,8 @@ class CuratedMemoryStore:
             entries.append(content)
             self._set_entries(target, entries)
             self._save(target)
+        if changes is not None:
+            changes.append({"action": "add", "entry": content})
         return self._success(target, caller_key, "Entry added.")
 
     def replace(
@@ -290,6 +299,7 @@ class CuratedMemoryStore:
         new_content: str,
         *,
         caller_key: str | None = None,
+        changes: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         old_text = old_text.strip()
         new_content = new_content.strip()
@@ -333,6 +343,7 @@ class CuratedMemoryStore:
                     "matches": self._previews([e for _, e in matches]),
                 }
             idx = matches[0][0]
+            old_entry = entries[idx]
             limit = self._char_limit(target)
             test_entries = entries.copy()
             test_entries[idx] = new_content
@@ -355,10 +366,24 @@ class CuratedMemoryStore:
             entries[idx] = new_content
             self._set_entries(target, entries)
             self._save(target)
+        if changes is not None:
+            changes.append(
+                {
+                    "action": "replace",
+                    "old_text": old_text,
+                    "old_entry": old_entry,
+                    "entry": new_content,
+                }
+            )
         return self._success(target, caller_key, "Entry replaced.")
 
     def remove(
-        self, target: str, old_text: str, *, caller_key: str | None = None
+        self,
+        target: str,
+        old_text: str,
+        *,
+        caller_key: str | None = None,
+        changes: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         old_text = old_text.strip()
         if not old_text:
@@ -389,9 +414,11 @@ class CuratedMemoryStore:
                     "error": f"Multiple entries matched '{old_text}'. Be more specific.",
                     "matches": self._previews([e for _, e in matches]),
                 }
-            entries.pop(matches[0][0])
+            old_entry = entries.pop(matches[0][0])
             self._set_entries(target, entries)
             self._save(target)
+        if changes is not None:
+            changes.append({"action": "remove", "old_text": old_text, "old_entry": old_entry})
         return self._success(target, caller_key, "Entry removed.")
 
     def apply_batch(
@@ -400,6 +427,7 @@ class CuratedMemoryStore:
         operations: list[dict[str, Any]],
         *,
         caller_key: str | None = None,
+        changes: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         """Apply a sequence of add/replace/remove ops to one target atomically.
 
@@ -415,6 +443,15 @@ class CuratedMemoryStore:
 
         ``caller_key`` (here and on add/replace/remove) scopes the
         consolidation-failure streak; see ``_consolidation_failure``.
+
+        ``changes`` (here and on add/replace/remove), when given, receives one
+        record per entry the committed write actually changed, in order:
+        ``{"action": "add", "entry"}``, ``{"action": "replace", "old_entry",
+        "entry"}`` or ``{"action": "remove", "old_entry"}``, each with the
+        op's ``old_text`` when it had one. Nothing is recorded for a write
+        that fails or is a no-op. The ``memory`` tool uses it to mirror the
+        write to an external provider, which needs the full text of a
+        replaced or removed entry, not the substring that matched it.
         """
         if not operations:
             return {"success": False, "error": "operations list is empty."}
@@ -466,6 +503,7 @@ class CuratedMemoryStore:
             # Work on a copy; only commit if the whole batch validates.
             working: list[str] = self.entries_for(target)
             limit = self._char_limit(target)
+            batch_changes: list[dict[str, str]] = []
 
             for i, op in enumerate(operations):
                 op = op or {}
@@ -480,6 +518,7 @@ class CuratedMemoryStore:
                     if content in working:
                         continue  # idempotent -- skip duplicate, don't fail the batch
                     working.append(content)
+                    batch_changes.append({"action": "add", "entry": content})
 
                 elif act == "replace":
                     if not old_text:
@@ -504,6 +543,14 @@ class CuratedMemoryStore:
                             f"{pos}: '{old_text}' matched multiple distinct entries -- "
                             f"be more specific.",
                         )
+                    batch_changes.append(
+                        {
+                            "action": "replace",
+                            "old_text": old_text,
+                            "old_entry": working[matches[0]],
+                            "entry": content,
+                        }
+                    )
                     working[matches[0]] = content
 
                 elif act == "remove":
@@ -523,7 +570,13 @@ class CuratedMemoryStore:
                             f"{pos}: '{old_text}' matched multiple distinct entries -- "
                             f"be more specific.",
                         )
-                    working.pop(matches[0])
+                    batch_changes.append(
+                        {
+                            "action": "remove",
+                            "old_text": old_text,
+                            "old_entry": working.pop(matches[0]),
+                        }
+                    )
 
                 else:
                     return self._batch_error(
@@ -552,6 +605,8 @@ class CuratedMemoryStore:
             # Commit.
             self._set_entries(target, working)
             self._save(target)
+            if changes is not None:
+                changes.extend(batch_changes)
 
         return self._success(target, caller_key, f"Applied {len(operations)} operation(s).")
 
