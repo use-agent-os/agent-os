@@ -158,3 +158,19 @@ async def test_the_ledger_alone_ends_automation_of_a_removed_wallet(world: World
     assert _status(world, "mandate", mandate_id)["status"] == "stopped"
     assert _status(world, "trigger", stop_id)["status_reason"] == WALLET_REMOVED
     assert service.ledger.sealed_row("trigger", stop_id)[1] is None
+
+
+async def test_bulk_removal_ends_the_automation_too(world: World) -> None:
+    """``remove_wallets`` (``wallet.removeBatch``) stops what each wallet ran, as one removal."""
+    service = world.service
+    mandate_id, stop_id, bracket_id = await _automation(world)
+    other = (await service.create_wallet("Spare"))["address"]
+
+    result = await service.remove_wallets([world.wallet, other], PASSWORD)
+
+    assert sorted(result["removed"]) == sorted([world.wallet, other])
+    assert service.vault.list() == []
+    mandate = _status(world, "mandate", mandate_id)
+    assert mandate["status"] == "stopped" and mandate["status_reason"] == WALLET_REMOVED
+    assert _status(world, "trigger", stop_id)["status"] == "stopped"
+    assert {leg["status"] for leg in service.ledger.group_triggers(bracket_id)} == {"stopped"}

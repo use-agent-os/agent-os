@@ -849,6 +849,14 @@ export const TRADING_WRITE_GATES: Readonly<Record<string, WriteGate>> = {
   'trading.bracket.stop': null,
   'wallet.export': vaultGate('export'),
   'wallet.remove': vaultGate('remove'),
+  'wallet.removeBatch': async (params) => {
+    const n = Array.isArray(params.addresses) ? params.addresses.length : 0
+    return {
+      kind: 'vault',
+      reason: t('trading.touchId.reason.removeBatch').replace('{n}', String(n)),
+      key: 'wallet:remove-batch',
+    }
+  },
   'wallet.create': null,
   'wallet.createBatch': null,
   // The keys and phrases of the wallets just made. With the vault password it

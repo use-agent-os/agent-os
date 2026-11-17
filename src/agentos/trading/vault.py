@@ -39,7 +39,7 @@ import secrets
 import stat
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -1016,6 +1016,34 @@ class Vault:
             self._write_index(index)
             self.keystore_path(address).unlink(missing_ok=True)
             self._keys.pop(key, None)
+
+    def remove_many(self, addresses: Iterable[str], password: str) -> builtins.list[str]:
+        """Remove several wallets under one password check, all or none.
+
+        Every address must be in the vault: one that is not removes nothing,
+        so a list built from a stale screen cannot half-apply. The password
+        is checked once (it is the slow part, by design) and the index is
+        written once. Returns the removed addresses, normalized, in order.
+        """
+        with self._lock:
+            self.verify_password(password)
+            index = self._read_index()
+            keys = list(dict.fromkeys(normalize_address(a) for a in addresses))
+            present = {normalize_address(raw["address"]) for raw in index["wallets"]}
+            for key in keys:
+                if key not in present:
+                    raise WalletNotFoundError(f"no wallet {key}")
+            gone = set(keys)
+            index["wallets"] = [
+                raw for raw in index["wallets"] if normalize_address(raw["address"]) not in gone
+            ]
+            if index.get("primary") and normalize_address(index["primary"]) in gone:
+                index["primary"] = index["wallets"][0]["address"] if index["wallets"] else None
+            self._write_index(index)
+            for key in keys:
+                self.keystore_path(key).unlink(missing_ok=True)
+                self._keys.pop(key, None)
+            return keys
 
     def set_primary(self, address: str) -> WalletRecord:
         with self._lock:

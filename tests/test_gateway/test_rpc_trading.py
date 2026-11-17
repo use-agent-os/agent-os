@@ -176,6 +176,39 @@ class TestWalletRpc:
             await call("wallet.balances", {"chainId": 1}, ctx)
         ).error.code == "trading.unsupported_chain"
 
+    async def test_remove_batch(self, ctx: RpcContext, stack: dict[str, Any]) -> None:
+        await call("wallet.setup", {"password": PASSWORD}, ctx)
+        made = [
+            (await call("wallet.create", {"label": f"W{i}"}, ctx)).payload["wallet"]["address"]
+            for i in range(4)
+        ]
+        bad = await call("wallet.removeBatch", {"addresses": made[:2], "password": "nope"}, ctx)
+        assert bad.ok is False
+        # One unknown address refuses the whole list: nothing is removed.
+        unknown = "0x" + "ab" * 20
+        missing = await call(
+            "wallet.removeBatch", {"addresses": [made[0], unknown], "password": PASSWORD}, ctx
+        )
+        assert missing.ok is False and missing.error.code == "wallet.not_found"
+        assert len((await call("wallet.list", {}, ctx)).payload["wallets"]) == 4
+        shape = await call("wallet.removeBatch", {"addresses": "x", "password": PASSWORD}, ctx)
+        assert shape.ok is False
+        empty = await call("wallet.removeBatch", {"addresses": [], "password": PASSWORD}, ctx)
+        assert empty.ok is False
+        # The primary (the first wallet made) goes too: the next one takes over.
+        removed = await call(
+            "wallet.removeBatch",
+            {"addresses": [made[0], made[2], made[2].lower()], "password": PASSWORD},
+            ctx,
+        )
+        assert removed.ok, removed.error
+        assert sorted(a.lower() for a in removed.payload["removed"]) == sorted(
+            [made[0].lower(), made[2].lower()]
+        )
+        listed = (await call("wallet.list", {}, ctx)).payload
+        assert {w["address"] for w in listed["wallets"]} == {made[1], made[3]}
+        assert listed["primary"] in {made[1], made[3]}
+
     async def test_locked_vault_errors(self, ctx: RpcContext, stack: dict[str, Any]) -> None:
         await call("wallet.setup", {"password": PASSWORD, "unlockMode": "manual"}, ctx)
         await call("wallet.lock", {}, ctx)
@@ -403,6 +436,7 @@ class TestAgentSurfaceRpc:
             ("wallet.export", {"address": address, "password": PASSWORD, "format": "privateKey"}),
             ("wallet.create", {"label": "Extra"}),
             ("wallet.remove", {"address": address, "password": PASSWORD}),
+            ("wallet.removeBatch", {"addresses": [address], "password": PASSWORD}),
             ("wallet.setPrimary", {"address": address}),
             ("wallet.rename", {"address": address, "label": "x"}),
             ("wallet.lock", {}),

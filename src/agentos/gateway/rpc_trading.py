@@ -532,6 +532,22 @@ async def _wallet_remove(params: dict | None, ctx: RpcContext) -> dict[str, Any]
     return {"removed": True}
 
 
+@_d.method("wallet.removeBatch")
+@_operator_only
+async def _wallet_remove_batch(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """Remove several wallets under one password check; all or none."""
+    p = _params(params)
+    addresses = p.get("addresses")
+    if not isinstance(addresses, list) or not all(isinstance(a, str) for a in addresses):
+        raise ValueError("params.addresses must be a list of strings")
+    password = _str(p, "password", required=True) or ""
+    service = _service(ctx)
+    try:
+        return await service.remove_wallets(addresses, password)
+    except Exception as exc:
+        raise _raise(exc) from exc
+
+
 @_d.method("wallet.setPrimary")
 @_operator_only
 async def _wallet_set_primary(params: dict | None, ctx: RpcContext) -> dict[str, Any]:

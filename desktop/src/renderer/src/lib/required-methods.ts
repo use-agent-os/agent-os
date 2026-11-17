@@ -96,6 +96,7 @@ export const DESKTOP_REQUIRED_METHODS: readonly string[] = [
   'wallet.list',
   'wallet.lock',
   'wallet.remove',
+  'wallet.removeBatch',
   'wallet.rename',
   'wallet.setPrimary',
   'wallet.setUnlockMode',

@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Desktop: *Manage wallets* can tick several wallets (or *Select all*) and
+  remove them together under one vault password, through the new
+  `wallet.removeBatch` RPC. The list is all or none: a wrong password or an
+  address no longer in the vault removes nothing. Each wallet's DCA mandates
+  and triggers end with it, as with `wallet.remove`.
+
+### Fixed
+- The Trade tab no longer takes minutes to open with many wallets. Every
+  unlisted token a wallet holds is re-judged as junk once a day, and the
+  portfolio and balances reads did it one DexScreener request per token, in a
+  row: 15 wallets holding ~370 airdropped tokens took ~3 minutes on the first
+  read of the day, and those reads filled the connection's request slots, so
+  the desk's chat sat on "Opening the desk" too. Due tokens are now judged
+  together (one request per 30 tokens, a few in flight at once; ~2 s for the
+  same set), and concurrent reads share one pass instead of each repeating it.
+
 ## [2026.11.17] - 2026-11-17
 
 ### Security

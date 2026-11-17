@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -143,6 +144,63 @@ class TestTokenCurator:
         ledger.set_token_hidden(8453, JUNK, True, by="auto", classified_at=state["now"])
         row = ledger.get_token(8453, JUNK)
         assert row and row["hidden"] == 0 and row["hidden_by"] == "user"
+
+
+class TestReviewMany:
+    """A day of due airdrops is judged in one price request per batch, not one each.
+
+    Seen live: 15 wallets held ~370 unlisted tokens, all due on the same day;
+    asked one by one the first portfolio read of the day took over three
+    minutes and held the desk (and its chat) on "loading".
+    """
+
+    async def test_many_due_tokens_cost_one_request(
+        self, ledger: Ledger, stack, prices_fake: FakePrices
+    ) -> None:
+        curator, _ = stack
+        junk = [f"0x{i:040x}" for i in range(1, 26)]
+        for address in junk:
+            _add(ledger, address)
+        _add(ledger, USDC)
+        before = len(prices_fake.requests)
+        verdicts = await curator.review_many(BASE, [*junk, USDC, NATIVE_ADDRESS])
+        dex = [r for r in prices_fake.requests[before:] if r.url.host == "api.dexscreener.com"]
+        assert len(dex) == 1
+        assert verdicts == {**dict.fromkeys(junk, True), USDC: False}
+        assert ledger.hidden_tokens(8453) == set(junk)
+
+    async def test_nothing_due_asks_nothing(
+        self, ledger: Ledger, stack, prices_fake: FakePrices
+    ) -> None:
+        curator, _ = stack
+        _add(ledger, JUNK)
+        await curator.review_many(BASE, [JUNK])
+        before = len(prices_fake.requests)
+        assert await curator.review_many(BASE, [JUNK]) == {JUNK: True}
+        assert len(prices_fake.requests) == before
+
+    async def test_concurrent_callers_price_once(
+        self, ledger: Ledger, stack, prices_fake: FakePrices
+    ) -> None:
+        curator, _ = stack
+        junk = [f"0x{i:040x}" for i in range(1, 11)]
+        for address in junk:
+            _add(ledger, address)
+        before = len(prices_fake.requests)
+        await asyncio.gather(*(curator.review_many(BASE, junk) for _ in range(3)))
+        dex = [r for r in prices_fake.requests[before:] if r.url.host == "api.dexscreener.com"]
+        assert len(dex) == 1
+
+    async def test_outage_leaves_the_batch_due(self, ledger: Ledger, stack) -> None:
+        curator, state = stack
+        _add(ledger, JUNK)
+        _add(ledger, NEW)
+        state["outage"] = True
+        assert await curator.review_many(BASE, [JUNK, NEW]) == {JUNK: False, NEW: False}
+        assert ledger.get_token(8453, JUNK)["classified_at"] is None  # type: ignore[index]
+        state["outage"] = False
+        state["now"] += 10  # past the unavailable hold
+        assert await curator.review_many(BASE, [JUNK, NEW]) == {JUNK: True, NEW: True}
 
 
 class TestUnreportedLiquidity:

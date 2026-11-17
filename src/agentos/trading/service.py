@@ -22,7 +22,7 @@ import re
 import secrets
 import sqlite3
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Literal
@@ -202,6 +202,8 @@ BROADCAST_REJECTED = "broadcast rejected:"
 MINTED_TTL_S = 900.0
 # The most private keys one ``import_wallets`` call takes.
 MAX_BATCH_IMPORT = 100
+#: The most wallets one ``wallet.removeBatch`` removes.
+MAX_BATCH_REMOVE = 100
 # Ledger log index for a native (ETH) leg of an LP write: it has no Transfer
 # log of its own, and must not collide with an ERC-20 leg's index.
 LP_NATIVE_LOG_INDEX = 1_000_000
@@ -1121,6 +1123,21 @@ class TradingService:
             await self.curator.review(chain, meta.address)
         return meta
 
+    async def judge_tokens(self, chain: ChainSpec, addresses: Iterable[str]) -> None:
+        """:meth:`token_meta` for every token of a holdings read, judged in one go.
+
+        Each token's metadata is remembered first (cheap once seen), then the
+        lot is put to the junk classifier together, so a day's worth of due
+        airdrops costs one price request per batch rather than one each.
+        """
+        keys: list[str] = []
+        for address in addresses:
+            meta = await self._token_meta(chain, address)
+            if not meta.native:
+                keys.append(meta.address)
+        if keys:
+            await self.curator.review_many(chain, keys)
+
     async def _token_meta(self, chain: ChainSpec, address: str) -> TokenMeta:
         if is_native(address):
             meta = native_token(chain)
@@ -1690,13 +1707,44 @@ class TradingService:
         record = self.vault.get(address)
         async with self._dca_lock, self._trigger_lock, self._wallet_lock(record.key):
             self.vault.remove(record.address, password)
-            try:
-                await self._end_wallet_automation(record)
-            except Exception as exc:  # the ledger below still stops what is left
-                log.warning("trading.wallet_automation_stop_failed", error=str(exc))
-            # Also the floor under the above: anything still live is stopped here.
-            self.ledger.remove_wallet(record.key, now=self._now())
+            await self._forget_wallet(record)
         await self._emit("trading.changed", {"reason": "wallet", "wallet": record.address})
+
+    async def remove_wallets(self, addresses: list[str], password: str) -> dict[str, Any]:
+        """Remove several wallets at once, as :meth:`remove_wallet` does each.
+
+        All or none: an address the vault does not hold refuses the whole
+        list before anything is touched. The password is checked once, off
+        the event loop, rather than once per wallet.
+        """
+        if not addresses:
+            raise TradingError("trading.invalid", "addresses is empty")
+        if len(addresses) > MAX_BATCH_REMOVE:
+            raise TradingError("trading.invalid", f"at most {MAX_BATCH_REMOVE} wallets per removal")
+        records: dict[str, WalletRecord] = {}
+        for address in addresses:
+            record = self.vault.get(address)
+            records.setdefault(record.key, record)
+        ordered = [records[key] for key in sorted(records)]
+        async with contextlib.AsyncExitStack() as stack:
+            await stack.enter_async_context(self._dca_lock)
+            await stack.enter_async_context(self._trigger_lock)
+            for record in ordered:
+                await stack.enter_async_context(self._wallet_lock(record.key))
+            await asyncio.to_thread(self.vault.remove_many, [r.address for r in ordered], password)
+            for record in ordered:
+                await self._forget_wallet(record)
+        await self._emit("trading.changed", {"reason": "wallet"})
+        return {"removed": [r.address for r in ordered]}
+
+    async def _forget_wallet(self, record: WalletRecord) -> None:
+        """After the key is gone: end its automation, then the ledger forgets it."""
+        try:
+            await self._end_wallet_automation(record)
+        except Exception as exc:  # the ledger below still stops what is left
+            log.warning("trading.wallet_automation_stop_failed", error=str(exc))
+        # Also the floor under the above: anything still live is stopped here.
+        self.ledger.remove_wallet(record.key, now=self._now())
 
     async def _end_wallet_automation(self, record: WalletRecord) -> None:
         now = self._now()
@@ -1808,8 +1856,7 @@ class TradingService:
             if not wanted:
                 continue
             # Judge before filtering: a first sight of a token is judged here.
-            for address in sorted({w["token"] for w in wanted.values()}):
-                await self.token_meta(chain, address)
+            await self.judge_tokens(chain, sorted({w["token"] for w in wanted.values()}))
             hidden = self.ledger.hidden_tokens(chain.chain_id)
             if not include_hidden:
                 wanted = {k: w for k, w in wanted.items() if w["token"] not in hidden}
@@ -1918,8 +1965,7 @@ class TradingService:
         hidden_by_chain: dict[int, set[str]] = {}
         for chain_id, tokens in by_chain.items():
             chain = CHAINS[chain_id]
-            for token in tokens:
-                await self.token_meta(chain, token)
+            await self.judge_tokens(chain, sorted(tokens))
             hidden_by_chain[chain_id] = self.ledger.hidden_tokens(chain_id)
             priced = (
                 sorted(tokens) if include_hidden else sorted(tokens - hidden_by_chain[chain_id])

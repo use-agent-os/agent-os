@@ -26,14 +26,15 @@ a token (a quote, a swap) shows it again.
 
 from __future__ import annotations
 
+import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 import structlog
 
 from agentos.trading.chains import ChainSpec, is_native, normalize_address
 from agentos.trading.ledger import Ledger
-from agentos.trading.prices import PriceService
+from agentos.trading.prices import PriceInfo, PriceService
 
 log = structlog.get_logger(__name__)
 
@@ -58,6 +59,7 @@ class TokenCurator:
         self._now = now
         self.min_liquidity_usd = min_liquidity_usd
         self.reclassify_s = reclassify_s
+        self._locks: dict[int, asyncio.Lock] = {}
 
     async def review(self, chain: ChainSpec, address: str, *, force: bool = False) -> bool:
         """Classify the token if it is due, and say whether it is hidden now.
@@ -70,47 +72,93 @@ class TokenCurator:
         """
         if is_native(address):
             return False
-        key = normalize_address(address)
-        row = self.ledger.get_token(chain.chain_id, key)
-        if row is None or row["is_native"]:
-            return False
-        hidden = bool(row["hidden"])
-        if row.get("hidden_by") == "user":
-            return hidden
-        if row["verified"] or row["touched"]:
-            if hidden:
-                self.ledger.set_token_hidden(
-                    chain.chain_id, key, False, by="auto", classified_at=self._now()
-                )
-            return False
-        classified_at = row.get("classified_at")
-        due = (
-            force
-            or classified_at is None
-            or self._now() - float(classified_at) >= self.reclassify_s
-        )
+        verdicts = await self.review_many(chain, [address], force=force)
+        return verdicts.get(normalize_address(address), False)
+
+    async def review_many(
+        self, chain: ChainSpec, addresses: Iterable[str], *, force: bool = False
+    ) -> dict[str, bool]:
+        """:meth:`review` for many tokens of one chain, with one price lookup.
+
+        A wallet full of airdrops holds hundreds of unlisted tokens, and every
+        one of them falls due on the same day. Asked one by one that is one
+        DexScreener round trip per token, in a row, inside whatever read
+        needed them judged (the portfolio, the balances), and it held the
+        desk on "loading" for minutes. Asked together it is one request per
+        :data:`~agentos.trading.prices.DEXSCREENER_BATCH` tokens.
+
+        Calls for the same chain run one at a time: the desk asks for the
+        all-wallet portfolio, a wallet's own and its balances at once, and
+        the second caller then finds the tokens judged rather than pricing
+        them all again. Returns ``{address: hidden}`` for the tokens the
+        ledger knows (native and unknown tokens are never hidden, and absent).
+        """
+        keys = sorted({normalize_address(a) for a in addresses if not is_native(a)})
+        if not keys:
+            return {}
+        out, due = self._scan(chain, keys, force=force)
         if not due:
-            return hidden
-        verdict = await self._is_junk(chain, key)
-        if verdict is None:
-            # No answer from the price source: leave the token as it is and
-            # ask again next time, rather than hiding something real.
-            return hidden
+            return out  # the usual case, and it never waits on a lock
+        async with self._locks.setdefault(chain.chain_id, asyncio.Lock()):
+            # Another read may have judged these while this one waited.
+            out, due = self._scan(chain, keys, force=force)
+            if not due:
+                return out
+            spent = {k for k in due if self.ledger.token_was_spent(chain.chain_id, k)}
+            priced = [k for k in due if k not in spent]
+            infos = await self.prices.prices(chain, priced) if priced else {}
+            for key in due:
+                verdict = False if key in spent else self._verdict(infos.get(key))
+                if verdict is None:
+                    # No answer from the price source: leave the token as it is
+                    # and ask again next time, rather than hiding something real.
+                    continue
+                self._record(chain, key, verdict, was_hidden=out[key])
+                out[key] = verdict
+            return out
+
+    def _scan(
+        self, chain: ChainSpec, keys: list[str], *, force: bool
+    ) -> tuple[dict[str, bool], list[str]]:
+        """Each known token's hidden flag now, and which of them are due a verdict."""
+        out: dict[str, bool] = {}
+        due: list[str] = []
+        for key in keys:
+            row = self.ledger.get_token(chain.chain_id, key)
+            if row is None or row["is_native"]:
+                continue
+            hidden = bool(row["hidden"])
+            out[key] = hidden
+            if row.get("hidden_by") == "user":
+                continue
+            if row["verified"] or row["touched"]:
+                if hidden:
+                    self.ledger.set_token_hidden(
+                        chain.chain_id, key, False, by="auto", classified_at=self._now()
+                    )
+                    out[key] = False
+                continue
+            classified_at = row.get("classified_at")
+            if (
+                force
+                or classified_at is None
+                or self._now() - float(classified_at) >= self.reclassify_s
+            ):
+                due.append(key)
+        return out, due
+
+    def _record(self, chain: ChainSpec, key: str, verdict: bool, *, was_hidden: bool) -> None:
         self.ledger.set_token_hidden(
             chain.chain_id, key, verdict, by="auto", classified_at=self._now()
         )
-        if verdict != hidden:
+        if verdict != was_hidden:
             log.info(
                 "trading.token_hidden" if verdict else "trading.token_shown",
                 chain=chain.key,
                 token=key,
             )
-        return verdict
 
-    async def _is_junk(self, chain: ChainSpec, key: str) -> bool | None:
-        if self.ledger.token_was_spent(chain.chain_id, key):
-            return False
-        info = (await self.prices.prices(chain, [key])).get(key)
+    def _verdict(self, info: PriceInfo | None) -> bool | None:
         if info is None or info.unavailable:
             return None
         liquidity = info.liquidity_usd

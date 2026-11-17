@@ -56,6 +56,8 @@ TOKEN_LIST_TTL_S = 24 * 3600
 TOKEN_LIST_EMPTY_HOLD_S = 60.0
 HISTORY_TTL_S = 6 * 3600
 DEXSCREENER_BATCH = 30
+#: DexScreener requests one ``prices`` call keeps in flight at once.
+DEXSCREENER_CONCURRENCY = 4
 #: A chunk the source did not answer (429, 5xx, timeout) is answered from that
 #: miss for this long, ± ``UNAVAILABLE_JITTER_S``: long enough that the
 #: portfolio poll and a burst of desk turns do not turn one 429 into a retry
@@ -337,11 +339,25 @@ class PriceService:
         fetched: dict[str, PriceInfo] = {}
         unanswered: dict[str, float] = {}
         unique = sorted(set(missing))
-        for start in range(0, len(unique), DEXSCREENER_BATCH):
-            chunk = unique[start : start + DEXSCREENER_BATCH]
-            body = await self._get(
-                f"{DEXSCREENER_BASE}/tokens/v1/{chain.dexscreener_slug}/{','.join(chunk)}"
-            )
+        chunks = [
+            unique[start : start + DEXSCREENER_BATCH]
+            for start in range(0, len(unique), DEXSCREENER_BATCH)
+        ]
+        # A few chunks in flight at once: a wallet set holding hundreds of
+        # tokens is a dozen requests, and in a row they kept the desk waiting.
+        slots = asyncio.Semaphore(DEXSCREENER_CONCURRENCY)
+
+        async def fetch(chunk: list[str]) -> Any:
+            async with slots:
+                return await self._get(
+                    f"{DEXSCREENER_BASE}/tokens/v1/{chain.dexscreener_slug}/{','.join(chunk)}"
+                )
+
+        if len(chunks) == 1:
+            bodies = [await fetch(chunks[0])]
+        else:
+            bodies = list(await asyncio.gather(*(fetch(chunk) for chunk in chunks)))
+        for chunk, body in zip(chunks, bodies, strict=True):
             if body is None:
                 # One hold per chunk, so its tokens come back as one request;
                 # never longer than an answer would be kept (``ttl_s``).
