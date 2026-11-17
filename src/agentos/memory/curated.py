@@ -132,6 +132,11 @@ class CuratedMemoryStore:
         # Frozen snapshot for system-prompt injection -- set once per
         # load_from_disk() call and never mutated by mid-session writes.
         self._snapshot: dict[str, str] = {}
+        # Entries this store has itself read from or written to disk, per
+        # target. The drift check uses it to tell an entry that was already in
+        # the file (e.g. written before the char limit was lowered) from one an
+        # external writer grew since -- only the latter is drift.
+        self._known_entries: dict[str, set[str]] = {}
 
     # -- loading ----------------------------------------------------------
 
@@ -175,6 +180,11 @@ class CuratedMemoryStore:
 
         self.memory_entries = list(dict.fromkeys(self._parse_entries(memory_raw or "")))
         self.user_entries = list(dict.fromkeys(self._parse_entries(user_raw or "")))
+        self._known_entries = {}
+        if memory_raw is not None:
+            self._known_entries["memory"] = set(self.memory_entries)
+        if user_raw is not None:
+            self._known_entries["user"] = set(self.user_entries)
 
         sanitized_memory = self._sanitize_entries_for_snapshot(self.memory_entries, "MEMORY.md")
         sanitized_user = self._sanitize_entries_for_snapshot(self.user_entries, "USER.md")
@@ -372,6 +382,28 @@ class CuratedMemoryStore:
         """
         if not operations:
             return {"success": False, "error": "operations list is empty."}
+        if not isinstance(operations, list):
+            return {"success": False, "error": "operations must be a list of objects."}
+
+        # Shape check first: operations arrive from the model and from RPC
+        # callers as decoded JSON, so a number or object where text belongs
+        # must come back as a clean error rather than a TypeError from the
+        # scanners below.
+        for i, op in enumerate(operations):
+            if op is None:
+                continue
+            if not isinstance(op, dict):
+                return {"success": False, "error": f"Operation {i + 1}: must be an object."}
+            for key in ("action", "content", "old_text"):
+                value = op.get(key)
+                if value is not None and not isinstance(value, str):
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Operation {i + 1}: '{key}' must be a string, "
+                            f"got {type(value).__name__}."
+                        ),
+                    }
 
         # Scan every add/replace content for injection/exfil, and for text the
         # next read would split, BEFORE touching disk -- a single bad op
@@ -591,6 +623,8 @@ class CuratedMemoryStore:
         bak = None if skip_drift else self._detect_external_drift(target, raw)
         fresh = list(dict.fromkeys(self._parse_entries(raw)))
         self._set_entries(target, fresh)
+        if bak is None:
+            self._known_entries[target] = set(fresh)
         return bak
 
     def _detect_external_drift(self, target: str, raw: str) -> str | None:
@@ -606,14 +640,22 @@ class CuratedMemoryStore:
         1. Round-trip mismatch — re-parsing and re-serializing the file
            doesn't produce identical bytes (rare; would catch oddly-encoded
            delimiters).
-        2. Entry-size overflow — any single parsed entry exceeds the store's
-           whole-file char limit. The store budgets the ENTIRE file against
-           that limit; no single tool-written entry can exceed it. When we
-           see one entry larger than the limit, an external writer (patch
-           tool, shell append, manual edit, sister session) appended
-           free-form content into what the store will treat as one entry.
-           Flushing would then truncate that entry to the model's new
-           content, discarding the appended bytes.
+        2. Entry-size overflow — a parsed entry exceeds the store's
+           whole-file char limit AND this store has not itself read or
+           written that exact entry. The store budgets the ENTIRE file
+           against that limit, so a new tool-written entry cannot exceed
+           it; an unknown oversized entry means an external writer (patch
+           tool, shell append, manual edit) appended free-form content into
+           what the store will treat as one entry, and flushing would
+           discard the appended bytes.
+
+           An oversized entry the store already knows is not drift: it was
+           written under a higher ``curated_*_char_limit`` that has since
+           been lowered. Treating it as drift would refuse every mutation --
+           including the ``remove`` / ``replace`` needed to get back under
+           the new limit -- and snapshot the file on each attempt. The
+           budget check still applies to the state an add/replace/batch
+           would leave behind.
 
         Returns the absolute path of the .bak file when drift was found and
         backed up; returns None when the file looks tool-shaped.
@@ -626,9 +668,10 @@ class CuratedMemoryStore:
         roundtrip = ENTRY_DELIMITER.join(parsed)
 
         char_limit = self._char_limit(target)
-        max_entry_len = max((len(e) for e in parsed), default=0)
+        known = self._known_entries.get(target, set())
+        unknown_oversized = any(len(e) > char_limit and e not in known for e in parsed)
 
-        drift_detected = (raw.strip() != roundtrip) or (max_entry_len > char_limit)
+        drift_detected = (raw.strip() != roundtrip) or unknown_oversized
         if not drift_detected:
             return None
 
@@ -680,7 +723,9 @@ class CuratedMemoryStore:
 
     def _save(self, target: str) -> None:
         self._memory_dir.mkdir(parents=True, exist_ok=True)
-        self._write_file(self._path_for(target), self.entries_for(target))
+        entries = self.entries_for(target)
+        self._write_file(self._path_for(target), entries)
+        self._known_entries[target] = set(entries)
 
     @staticmethod
     def _read_failed_error(path: Path) -> dict[str, Any]:
