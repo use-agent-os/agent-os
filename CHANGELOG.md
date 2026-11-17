@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Curated memory's "stop retrying" cutoff is counted per session. The
+  workspace's `MEMORY.md` / `USER.md` store is shared by every session in the
+  process, and one failure counter let two sessions consolidating at the same
+  time trip each other into the terminal state after three combined failures.
+  The `memory` tool now keys the streak by session; RPC and CLI callers keep
+  the single shared streak they had.
+
 ## [2026.11.17.post2] - 2026-11-17
 
 ### Added

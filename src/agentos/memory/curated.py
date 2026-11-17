@@ -19,6 +19,7 @@ import os
 import shutil
 import tempfile
 import time
+from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -58,6 +59,12 @@ _READ_FAILED = "\x00__read_failed__"
 # tool into its terminal error state permanently. Comfortably longer than any
 # single turn's retry loop, far shorter than a session.
 _CONSOLIDATION_FAILURE_WINDOW_S = 300.0
+
+# Streaks are tracked per caller (the ``memory`` tool passes its session key)
+# so two sessions sharing one workspace store cannot push each other into the
+# terminal state. Bounded so a long-lived gateway with many sessions does not
+# grow the map forever; the least recently touched streak is dropped first.
+_MAX_FAILURE_STREAKS = 64
 
 
 def _scan(content: str) -> str | None:
@@ -123,8 +130,9 @@ class CuratedMemoryStore:
         self.user_char_limit = user_char_limit
         self.memory_entries: list[str] = []
         self.user_entries: list[str] = []
-        self._consolidation_failures = 0
-        self._first_failure_at = 0.0
+        # caller_key -> (failure count, monotonic time of the first failure).
+        # ``None`` is the unkeyed streak used by RPC / CLI callers.
+        self._failure_streaks: OrderedDict[str | None, tuple[int, float]] = OrderedDict()
         # Targets whose last load_from_disk() could not read the file. Their
         # in-memory entries are NOT the file's contents, so writes must refuse
         # rather than flush emptiness over real data.
@@ -193,15 +201,19 @@ class CuratedMemoryStore:
             "user": self._render_block("user", sanitized_user),
         }
 
-    def reset_consolidation_failures(self) -> None:
-        """Clear the consolidation-failure streak.
+    def reset_consolidation_failures(self, caller_key: str | None = None) -> None:
+        """Clear *caller_key*'s consolidation-failure streak.
 
         Callers that know a turn boundary was crossed can call this to reset
         immediately; otherwise the streak expires on its own after
         ``_CONSOLIDATION_FAILURE_WINDOW_S`` (see ``_consolidation_failure``).
         """
-        self._consolidation_failures = 0
-        self._first_failure_at = 0.0
+        self._failure_streaks.pop(caller_key, None)
+
+    def consolidation_failure_count(self, caller_key: str | None = None) -> int:
+        """Return the current (unexpired or not) failure count for *caller_key*."""
+        streak = self._failure_streaks.get(caller_key)
+        return streak[0] if streak else 0
 
     # -- public state -----------------------------------------------------
 
@@ -227,7 +239,7 @@ class CuratedMemoryStore:
 
     # -- mutations --------------------------------------------------------
 
-    def add(self, target: str, content: str) -> dict[str, Any]:
+    def add(self, target: str, content: str, *, caller_key: str | None = None) -> dict[str, Any]:
         content = content.strip()
         if not content:
             return {"success": False, "error": "Content cannot be empty."}
@@ -246,11 +258,14 @@ class CuratedMemoryStore:
             entries = self.entries_for(target)
             limit = self._char_limit(target)
             if content in entries:
-                return self._success(target, "Entry already exists (no duplicate added).")
+                return self._success(
+                    target, caller_key, "Entry already exists (no duplicate added)."
+                )
             new_total = len(ENTRY_DELIMITER.join([*entries, content]))
             if new_total > limit:
                 current = self._char_count(target)
                 return self._consolidation_failure(
+                    caller_key,
                     {
                         "success": False,
                         "error": (
@@ -261,14 +276,21 @@ class CuratedMemoryStore:
                         ),
                         "current_entries": list(entries),
                         "usage": f"{current:,}/{limit:,}",
-                    }
+                    },
                 )
             entries.append(content)
             self._set_entries(target, entries)
             self._save(target)
-        return self._success(target, "Entry added.")
+        return self._success(target, caller_key, "Entry added.")
 
-    def replace(self, target: str, old_text: str, new_content: str) -> dict[str, Any]:
+    def replace(
+        self,
+        target: str,
+        old_text: str,
+        new_content: str,
+        *,
+        caller_key: str | None = None,
+    ) -> dict[str, Any]:
         old_text = old_text.strip()
         new_content = new_content.strip()
         if not old_text:
@@ -294,6 +316,7 @@ class CuratedMemoryStore:
             matches = [(i, e) for i, e in enumerate(entries) if old_text in e]
             if not matches:
                 return self._consolidation_failure(
+                    caller_key,
                     {
                         "success": False,
                         "error": (
@@ -301,7 +324,7 @@ class CuratedMemoryStore:
                             f"with the exact text of the entry you want to replace."
                         ),
                         "current_entries": list(entries),
-                    }
+                    },
                 )
             if len({e for _, e in matches}) > 1:
                 return {
@@ -317,6 +340,7 @@ class CuratedMemoryStore:
             if new_total > limit:
                 current = self._char_count(target)
                 return self._consolidation_failure(
+                    caller_key,
                     {
                         "success": False,
                         "error": (
@@ -326,14 +350,16 @@ class CuratedMemoryStore:
                         ),
                         "current_entries": list(entries),
                         "usage": f"{current:,}/{limit:,}",
-                    }
+                    },
                 )
             entries[idx] = new_content
             self._set_entries(target, entries)
             self._save(target)
-        return self._success(target, "Entry replaced.")
+        return self._success(target, caller_key, "Entry replaced.")
 
-    def remove(self, target: str, old_text: str) -> dict[str, Any]:
+    def remove(
+        self, target: str, old_text: str, *, caller_key: str | None = None
+    ) -> dict[str, Any]:
         old_text = old_text.strip()
         if not old_text:
             return {"success": False, "error": "old_text cannot be empty."}
@@ -347,6 +373,7 @@ class CuratedMemoryStore:
             matches = [(i, e) for i, e in enumerate(entries) if old_text in e]
             if not matches:
                 return self._consolidation_failure(
+                    caller_key,
                     {
                         "success": False,
                         "error": (
@@ -354,7 +381,7 @@ class CuratedMemoryStore:
                             f"with the exact text of the entry you want to remove."
                         ),
                         "current_entries": list(entries),
-                    }
+                    },
                 )
             if len({e for _, e in matches}) > 1:
                 return {
@@ -365,9 +392,15 @@ class CuratedMemoryStore:
             entries.pop(matches[0][0])
             self._set_entries(target, entries)
             self._save(target)
-        return self._success(target, "Entry removed.")
+        return self._success(target, caller_key, "Entry removed.")
 
-    def apply_batch(self, target: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
+    def apply_batch(
+        self,
+        target: str,
+        operations: list[dict[str, Any]],
+        *,
+        caller_key: str | None = None,
+    ) -> dict[str, Any]:
         """Apply a sequence of add/replace/remove ops to one target atomically.
 
         All operations are validated and applied against the FINAL budget --
@@ -379,6 +412,9 @@ class CuratedMemoryStore:
         Semantics: all-or-nothing. If any op is malformed, doesn't match, or
         the net result would exceed the char limit, NOTHING is written and an
         error is returned describing the first failure plus the live state.
+
+        ``caller_key`` (here and on add/replace/remove) scopes the
+        consolidation-failure streak; see ``_consolidation_failure``.
         """
         if not operations:
             return {"success": False, "error": "operations list is empty."}
@@ -440,25 +476,31 @@ class CuratedMemoryStore:
 
                 if act == "add":
                     if not content:
-                        return self._batch_error(target, f"{pos}: content is required.")
+                        return self._batch_error(target, caller_key, f"{pos}: content is required.")
                     if content in working:
                         continue  # idempotent -- skip duplicate, don't fail the batch
                     working.append(content)
 
                 elif act == "replace":
                     if not old_text:
-                        return self._batch_error(target, f"{pos}: old_text is required.")
+                        return self._batch_error(
+                            target, caller_key, f"{pos}: old_text is required."
+                        )
                     if not content:
                         return self._batch_error(
                             target,
+                            caller_key,
                             f"{pos}: content is required (use action='remove' to delete).",
                         )
                     matches = [j for j, e in enumerate(working) if old_text in e]
                     if not matches:
-                        return self._batch_error(target, f"{pos}: no entry matched '{old_text}'.")
+                        return self._batch_error(
+                            target, caller_key, f"{pos}: no entry matched '{old_text}'."
+                        )
                     if len({working[j] for j in matches}) > 1:
                         return self._batch_error(
                             target,
+                            caller_key,
                             f"{pos}: '{old_text}' matched multiple distinct entries -- "
                             f"be more specific.",
                         )
@@ -466,13 +508,18 @@ class CuratedMemoryStore:
 
                 elif act == "remove":
                     if not old_text:
-                        return self._batch_error(target, f"{pos}: old_text is required.")
+                        return self._batch_error(
+                            target, caller_key, f"{pos}: old_text is required."
+                        )
                     matches = [j for j, e in enumerate(working) if old_text in e]
                     if not matches:
-                        return self._batch_error(target, f"{pos}: no entry matched '{old_text}'.")
+                        return self._batch_error(
+                            target, caller_key, f"{pos}: no entry matched '{old_text}'."
+                        )
                     if len({working[j] for j in matches}) > 1:
                         return self._batch_error(
                             target,
+                            caller_key,
                             f"{pos}: '{old_text}' matched multiple distinct entries -- "
                             f"be more specific.",
                         )
@@ -480,7 +527,7 @@ class CuratedMemoryStore:
 
                 else:
                     return self._batch_error(
-                        target, f"{pos}: unknown action. Use add, replace, or remove."
+                        target, caller_key, f"{pos}: unknown action. Use add, replace, or remove."
                     )
 
             # Budget check against the FINAL state only.
@@ -488,6 +535,7 @@ class CuratedMemoryStore:
             if new_total > limit:
                 current = self._char_count(target)
                 return self._consolidation_failure(
+                    caller_key,
                     {
                         "success": False,
                         "error": (
@@ -498,26 +546,27 @@ class CuratedMemoryStore:
                         ),
                         "current_entries": list(self.entries_for(target)),
                         "usage": f"{current:,}/{limit:,}",
-                    }
+                    },
                 )
 
             # Commit.
             self._set_entries(target, working)
             self._save(target)
 
-        return self._success(target, f"Applied {len(operations)} operation(s).")
+        return self._success(target, caller_key, f"Applied {len(operations)} operation(s).")
 
-    def _batch_error(self, target: str, message: str) -> dict[str, Any]:
+    def _batch_error(self, target: str, caller_key: str | None, message: str) -> dict[str, Any]:
         """Build a batch-abort error that reports live (uncommitted) state."""
         current = self._char_count(target)
         limit = self._char_limit(target)
         return self._consolidation_failure(
+            caller_key,
             {
                 "success": False,
                 "error": message + " No operations were applied (batch is all-or-nothing).",
                 "current_entries": list(self.entries_for(target)),
                 "usage": f"{current:,}/{limit:,}",
-            }
+            },
         )
 
     # -- internals ---------------------------------------------------------
@@ -787,7 +836,9 @@ class CuratedMemoryStore:
             ),
         }
 
-    def _consolidation_failure(self, response: dict[str, Any]) -> dict[str, Any]:
+    def _consolidation_failure(
+        self, caller_key: str | None, response: dict[str, Any]
+    ) -> dict[str, Any]:
         """Count a failed consolidation and cut the model off after N in a row.
 
         The budget is scoped to a WINDOW rather than a literal turn: this
@@ -797,28 +848,37 @@ class CuratedMemoryStore:
         dead with no way back. Any failure older than the window is stale
         evidence about a turn that already ended, so the count restarts.
 
-        A successful write also resets it (see ``_success``).
+        The streak is also scoped per ``caller_key`` (the ``memory`` tool
+        passes its session key): the cached store is shared by every session
+        in the workspace, and one shared counter let two concurrent sessions
+        trip each other into the terminal state with their combined failures.
+        RPC / CLI callers pass no key and share the ``None`` streak.
+
+        A successful write also resets the caller's streak (see ``_success``).
         """
         now = time.monotonic()
-        if now - self._first_failure_at > _CONSOLIDATION_FAILURE_WINDOW_S:
-            self._consolidation_failures = 0
-            self._first_failure_at = now
-        if self._consolidation_failures == 0:
-            self._first_failure_at = now
-        self._consolidation_failures += 1
-        if self._consolidation_failures <= _MAX_CONSOLIDATION_FAILURES_PER_TURN:
+        count, first_at = self._failure_streaks.pop(caller_key, (0, 0.0))
+        if count == 0 or now - first_at > _CONSOLIDATION_FAILURE_WINDOW_S:
+            count, first_at = 0, now
+        count += 1
+        self._failure_streaks[caller_key] = (count, first_at)
+        while len(self._failure_streaks) > _MAX_FAILURE_STREAKS:
+            self._failure_streaks.popitem(last=False)
+        if count <= _MAX_CONSOLIDATION_FAILURES_PER_TURN:
             return response
         return {
             "success": False,
             "done": True,
             "error": (
-                f"Memory consolidation failed {self._consolidation_failures} times this "
+                f"Memory consolidation failed {count} times this "
                 "turn. Stop retrying memory calls — leave memory unchanged and continue "
                 "with your reply. The fact can be saved in a later turn."
             ),
         }
 
-    def _success(self, target: str, message: str | None = None) -> dict[str, Any]:
+    def _success(
+        self, target: str, caller_key: str | None, message: str | None = None
+    ) -> dict[str, Any]:
         """Build the terminal success response for a committed write.
 
         Deliberately does NOT echo the entries list. Handing the model the
@@ -828,8 +888,7 @@ class CuratedMemoryStore:
         entries only appear on the error paths, where the model genuinely
         needs them to decide what to consolidate.
         """
-        self._consolidation_failures = 0
-        self._first_failure_at = 0.0
+        self._failure_streaks.pop(caller_key, None)
         entries = self.entries_for(target)
         current = self._char_count(target)
         limit = self._char_limit(target)

@@ -392,7 +392,9 @@ agent can consolidate: `replace` overlapping entries or `remove` stale ones,
 then retry — ideally in the same batch call so a single round-trip both
 frees room and adds the new fact. Repeated consolidation failures within a
 turn cap out after a few attempts so a fragile add/replace can't loop the
-turn to budget exhaustion.
+turn to budget exhaustion. The cap is counted per session, so two sessions
+consolidating the same workspace's memory at once do not use up each other's
+attempts.
 
 ```mermaid
 flowchart TD

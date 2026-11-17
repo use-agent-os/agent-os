@@ -248,7 +248,65 @@ def test_successful_write_clears_the_streak(store: CuratedMemoryStore):
     store.add("memory", "x" * 150)
     store.add("memory", "y" * 150)  # failure
     assert store.add("memory", "ok")["success"] is True
-    assert store._consolidation_failures == 0
+    assert store.consolidation_failure_count() == 0
+
+
+def test_failure_streaks_are_scoped_per_caller(
+    store: CuratedMemoryStore, monkeypatch: pytest.MonkeyPatch
+):
+    """Two sessions sharing the cached workspace store must not trip each other.
+
+    Alternating failures from two callers add up to more than the per-turn
+    cap, but neither caller's own streak reaches it, so neither may be cut off.
+    """
+    monkeypatch.setattr("agentos.memory.curated.time.monotonic", lambda: 1000.0)
+    store.add("memory", "x" * 150)
+
+    results = []
+    for _ in range(_MAX_CONSOLIDATION_FAILURES_PER_TURN):
+        results.append(store.add("memory", "y" * 150, caller_key="session-a"))
+        results.append(store.add("memory", "y" * 150, caller_key="session-b"))
+
+    assert all("done" not in r for r in results)
+    assert store.consolidation_failure_count("session-a") == _MAX_CONSOLIDATION_FAILURES_PER_TURN
+    assert store.consolidation_failure_count("session-b") == _MAX_CONSOLIDATION_FAILURES_PER_TURN
+    # The unkeyed (RPC / CLI) streak is untouched by either session.
+    assert store.consolidation_failure_count() == 0
+
+
+def test_one_caller_still_trips_after_the_cap(
+    store: CuratedMemoryStore, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr("agentos.memory.curated.time.monotonic", lambda: 1000.0)
+    store.add("memory", "x" * 150)
+
+    for _ in range(_MAX_CONSOLIDATION_FAILURES_PER_TURN):
+        assert "done" not in store.add("memory", "y" * 150, caller_key="session-a")
+    frozen = store.replace("memory", "no-such-entry", "z", caller_key="session-a")
+    assert frozen["done"] is True and "Stop retrying" in frozen["error"]
+
+    # Another session in the same workspace is still allowed to consolidate.
+    other = store.add("memory", "y" * 150, caller_key="session-b")
+    assert "done" not in other and other["success"] is False
+
+
+def test_success_clears_only_the_callers_streak(store: CuratedMemoryStore):
+    store.add("memory", "x" * 150)
+    store.add("memory", "y" * 150, caller_key="session-a")
+    store.add("memory", "y" * 150, caller_key="session-b")
+    assert store.add("memory", "ok", caller_key="session-a")["success"] is True
+    assert store.consolidation_failure_count("session-a") == 0
+    assert store.consolidation_failure_count("session-b") == 1
+
+
+def test_failure_streak_map_is_bounded(store: CuratedMemoryStore):
+    from agentos.memory.curated import _MAX_FAILURE_STREAKS
+
+    store.add("memory", "x" * 150)
+    for i in range(_MAX_FAILURE_STREAKS + 10):
+        store.add("memory", "y" * 150, caller_key=f"session-{i}")
+    assert len(store._failure_streaks) == _MAX_FAILURE_STREAKS
+    assert store.consolidation_failure_count("session-0") == 0
 
 
 # -- success payload stays terminal ----------------------------------------

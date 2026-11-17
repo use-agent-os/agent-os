@@ -1124,6 +1124,11 @@ def create_memory_tools(
     ) -> str:
         r = _resolve()
         store = _curated_store_for(r)
+        # The cached store is shared by every session in this workspace; key
+        # the consolidation-failure streak by session so concurrent sessions
+        # cannot trip each other's anti-loop cutoff.
+        _ctx = current_tool_context.get()
+        caller_key = _ctx.session_key if _ctx else None
 
         # Some strict providers fill optional schema fields with JSON null
         # rather than omitting them. Treat target: null as omitted so writes
@@ -1149,7 +1154,9 @@ def create_memory_tools(
                     },
                     ensure_ascii=False,
                 )
-            result = await asyncio.to_thread(store.apply_batch, target, operations)
+            result = await asyncio.to_thread(
+                store.apply_batch, target, operations, caller_key=caller_key
+            )
             _mirror_memory_write(
                 _provider_manager_for_current_agent(),
                 tool_result=result,
@@ -1189,11 +1196,17 @@ def create_memory_tools(
             return _missing_old_text_error(store, target, "remove")
 
         if action == "add":
-            result = await asyncio.to_thread(store.add, target, content or "")
+            result = await asyncio.to_thread(
+                store.add, target, content or "", caller_key=caller_key
+            )
         elif action == "replace":
-            result = await asyncio.to_thread(store.replace, target, old_text or "", content or "")
+            result = await asyncio.to_thread(
+                store.replace, target, old_text or "", content or "", caller_key=caller_key
+            )
         elif action == "remove":
-            result = await asyncio.to_thread(store.remove, target, old_text or "")
+            result = await asyncio.to_thread(
+                store.remove, target, old_text or "", caller_key=caller_key
+            )
         else:
             return json.dumps(
                 {
