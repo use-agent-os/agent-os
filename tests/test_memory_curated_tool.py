@@ -58,6 +58,40 @@ async def test_memory_tool_batch_operations(memory_tools_fixture):
     assert result["entry_count"] == 2
 
 
+async def test_memory_tool_scopes_failure_streak_per_session(tmp_path, monkeypatch):
+    """Sessions sharing the cached workspace store keep separate failure streaks."""
+    from agentos.memory.curated import _MAX_CONSOLIDATION_FAILURES_PER_TURN
+    from agentos.tools.types import CallerKind, ToolContext, current_tool_context
+
+    monkeypatch.setattr("agentos.memory.curated.time.monotonic", lambda: 1000.0)
+    registry = ToolRegistry()
+    create_memory_tools(
+        stores=_FakeMemorySaveStore(),
+        retrievers=SimpleNamespace(),
+        memory_dir=str(tmp_path),
+        registry=registry,
+        memory_config=SimpleNamespace(curated_memory_char_limit=200, curated_user_char_limit=100),
+    )
+    memory = registry.get("memory").handler
+
+    async def call(session_key: str, **kwargs):
+        ctx = ToolContext(caller_kind=CallerKind.AGENT, agent_id="main", session_key=session_key)
+        token = current_tool_context.set(ctx)
+        try:
+            return json.loads(await memory(**kwargs))
+        finally:
+            current_tool_context.reset(token)
+
+    assert (await call("agent:main:a", action="add", content="x" * 150))["success"] is True
+    for _ in range(_MAX_CONSOLIDATION_FAILURES_PER_TURN):
+        for key in ("agent:main:a", "agent:main:b"):
+            result = await call(key, action="add", content="y" * 150)
+            assert result["success"] is False and "done" not in result
+
+    tripped = await call("agent:main:a", action="add", content="y" * 150)
+    assert tripped["done"] is True
+
+
 async def test_memory_tool_null_target_defaults_to_memory(memory_tools_fixture):
     tools = memory_tools_fixture
     result = json.loads(await tools["memory"](action="add", target=None, content="x"))

@@ -41,7 +41,7 @@ graph TB
     TOOLS -->|memory tool writes| CUR
     TOOLS -->|memory_save| NOTES
     MEM0 -->|fenced recall block| PROMPT
-    TOOLS -.->|write mirror, add only| MEM0
+    TOOLS -.->|write mirror| MEM0
 
     classDef store fill:#E6E6FA,stroke:#333,stroke-width:2px,color:#1a1a5e
     classDef engine fill:#90EE90,stroke:#333,stroke-width:2px,color:#0a3d0a
@@ -392,7 +392,9 @@ agent can consolidate: `replace` overlapping entries or `remove` stale ones,
 then retry — ideally in the same batch call so a single round-trip both
 frees room and adds the new fact. Repeated consolidation failures within a
 turn cap out after a few attempts so a fragile add/replace can't loop the
-turn to budget exhaustion.
+turn to budget exhaustion. The cap is counted per session, so two sessions
+consolidating the same workspace's memory at once do not use up each other's
+attempts.
 
 ```mermaid
 flowchart TD
@@ -466,9 +468,12 @@ When a provider is active it hooks four points:
 - **Per-turn sync** — after each turn the user/assistant exchange is handed to
   the provider (serialized through one background queue per manager) so it can
   extract and store durable memories.
-- **Write mirror** — curated `memory` tool **ADDs** are mirrored to the
-  provider so it picks up new facts too; replace/remove are not propagated
-  in v1, so the provider's copy can drift from edited or deleted notes.
+- **Write mirror** — every committed curated `memory` tool write (add,
+  replace, remove, and each change in a batch) is mirrored to the provider
+  on the same background queue, so it picks up new facts and drops edited or
+  deleted ones. Replace and remove hand the provider the full text of the old
+  entry. A duplicate add that changed nothing is not mirrored, and a failed
+  mirror is logged without affecting the tool call.
 
 ```mermaid
 sequenceDiagram
@@ -490,7 +495,7 @@ sequenceDiagram
     end
     opt memory tool write during the turn
         RT->>CM: add / replace / remove (budget-checked)
-        RT-->>XP: mirror (add only)
+        RT-->>XP: mirror add / replace / remove
     end
 ```
 
@@ -545,6 +550,23 @@ The same keys are editable in the web console under **Settings › Advanced**
 changing `memory.provider.name` — or any `memory.provider.mem0.*` setting —
 only takes effect after a gateway restart. Settings shows a restart notice
 naming the change when you save these keys.
+
+**How curated writes reach mem0.** A curated entry is stored in mem0 verbatim
+(no LLM extraction) as one record, tagged with its target and a hash of the
+entry text. A `remove` searches mem0 for that text and deletes only the records
+carrying both tags; a `replace` does the same and then adds the new entry.
+Limits:
+
+- Only mirrors written by a version with this tagging can be deleted. Curated
+  adds mirrored by earlier versions went through mem0's fact extraction, carry
+  no tags, and stay in mem0 until you delete them there.
+- Facts mem0 extracted from the conversation itself (per-turn sync) are never
+  deleted by a curated replace or remove, even when they say the same thing.
+- The lookup inspects the top 20 search hits for the entry's text. A record
+  that does not rank there (for example, after the embedder model changed) is
+  missed and stays in mem0.
+- An entry edited outside the `memory` tool (by hand, or through
+  `agentos memory curated`) is not mirrored at all.
 
 **Privacy.** With the default stack, everything (LLM, embeddings, vector
 store) stays on the local machine. mem0 telemetry is disabled, so no usage

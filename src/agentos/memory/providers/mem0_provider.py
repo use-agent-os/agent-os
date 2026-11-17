@@ -35,6 +35,7 @@ parser, so a silent upstream schema change would surface only at runtime.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib.util
 import os
 from pathlib import Path
@@ -62,6 +63,19 @@ _MAX_CONTENT_CHARS = 8192
 _EMBEDDING_DIMS = 768
 
 _COLLECTION_NAME = "mem0"
+
+# Metadata tags on the record a curated ``memory`` write mirrors into mem0.
+# They are how a later replace/remove finds that record again: mem0 only
+# deletes by its own memory id, which the curated store never sees, so the
+# provider looks the record up by text and deletes it only when both tags
+# match the entry being dropped. Records without the tags (turn extractions,
+# curated mirrors written before the tags existed) are never deleted.
+_CURATED_TARGET_KEY = "agentos_curated_target"
+_CURATED_HASH_KEY = "agentos_curated_sha256"
+
+# How many search hits to inspect when looking for a curated record. The
+# lookup query is the record's own text, so its copies rank at the top.
+_CURATED_LOOKUP_LIMIT = 20
 
 
 class Mem0Provider(MemoryProvider):
@@ -211,27 +225,105 @@ class Mem0Provider(MemoryProvider):
         content: str,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        """Mirror curated ADD writes into mem0. Replace/remove are ignored v1."""
-        if self._client is None or action != "add":
+        """Mirror a curated write into mem0.
+
+        An add stores the entry verbatim (``infer=False``) as one record
+        tagged with the target and a hash of the entry, so that exact record
+        can be found again. A remove deletes the tagged records of
+        ``metadata["old_entry"]``; a replace deletes those and adds the new
+        entry. Without ``old_entry`` a replace only adds and a remove does
+        nothing -- matching on the ``old_text`` substring could delete an
+        unrelated memory.
+        """
+        if self._client is None:
             return
-        text = f"[curated {target}] {_truncate(content)}"
-        await self._add([{"role": "user", "content": text}])
+        old_entry = str((metadata or {}).get("old_entry") or "")
+        if action in {"replace", "remove"} and old_entry:
+            await self._delete_curated(target, old_entry)
+        if action in {"add", "replace"} and content:
+            await self._add(
+                [{"role": "user", "content": _curated_text(target, content)}],
+                metadata=_curated_tags(target, content),
+                infer=False,
+            )
 
     # -- Internals -----------------------------------------------------------
 
-    async def _add(self, payload: list[dict[str, str]]) -> None:
+    async def _add(self, payload: list[dict[str, str]], **extra: Any) -> None:
         """Run the synchronous ``client.add`` off the event loop, guarded."""
         client = self._client
         if client is None:
             return
 
         def _run() -> None:
-            client.add(messages=payload, user_id=self._user_id)
+            client.add(messages=payload, user_id=self._user_id, **extra)
 
         try:
             await asyncio.to_thread(_run)
         except Exception as exc:  # noqa: BLE001 — a write must never break a turn
             logger.warning("mem0_provider.add_failed", error=str(exc))
+
+    async def _delete_curated(self, target: str, entry: str) -> None:
+        """Delete the tagged mem0 records mirroring curated *entry*, guarded."""
+        client = self._client
+        if client is None:
+            return
+        query = _curated_text(target, entry)
+        tags = _curated_tags(target, entry)
+
+        def _run() -> int:
+            try:
+                # mem0 >= 1.x scopes search through ``filters``.
+                result = client.search(
+                    query, filters={"user_id": self._user_id}, top_k=_CURATED_LOOKUP_LIMIT
+                )
+            except TypeError:
+                # 0.1.x takes the entity id and limit as keywords.
+                result = client.search(query, user_id=self._user_id, limit=_CURATED_LOOKUP_LIMIT)
+            ids = _tagged_memory_ids(result, tags)
+            for memory_id in ids:
+                client.delete(memory_id)
+            return len(ids)
+
+        try:
+            deleted = await asyncio.to_thread(_run)
+        except Exception as exc:  # noqa: BLE001 — a write must never break a turn
+            logger.warning("mem0_provider.delete_failed", error=str(exc))
+            return
+        if not deleted:
+            logger.debug("mem0_provider.curated_record_not_found", target=target)
+
+
+def _curated_text(target: str, entry: str) -> str:
+    """The message text a curated entry is stored (and looked up) under."""
+    return f"[curated {target}] {_truncate(entry)}"
+
+
+def _curated_tags(target: str, entry: str) -> dict[str, str]:
+    """Metadata identifying the mem0 record that mirrors curated *entry*."""
+    digest = hashlib.sha256(entry.encode("utf-8")).hexdigest()
+    return {_CURATED_TARGET_KEY: target, _CURATED_HASH_KEY: digest}
+
+
+def _tagged_memory_ids(result: Any, tags: dict[str, str]) -> list[str]:
+    """Ids of search hits whose metadata carries every one of *tags*."""
+    if isinstance(result, dict):
+        hits = result.get("results", [])
+    elif isinstance(result, list):
+        hits = result
+    else:
+        return []
+    ids: list[str] = []
+    for hit in hits:
+        if not isinstance(hit, dict):
+            continue
+        meta = hit.get("metadata")
+        memory_id = hit.get("id")
+        if not memory_id or not isinstance(meta, dict):
+            continue
+        if all(meta.get(key) == value for key, value in tags.items()):
+            ids.append(str(memory_id))
+    return ids
 
 
 def _truncate(text: str) -> str:

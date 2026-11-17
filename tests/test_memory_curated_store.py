@@ -321,3 +321,38 @@ def test_user_snapshot_header_is_user_profile(store: CuratedMemoryStore):
     store.add("user", "Name: Key")
     store.load_from_disk()
     assert "USER PROFILE" in (store.snapshot_block("user") or "")
+
+
+def test_changes_record_full_entries_for_each_committed_write(store: CuratedMemoryStore):
+    changes: list[dict[str, str]] = []
+    store.add("memory", "uses npm for installs", changes=changes)
+    store.add("memory", "uses npm for installs", changes=changes)  # duplicate: no change
+    store.replace("memory", "npm", "uses pnpm for installs", changes=changes)
+    store.remove("memory", "pnpm", changes=changes)
+
+    assert changes == [
+        {"action": "add", "entry": "uses npm for installs"},
+        {
+            "action": "replace",
+            "old_text": "npm",
+            "old_entry": "uses npm for installs",
+            "entry": "uses pnpm for installs",
+        },
+        {"action": "remove", "old_text": "pnpm", "old_entry": "uses pnpm for installs"},
+    ]
+
+
+def test_changes_stay_empty_when_a_write_fails(store: CuratedMemoryStore):
+    store.add("memory", "keep me")
+    changes: list[dict[str, str]] = []
+
+    store.replace("memory", "no such entry", "x", changes=changes)
+    store.remove("memory", "no such entry", changes=changes)
+    store.apply_batch(
+        "memory",
+        [{"action": "remove", "old_text": "keep"}, {"action": "remove", "old_text": "nope"}],
+        changes=changes,
+    )
+
+    assert changes == []
+    assert store.entries_for("memory") == ["keep me"]

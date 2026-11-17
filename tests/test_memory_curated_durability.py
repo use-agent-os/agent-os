@@ -170,6 +170,78 @@ def test_write_through_symlink_keeps_the_symlink(tmp_path: Path):
     assert "persisted fact" in real_file.read_text(encoding="utf-8")
 
 
+# -- lock follows symlinks to the real file --------------------------------
+
+
+def _two_workspaces_sharing(tmp_path: Path) -> tuple[Path, Path, Path]:
+    real_dir = tmp_path / "shared"
+    real_dir.mkdir()
+    real_file = real_dir / "MEMORY.md"
+    real_file.write_text("", encoding="utf-8")
+    workspaces = []
+    for name in ("ws-a", "ws-b"):
+        ws = tmp_path / name
+        ws.mkdir()
+        (ws / "MEMORY.md").symlink_to(real_file)
+        workspaces.append(ws)
+    return workspaces[0], workspaces[1], real_file
+
+
+@pytest.mark.skipif(os.name != "posix", reason="flock + unprivileged symlinks are POSIX-only")
+def test_symlinked_stores_contend_for_one_lock(tmp_path: Path):
+    """Two workspaces whose MEMORY.md points at one file must share its lock.
+
+    Locking beside the symlink gave each workspace its own lock file, so their
+    read-modify-writes of the same real file could interleave and lose one.
+    """
+    import fcntl
+
+    ws_a, ws_b, real_file = _two_workspaces_sharing(tmp_path)
+
+    with CuratedMemoryStore._file_lock(ws_a / "MEMORY.md"):
+        assert (real_file.parent / "MEMORY.md.lock").exists()
+        assert not (ws_a / "MEMORY.md.lock").exists()
+        other = CuratedMemoryStore._open_lock_file(ws_b / "MEMORY.md")
+        try:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            other.close()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="unprivileged symlinks are POSIX-only")
+def test_symlinked_stores_both_writes_land(tmp_path: Path):
+    ws_a, ws_b, real_file = _two_workspaces_sharing(tmp_path)
+    a = CuratedMemoryStore(memory_dir=ws_a, memory_char_limit=200, user_char_limit=100)
+    b = CuratedMemoryStore(memory_dir=ws_b, memory_char_limit=200, user_char_limit=100)
+    a.load_from_disk()
+    b.load_from_disk()
+
+    assert a.add("memory", "from a")["success"] is True
+    assert b.add("memory", "from b")["success"] is True
+
+    text = real_file.read_text(encoding="utf-8")
+    assert "from a" in text and "from b" in text
+
+
+@pytest.mark.skipif(os.name != "posix", reason="unprivileged symlinks are POSIX-only")
+def test_lock_falls_back_beside_the_link_when_real_dir_is_unusable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    ws_a, _ws_b, real_file = _two_workspaces_sharing(tmp_path)
+    real_lock = real_file.with_suffix(".md.lock")
+    builtin_open = open
+
+    def refuse_real_lock(file, *args, **kwargs):
+        if Path(file) == real_lock:
+            raise PermissionError(errno.EACCES, "read-only")
+        return builtin_open(file, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", refuse_real_lock)
+    with CuratedMemoryStore._file_lock(ws_a / "MEMORY.md"):
+        assert (ws_a / "MEMORY.md.lock").exists()
+
+
 def test_cross_device_rename_falls_back_to_copy(
     store: CuratedMemoryStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -248,7 +320,65 @@ def test_successful_write_clears_the_streak(store: CuratedMemoryStore):
     store.add("memory", "x" * 150)
     store.add("memory", "y" * 150)  # failure
     assert store.add("memory", "ok")["success"] is True
-    assert store._consolidation_failures == 0
+    assert store.consolidation_failure_count() == 0
+
+
+def test_failure_streaks_are_scoped_per_caller(
+    store: CuratedMemoryStore, monkeypatch: pytest.MonkeyPatch
+):
+    """Two sessions sharing the cached workspace store must not trip each other.
+
+    Alternating failures from two callers add up to more than the per-turn
+    cap, but neither caller's own streak reaches it, so neither may be cut off.
+    """
+    monkeypatch.setattr("agentos.memory.curated.time.monotonic", lambda: 1000.0)
+    store.add("memory", "x" * 150)
+
+    results = []
+    for _ in range(_MAX_CONSOLIDATION_FAILURES_PER_TURN):
+        results.append(store.add("memory", "y" * 150, caller_key="session-a"))
+        results.append(store.add("memory", "y" * 150, caller_key="session-b"))
+
+    assert all("done" not in r for r in results)
+    assert store.consolidation_failure_count("session-a") == _MAX_CONSOLIDATION_FAILURES_PER_TURN
+    assert store.consolidation_failure_count("session-b") == _MAX_CONSOLIDATION_FAILURES_PER_TURN
+    # The unkeyed (RPC / CLI) streak is untouched by either session.
+    assert store.consolidation_failure_count() == 0
+
+
+def test_one_caller_still_trips_after_the_cap(
+    store: CuratedMemoryStore, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr("agentos.memory.curated.time.monotonic", lambda: 1000.0)
+    store.add("memory", "x" * 150)
+
+    for _ in range(_MAX_CONSOLIDATION_FAILURES_PER_TURN):
+        assert "done" not in store.add("memory", "y" * 150, caller_key="session-a")
+    frozen = store.replace("memory", "no-such-entry", "z", caller_key="session-a")
+    assert frozen["done"] is True and "Stop retrying" in frozen["error"]
+
+    # Another session in the same workspace is still allowed to consolidate.
+    other = store.add("memory", "y" * 150, caller_key="session-b")
+    assert "done" not in other and other["success"] is False
+
+
+def test_success_clears_only_the_callers_streak(store: CuratedMemoryStore):
+    store.add("memory", "x" * 150)
+    store.add("memory", "y" * 150, caller_key="session-a")
+    store.add("memory", "y" * 150, caller_key="session-b")
+    assert store.add("memory", "ok", caller_key="session-a")["success"] is True
+    assert store.consolidation_failure_count("session-a") == 0
+    assert store.consolidation_failure_count("session-b") == 1
+
+
+def test_failure_streak_map_is_bounded(store: CuratedMemoryStore):
+    from agentos.memory.curated import _MAX_FAILURE_STREAKS
+
+    store.add("memory", "x" * 150)
+    for i in range(_MAX_FAILURE_STREAKS + 10):
+        store.add("memory", "y" * 150, caller_key=f"session-{i}")
+    assert len(store._failure_streaks) == _MAX_FAILURE_STREAKS
+    assert store.consolidation_failure_count("session-0") == 0
 
 
 # -- success payload stays terminal ----------------------------------------

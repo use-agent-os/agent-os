@@ -360,6 +360,106 @@ async def test_batch_write_mirrors_each_op(tmp_path):
     await _store.close()
 
 
+async def test_replace_and_remove_mirror_the_full_old_entry(tmp_path):
+    """The provider gets the whole replaced/removed entry, not just old_text.
+
+    A provider can only find its own copy of an entry by the full text; the
+    substring the model matched with is not enough to delete it safely.
+    """
+    provider = _FakeProvider()
+    mgr = _manager_with(provider)
+    registry, ctx, cv, _store = await _make_memory_tool(tmp_path, mgr)
+
+    memory = registry.get("memory").handler
+    token = cv.set(ctx)
+    try:
+        await memory(action="add", target="memory", content="deploys go through staging")
+        await memory(action="add", target="memory", content="uses npm for installs")
+        replaced = await memory(
+            action="replace", target="memory", old_text="npm", content="uses pnpm for installs"
+        )
+        removed = await memory(action="remove", target="memory", old_text="staging")
+    finally:
+        cv.reset(token)
+    assert json.loads(replaced)["success"] is True
+    assert json.loads(removed)["success"] is True
+
+    await mgr.flush_pending()
+    assert provider.memory_writes[2:] == [
+        (
+            "replace",
+            "memory",
+            "uses pnpm for installs",
+            {"old_text": "npm", "old_entry": "uses npm for installs"},
+        ),
+        (
+            "remove",
+            "memory",
+            "",
+            {"old_text": "staging", "old_entry": "deploys go through staging"},
+        ),
+    ]
+    await _store.close()
+
+
+async def test_batch_mirrors_what_the_batch_changed(tmp_path):
+    provider = _FakeProvider()
+    mgr = _manager_with(provider)
+    registry, ctx, cv, _store = await _make_memory_tool(tmp_path, mgr)
+
+    memory = registry.get("memory").handler
+    token = cv.set(ctx)
+    try:
+        await memory(action="add", target="user", content="likes dark mode")
+        await memory(action="add", target="user", content="writes Rust")
+        await mgr.flush_pending()
+        provider.memory_writes.clear()
+        result = await memory(
+            target="user",
+            operations=[
+                {"action": "remove", "old_text": "Rust"},
+                {"action": "replace", "old_text": "dark", "content": "likes dark mode, 2 spaces"},
+                {"action": "add", "content": "likes dark mode, 2 spaces"},  # duplicate: no-op
+                {"action": "add", "content": "lives in Lisbon"},
+            ],
+        )
+    finally:
+        cv.reset(token)
+    assert json.loads(result)["success"] is True
+
+    await mgr.flush_pending()
+    assert provider.memory_writes == [
+        ("remove", "user", "", {"old_text": "Rust", "old_entry": "writes Rust"}),
+        (
+            "replace",
+            "user",
+            "likes dark mode, 2 spaces",
+            {"old_text": "dark", "old_entry": "likes dark mode"},
+        ),
+        ("add", "user", "lives in Lisbon", {}),
+    ]
+    await _store.close()
+
+
+async def test_duplicate_add_is_not_mirrored(tmp_path):
+    provider = _FakeProvider()
+    mgr = _manager_with(provider)
+    registry, ctx, cv, _store = await _make_memory_tool(tmp_path, mgr)
+
+    memory = registry.get("memory").handler
+    token = cv.set(ctx)
+    try:
+        await memory(action="add", target="memory", content="fact")
+        again = await memory(action="add", target="memory", content="fact")
+    finally:
+        cv.reset(token)
+    assert json.loads(again)["success"] is True
+
+    await mgr.flush_pending()
+    assert provider.memory_writes == [("add", "memory", "fact", {})]
+    await _store.close()
+
+
 async def test_failed_write_does_not_mirror(tmp_path):
     provider = _FakeProvider()
     mgr = _manager_with(provider)

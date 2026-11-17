@@ -7,8 +7,7 @@ transcript and enqueues it on the task runtime with ``run_kind="acp"`` --
 the same path a subagent takes, so depth / ``max_children`` gates, the
 completion announce and the parent wake behave identically.
 
-Spawn planning follows OpenClaw ``src/agents/spawn-plan.ts`` and
-``subagents/spawn/acp-spawn*.ts`` (MIT): resolve the harness, check policy,
+Spawn planning runs in a fixed order: resolve the harness, check policy,
 resolve and confine ``cwd``, optionally create a managed worktree, and only
 resume a harness session the requester (or one of its children) owns.
 """

@@ -129,39 +129,37 @@ def _mirror_memory_write(
     *,
     tool_result: Any,
     target: str,
-    action: str | None,
-    content: str | None,
-    old_text: str | None,
-    operations: list[dict[str, Any]] | None,
+    changes: list[dict[str, str]],
 ) -> None:
     """Mirror a successful curated ``memory`` write to the external provider.
 
     Ports the hermes ``notify_memory_tool_write`` semantics: gate on a
-    committed (non-staged, successful) write, expand the single-op and batched
-    ``operations`` shapes, keep only add/replace/remove, and forward
-    ``old_text`` as provenance metadata. No-op when no provider is configured.
+    committed (non-staged, successful) write and forward add/replace/remove
+    only. ``changes`` is what the store recorded for the commit (see
+    ``CuratedMemoryStore.apply_batch``), so a duplicate add that changed
+    nothing is not mirrored and a replace/remove carries the FULL text of the
+    entry it replaced or removed as ``metadata["old_entry"]`` -- a provider
+    can only find its copy of that entry by the whole text, not by the
+    ``old_text`` substring the model matched with (still forwarded as
+    ``metadata["old_text"]``). No-op when no provider is configured.
     """
     if provider_manager is None:
         return
     if not _memory_write_committed(tool_result):
         return
-    if operations:
-        raw_ops: list[dict[str, Any]] = [op for op in operations if isinstance(op, dict)]
-    else:
-        raw_ops = [{"action": action, "content": content, "old_text": old_text}]
-    for op in raw_ops:
-        op_action = str(op.get("action") or "")
+    for change in changes:
+        op_action = change.get("action") or ""
         if op_action not in _MIRRORED_MEMORY_ACTIONS:
             continue
         metadata: dict[str, Any] = {}
-        op_old_text = op.get("old_text")
-        if op_old_text:
-            metadata["old_text"] = str(op_old_text)
+        for key in ("old_text", "old_entry"):
+            if change.get(key):
+                metadata[key] = change[key]
         try:
             provider_manager.notify_memory_write(
                 op_action,
                 target,
-                str(op.get("content") or ""),
+                change.get("entry") or "",
                 metadata,
             )
         except Exception as exc:  # noqa: BLE001 \u2014 mirror must never break the tool
@@ -1124,6 +1122,14 @@ def create_memory_tools(
     ) -> str:
         r = _resolve()
         store = _curated_store_for(r)
+        # The cached store is shared by every session in this workspace; key
+        # the consolidation-failure streak by session so concurrent sessions
+        # cannot trip each other's anti-loop cutoff.
+        _ctx = current_tool_context.get()
+        caller_key = _ctx.session_key if _ctx else None
+        # Filled by the store with what a committed write changed; drives the
+        # external-provider mirror.
+        changes: list[dict[str, str]] = []
 
         # Some strict providers fill optional schema fields with JSON null
         # rather than omitting them. Treat target: null as omitted so writes
@@ -1149,15 +1155,14 @@ def create_memory_tools(
                     },
                     ensure_ascii=False,
                 )
-            result = await asyncio.to_thread(store.apply_batch, target, operations)
+            result = await asyncio.to_thread(
+                store.apply_batch, target, operations, caller_key=caller_key, changes=changes
+            )
             _mirror_memory_write(
                 _provider_manager_for_current_agent(),
                 tool_result=result,
                 target=target,
-                action=None,
-                content=None,
-                old_text=None,
-                operations=operations,
+                changes=changes,
             )
             # Same contract as memory_save/memory_delete: the frozen per-session
             # snapshot only rebuilds through this callback, so without it a
@@ -1189,11 +1194,22 @@ def create_memory_tools(
             return _missing_old_text_error(store, target, "remove")
 
         if action == "add":
-            result = await asyncio.to_thread(store.add, target, content or "")
+            result = await asyncio.to_thread(
+                store.add, target, content or "", caller_key=caller_key, changes=changes
+            )
         elif action == "replace":
-            result = await asyncio.to_thread(store.replace, target, old_text or "", content or "")
+            result = await asyncio.to_thread(
+                store.replace,
+                target,
+                old_text or "",
+                content or "",
+                caller_key=caller_key,
+                changes=changes,
+            )
         elif action == "remove":
-            result = await asyncio.to_thread(store.remove, target, old_text or "")
+            result = await asyncio.to_thread(
+                store.remove, target, old_text or "", caller_key=caller_key, changes=changes
+            )
         else:
             return json.dumps(
                 {
@@ -1207,10 +1223,7 @@ def create_memory_tools(
             _provider_manager_for_current_agent(),
             tool_result=result,
             target=target,
-            action=action,
-            content=content,
-            old_text=old_text,
-            operations=None,
+            changes=changes,
         )
         # See the batch path above: without this, a committed add/replace/
         # remove here is invisible to the model for the rest of the session.
