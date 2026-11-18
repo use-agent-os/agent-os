@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -140,11 +141,24 @@ class SessionSourceIndexer:
         store: Any,
         agent_id: str = "main",
         max_sessions: int = 1000,
+        forgotten: Callable[[], Awaitable[Any]] | None = None,
     ) -> None:
+        """``forgotten`` returns the agent's forgotten sessions (an object with
+        ``contains(session_id=..., session_key=...)``, see
+        ``MemoryEvidenceStore.forgotten_sessions``). Those sessions are never
+        indexed, and their existing documents fall to the stale-path sweep.
+        It is read before the transcripts, again right before each document
+        is published, and once more after publishing: a forget or a session
+        delete that lands while this sync is reading or embedding is caught by
+        the last read, and the document it would have brought back is
+        withdrawn. When it raises, the sync raises too
+        rather than index a session that may have been forgotten.
+        """
         self._storage: Any = storage
         self._store = store
         self._agent_id = _normalize_agent_id(agent_id)
         self._max_sessions = max(1, max_sessions)
+        self._forgotten = forgotten
 
     async def sync(self, *, force: bool = False) -> SessionSourceSyncResult:
         sessions, complete_scan = await self._list_sessions()
@@ -152,7 +166,21 @@ class SessionSourceIndexer:
         indexed = 0
         skipped = 0
 
+        if self._forgotten is not None:
+            forgotten = await self._forgotten()
+            kept = [
+                session
+                for session in sessions
+                if not forgotten.contains(
+                    session_id=str(getattr(session, "session_id", "") or ""),
+                    session_key=str(getattr(session, "session_key", "") or ""),
+                )
+            ]
+            skipped += len(sessions) - len(kept)
+            sessions = kept
+
         unchanged = set() if force else await self._unchanged_document_paths(sessions)
+        published: list[tuple[Any, str]] = []
 
         for session in sessions:
             if not force:
@@ -167,6 +195,10 @@ class SessionSourceIndexer:
                 skipped += 1
                 continue
             document = build_session_source_document(session, entries)
+            if await self._forgotten_now(session):
+                # Forgotten while this sync was reading it: do not publish.
+                skipped += 1
+                continue
             expected_paths.add(document.path)
             chunks = await self._store.index_file(
                 path=document.path,
@@ -174,10 +206,15 @@ class SessionSourceIndexer:
                 source=MemorySource.sessions,
                 mtime=document.mtime,
             )
+            published.append((session, document.path))
             if chunks > 0 or force:
                 indexed += 1
 
         removed = 0
+        for path in await self._lost_races(published):
+            await self._store.remove_file(path)
+            expected_paths.discard(path)
+            removed += 1
         list_paths = getattr(self._store, "list_paths", None)
         if complete_scan and callable(list_paths):
             existing_paths = set(await list_paths(source=MemorySource.sessions))
@@ -186,6 +223,44 @@ class SessionSourceIndexer:
                 removed += 1
 
         return SessionSourceSyncResult(indexed=indexed, removed=removed, skipped=skipped)
+
+    async def _forgotten_now(self, session: Any) -> bool:
+        """A fresh read of the forgotten set for one session, right before publishing."""
+        if self._forgotten is None:
+            return False
+        forgotten = await self._forgotten()
+        return bool(
+            forgotten.contains(
+                session_id=str(getattr(session, "session_id", "") or ""),
+                session_key=str(getattr(session, "session_key", "") or ""),
+            )
+        )
+
+    async def _lost_races(self, published: list[tuple[Any, str]]) -> list[str]:
+        """Documents this sync published for sessions forgotten or deleted since.
+
+        Read after every publish, so a forget or delete that removed a
+        document before this sync wrote it back is seen here; one that lands
+        later removes the document itself.
+        """
+        if not published:
+            return []
+        forgotten = await self._forgotten() if self._forgotten is not None else None
+        get_session = getattr(self._storage, "get_session", None)
+        lost: list[str] = []
+        for session, path in published:
+            session_id = str(getattr(session, "session_id", "") or "")
+            session_key = str(getattr(session, "session_key", "") or "")
+            if forgotten is not None and forgotten.contains(
+                session_id=session_id, session_key=session_key
+            ):
+                lost.append(path)
+                continue
+            if callable(get_session):
+                current = await get_session(session_key)
+                if current is None or str(getattr(current, "session_id", "")) != session_id:
+                    lost.append(path)
+        return lost
 
     async def _unchanged_document_paths(self, sessions: list[Any]) -> set[str]:
         """Document paths already indexed at or past their session's mtime.

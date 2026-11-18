@@ -631,6 +631,11 @@ class MemoryNudgeConfig(BaseModel):
     excluded_run_kinds: list[str] = Field(
         default_factory=lambda: ["memory_nudge", "cron", "heartbeat", "subagent", "recall"]
     )
+    # Also run the review once right before a compaction summarises a private
+    # conversation (proactive and manual compactions; a compaction forced by
+    # a full context has no room for it). Bounded by ``timeout_seconds``;
+    # compaction never waits longer and never depends on what it saved.
+    before_compaction: bool = True
 
 
 class SafetyConfig(BaseModel):

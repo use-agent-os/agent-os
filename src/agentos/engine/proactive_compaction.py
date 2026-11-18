@@ -34,6 +34,13 @@ Concurrency rules:
 * subagent and cron sessions (:func:`is_ephemeral_session`) are short-lived
   and compacted in memory only; they get no proactive job.
 
+Before it summarises, the job runs the memory review once
+(:meth:`~agentos.engine.runtime.TurnRunner.review_memory_before_compaction`),
+bounded by the review's timeout. The review is not a turn as far as this
+scheduler is concerned (it neither bumps the generation nor ends the
+session's turn), a turn that starts meanwhile cancels it with the job, and
+the job compacts afterwards whatever the review did.
+
 Preflight compaction stays the safety net for whatever this misses.
 """
 
@@ -48,6 +55,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from agentos.engine import pre_compaction_review
 from agentos.engine.compaction_coordinator import CompactionCoordinator
 from agentos.engine.compaction_service import (
     CompactionResult,
@@ -57,6 +65,7 @@ from agentos.engine.compaction_service import (
     trigger_limit_tokens,
 )
 from agentos.engine.estimate_calibration import EstimateCalibration
+from agentos.engine.pre_compaction_review import is_pre_compaction_review
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -72,6 +81,7 @@ MAX_PROACTIVE_IDLE_SECONDS = 300.0
 
 # Job phases, as seen by ``before_history_load``.
 _WAITING = "waiting"  # idle delay: cancelling costs nothing
+_REVIEWING = "reviewing"  # the memory review's model calls may be in flight (billed)
 _SUMMARIZING = "summarizing"  # a summarizer call may be in flight (billed)
 _PERSISTED = "persisted"  # passed the generation check under the gate
 
@@ -181,6 +191,18 @@ def _trigger_limit(agent: Any) -> int:
     )
 
 
+@dataclass
+class _Prepared:
+    """What one proactive job compacts (see ``_prepare``)."""
+
+    transcript: list[Any]
+    tail_index: int
+    record: Any
+    current: list[Message]
+    messages: list[Message]
+    compact_kwargs: dict[str, Any]
+
+
 def _coordinator(agent: Any, session_key: str) -> CompactionCoordinator:
     return CompactionCoordinator(agent.config, agent.provider, session_key)
 
@@ -220,6 +242,10 @@ class ProactiveCompactionScheduler:
         load sees either the old or the compacted transcript, whole. Also
         hands the runtime's estimator calibration to the turn's agent.
         """
+        if is_pre_compaction_review(session_key):
+            # The job's own memory review: neither a turn that should cancel
+            # the job nor one whose estimates should calibrate it.
+            return
         if calibration_enabled(getattr(self._runner, "_config", None)):
             try:
                 agent.estimate_calibration = self._calibration
@@ -241,10 +267,10 @@ class ProactiveCompactionScheduler:
             # Nothing running, or the job already persisted: it only has its
             # notifications and hooks left, which must not be cut short.
             return
-        # Still waiting or summarizing: its result could not be persisted any
-        # more. A cancelled summarizer call was billed, so back off.
+        # Still waiting, reviewing or summarizing: its result could not be
+        # persisted any more. A cancelled model call was billed, so back off.
         task.cancel()
-        billed = phase == _SUMMARIZING
+        billed = phase in (_REVIEWING, _SUMMARIZING)
         if billed:
             self._backoff[session_key] = self._backoff.get(session_key, 0) + 1
         log.info(
@@ -312,6 +338,8 @@ class ProactiveCompactionScheduler:
 
     def turn_ended(self, session_key: str) -> None:
         """The turn (and its session lock) is over: start the pending job."""
+        if is_pre_compaction_review(session_key):
+            return
         state = self._sessions.get(session_key)
         if state is None:
             return
@@ -357,6 +385,8 @@ class ProactiveCompactionScheduler:
                 # Idle wait: a turn that starts meanwhile cancels the job before
                 # any model call (and so does a process that exits).
                 await self._sleep(delay)
+            state.phase = _REVIEWING
+            await self._review_memory(session_key, pending)
             state.phase = _SUMMARIZING
             if await self._compact(session_key, state, pending):
                 self._backoff.pop(session_key, None)
@@ -378,6 +408,46 @@ class ProactiveCompactionScheduler:
             ):
                 self._sessions.pop(session_key, None)
 
+    async def _review_memory(self, session_key: str, pending: _Pending) -> None:
+        """Give the conversation one memory review before it is summarised.
+
+        Best effort and bounded by the review's own timeout; nothing it does
+        or fails to do changes the compaction that follows. A finished turn
+        already at the compaction trigger leaves no room for a review turn.
+        """
+        review = getattr(self._runner, "review_memory_before_compaction", None)
+        if not callable(review):
+            return
+        try:
+            skip = await self._precheck(session_key, pending)
+        except Exception:  # noqa: BLE001 - an unknown outcome still gets its review
+            skip = None
+        if skip is not None:
+            # The compaction would summarise nothing (too little history, not
+            # worth a summary, ...): a review before it would be wasted.
+            note = getattr(self._runner, "note_compaction_without_review", None)
+            if callable(note):
+                note(
+                    session_key=session_key,
+                    compaction=PROACTIVE_PHASE,
+                    reason=pre_compaction_review.NOTHING_TO_COMPACT,
+                    agent_id=pending.agent_id,
+                )
+            return
+        try:
+            await review(
+                agent_id=pending.agent_id,
+                session_key=session_key,
+                compaction=PROACTIVE_PHASE,
+                headroom=pending.estimated_tokens < pending.limit_tokens,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - the review never blocks compaction
+            log.warning(
+                "compaction.proactive_review_failed", session_key=session_key, error=str(exc)
+            )
+
     def _skip(self, session_key: str, reason: str, **fields: Any) -> None:
         log.info(
             "compaction.proactive",
@@ -387,48 +457,79 @@ class ProactiveCompactionScheduler:
             **fields,
         )
 
-    async def _compact(self, session_key: str, state: _SessionState, pending: _Pending) -> bool:
-        """Run the job; False when a turn won the race after the summarizer ran."""
-        runner = self._runner
-        manager = getattr(runner, "_session_manager", None)
+    async def _prepare(self, session_key: str, pending: _Pending) -> _Prepared | str | None:
+        """The job's inputs, or the reason it cannot compact (``None``: no manager)."""
+        manager = getattr(self._runner, "_session_manager", None)
         if manager is None:
-            return True
+            return None
         agent = pending.agent
         view = _turn_view(agent)
         if view is None:
-            self._skip(session_key, "no_turn_view")
-            return True
+            return "no_turn_view"
         transcript = await manager.get_transcript(session_key)
         tail = _kept_tail(transcript, getattr(agent, "_transcript_input_entry_id", None))
         if tail is None:
-            self._skip(session_key, "no_structured_turn_record")
-            return True
+            return "no_structured_turn_record"
         tail_index, record, current = tail
         prefix = view.messages[: view.turn_input_index]
         if len(view.messages) - view.turn_input_index != len(current):
-            self._skip(session_key, "history_mismatch")
-            return True
+            return "history_mismatch"
         messages = [*prefix, *current]
         message_tokens = _scaled(agent._message_tokens, view.scale)
-        estimated = int(view.overhead_tokens * view.scale) + message_tokens(messages)
+        budget_of = getattr(agent, "_compaction_budget_tokens", None)
+        return _Prepared(
+            transcript=transcript,
+            tail_index=tail_index,
+            record=record,
+            current=current,
+            messages=messages,
+            compact_kwargs={
+                "turn_input_index": len(prefix),
+                "estimated_tokens": int(view.overhead_tokens * view.scale)
+                + message_tokens(messages),
+                "window_tokens": int(agent.config.context_window_tokens),
+                "message_tokens": message_tokens,
+                "budget_tokens": budget_of() if callable(budget_of) else None,
+                "proactive": True,
+            },
+        )
+
+    async def _precheck(self, session_key: str, pending: _Pending) -> str | None:
+        """Why the job would summarise nothing, decided without a model call."""
+        prepared = await self._prepare(session_key, pending)
+        if prepared is None or isinstance(prepared, str):
+            return prepared
+        return _coordinator(pending.agent, session_key).skip_reason(
+            prepared.messages, phase=PROACTIVE_PHASE, **prepared.compact_kwargs
+        )
+
+    async def _compact(self, session_key: str, state: _SessionState, pending: _Pending) -> bool:
+        """Run the job; False when a turn won the race after the summarizer ran."""
+        prepared = await self._prepare(session_key, pending)
+        if prepared is None:
+            return True
+        if isinstance(prepared, str):
+            self._skip(session_key, prepared)
+            return True
+        transcript, tail_index, record, current = (
+            prepared.transcript,
+            prepared.tail_index,
+            prepared.record,
+            prepared.current,
+        )
+        messages = prepared.messages
         log.info(
             "compaction.proactive",
             session_key=session_key,
             action="started",
-            estimated_tokens=estimated,
+            estimated_tokens=prepared.compact_kwargs["estimated_tokens"],
             limit_tokens=pending.limit_tokens,
         )
-        budget_of = getattr(agent, "_compaction_budget_tokens", None)
-        result = await _coordinator(agent, session_key).compact(
+        result = await _coordinator(pending.agent, session_key).compact(
             messages,
             trigger="proactive",
             phase=PROACTIVE_PHASE,
-            turn_input_index=len(prefix),
-            estimated_tokens=estimated,
-            window_tokens=int(agent.config.context_window_tokens),
-            message_tokens=message_tokens,
-            budget_tokens=budget_of() if callable(budget_of) else None,
-            proactive=True,
+            **prepared.compact_kwargs,
         )
         if not result.compacted:
             self._skip(session_key, result.reason or result.status)

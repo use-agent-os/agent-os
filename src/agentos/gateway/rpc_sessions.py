@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 import uuid
 from dataclasses import asdict, replace
@@ -2350,12 +2351,114 @@ async def _handle_sessions_delete(params: dict | None, ctx: RpcContext) -> dict:
                     log.warning("sessions.delete.task_cancel_failed", session_key=canonical)
             evict_session_runtime_state(canonical)
             clear_session_epoch(ctx.session_manager, canonical)
+            node = await _session_node_or_none(storage, canonical)
             await storage.delete_session(canonical)
             deleted.append(k)
+            if node is not None:
+                await _remove_session_index_document(ctx, node)
         except Exception as exc:
             errors.append(f"{k}: {exc}")
 
     return {"deleted": deleted, "errors": errors}
+
+
+async def _session_node_or_none(storage: Any, session_key: str) -> Any | None:
+    """The session row about to be deleted, read for its id and agent; best effort."""
+    get_session = getattr(storage, "get_session", None)
+    if not callable(get_session):
+        return None
+    try:
+        return await get_session(session_key)
+    except Exception:  # noqa: BLE001 - the delete itself must still run
+        return None
+
+
+async def _remove_session_index_document(ctx: RpcContext, node: Any) -> None:
+    """Drop a deleted session's derived document from its agent's memory index.
+
+    Only the index row goes: curated entries, notes and their origins stay,
+    because deleting a conversation is not a request to unlearn it. Best
+    effort -- the session is already deleted, so a failure here is logged and
+    the next session-index sync removes the stale document anyway.
+    """
+    managers = getattr(ctx, "memory_managers", None) or {}
+    agent_id = normalize_agent_id(getattr(node, "agent_id", None))
+    manager = managers.get(agent_id)
+    remove_file = getattr(getattr(manager, "store", None), "remove_file", None)
+    if not callable(remove_file):
+        return
+    from agentos.memory.session_source import session_source_path
+
+    path = session_source_path(node)
+    try:
+        await remove_file(path)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "sessions.delete.index_document_remove_failed",
+            agent_id=agent_id,
+            path=path,
+            error=str(exc),
+        )
+
+
+async def _review_memory_before_manual_compaction(
+    ctx: RpcContext, key: str, context_window_tokens: int
+) -> None:
+    """Give the session one memory review before a manual compaction.
+
+    Runs before the session lock is taken: the review is a turn of this
+    session and runs without that lock, like the periodic review. Bounded by
+    the review timeout; whatever it does or fails to do, the compaction that
+    follows is the same. Skipped (``nothing_to_compact``) when the compaction
+    would summarise nothing, which is decided without a model call.
+    """
+    review = getattr(ctx.turn_runner, "review_memory_before_compaction", None)
+    if not callable(review):
+        return
+    try:
+        storage = get_session_storage(ctx.session_manager)
+        session = await storage.get_session(key) if storage is not None else None
+        if session is None:
+            # Nothing to review; the compaction reports the missing session.
+            return
+        agent_id = getattr(session, "agent_id", None) or parse_agent_id(key)
+        if await _manual_compaction_skip_reason(ctx, key, session, context_window_tokens):
+            note = getattr(ctx.turn_runner, "note_compaction_without_review", None)
+            if callable(note):
+                from agentos.engine.pre_compaction_review import NOTHING_TO_COMPACT
+
+                note(
+                    session_key=key,
+                    compaction="manual",
+                    reason=NOTHING_TO_COMPACT,
+                    agent_id=str(agent_id),
+                )
+            return
+        result = review(agent_id=str(agent_id), session_key=key, compaction="manual")
+        if inspect.isawaitable(result):
+            await result
+    except Exception as exc:  # noqa: BLE001 - the review never blocks compaction
+        log.warning("sessions.contextCompact.review_failed", session_key=key, error=str(exc))
+
+
+async def _manual_compaction_skip_reason(
+    ctx: RpcContext, key: str, session: Any, context_window_tokens: int
+) -> str | None:
+    """The manual compaction's own no-model skip decision, made up front."""
+    precheck = getattr(ctx.session_manager, "compaction_skip_reason", None)
+    if not callable(precheck):
+        return None
+    try:
+        compaction_model = effective_compaction_model(session)
+        config = build_compaction_config_from_provider(
+            resolve_compaction_provider(getattr(ctx, "provider_selector", None), compaction_model),
+            model_override=compaction_model,
+            compaction_config=getattr(getattr(ctx, "config", None), "compaction", None),
+        )
+        reason = await precheck(key, context_window_tokens, config)
+    except Exception:  # noqa: BLE001 - an unknown outcome still gets its review
+        return None
+    return str(reason) if reason else None
 
 
 @_d.method("sessions.contextCompact", CONTROL_AND_CHANNEL)
@@ -2589,6 +2692,7 @@ async def _handle_sessions_context_compact(params: dict | None, ctx: RpcContext)
         )
         return payload
 
+    await _review_memory_before_manual_compaction(ctx, key, context_window_tokens)
     if lock is None:
         return await _run_locked()
     async with lock:

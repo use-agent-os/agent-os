@@ -267,7 +267,7 @@ async def test_job_compacts_between_turns_and_the_next_preflight_is_a_noop(
     await _scheduler(runner).wait_idle(KEY)
     # No compaction during or after the second turn.
     assert len(provider.summarizer_requests) == 1
-    sent = provider.turn_requests[1]
+    sent = provider.turn_requests[-1]
     assert str(sent[0].content) == f"[Context summary]\n{SUMMARY}"
     assert sent[1].content == "Understood. Continuing from summary."
     assert str(sent[2].content).startswith("deploy status?")
@@ -351,7 +351,7 @@ async def test_a_turn_that_starts_first_makes_the_job_persist_nothing(
     # Both turns' rows are intact: nothing was rewritten under the turn.
     rows = await manager.get_transcript(KEY)
     assert len(rows) == rows_before + 2
-    assert str(provider.turn_requests[1][0].content).startswith("old question 0")
+    assert str(provider.turn_requests[-1][0].content).startswith("old question 0")
 
 
 async def test_stale_generation_skips_the_persist(
@@ -520,7 +520,7 @@ async def test_a_job_that_has_persisted_is_not_cancelled_by_the_next_turn(
     # The next turn starts while the persisted job runs its after-hooks.
     second = await _turn(runner, manager, KEY, "and the logs?", tmp_path)
     assert any(isinstance(event, DoneEvent) for event in second)
-    assert str(provider.turn_requests[1][0].content).startswith("[Context summary]")
+    assert str(provider.turn_requests[-1][0].content).startswith("[Context summary]")
     assert not job.done()
 
     hook_release.set()
@@ -614,7 +614,7 @@ async def test_gateway_write_lock_path_compacts_between_turns(
     assert len(provider.summarizer_requests) == 1
     assert held_during_persist == [True]
     assert len(await manager.get_summaries(KEY)) == 1
-    assert str(provider.turn_requests[1][0].content) == f"[Context summary]\n{SUMMARY}"
+    assert str(provider.turn_requests[-1][0].content) == f"[Context summary]\n{SUMMARY}"
 
 
 # ---------------------------------------------------------------------------

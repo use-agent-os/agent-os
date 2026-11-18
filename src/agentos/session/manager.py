@@ -23,6 +23,7 @@ from agentos.session.compaction import (
     CompactionRequest,
     CompactionResult,
     compact_context,
+    compaction_skip_reason,
 )
 from agentos.session.compaction_lifecycle import new_compaction_id
 from agentos.session.compaction_state import (
@@ -1485,6 +1486,28 @@ class SessionManager:
             mutation_context=mutation_context,
         )
         return result.summary if result.removed_count else ""
+
+    async def compaction_skip_reason(
+        self,
+        session_key: str,
+        context_window_tokens: int,
+        config: CompactionConfig | None = None,
+    ) -> str | None:
+        """Why :meth:`compact_with_result` would summarise nothing right now.
+
+        Reads the transcript and makes no model call; ``None`` when a summary
+        would be attempted. A missing session is ``None`` too: the compaction
+        itself reports it.
+        """
+        node = await self._storage.get_session(canonicalize_session_key(session_key))
+        if node is None:
+            return None
+        entries = await self._storage.get_transcript(node.session_id)
+        return compaction_skip_reason(
+            _compaction_entry_payloads(entries),
+            context_window_tokens,
+            config or CompactionConfig(),
+        )
 
     async def compact_with_result(
         self,

@@ -480,6 +480,11 @@ def _has_unproven_live_change(changed_paths: set[str]) -> bool:
     for path in leaves:
         if path in search_paths or path in live_paths or path.startswith("rate_limit."):
             continue
+        # The memory review and proactive recall read their sections from the
+        # root config on every turn (TurnRunner._memory_nudge_config /
+        # _memory_recall_config).
+        if path.startswith(("memory.nudge.", "memory.recall.")):
+            continue
         if any(path == prefix or path.startswith(f"{prefix}.") for prefix in hot_prefixes):
             continue
         if path.startswith("agentos_router.") and path != "agentos_router.require_router_runtime":

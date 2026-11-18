@@ -116,6 +116,17 @@ def _atomic_replace(tmp_path: str | Path, target: Path) -> None:
         pass
 
 
+def _entry_text(text: str) -> str:
+    """An entry as it will read back from disk: line endings as ``\n``, trimmed.
+
+    The files are read in text mode, which turns ``\r\n`` and ``\r`` into
+    ``\n``. Storing submitted text unnormalised makes the entry in memory
+    differ from the entry on disk, and on Windows a submitted ``\r\n`` is
+    written as ``\r\r\n`` and comes back as a blank line.
+    """
+    return text.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
 class CuratedMemoryStore:
     """Bounded curated memory with file persistence. One instance per agent."""
 
@@ -247,7 +258,7 @@ class CuratedMemoryStore:
         caller_key: str | None = None,
         changes: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
-        content = content.strip()
+        content = _entry_text(content)
         if not content:
             return {"success": False, "error": "Content cannot be empty."}
         scan_error = _scan(content)
@@ -302,7 +313,7 @@ class CuratedMemoryStore:
         changes: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         old_text = old_text.strip()
-        new_content = new_content.strip()
+        new_content = _entry_text(new_content)
         if not old_text:
             return {"success": False, "error": "old_text cannot be empty."}
         if not new_content:
@@ -421,6 +432,68 @@ class CuratedMemoryStore:
             changes.append({"action": "remove", "old_text": old_text, "old_entry": old_entry})
         return self._success(target, caller_key, "Entry removed.")
 
+    def remove_exact(
+        self,
+        target: str,
+        entries: list[str],
+        *,
+        caller_key: str | None = None,
+        changes: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
+        """Remove whole entries whose text equals one of *entries* exactly.
+
+        Unlike ``remove``, nothing is matched by substring: an entry that
+        merely contains a requested text is left alone, so removing a short
+        entry can never take a longer one with it or fail as ambiguous. Runs
+        under the same file lock, drift guard and atomic write as every other
+        mutator. Requested texts no longer in the file are reported under
+        ``"missing"``; they are not an error. ``changes`` receives one
+        ``{"action": "remove", "old_text", "old_entry"}`` record per removed
+        entry.
+        """
+        wanted = list(dict.fromkeys(e.strip() for e in entries if e and e.strip()))
+        if not wanted:
+            return {"success": False, "error": "No entries to remove."}
+        with self._file_lock(self._path_for(target)):
+            bak = self._reload_target(target, skip_drift=False)
+            if bak is _READ_FAILED:
+                return self._read_failed_error(self._path_for(target))
+            if bak:
+                return self._drift_error(self._path_for(target), bak)
+            current = self.entries_for(target)
+            present = set(current)
+            removed = [entry for entry in wanted if entry in present]
+            missing = [entry for entry in wanted if entry not in present]
+            if removed:
+                drop = set(removed)
+                self._set_entries(target, [e for e in current if e not in drop])
+                self._save(target)
+        if changes is not None:
+            changes.extend(
+                {"action": "remove", "old_text": entry, "old_entry": entry} for entry in removed
+            )
+        result = self._success(
+            target, caller_key, f"Removed {len(removed)} entr{'y' if len(removed) == 1 else 'ies'}."
+        )
+        result["removed"] = removed
+        result["missing"] = missing
+        return result
+
+    def write_blocked_reason(self, target: str) -> str | None:
+        """Why a write to *target* would be refused right now, without writing.
+
+        Returns ``"unreadable"`` when the file cannot be read, ``"drift"`` when
+        its contents would not round-trip through this store, else ``None``.
+        Unlike the mutators' drift check it takes no ``.bak`` snapshot and no
+        lock, so a preview can call it and leave the directory untouched.
+        """
+        raw = self._read_raw_checked(self._path_for(target))
+        if raw is None:
+            return "unreadable"
+        if self._drift_found(target, raw):
+            return "drift"
+        return None
+
     def apply_batch(
         self,
         target: str,
@@ -488,7 +561,7 @@ class CuratedMemoryStore:
                 scan_error = _scan(new_content)
                 if scan_error:
                     return {"success": False, "error": f"Operation {i + 1}: {scan_error}"}
-                stripped = new_content.strip()
+                stripped = _entry_text(new_content)
                 if stripped and self._would_not_round_trip(stripped):
                     refusal = self._delimiter_error(stripped)
                     return {**refusal, "error": f"Operation {i + 1}: {refusal['error']}"}
@@ -508,7 +581,7 @@ class CuratedMemoryStore:
             for i, op in enumerate(operations):
                 op = op or {}
                 act = op.get("action")
-                content = (op.get("content") or "").strip()
+                content = _entry_text(op.get("content") or "")
                 old_text = (op.get("old_text") or "").strip()
                 pos = f"Operation {i + 1} ({act or 'unknown'})"
 
@@ -765,18 +838,7 @@ class CuratedMemoryStore:
         backed up; returns None when the file looks tool-shaped.
         """
         path = self._path_for(target)
-        if not raw.strip():
-            return None
-
-        parsed = [e.strip() for e in raw.split(ENTRY_DELIMITER) if e.strip()]
-        roundtrip = ENTRY_DELIMITER.join(parsed)
-
-        char_limit = self._char_limit(target)
-        known = self._known_entries.get(target, set())
-        unknown_oversized = any(len(e) > char_limit and e not in known for e in parsed)
-
-        drift_detected = (raw.strip() != roundtrip) or unknown_oversized
-        if not drift_detected:
+        if not self._drift_found(target, raw):
             return None
 
         # Drift confirmed — snapshot the file so the operator can recover
@@ -802,6 +864,17 @@ class CuratedMemoryStore:
         except OSError:
             return str(bak_path) + " (BACKUP FAILED — file unchanged on disk)"
         return str(bak_path)
+
+    def _drift_found(self, target: str, raw: str) -> bool:
+        """The two drift signals of ``_detect_external_drift``, with no side effect."""
+        if not raw.strip():
+            return False
+        parsed = [e.strip() for e in raw.split(ENTRY_DELIMITER) if e.strip()]
+        roundtrip = ENTRY_DELIMITER.join(parsed)
+        char_limit = self._char_limit(target)
+        known = self._known_entries.get(target, set())
+        unknown_oversized = any(len(e) > char_limit and e not in known for e in parsed)
+        return (raw.strip() != roundtrip) or unknown_oversized
 
     @staticmethod
     def _drift_backups(path: Path) -> list[Path]:

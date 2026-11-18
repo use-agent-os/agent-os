@@ -26,10 +26,16 @@ graph TB
         MEM0["mem0, fully local<br/>Ollama LLM + embeddinggemma + on-disk vectors"]
     end
 
+    CHAT["💬 Private conversation"]
+    REVIEW["📝 Memory review<br/>every N turns · before a compaction"]
     PROMPT["💬 System prompt<br/>frozen snapshots + fenced recall"]
     RECALL["🔁 Proactive recall<br/>trigger search · deep recall"]
     TOOLS["🛠️ Tools<br/>memory · memory_save · memory_search"]
+    LIN[("🧾 Lineage<br/>origins · forgotten sessions")]
 
+    CHAT --> TOOLS
+    CHAT --> REVIEW
+    REVIEW -->|memory · memory_save| TOOLS
     CUR -->|frozen snapshot| PROMPT
     USR -->|frozen snapshot| PROMPT
     CUR --> IDX
@@ -40,6 +46,7 @@ graph TB
     RECALL -->|fenced recall block| PROMPT
     TOOLS -->|memory tool writes| CUR
     TOOLS -->|memory_save| NOTES
+    TOOLS -.->|origins| LIN
     MEM0 -->|fenced recall block| PROMPT
     TOOLS -.->|write mirror| MEM0
 
@@ -47,11 +54,19 @@ graph TB
     classDef engine fill:#90EE90,stroke:#333,stroke-width:2px,color:#0a3d0a
     classDef ext fill:#FFE4B5,stroke:#333,stroke-width:2px,color:#5e3a00
     classDef out fill:#87CEEB,stroke:#333,stroke-width:2px,color:#003554
-    class CUR,USR,NOTES store
-    class IDX,EMB,RECALL engine
+    class CUR,USR,NOTES,LIN store
+    class IDX,EMB,RECALL,REVIEW engine
     class MEM0 ext
-    class PROMPT,TOOLS out
+    class PROMPT,TOOLS,CHAT out
 ```
+
+How a conversation becomes long-term memory: the model saves facts on its
+own, or the [memory review](#how-conversations-become-memory) does it every
+few turns and once more before a compaction summarises the conversation.
+Those writes land in `MEMORY.md` (through the `memory` tool) or in dated
+notes (`memory_save`), and notes are found again by search and proactive
+recall. Every write records which session caused it, so
+[forget](#lineage-and-forget) can remove what a session taught the agent.
 
 ## What to Store
 
@@ -225,8 +240,8 @@ provider = ""                  # empty: inherit the session's chat model
 model = ""
 ```
 
-The same keys are in the web console under **Settings › Memory › Settings ›
-Proactive recall**.
+The same keys are in the web console in the **Proactive recall** card of
+**Settings › Memory**, on the **Embeddings** tab.
 
 **Per-session control and inspection.**
 
@@ -243,11 +258,58 @@ one session until it is resumed or the gateway restarts. Each turn also logs
 a `memory.active_recall` event with the same fields. Over RPC these are
 `memory.recall.status` and `memory.recall.set`.
 
-## Session-Derived Memory
+## How conversations become memory
 
-Durable facts from a conversation are saved by the periodic memory review
-(`[memory.nudge]`), which runs on its own every few turns. You can also ask
-the agent to save something explicitly at any point.
+Durable facts from a conversation reach memory in three ways: the model saves
+them on its own, you ask it to, or the **memory review** does it. The review
+is a short background turn that re-reads the conversation and saves anything
+durable it finds, with a memory-only tool set (`memory`, `memory_save`,
+`memory_get`, `memory_search`, and for the periodic review `memory_delete`).
+It never blocks a reply and never appears in the transcript.
+
+It runs at two moments:
+
+- **Every few turns** (`[memory.nudge] interval`, default 10 user turns),
+  after the reply has been delivered. It is skipped for a turn in which the
+  agent already wrote to memory on its own.
+- **Once before a compaction** (`[memory.nudge] before_compaction`, default
+  `true`). A compaction replaces older messages with a summary, so this is the
+  last chance to save what only those messages hold. The review runs right
+  before a proactive or manual compaction (the web console's or
+  `agentos chat`'s `/compact`) of a private chat, with a prompt saying that
+  earlier messages are about to be summarised and only durable facts not yet
+  saved should be written. It can only add: new `memory` entries and notes
+  appended with `memory_save`. Replacing, removing or overwriting anything
+  already saved is refused inside it, whatever the conversation asks for (the
+  periodic review keeps those operations). It is bounded by
+  `[memory.nudge] timeout_seconds`: compaction never waits longer, and comes
+  out the same whether the review saved something, saved nothing, failed or
+  timed out. A manual compaction can therefore take up to `timeout_seconds`
+  longer than before. Afterwards the periodic count restarts.
+
+  It is skipped, with a logged reason, when the compaction would summarise
+  nothing anyway, which is known without a model call (the conversation still
+  fits, or folding it would not save enough: `nothing_to_compact`), for a
+  compaction forced by a full context (in-turn, or the gateway's overflow
+  recovery: `no_headroom`), for cron, sub-agent, group and channel sessions,
+  when a review ran in the last two user turns of the session
+  (`recent_review`), and while one is already running for it (`in_progress`;
+  a review still winding down after its deadline or after its compaction was
+  cancelled counts, and can no longer start a memory write).
+  `[memory.nudge] enabled = false` or `interval = 0` turns it off too. With
+  `[compaction] proactive = false` only manual compactions get a review. A new
+  message cancels a proactive compaction, and its review with it. Each
+  decision is logged as a `pre_compaction_review` event with `outcome` `ran`,
+  `timeout`, `error`, `cancelled` or `skipped` (plus `reason`), and
+  `compaction`, `duration_ms` and `timeout_seconds`.
+
+```toml
+[memory.nudge]
+enabled = true
+interval = 10                 # user turns between reviews; 0 disables
+timeout_seconds = 90.0
+before_compaction = true      # one review before a proactive or manual compaction
+```
 
 Use session export when exact old wording matters:
 
@@ -256,6 +318,83 @@ agentos sessions export <session-key>
 ```
 
 Memory is for useful recall. Session export is for exact records.
+
+## Lineage and forget
+
+Every write records its **origin**: which session caused it and how.
+
+- The `memory` tool records each entry it adds or replaces, with the session
+  and writer `tool` (or `review` for the memory review). A replacement keeps
+  the replaced entry's origins and adds the current session; a removal drops
+  the entry's origins. An add of an entry that already exists adds the
+  session to it.
+- `memory_save` records the block it wrote to its note.
+- Curated edits through the CLI or RPC (`agentos memory curated ...`) record
+  writer `operator` and no session.
+
+Entries and note text written before this existed, or edited by hand since,
+have no origin: they are **untracked** and never attributed to a session.
+`agentos memory status --json` shows tracked and untracked counts for
+`MEMORY.md` and `USER.md`.
+
+```sh
+agentos memory forget --session <id-or-key> [--session ...] [--agent <id>] [--dry-run] [--json]
+```
+
+A selector is a full session id (that transcript only) or a full session key
+(every transcript under the key, including ones a later reset creates). A
+prefix never matches: any selector that resolves to nothing stops the whole
+command, changes nothing, and exits 2. Forget removes:
+
+1. every curated entry with any origin from the selected sessions, whole; an
+   entry that also came from other sessions is removed too and listed as
+   `mixed`;
+2. note blocks those sessions saved, under the rule below;
+3. the sessions' derived index documents (with session indexing on), found
+   by their path, so one indexed while the forget was running goes too;
+4. best effort, the external provider's copies of the removed curated entries.
+
+A note block goes only when it is provably theirs. Its text must still be a
+complete block in the note (starting the note or after a blank line, ending
+it or before one): a block the user edited or extended with another line is
+listed as `unmatched` with reason `changed`. And every complete copy of that
+text in the note must be attributable to the selected sessions: if another
+session also saved it, if the note holds more copies than they saved, or if a
+copy lies inside a block another session wrote, nothing is guessed and the
+block is listed as `unmatched` with reason `ambiguous` and a `detail`
+(`other_sessions`, `untracked_copies` or `overlaps_other_block`). Forgetting
+all the sessions involved together removes such a shared block. Only the
+removed text and one blank-line separator next to it are cut; every other
+byte of the note, its line endings included, stays as it was.
+
+The sessions are then recorded as forgotten: they are never indexed again.
+Forgets of one agent run one at a time. `--dry-run` prints the same report and changes
+nothing. The report (`--json`) has `sessions`, `curated`, `mixed`, `notes`,
+`unmatched` (reason `changed`, `ambiguous`, `file_missing`, `unreadable` or
+`invalid_path`), `sessionDocuments`, `staleOrigins`, `untracked`,
+`providerMirrored`, `errors` (each with a stable `code`) and `notCovered`.
+The command exits 1 when `errors` is not empty. Forget deletes an origin only
+together with the text it points to: what it could not remove (an unreadable
+or missing note or `MEMORY.md`, an edited or shared block) keeps its lineage,
+so running the same forget again retries it. Removed text appears only in the
+report's `curated` list; logs carry hashes, paths, counts and codes.
+
+Forget is not erasure. It removes only what lineage attributes to the
+sessions: it does not delete transcripts (use `agentos sessions delete`),
+turn-capture files, compaction checkpoints, or untracked and hand-edited text,
+and the report says so. A `MEMORY.md` the curated store refuses to rewrite
+(drift) is reported, not rewritten. Over RPC this is `memory.forget`
+(`agentId`, `sessions`, `dryRun`), Control-only.
+
+Deleting a session (`agentos sessions delete`) removes its derived index
+document, so search no longer returns it. What the session taught the agent
+stays, with its origins: deleting a conversation is not a request to unlearn
+it.
+
+**`memory.db` holds more than the index.** The per-agent `memory.db` also
+holds the origins and the list of forgotten sessions. `agentos memory index
+--force` rebuilds only the index and keeps both; deleting `memory.db` to force
+a reindex loses them, and a forgotten session would be indexed again.
 
 ## Embeddings and semantic search
 

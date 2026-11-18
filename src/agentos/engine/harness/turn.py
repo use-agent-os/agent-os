@@ -51,6 +51,7 @@ from agentos.engine.turn_runner.stream_consumer_stage import (
 from agentos.engine.turn_runner.turn_finalizer_stage import (
     ReplyPersistence,
     TurnFinalizerStageInput,
+    _is_internal_turn,
 )
 from agentos.engine.turn_timing import TurnTiming, emit_turn_timing_log
 from agentos.engine.types import (
@@ -1059,6 +1060,11 @@ class TurnHarness:
             # The in-progress row (or the bare user message) stays the tail, so
             # restart recovery sees how far the turn got.
             log.info("turn_runner.cancelled_by_shutdown", session_key=session_key)
+        elif _is_internal_turn(run.request.run_kind):
+            # An internal turn (the memory review) writes nothing to the
+            # transcript (the runner's append refuses it); returning here only
+            # keeps the log from reporting a stopped reply as persisted.
+            log.info("turn_runner.cancelled_internal_turn", session_key=session_key)
         elif run.reply_persisted:
             log.info("turn_runner.cancelled_after_reply_persisted", session_key=session_key)
         elif persistence.attempted:
@@ -1160,6 +1166,7 @@ class TurnHarness:
             else "agent_error"
         )
         log.error("turn_runner.failed", session_key=session_key, error=str(exc), exc_info=True)
+        # Not written for an internal turn: the runner's append refuses it.
         if runner._session_manager is not None:
             if event_code == "provider_output_truncated":
                 transcript_message = build_terminal_reply(

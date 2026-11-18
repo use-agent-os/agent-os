@@ -883,6 +883,18 @@ class SessionStorage:
             return None
         return SessionNode(**_deserialize_row(dict(row)))
 
+    async def get_session_by_id(self, session_id: str) -> SessionNode | None:
+        """Return the session whose current transcript id is exactly *session_id*."""
+        if not session_id:
+            return None
+        async with self.conn.execute(
+            "SELECT * FROM sessions WHERE session_id = ? LIMIT 1", (session_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        return SessionNode(**_deserialize_row(dict(row)))
+
     async def list_sessions(
         self,
         agent_id: str | None = None,

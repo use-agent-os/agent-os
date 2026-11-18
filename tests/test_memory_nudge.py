@@ -281,7 +281,7 @@ def test_hydration_only_seeds_once():
     _note(r, prior_user_turns=4)  # seed 3, this turn -> 4
     # A later turn reporting a wildly different count must not re-seed.
     assert _note(r, prior_user_turns=999) is True  # 5 == interval
-    assert r._memory_nudge_counters[("main", "s1")] == 0
+    assert r._memory_nudge_counters[("main", "s1")].count == 0
 
 
 def test_unknown_prior_turns_starts_from_zero():
@@ -416,19 +416,29 @@ def test_review_records_its_writes_instead_of_discarding_them():
 
 
 @pytest.mark.parametrize(
-    ("arguments", "expected"),
+    ("tool_name", "arguments", "expected"),
     [
-        ({"target": "user", "action": "add", "content": "Prefers Go"}, "user/add: Prefers Go"),
-        ({"action": "add", "content": "no target"}, "memory/add: no target"),
-        ({"target": "memory", "action": "remove", "old_text": "stale"}, "memory/remove: stale"),
-        ({"target": "memory", "action": "add"}, "memory/add"),
-        (None, "write"),
+        ("memory", {"target": "user", "action": "add", "content": "Prefers Go"}, "memory:user/add"),
+        ("memory", {"action": "add", "content": "no target"}, "memory:memory/add"),
+        (
+            "memory",
+            {"target": "memory", "action": "remove", "old_text": "stale"},
+            "memory:memory/remove",
+        ),
+        (
+            "memory_save",
+            {"path": "memory/notes.md", "content": "a note", "mode": "replace"},
+            "memory_save:memory/notes.md/replace",
+        ),
+        ("memory_save", {"content": "a daily note"}, "memory_save:daily-note/append"),
+        ("memory", None, "memory:write"),
     ],
 )
-def test_write_summary_renders_target_action_and_content(arguments, expected):
+def test_write_summary_names_the_target_and_action_never_the_text(tool_name, arguments, expected):
+    """A log line outlives ``agentos memory forget``: no saved text in it."""
     from agentos.engine.runtime import _summarize_memory_write
 
-    assert _summarize_memory_write(arguments) == expected
+    assert _summarize_memory_write(tool_name, arguments) == expected
 
 
 def test_write_summary_collapses_a_batch_to_its_operation_count():
@@ -436,6 +446,7 @@ def test_write_summary_collapses_a_batch_to_its_operation_count():
     from agentos.engine.runtime import _summarize_memory_write
 
     summary = _summarize_memory_write(
+        "memory",
         {
             "target": "memory",
             "operations": [
@@ -443,19 +454,19 @@ def test_write_summary_collapses_a_batch_to_its_operation_count():
                 {"action": "remove", "old_text": "b"},
                 {"action": "add", "content": "merged"},
             ],
-        }
+        },
     )
 
-    assert summary == "memory/batch[3 ops: add,remove]"
+    assert summary == "memory:memory/batch[3 ops: add,remove]"
 
 
-def test_write_summary_truncates_a_long_entry():
+def test_write_summary_carries_no_content_however_long():
     from agentos.engine.runtime import _summarize_memory_write
 
-    summary = _summarize_memory_write({"action": "add", "content": "x" * 400})
+    summary = _summarize_memory_write("memory", {"action": "add", "content": "x" * 400})
 
-    assert summary.endswith("…")
-    assert len(summary) < 200
+    assert "x" not in summary.split(":", 1)[1].replace("memory/add", "")
+    assert summary == "memory:memory/add"
 
 
 # -- the review cannot reach past the memory tools ---------------------------

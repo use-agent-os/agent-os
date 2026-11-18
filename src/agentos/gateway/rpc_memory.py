@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentos.gateway.rpc import RpcContext, RpcUnavailableError, get_dispatcher
+import structlog
+
+from agentos.gateway.rpc import (
+    RpcContext,
+    RpcHandlerError,
+    RpcUnavailableError,
+    get_dispatcher,
+    require_params_dict,
+)
 from agentos.gateway.session_services import get_session_storage
 from agentos.memory.types import (
     DEFAULT_MEMORY_SEARCH_MIN_SCORE,
@@ -22,6 +31,7 @@ from agentos.session.keys import normalize_agent_id
 from agentos.tools.builtin.memory_tools import _is_memory_source_path
 
 _d = get_dispatcher()
+log = structlog.get_logger(__name__)
 
 _MAX_MEMORY_SHOW_CHARS = 8000
 _MAX_MEMORY_SHOW_LINES = 500
@@ -47,7 +57,12 @@ def _require_memory_manager(ctx: RpcContext, agent_id: str | None) -> tuple[str,
     resolved_agent = normalize_agent_id(agent_id or "main")
     manager = managers.get(resolved_agent)
     if manager is None:
-        raise KeyError(f"Memory manager not found for agent: {resolved_agent}")
+        # Not a bare KeyError: its str() would wrap the message in quotes.
+        raise RpcHandlerError(
+            code="NOT_FOUND",
+            message=f"No memory for agent {resolved_agent!r}: it is not a configured agent.",
+            details={"agentId": resolved_agent},
+        )
     return resolved_agent, manager
 
 
@@ -630,6 +645,35 @@ async def _handle_raw_fallbacks_show(params: dict | None, ctx: RpcContext) -> di
 # ── Curated memory management ──────────────────────────────────────────────────
 
 
+async def _record_operator_curated(
+    manager: Any,
+    store: Any,
+    target: str,
+    result: dict[str, Any],
+    changes: list[dict[str, str]],
+    requested_adds: list[str],
+) -> None:
+    """Record an operator curated edit's origins (writer ``operator``, no session)."""
+    evidence = getattr(manager, "evidence", None)
+    if evidence is None or not result.get("success"):
+        return
+    from agentos.memory.lineage import duplicate_curated_adds, record_curated_changes
+
+    entries_after = store.entries_for(target)
+    try:
+        await record_curated_changes(
+            evidence,
+            target=target,
+            changes=changes,
+            writer="operator",
+            session=None,
+            entries_after=entries_after,
+            duplicate_adds=duplicate_curated_adds(requested_adds, changes, entries_after),
+        )
+    except Exception as exc:  # noqa: BLE001 — lineage must never fail the edit
+        log.warning("memory.curated.lineage_record_failed", target=target, error=str(exc))
+
+
 @_d.method("memory.curated.get")
 async def _handle_memory_curated_get(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     params = params or {}
@@ -665,9 +709,11 @@ async def _handle_memory_curated_add(params: dict | None, ctx: RpcContext) -> di
     if not content:
         raise ValueError("params.content is required")
     store = manager.curated_store()
-    res = store.add(target, content)
+    changes: list[dict[str, str]] = []
+    res = store.add(target, content, changes=changes)
     if not res.get("success"):
         raise ValueError(res.get("error") or "Failed to add curated entry")
+    await _record_operator_curated(manager, store, target, res, changes, [content])
     return {
         "agentId": agent_id,
         "target": target,
@@ -692,9 +738,11 @@ async def _handle_memory_curated_replace(params: dict | None, ctx: RpcContext) -
     if not new_content:
         raise ValueError("params.newContent is required")
     store = manager.curated_store()
-    res = store.replace(target, old_text, new_content)
+    changes: list[dict[str, str]] = []
+    res = store.replace(target, old_text, new_content, changes=changes)
     if not res.get("success"):
         raise ValueError(res.get("error") or "Failed to replace curated entry")
+    await _record_operator_curated(manager, store, target, res, changes, [])
     return {
         "agentId": agent_id,
         "target": target,
@@ -716,9 +764,11 @@ async def _handle_memory_curated_remove(params: dict | None, ctx: RpcContext) ->
     if not old_text:
         raise ValueError("params.oldText is required")
     store = manager.curated_store()
-    res = store.remove(target, old_text)
+    changes: list[dict[str, str]] = []
+    res = store.remove(target, old_text, changes=changes)
     if not res.get("success"):
         raise ValueError(res.get("error") or "Failed to remove curated entry")
+    await _record_operator_curated(manager, store, target, res, changes, [])
     return {
         "agentId": agent_id,
         "target": target,
@@ -740,9 +790,15 @@ async def _handle_memory_curated_batch(params: dict | None, ctx: RpcContext) -> 
     if not isinstance(operations, list):
         raise ValueError("params.operations must be a list")
     store = manager.curated_store()
-    res = store.apply_batch(target, operations)
+    changes: list[dict[str, str]] = []
+    res = store.apply_batch(target, operations, changes=changes)
     if not res.get("success"):
         raise ValueError(res.get("error") or "Batch operation failed")
+    from agentos.memory.lineage import requested_curated_adds
+
+    await _record_operator_curated(
+        manager, store, target, res, changes, requested_curated_adds(operations=operations)
+    )
     return {
         "agentId": agent_id,
         "target": target,
@@ -750,6 +806,109 @@ async def _handle_memory_curated_batch(params: dict | None, ctx: RpcContext) -> 
         "usage": store.usage_for(target),
         "message": res.get("message", "Batch applied."),
     }
+
+
+# ── Lineage: forget what chosen sessions produced ───────────────────────────────
+
+
+def _forget_session_lookup(ctx: RpcContext) -> Any:
+    """Exact session lookup by key and by id, for ``resolve_sessions``."""
+    from agentos.memory.lineage import SessionMatch
+
+    session_manager = getattr(ctx, "session_manager", None)
+    storage = get_session_storage(session_manager) if session_manager is not None else None
+    if storage is None:
+        return None
+
+    async def _lookup(selector: str) -> list[SessionMatch]:
+        matches: list[SessionMatch] = []
+        get_by_key = getattr(storage, "get_session", None)
+        node = await get_by_key(selector) if callable(get_by_key) else None
+        if node is not None:
+            matches.append(
+                SessionMatch(
+                    session_key=str(node.session_key),
+                    session_id=str(node.session_id),
+                    agent_id=normalize_agent_id(getattr(node, "agent_id", None)),
+                    matched_by="session_key",
+                )
+            )
+        get_by_id = getattr(storage, "get_session_by_id", None)
+        node = await get_by_id(selector) if callable(get_by_id) else None
+        if node is not None:
+            matches.append(
+                SessionMatch(
+                    session_key=str(node.session_key),
+                    session_id=str(node.session_id),
+                    agent_id=normalize_agent_id(getattr(node, "agent_id", None)),
+                    matched_by="session_id",
+                )
+            )
+        return matches
+
+    return _lookup
+
+
+#: Per-agent lock that serialises applied forgets (see ``memory.forget``).
+_forget_locks: dict[str, asyncio.Lock] = {}
+
+
+@_d.method("memory.forget")
+async def _handle_memory_forget(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """Preview (``dryRun``) or remove what the selected sessions taught the agent.
+
+    ``sessions`` holds full session ids or full session keys; a prefix never
+    matches. Any selector that resolves to nothing refuses the whole call with
+    ``NOT_FOUND`` and changes nothing. Control only: never on the HTTP RPC
+    allow-list.
+    """
+    from agentos.memory.lineage import apply_forget, forget_report, plan_forget, resolve_sessions
+
+    params = require_params_dict(params)
+    agent_id, manager = _require_memory_manager(ctx, params.get("agentId"))
+    selectors = params.get("sessions")
+    if isinstance(selectors, str):
+        selectors = [selectors]
+    if (
+        not isinstance(selectors, list)
+        or not selectors
+        or not all(isinstance(item, str) and item.strip() for item in selectors)
+    ):
+        raise ValueError("params.sessions must be a non-empty list of session ids or keys")
+    dry_run = _bool_param(params, "dryRun", False)
+    evidence = getattr(manager, "evidence", None)
+    if evidence is None:
+        raise RpcUnavailableError(f"Memory lineage is not available for agent: {agent_id}")
+
+    resolved, unresolved = await resolve_sessions(
+        selectors,
+        agent_id=agent_id,
+        evidence=evidence,
+        lookup=_forget_session_lookup(ctx),
+    )
+    if unresolved:
+        names = ", ".join(repr(u.selector) for u in unresolved)
+        raise RpcHandlerError(
+            code="NOT_FOUND",
+            message=(
+                f"Unresolved session selector(s): {names}. A selector must be a full "
+                f"session id or a full session key of agent {agent_id!r}; nothing was changed."
+            ),
+            details={"agentId": agent_id, "unresolved": [u.wire() for u in unresolved]},
+        )
+
+    if dry_run:
+        return forget_report(await plan_forget(manager, resolved))
+    turn_runner = getattr(ctx, "turn_runner", None)
+    refresh = getattr(turn_runner, "refresh_memory_snapshot", None)
+    # One forget at a time per agent: rewriting a note reads it, awaits its
+    # origins, then writes, so two forgets of the same note would each write
+    # back the block the other removed.
+    async with _forget_locks.setdefault(agent_id, asyncio.Lock()):
+        plan = await plan_forget(manager, resolved)
+        return await apply_forget(
+            manager, plan, on_memory_write=refresh if callable(refresh) else None
+        )
 
 
 # ── Proactive recall: status and per-session pause ──────────────────────────────
