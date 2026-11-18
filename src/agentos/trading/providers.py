@@ -65,6 +65,30 @@ class ProbeResult:
 
 
 @dataclass
+class SwapFee:
+    """The fee a provider takes on the swap itself (not gas).
+
+    ``symbol`` names the token the fee is paid in (the sell token), as the
+    provider spells it; ``amount_raw`` is in that token's base units and
+    ``amount`` its decimal form.
+    """
+
+    bps: int | None
+    symbol: str
+    amount_raw: int | None
+    amount: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "bps": self.bps,
+            "pct": self.bps / 100.0 if self.bps is not None else None,
+            "symbol": self.symbol,
+            "amount": self.amount,
+            "amountRaw": str(self.amount_raw) if self.amount_raw is not None else None,
+        }
+
+
+@dataclass
 class ProviderQuote:
     """A provider-neutral quote. ``raw`` is the provider's own object."""
 
@@ -92,6 +116,9 @@ class ProviderQuote:
     # (both sides priced). A provider's figure alone is shown, never trusted:
     # the agent guardrails read an unchecked impact as unknown.
     impact_checked: bool = False
+    # The provider's own fee on the swap (the AgentOS DEX fee on the
+    # aggregator); ``None`` when the provider charges none or says nothing.
+    swap_fee: SwapFee | None = None
 
     @property
     def age_s(self) -> float:

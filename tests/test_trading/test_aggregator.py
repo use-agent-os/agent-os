@@ -548,6 +548,41 @@ class TestThroughTheService:
         )
         assert quote["gasUsd"] == pytest.approx(0.8)
 
+    async def test_quote_carries_the_agentos_dex_fee_in_the_sell_token(
+        self, funded_service: TradingService
+    ) -> None:
+        quote = await funded_service.quote(
+            chain=BASE, wallet=None, token_in="USDC", token_out="WETH", amount_in="10"
+        )
+        # 20 bps of 10 USDC, written in USDC's own six decimals.
+        assert quote["swapFee"] == {
+            "bps": 20,
+            "pct": 0.2,
+            "symbol": "USDC",
+            "amount": "0.02",
+            "amountRaw": "20000",
+        }
+
+    async def test_an_unmatched_fee_token_keeps_the_aggregators_own_amount(
+        self, funded_service: TradingService, fake_aggregator: FakeAggregator
+    ) -> None:
+        fake_aggregator.fee_symbol = "XYZ"
+        fake_aggregator.fee_formatted = "0.02"
+        quote = await funded_service.quote(
+            chain=BASE, wallet=None, token_in="USDC", token_out="WETH", amount_in="10"
+        )
+        assert quote["swapFee"]["symbol"] == "XYZ"
+        assert quote["swapFee"]["amount"] == "0.02"
+
+    async def test_no_fee_block_means_no_swap_fee(
+        self, funded_service: TradingService, fake_aggregator: FakeAggregator
+    ) -> None:
+        fake_aggregator.fee_bps = None
+        quote = await funded_service.quote(
+            chain=BASE, wallet=None, token_in="USDC", token_out="WETH", amount_in="10"
+        )
+        assert quote["swapFee"] is None
+
     async def test_status_lists_the_aggregator_first_and_active(
         self, funded_service: TradingService
     ) -> None:

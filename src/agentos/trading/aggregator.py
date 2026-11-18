@@ -43,6 +43,7 @@ from agentos.trading.providers import (
     ProbeResult,
     ProviderError,
     ProviderQuote,
+    SwapFee,
 )
 from agentos.trading.uniswap import DecisionOrigin
 
@@ -512,6 +513,7 @@ class AggregatorProvider:
             fresh_for_s=fresh_for,
             raw=parsed,
             warnings=[*(extra_warnings or []), *parsed.warnings],
+            swap_fee=_swap_fee(parsed.fee),
         )
 
     async def approval_tx(
@@ -589,6 +591,25 @@ class AggregatorProvider:
         if gas > 0:
             tx["gasLimit"] = str(int(gas * 1.2))
         return tx
+
+
+def _swap_fee(fee: dict[str, Any] | None) -> SwapFee | None:
+    """The quote's ``fee`` block — ``{bps, token, amount: {raw, formatted}}`` —
+    as a :class:`SwapFee`; ``None`` when absent or empty."""
+    if not fee:
+        return None
+    bps = _f(fee.get("bps"))
+    amount = fee.get("amount")
+    amount_raw = _raw(amount)
+    if bps is None and amount_raw is None:
+        return None
+    formatted = amount.get("formatted") if isinstance(amount, dict) else None
+    return SwapFee(
+        bps=int(bps) if bps is not None else None,
+        symbol=str(fee.get("token") or "").strip(),
+        amount_raw=amount_raw,
+        amount=str(formatted) if formatted not in (None, "") else None,
+    )
 
 
 def _chain_for(chain_id: int) -> ChainSpec:

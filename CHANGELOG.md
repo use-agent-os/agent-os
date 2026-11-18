@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Desk → Trade: the swap box and the Confirm swap sheet now show an
+  **AgentOS DEX Fee** row, the fee the AgentOS Aggregator takes on the swap,
+  in the token you sell (e.g. `0.02 USDC` for 0.2% of 10 USDC). The quote RPC
+  (`trading.quote`) carries it as `swapFee` (`bps`, `pct`, `symbol`,
+  `amount`, `amountRaw`), or `null` when the provider charges none.
+
 ### Changed
 - Desktop: the Automations cards (the Trade tab's Automations, and the BOOK
   beside the chat) are about half as tall. The state word and the figures

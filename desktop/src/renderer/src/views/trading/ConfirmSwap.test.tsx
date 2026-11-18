@@ -78,6 +78,14 @@ describe('ConfirmSwap · the engine is held to the frozen numbers', () => {
     )
   })
 
+  it('lists the AgentOS DEX fee in the sell token', () => {
+    const fee = { bps: 20, pct: 0.2, symbol: 'ETH', amount: '0.0002', amountRaw: '200000000000000' }
+    renderDesk(sheet(quote({ swapFee: fee }), Date.now()))
+    const row = screen.getByTestId('quote-dex-fee')
+    expect(row).toHaveTextContent('AgentOS DEX Fee')
+    expect(row).toHaveTextContent('0.0002 ETH')
+  })
+
   it('derives the raw figures from the decimals when an older engine sends none', async () => {
     const q = quote({ quoteId: 'q2', amountOut: '250.12', minOut: '248.87' })
     delete (q as Partial<Quote>).amountOutRaw

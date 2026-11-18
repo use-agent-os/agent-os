@@ -563,6 +563,10 @@ class FakeAggregator:
     tx_to: str = ALLOWANCE_HOLDER  # what the live API sends every swap to
     tx_value: str = "0"
     tx_data: str = "0x2213bc0b" + "22" * 32
+    # The AgentOS fee, taken on the sell side; ``fee_bps=None`` sends no fee.
+    fee_bps: int | None = 20
+    fee_symbol: str = "USDC"
+    fee_formatted: str | None = None
     requests: list[httpx.Request] = field(default_factory=list)
     quotes: int = 0
 
@@ -634,7 +638,18 @@ class FakeAggregator:
                 "buyAmount": {"raw": str(self.amount_out), "formatted": None},
                 "minBuyAmount": {"raw": str(min_out), "formatted": None},
                 "price": "1",
-                "fee": {"bps": 20, "token": "ETH", "amount": {"raw": "1", "formatted": None}},
+                "fee": (
+                    {
+                        "bps": self.fee_bps,
+                        "token": self.fee_symbol,
+                        "amount": {
+                            "raw": str(amount_raw * self.fee_bps // 10_000),
+                            "formatted": self.fee_formatted,
+                        },
+                    }
+                    if self.fee_bps is not None
+                    else None
+                ),
                 "gas": {
                     "estimate": self.gas_estimate,
                     "gasPriceWei": "5040000",

@@ -237,6 +237,7 @@ export const trading = {
   'trading.swap.impact': 'Price vs reference',
   'trading.swap.minOut': 'Minimum received',
   'trading.swap.gas': 'Network fee',
+  'trading.swap.dexFee': 'AgentOS DEX Fee',
   'trading.swap.slippage': 'Slippage',
   'trading.swap.slippage.auto': 'Auto',
   'trading.swap.slippage.custom': 'Custom',

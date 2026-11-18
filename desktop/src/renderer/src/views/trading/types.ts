@@ -766,6 +766,15 @@ export interface Portfolio {
 
 export type GuardDecision = 'allow' | 'needs_approval' | 'blocked_daily_cap'
 
+export interface SwapFee {
+  bps: number | null
+  pct: number | null
+  symbol: string
+  /** In `symbol`, as a decimal string. */
+  amount: string | null
+  amountRaw: string | null
+}
+
 export interface Quote {
   quoteId: string
   routing: string
@@ -782,6 +791,9 @@ export interface Quote {
   minOutRaw?: string
   priceImpactPct: number | null
   gasUsd: number | null
+  /** The AgentOS DEX fee the aggregator takes on the swap itself (not gas),
+   *  paid in `symbol` (the sell token); absent on providers that charge none. */
+  swapFee?: SwapFee | null
   valueUsd: number | null
   /** One tokenIn priced in tokenOut, as a decimal string; null when there is
    *  no input amount to divide by. */
