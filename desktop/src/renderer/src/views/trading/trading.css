@@ -3342,6 +3342,22 @@ button:disabled > .trd-hero__spin {
 .trd-lptable .trd-col--earned {
   min-width: 110px;
 }
+.trd-lptable .trd-col--lpact {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+.trd-lpact {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.trd-lpact__btn {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}
 .trd-lppool {
   display: inline-flex;
   align-items: center;

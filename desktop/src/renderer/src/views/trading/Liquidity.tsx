@@ -10,6 +10,8 @@ import {
   formatRate,
   formatShare,
   hasClaimable,
+  type LpAction,
+  lpActions,
   lpStatusTone,
   positionTag,
   rangeMarker,
@@ -44,6 +46,8 @@ export function Liquidity({
   showChain,
   logos,
   now,
+  onAction,
+  acting,
 }: {
   book: LpBook | undefined
   loading: boolean
@@ -59,6 +63,10 @@ export function Liquidity({
   /** Token art by lower-cased address, borrowed from the holdings. */
   logos?: ReadonlyMap<string, string>
   now: number
+  /** Collect a position's fees or take it out; without it the table is read-only. */
+  onAction?: (position: LpPosition, action: LpAction) => void
+  /** The position (by id) whose action is on its way to the engine. */
+  acting?: string | null
 }) {
   const [protocol, setProtocol] = useState<string | null>(null)
   const positions = book?.positions ?? []
@@ -194,6 +202,11 @@ export function Liquidity({
             <th className="trd-col--amounts">{t('trading.liquidity.col.amounts')}</th>
             <th className="trd-col--earned">{t('trading.liquidity.col.earned')}</th>
             <th className="trd-col--value">{t('trading.liquidity.col.value')}</th>
+            {onAction ? (
+              <th className="trd-col--lpact">
+                <span className="sr-only">{t('trading.liquidity.col.actions')}</span>
+              </th>
+            ) : null}
           </tr>
         </thead>
         <tbody>
@@ -215,6 +228,7 @@ export function Liquidity({
                   <td className="trd-col--value">
                     <Skeleton width={72} />
                   </td>
+                  {onAction ? <td className="trd-col--lpact" /> : null}
                 </tr>
               ))
             : rows.map((position) => (
@@ -224,6 +238,9 @@ export function Liquidity({
                   showChain={showChain}
                   wallet={walletName(position)}
                   logos={logos}
+                  onAction={onAction}
+                  busy={acting === position.id}
+                  locked={Boolean(acting)}
                 />
               ))}
         </tbody>
@@ -295,12 +312,21 @@ function Row({
   showChain,
   wallet,
   logos,
+  onAction,
+  busy,
+  locked,
 }: {
   position: LpPosition
   showChain: boolean
   wallet?: string
   logos?: ReadonlyMap<string, string>
+  onAction?: (position: LpPosition, action: LpAction) => void
+  /** This row's action is on its way. */
+  busy: boolean
+  /** Some row's action is on its way: one order at a time. */
+  locked: boolean
 }) {
+  const actions = onAction ? lpActions(position) : []
   const tag = positionTag(position)
   const share = formatShare(position.share)
   const fee = position.pool.feePct
@@ -380,6 +406,28 @@ function Row({
             : formatUsdCell(position.valueUsd)}
         </Tick>
       </td>
+      {onAction ? (
+        <td className="trd-col--lpact">
+          {actions.length ? (
+            <span className="trd-lpact">
+              {busy ? <Spinner className="size-3" /> : null}
+              {actions.map((action) => (
+                <Button
+                  key={action}
+                  variant="secondary"
+                  className="trd-lpact__btn"
+                  disabled={locked}
+                  title={t(`trading.liquidity.action.${action}.help`)}
+                  onClick={() => onAction(position, action)}
+                  data-testid={`lp-${action}`}
+                >
+                  {t(`trading.liquidity.action.${action}`)}
+                </Button>
+              ))}
+            </span>
+          ) : null}
+        </td>
+      ) : null}
     </tr>
   )
 }

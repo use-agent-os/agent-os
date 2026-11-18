@@ -153,6 +153,14 @@ export const trading = {
   'trading.liquidity.price': 'Price now',
   'trading.liquidity.copyPool': 'Copy pool address',
   'trading.liquidity.noFees': 'Fees compound into the position',
+  'trading.liquidity.col.actions': 'Actions',
+  'trading.liquidity.action.collect': 'Collect',
+  'trading.liquidity.action.collect.help': 'Collect the unclaimed fees. Waits for your approval.',
+  'trading.liquidity.action.remove': 'Remove',
+  'trading.liquidity.action.remove.help':
+    'Take the whole position out, fees included. Waits for your approval.',
+  'trading.liquidity.parked': 'Waiting for your approval',
+  'trading.liquidity.actionFailed': 'Could not prepare the order',
 
   // History
   'trading.history.empty': 'No activity yet',

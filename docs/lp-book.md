@@ -7,9 +7,11 @@ readers fill it (`lp.py` for Uniswap V4, `lp_amm.py` for everything else).
 This file is the contract between the engine and its clients; change it
 before changing either side.
 
-Read-only. To collect fees or remove liquidity from a Uniswap V4 position use
-the LP writes ([`lp-write.md`](lp-write.md)); the other protocols are listed,
-not managed.
+The book itself is read-only. A Uniswap V4 row in the desktop's tab carries
+**Collect** (when fees are owed) and **Remove** (the whole position, fees
+included): each calls the LP writes ([`lp-write.md`](lp-write.md)), which park
+an order for approval, and the tab moves to Approvals where its card is. The
+other protocols are listed, not managed.
 
 ## What is covered
 
