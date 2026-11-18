@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.19] - 2026-11-19
+
 ### Added
 - `trading.aggregator_trusted_spenders`: a list of extra contracts an
   AgentOS Aggregator quote may name as the approval spender and swap target,
