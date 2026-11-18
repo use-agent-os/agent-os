@@ -1,4 +1,4 @@
-"""The AgentOS Aggregator provider: its own contract, and one swap end to end.
+"""The AgentOS DEX provider: its own contract, and one swap end to end.
 
 The shared swap machinery is covered in ``test_service.py``, which now runs
 on this provider because it is the default. What lives here is what is
@@ -84,7 +84,7 @@ class TestRegistry:
         assert DEFAULT_PROVIDER_ID == "aggregator"
         assert PROVIDER_IDS[0] == "aggregator"
         assert PROVIDER_IDS == ("aggregator", "uniswap")
-        assert provider_label("aggregator") == "AgentOS Aggregator"
+        assert provider_label("aggregator") == "AgentOS DEX"
         assert "kyber" not in PROVIDER_IDS
 
     def test_config_default_matches_the_registry(self) -> None:
@@ -526,7 +526,7 @@ class TestThroughTheService:
         order = orders[0]
         assert order["status"] == "confirmed", order
         assert order["provider"] == "aggregator"
-        assert order["providerLabel"] == "AgentOS Aggregator"
+        assert order["providerLabel"] == "AgentOS DEX"
         assert order["approvalTxHash"] and order["txHash"]
         # Approval first, then the swap — two transactions, in that order.
         assert len(base_chain.sent) == 2

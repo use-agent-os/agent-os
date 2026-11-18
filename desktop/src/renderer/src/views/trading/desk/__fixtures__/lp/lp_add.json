@@ -48,7 +48,7 @@
   "expiresAt": 1790502300000,
   "deliveredToken": null,
   "provider": "aggregator",
-  "providerLabel": "AgentOS Aggregator",
+  "providerLabel": "AgentOS DEX",
   "clientOrderId": null,
   "plan": {
     "op": "add",

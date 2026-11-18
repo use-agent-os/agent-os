@@ -78,7 +78,7 @@ class _FakeClient:
                 "providers": [
                     {
                         "id": "aggregator",
-                        "label": "AgentOS Aggregator",
+                        "label": "AgentOS DEX",
                         "needsKey": False,
                         "keyConfigured": True,
                         "healthy": True,
@@ -237,12 +237,12 @@ def test_status_renders(client: _FakeClient) -> None:
 def test_status_shows_provider_and_provider_table(client: _FakeClient) -> None:
     result = runner.invoke(trade_cmd.app, ["status"])
     assert result.exit_code == 0, result.output
-    assert "AgentOS Aggregator" in result.output
+    assert "AgentOS DEX" in result.output
     assert "Uniswap" in result.output
     assert "not needed" in result.output
     # The active provider gets the star, the other one does not.
     lines = result.output.splitlines()
-    agg_line = next(line for line in lines if "Aggregator" in line and "not needed" in line)
+    agg_line = next(line for line in lines if "AgentOS DEX" in line and "not needed" in line)
     uniswap_line = next(
         line for line in lines if "Uniswap" in line and "API key" not in line and "★" not in line
     )
@@ -272,7 +272,7 @@ def test_probe_provider_flag(client: _FakeClient) -> None:
     ok = runner.invoke(trade_cmd.app, ["probe", "--provider", "AGG"])
     assert ok.exit_code == 0, ok.output
     assert client.calls == [("trading.probe", {"provider": "aggregator"})]
-    assert "AgentOS Aggregator OK" in ok.output
+    assert "AgentOS DEX OK" in ok.output
 
     client.payloads["trading.probe"] = {
         "ok": False,
@@ -296,7 +296,7 @@ def test_probe_provider_flag(client: _FakeClient) -> None:
 def test_provider_show_and_switch(client: _FakeClient) -> None:
     shown = runner.invoke(trade_cmd.app, ["provider"])
     assert shown.exit_code == 0, shown.output
-    assert "AgentOS Aggregator" in shown.output
+    assert "AgentOS DEX" in shown.output
     assert client.calls == [("trading.status", {})]
 
     shown_json = runner.invoke(trade_cmd.app, ["provider", "--json"])
@@ -323,7 +323,7 @@ def test_provider_helpers() -> None:
     assert trade_cmd.provider_id_from_arg("Uniswap") == "uniswap"
     assert trade_cmd.provider_id_from_arg("AGG") == "aggregator"
     assert trade_cmd.provider_id_from_arg("aggregator") == "aggregator"
-    assert trade_cmd.provider_label("aggregator") == "AgentOS Aggregator"
+    assert trade_cmd.provider_label("aggregator") == "AgentOS DEX"
     assert trade_cmd.provider_label(None) == "—"
     assert trade_cmd.provider_label("other") == "other"
     with pytest.raises(BadParameter):

@@ -386,7 +386,7 @@ describe('SwapPanel · providers', () => {
     mount({ provider: 'aggregator' })
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '0.1' } })
     await waitFor(() =>
-      expect(screen.getByTestId('quote-provider')).toHaveTextContent('via AgentOS Aggregator'),
+      expect(screen.getByTestId('quote-provider')).toHaveTextContent('via AgentOS DEX'),
     )
   })
 

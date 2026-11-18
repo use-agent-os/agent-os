@@ -33,7 +33,7 @@ available without `uv tool list` or `pip show`.
 | `agentos acp` | Drive external coding harnesses (Claude Code, Codex, Gemini CLI, ...) over ACP: `list`, `doctor`, `run`, `sessions`, `cancel`, `close`. |
 | `agentos projects` | Group sessions into projects with shared knowledge injected into every member session. |
 | `agentos wallet` | Create, import, export and unlock wallets in the engine's vault; show balances. |
-| `agentos trade` | Quote and swap tokens on Base / Robinhood Chain through the AgentOS Aggregator (default) or Uniswap; orders, approvals, history, PnL; Uniswap V4 liquidity; DCA mandates; price triggers (stop-loss, take-profit, trailing stop, buy-the-dip, alerts); brackets (take-profit + stop-loss on one position, one cancels the other). |
+| `agentos trade` | Quote and swap tokens on Base / Robinhood Chain through the AgentOS DEX (default) or Uniswap; orders, approvals, history, PnL; Uniswap V4 liquidity; DCA mandates; price triggers (stop-loss, take-profit, trailing stop, buy-the-dip, alerts); brackets (take-profit + stop-loss on one position, one cancels the other). |
 | `agentos skills` | List, search, view, install, update, publish, inspect, and tap skills. |
 | `agentos memory` | Inspect and maintain memory. |
 | `agentos channels` | Configure and inspect messaging channels. |
@@ -1216,7 +1216,7 @@ always asks the vault password. Passwords are read from a hidden prompt or
 keystore) — never from the command line.
 
 Swaps run on Base (8453) and Robinhood Chain (4663) through one of two
-providers. The **AgentOS Aggregator** (the default,
+providers. The **AgentOS DEX** (the default,
 `trading.provider = "aggregator"`, served at `https://agg.useagentos.dev`)
 needs no key and no account: one GET returns the price *and* the unsigned
 calldata, including the ERC-20 approval when one is needed. It never signs

@@ -537,7 +537,7 @@ class FakeUniswap:
 
 @dataclass
 class FakeAggregator:
-    """The AgentOS Aggregator: one GET answers with price *and* calldata.
+    """The AgentOS DEX: one GET answers with price *and* calldata.
 
     Knob names mirror :class:`FakeUniswap` where the concept is the same, so
     a test can be pointed at either provider. ``approval_spender`` defaults

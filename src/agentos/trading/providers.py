@@ -1,7 +1,7 @@
 """Swap providers: one protocol, two implementations.
 
 The service only ever talks to a :class:`SwapProvider`: quote, approval
-transaction (if any), swap transaction. The AgentOS Aggregator is the
+transaction (if any), swap transaction. The AgentOS DEX is the
 default and needs no key; Uniswap's Trading API is the fallback, and needs
 one. Each provider normalises its own quirks — native-token sentinel, quote
 freshness, slippage units — so the order pipeline stays provider-agnostic.
@@ -31,7 +31,7 @@ ProviderId = Literal["aggregator", "uniswap"]
 PROVIDER_IDS: tuple[str, ...] = ("aggregator", "uniswap")
 DEFAULT_PROVIDER_ID = "aggregator"
 PROVIDER_LABELS: dict[str, str] = {
-    "aggregator": "AgentOS Aggregator",
+    "aggregator": "AgentOS DEX",
     "uniswap": "Uniswap",
     # Not a swap provider: the bridge an order of kind ``bridge`` runs through.
     "relay": "Relay",

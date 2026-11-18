@@ -660,21 +660,21 @@ describe('trade status from history', () => {
       enabled: true,
       version: '2026.9.27',
       provider: 'aggregator',
-      providers: [{ id: 'aggregator', label: 'AgentOS Aggregator', active: true }],
+      providers: [{ id: 'aggregator', label: 'AgentOS DEX', active: true }],
       apiKeyConfigured: true,
       chains: Array.from({ length: 30 }, (_, i) => ({ chainId: i, name: `chain ${i}` })),
       unlocked: true,
     }
     const whole = parseTradeResult(call, JSON.stringify(full, null, 2))
     expect(whole.provider).toBe('aggregator')
-    expect(whole.summary).toBe('via AgentOS Aggregator · vault unlocked')
+    expect(whole.summary).toBe('via AgentOS DEX · vault unlocked')
     for (const cut of [
       JSON.stringify(full).slice(0, 400),
       `exit_code=0\n${JSON.stringify(full, null, 2).slice(0, 400)}`,
     ]) {
       const out = parseTradeResult(call, cut)
       expect(out.provider).toBe('aggregator')
-      expect(out.summary).toBe('via AgentOS Aggregator')
+      expect(out.summary).toBe('via AgentOS DEX')
       expect(out.summary).not.toContain('{')
       expect(out.error).toBeNull()
     }
