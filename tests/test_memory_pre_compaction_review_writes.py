@@ -314,10 +314,11 @@ async def test_the_review_log_names_what_was_written_but_not_its_text(
     for text in (secret_entry, secret_note, secret_removal, "4471", "blue binder"):
         assert text not in rendered
     (done,) = [entry for entry in logs if entry.get("event") == "memory_nudge.review_done"]
-    assert done["wrote"] == 4 and done["failed"] == 0  # the refusal is a tool reply
+    # The refused remove is a tool reply, not an exception; it still did not write.
+    assert done["wrote"] == 3 and done["failed"] == 1
     assert done["entries"] == [
         "memory:memory/add",
         "memory:memory/batch[1 ops: add]",
         f"memory_save:{NOTE}/append",
-        "memory:memory/remove",
     ]
+    assert done["errors"] == ["memory:memory/remove"]

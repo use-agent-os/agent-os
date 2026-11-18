@@ -577,6 +577,23 @@ _NUDGE_MAX_DEFERRAL_INTERVALS: Final[int] = 2
 _MEMORY_REVIEW_LOG_MAX_ENTRIES: Final[int] = 5
 
 
+def _memory_write_refused(result: Any) -> bool:
+    """Whether a memory tool reply says the write did not happen.
+
+    The ``memory`` tool answers a refused or failed call with
+    ``{"success": false, ...}`` instead of raising, so the event is not an
+    error; counting it as written would make the review log claim writes
+    that never reached a file.
+    """
+    if not isinstance(result, str) or '"success"' not in result:
+        return False
+    try:
+        payload = json.loads(result)
+    except ValueError:
+        return False
+    return isinstance(payload, dict) and payload.get("success") is False
+
+
 def _summarize_memory_write(tool_name: str, arguments: Any) -> str:
     """Render one memory tool call as ``tool:target/action``, without its text.
 
@@ -3842,7 +3859,9 @@ class TurnRunner:
                 summary = _summarize_memory_write(
                     str(getattr(event, "tool_name", "")), getattr(event, "arguments", None)
                 )
-                if getattr(event, "is_error", False):
+                if getattr(event, "is_error", False) or _memory_write_refused(
+                    getattr(event, "result", "")
+                ):
                     failures.append(summary)
                 else:
                     writes.append(summary)
