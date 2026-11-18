@@ -1058,6 +1058,18 @@ describe('approvals cards and the empty transcript · CSS contract', () => {
     expect(rule(chat, '.chat-history-loading')).toMatch(/inset: 0;/)
   })
 
+  it('holds the empty hint back while the loading line holds the same centre', () => {
+    // Both centre in the transcript box: shown together, "Opening the desk"
+    // sat between the hint's title and body.
+    expect(rule(desk, ".chat-thread[data-history-ready='false'] ~ .trd-chat__empty")).toMatch(
+      /visibility: hidden;/,
+    )
+    // The hint is the thread's sibling, so the `~` selector reaches it.
+    expect(rule(chat, ".chat-thread[data-history-ready='true'] + .chat-history-loading")).toMatch(
+      /display: none;/,
+    )
+  })
+
   it('says the empty desk once: the renderer’s own empty line is hidden at the desk', () => {
     expect(rule(desk, '.chat-desktop[data-desk] .chat-empty')).toMatch(/display: none;/)
     // The old selector keyed on a wrapper the desk no longer renders.
