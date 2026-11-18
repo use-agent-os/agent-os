@@ -10,8 +10,9 @@ funds — a swap happens only when this wallet signs the calldata below. Two
 facts from that response are checked here before anything is signed:
 
 * the approval's ``spender`` is one of the contracts this desk knows the
-  aggregator to use (:data:`TRUSTED_SPENDERS`, 0x's AllowanceHolder) *and*
-  the same contract the swap transaction is sent ``to``. The set is pinned
+  aggregator to use (:data:`TRUSTED_SPENDERS`: the AgentOS Router, or 0x's
+  AllowanceHolder for a gateway that quotes 0x directly) *and* the same
+  contract the swap transaction is sent ``to``. The set is pinned
   here, not read from the response: a response that names some other
   address, however consistently, is refused, not signed;
 * the approval is for exactly what the order needs — the API never asks for
@@ -54,12 +55,20 @@ QUOTE_FRESH_S = 20.0
 DEFAULT_SLIPPAGE_BPS = 50
 MIN_SLIPPAGE_BPS = 1
 MAX_SLIPPAGE_BPS = 500
-#: 0x's AllowanceHolder — what every approval the aggregator asks for names
-#: (seen live on Base 2026-09-20; the same address on every 0x chain). The
-#: only spender an approval for this provider may carry, and the only
-#: contract a swap that needed an approval may be sent to.
+#: 0x's AllowanceHolder — what every approval names when the gateway quotes
+#: 0x directly (seen live on Base 2026-09-20; the same address on every 0x
+#: chain).
 ALLOWANCE_HOLDER = "0x0000000000001ff3684f28c67538d4d072c22734"
-TRUSTED_SPENDERS: frozenset[str] = frozenset({ALLOWANCE_HOLDER})
+#: AgentOSRouter (use-agent-os/agent-os-dex-contracts) — what the gateway
+#: hands out in contract mode: users approve and call the Router, which takes
+#: the AgentOS fee and runs the aggregator's calldata through its Executor.
+#: Immutable, deployed 2026-11-18 at the same CREATE2 address on Base and
+#: Robinhood Chain.
+AGENTOS_ROUTER = "0x4cf93bac8920b1efc92b0d2c84dcbe56802e530c"
+#: The only spenders an approval for this provider may carry, and the only
+#: contracts a swap may be sent to. Each plays both roles, so an approval's
+#: spender must also be the swap's target.
+TRUSTED_SPENDERS: frozenset[str] = frozenset({ALLOWANCE_HOLDER, AGENTOS_ROUTER})
 
 #: The aggregator's error envelope maps onto the engine's own codes. The
 #: bool is whether retrying the same request could plausibly work.
@@ -353,10 +362,11 @@ class AggregatorClient:
         The aggregator's calldata is opaque, but two things are not. The
         spender has to be one of :data:`TRUSTED_SPENDERS` — a constant of this
         module, never something the response gets to choose, or the check
-        would only prove the response agrees with itself. And 0x's
-        AllowanceHolder is both the spender and the swap target, so the two
-        must match. The amount is bounded too: the API asks for what the
-        order needs, so an unlimited allowance is a response we do not sign.
+        would only prove the response agrees with itself. And each trusted
+        contract (the AgentOS Router, 0x's AllowanceHolder) is both the
+        spender and the swap target, so the two must match. The amount is
+        bounded too: the API asks for what the order needs, so an unlimited
+        allowance is a response we do not sign.
         """
         if parsed.approval is None:
             return
@@ -516,9 +526,9 @@ class AggregatorProvider:
         return TRUSTED_SPENDERS
 
     def trusted_targets(self, chain: ChainSpec, quote: ProviderQuote) -> frozenset[str]:
-        # 0x's AllowanceHolder is the entry point for every route the
-        # aggregator builds, ERC-20 and native sells alike; the swap is sent
-        # there or not at all.
+        # The AgentOS Router (contract mode) or 0x's AllowanceHolder (direct)
+        # is the entry point for every route the aggregator builds, ERC-20 and
+        # native sells alike; the swap is sent there or not at all.
         return TRUSTED_SPENDERS
 
     async def build(
@@ -581,6 +591,7 @@ def _approve_amount(data: str) -> int | None:
 
 
 __all__ = [
+    "AGENTOS_ROUTER",
     "AGGREGATOR_BASE",
     "ALLOWANCE_HOLDER",
     "MAX_SLIPPAGE_BPS",

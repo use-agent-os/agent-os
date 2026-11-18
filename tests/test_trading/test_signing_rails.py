@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from agentos.trading import service as service_module
-from agentos.trading.aggregator import ALLOWANCE_HOLDER, AggregatorProvider
+from agentos.trading.aggregator import AGENTOS_ROUTER, ALLOWANCE_HOLDER, AggregatorProvider
 from agentos.trading.chains import BASE, NATIVE_ADDRESS, ROBINHOOD
 from agentos.trading.evm import EvmClient, EvmRpcError, EvmTransportError
 from agentos.trading.ledger import Ledger
@@ -82,6 +82,38 @@ class TestPinnedSwapTargets:
         assert order["status"] == "confirmed", order
         assert decode_fake_raw(base_chain.sent[-1])["to"].lower() == ALLOWANCE_HOLDER
 
+    @pytest.mark.parametrize(
+        ("token_in", "token_out", "amount_in", "needs_approval"),
+        [("USDC", "WETH", "10", True), ("ETH", "USDC", "0.001", False)],
+    )
+    async def test_a_sell_through_the_agentos_router_is_signed(
+        self,
+        funded_service: TradingService,
+        base_chain: FakeChain,
+        fake_aggregator: FakeAggregator,
+        token_in: str,
+        token_out: str,
+        amount_in: str,
+        needs_approval: bool,
+    ) -> None:
+        """Contract mode: the gateway names the AgentOS Router as spender and target."""
+        service = funded_service
+        wallet = service.test_wallet  # type: ignore[attr-defined]
+        if token_out == "USDC":
+            _wire_swap_effects(base_chain, wallet, out_token=USDC, out_amount=10 * 10**6)
+            fake_aggregator.tx_value = str(10**15)
+        else:
+            _wire_swap_effects(base_chain, wallet, out_amount=5 * 10**15)
+        fake_aggregator.approval_needed = needs_approval
+        fake_aggregator.tx_to = AGENTOS_ROUTER
+        order = await _swap(service, token_in=token_in, token_out=token_out, amount_in=amount_in)
+        assert order["status"] == "confirmed", order
+        assert decode_fake_raw(base_chain.sent[-1])["to"].lower() == AGENTOS_ROUTER
+        if needs_approval:
+            approve = decode_fake_raw(base_chain.sent[0])
+            assert approve["to"].lower() == USDC.lower()
+            assert AGENTOS_ROUTER[2:] in approve["data"].lower()
+
     async def test_the_aggregator_pins_the_allowance_holder_for_every_sell(
         self, http: httpx.AsyncClient, fake_aggregator: FakeAggregator
     ) -> None:
@@ -98,7 +130,9 @@ class TestPinnedSwapTargets:
                 slippage_pct=None,
                 decision_origin="human_mediated",
             )
-            assert provider.trusted_targets(BASE, quote) == frozenset({ALLOWANCE_HOLDER})
+            assert provider.trusted_targets(BASE, quote) == frozenset(
+                {ALLOWANCE_HOLDER, AGENTOS_ROUTER}
+            )
 
     def test_uniswap_targets_are_pinned_per_chain(self) -> None:
         provider = UniswapProvider(client=None)  # type: ignore[arg-type]
