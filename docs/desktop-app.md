@@ -127,7 +127,10 @@ desk's wallets hold on Uniswap (V2, V3, V4), Aero and Aerodrome, on Base and
 Robinhood Chain: the pair, the range with the price marked on it, what is
 deposited, unclaimed fees and gauge rewards, and the value. Out-of-range
 positions come first. The engine reads the chain only while the tab is open
-and serves its cache in between. See [the liquidity book](lp-book.md).
+and serves its cache in between. A Uniswap V4 row has **Collect** and
+**Remove** buttons: each prepares an order that waits for your approval on the
+Approvals tab, and nothing is signed before that. Positions on the other
+protocols are listed only. See [the liquidity book](lp-book.md).
 
 ## Sidebar
 

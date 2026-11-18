@@ -1028,6 +1028,25 @@ export function useLpBook(wallet: string | undefined, chainId: number | undefine
   })
 }
 
+/**
+ * Collect a Uniswap V4 position's fees, or take the whole position out. Either
+ * parks an order for approval: nothing is signed until its card is approved
+ * (which is where Touch ID stands), so the write itself is not gated.
+ */
+export function useLpWrite() {
+  const rpc = useRpc()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (params: { action: 'collect' | 'remove'; chainId: number; tokenId: string }) =>
+      gatedCall<{ order: Order }>(
+        (m, p) => rpc.call(m, p),
+        params.action === 'collect' ? 'trading.lp.collect' : 'trading.lp.remove',
+        { chainId: params.chainId, tokenId: params.tokenId, initiator: 'manual' },
+      ),
+    onSettled: () => invalidateTrading(queryClient),
+  })
+}
+
 /** Ask the engine to re-read the chain now (it honours one every few seconds). */
 export function useLpRefresh() {
   const rpc = useRpc()

@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Desktop: a Uniswap V4 row on the Trade tab's **Liquidity** tab has
+  **Collect** (when fees are owed) and **Remove** (the whole position, fees
+  included). Each prepares the same order the desk's chat does and moves to
+  the Approvals tab, where its card is approved; nothing is signed before
+  that. Positions on Uniswap V2 and V3, Aero and Aerodrome are still listed
+  only.
+
 ### Fixed
 - Trading: Uniswap V4 positions went missing from the Liquidity tab and from
   `agentos trade lp positions` on Robinhood Chain, and on Base for a user with
