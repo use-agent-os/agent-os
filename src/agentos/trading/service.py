@@ -177,6 +177,12 @@ MANUAL_SYNC_MIN_S = 10.0
 # Hidden (junk) tokens leave the sync's fast lane; their balances and
 # openings are still brought up to date this often.
 HIDDEN_RESCAN_S = 3600.0
+# ``syncKind`` vocabulary: why the pass in flight runs. A client shows a
+# "syncing" state for the last two only; the background pass is the engine
+# keeping figures fresh, and with many wallets it runs most of the time.
+SYNC_BACKGROUND = "background"
+SYNC_REQUESTED = "requested"
+SYNC_INITIAL = "initial"
 # WETH9 ``withdraw(uint256)``.
 SEL_WETH_WITHDRAW = "0x2e1a7d4d"
 # A multisend is one decision and one wallet lock; beyond this many legs it
@@ -499,6 +505,12 @@ class TradingService:
         # both saw a condition hold must not both fire the trigger.
         self._trigger_lock = asyncio.Lock()
         self.syncing = False
+        # Who the pass in flight is for (see ``sync_kind``): the engine's own
+        # clock, or someone who asked and is waiting on it.
+        self._sync_pass_kind = SYNC_BACKGROUND
+        # The pass in flight is sweeping a wallet/chain for the first time (or
+        # rebuilding one): its rows are not there yet, whoever started it.
+        self._sync_first_sweep = False
         self.last_sync_at: float | None = None
         self.discovery = BlockscoutDiscovery(http=self._http, now=now)
         self.curator = TokenCurator(self.ledger, self.prices, now=now)
@@ -1014,6 +1026,7 @@ class TradingService:
             "initialized": vault["initialized"],
             "walletCount": vault["walletCount"],
             "syncing": self.syncing,
+            "syncKind": self.sync_kind,
             "rebuild": self.syncer.rebuild_progress,
             "lastSyncAt": int(self.last_sync_at * 1000) if self.last_sync_at else None,
             "ledgerRepair": self._ledger_repair(),
@@ -1912,7 +1925,7 @@ class TradingService:
             return False
         for record in due:
             self._manual_sync_at[record.key] = now
-        await self.sync_all(wallets=due, chains=chains)
+        await self.sync_all(wallets=due, chains=chains, kind=SYNC_REQUESTED)
         return True
 
     def chain_reads(
@@ -2120,6 +2133,7 @@ class TradingService:
             "wallets": wallets_out,
             "updatedAt": int(self._now() * 1000),
             "syncing": self.syncing,
+            "syncKind": self.sync_kind,
             "rebuild": self.syncer.rebuild_progress,
         }
 
@@ -2341,6 +2355,7 @@ class TradingService:
         wallets: list[WalletRecord] | None = None,
         chains: list[ChainSpec] | None = None,
         read_all: bool = False,
+        kind: str = SYNC_BACKGROUND,
     ) -> int:
         """Sync every wallet × chain (or the given subset). 0 when a sync is already running.
 
@@ -2348,11 +2363,18 @@ class TradingService:
         been announced as ``trading.changed`` so clients re-read the ledger
         the moment it moves, not on their next poll. ``read_all`` reads every
         token of interest, as the hourly pass does, instead of just the live ones.
+        ``kind`` says who the pass is for (``SYNC_BACKGROUND`` or
+        ``SYNC_REQUESTED``); it is what :attr:`sync_kind` reports.
         """
         if self._sync_lock.locked():
+            # The pass in flight is the one the asker will see finish: from
+            # now on it is theirs, not the engine's routine.
+            if kind != SYNC_BACKGROUND:
+                self._sync_pass_kind = kind
             return 0
         async with self._sync_lock:
             self.syncing = True
+            self._sync_pass_kind = kind
             changed = 0
             try:
                 if wallets is None:
@@ -2363,6 +2385,11 @@ class TradingService:
                     self._hidden_sync_at = self._now()
                 for record in wallets:
                     for chain in chains or self.chains():
+                        self._sync_first_sweep = (
+                            full
+                            or self.ledger.sync_state(chain.chain_id, record.key) is None
+                            or self.ledger.rebuild_state(chain.chain_id, record.key) is not None
+                        )
                         try:
                             if await self.syncer.sync(
                                 record,
@@ -2386,13 +2413,30 @@ class TradingService:
                 self.last_sync_at = self._now()
             finally:
                 self.syncing = False
+                self._sync_first_sweep = False
+                self._sync_pass_kind = SYNC_BACKGROUND
             return changed
+
+    @property
+    def sync_kind(self) -> str | None:
+        """Why the pass in flight runs; ``None`` when no pass is running.
+
+        ``initial`` while a wallet/chain is swept for the first time or
+        rebuilt (its rows are still missing), ``requested`` when someone
+        asked for the pass, ``background`` for the engine's own clock.
+        """
+        if not self.syncing:
+            return None
+        if self._sync_first_sweep:
+            return SYNC_INITIAL
+        return self._sync_pass_kind
 
     def request_sync(self, *, wallet: str | None = None, full: bool = False) -> None:
         loop = asyncio.get_running_loop()
         # Someone asked for this pass: it re-reads everything, not just the live tokens.
         task = loop.create_task(
-            self.sync_all(wallet=wallet, full=full, read_all=True), name="trading-sync-once"
+            self.sync_all(wallet=wallet, full=full, read_all=True, kind=SYNC_REQUESTED),
+            name="trading-sync-once",
         )
         self._confirm_tasks.add(task)
         task.add_done_callback(self._confirm_tasks.discard)

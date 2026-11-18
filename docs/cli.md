@@ -1134,7 +1134,7 @@ agentos wallet export <addr> --private-key   # prints the raw key; always asks t
 agentos wallet list / rename <addr> <label> / primary <addr> / remove <addr> --yes|-y   # remove also stops the wallet's DCA mandates, triggers and brackets (re-importing the key revives none)
 agentos wallet balances [<addr>] [--chain base|robinhood] [--refresh] [--hidden] [--json]   # ledger view; --refresh re-reads the chain first (throttled to once per 10 s per wallet); --hidden lists junk tokens too
 
-agentos trade status                        # provider, API key, chains, limits, vault state; --json adds ledgerRepair ("full sync required") after a ledger repair migration
+agentos trade status                        # provider, API key, chains, limits, vault state; --json adds syncKind (why a sync runs: background, requested, initial) and ledgerRepair ("full sync required") after a ledger repair migration
 agentos trade provider                      # show the swap provider (aggregator | uniswap)
 agentos trade provider uniswap              # switch it (= config set trading.provider uniswap)
 agentos trade probe [--provider aggregator|uniswap] [--api-key <key>]   # reachable? key valid? (--json exits 1 when not ok; --api-key is operator-only)

@@ -18,6 +18,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   ignoring case and surrounding spaces.
 
 ### Fixed
+- Desktop: the trading desk no longer shows "Syncing" all the time once
+  many wallets are imported. The engine syncs every wallet × chain one after
+  another; with 15 wallets on Base and Robinhood Chain a pass took 20–55 s
+  against a 30–60 s loop, so the flag was on ~70% of the time and the head
+  read as stuck. `trading.status` and `trading.portfolio` now carry
+  `syncKind` (`background`, `requested`, `initial`), and the desk shows
+  "Syncing" only for a resync, a new wallet's first sweep or a rebuild; the
+  routine pass shows "Last sync …" instead. A resync asked for while the
+  routine pass runs is folded into that pass, which then shows. Older
+  engines without `syncKind` keep the old behaviour.
 - Desktop: picking one wallet on the trading desk (full desk or the BOOK
   beside the chat) now scopes the Orders, Approvals and Automations tabs to
   that wallet, as Holdings and History already were. Orders are fetched with
