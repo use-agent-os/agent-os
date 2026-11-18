@@ -1400,6 +1400,27 @@ function walletsFromLine(part: string, wallets: readonly Wallet[]): string[] {
   return out
 }
 
+/**
+ * The wallets a mission acts for, read from its contract's `Wallets:` line:
+ * "the primary wallet" is whichever is primary now, and a named wallet the
+ * list no longer has resolves to nothing. Null when the prompt carries no
+ * such line — a mission written by hand names no wallet at all.
+ */
+export function missionWallets(
+  job: RawJob,
+  primary: string | null,
+  wallets: readonly Wallet[],
+): string[] | null {
+  const scope = jobText(job)
+    .split('\n')
+    .find((l) => l.startsWith('Wallets: '))
+  if (!scope) return null
+  const cut = scope.lastIndexOf(' · Chains: ')
+  const part = (cut >= 0 ? scope.slice(0, cut) : scope).slice('Wallets: '.length)
+  if (part === 'the primary wallet') return primary ? [primary] : []
+  return walletsFromLine(part, wallets)
+}
+
 export function stopFromLine(line: string | undefined): StopRule {
   if (!line) return { kind: 'none' }
   const runs = /^Stop: after (\d+) runs\./.exec(line)

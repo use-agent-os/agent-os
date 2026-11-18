@@ -17,13 +17,14 @@ import { t } from '~/i18n'
 import { useBrackets, useMandates, useTriggers } from '~/stores/trading'
 import { clockLabel } from '~/views/jobs/logic'
 import { Empty, Skeleton } from '../parts'
-import type { Bracket, Mandate, Trigger } from '../types'
+import type { Bracket, Mandate, Trigger, Wallet } from '../types'
 import {
   AUTOMATION_GROUPS,
   automationCounts,
   automationElsewhere,
   automationItems,
   automationSections,
+  automationsForWallet,
   FINISHED_SHOWN,
   itemHistory,
   type AutomationFilter,
@@ -55,6 +56,8 @@ import { planText, triggerReason, triggerWord } from './trigger-logic'
 /** History rows drawn before "+N earlier". */
 const HISTORY_ROWS = 5
 
+const NO_WALLETS: readonly Wallet[] = []
+
 /**
  * The BOOK's Automations tab: every mission, DCA mandate, price trigger and
  * bracket in one place, grouped by what the user has to do about it —
@@ -64,6 +67,9 @@ const HISTORY_ROWS = 5
  * The lists come from the same cache entries the Missions row fills
  * (`trading.*.list {all:true}`, `cron.list`), so the tab costs no second
  * request. The mission writes go through the desk's one `useMissions`.
+ *
+ * With one wallet selected in the head, only that wallet's automations are
+ * drawn (see `automationsForWallet`); `wallet` absent means all wallets.
  */
 export function Automations({
   missions,
@@ -71,12 +77,20 @@ export function Automations({
   pendingApprovals,
   enabled,
   onOpenSession,
+  wallet,
+  primary = null,
+  wallets = NO_WALLETS,
 }: {
   missions: MissionsApi
   sessionKey: string
   pendingApprovals: number
   enabled: boolean
   onOpenSession: (sessionKey: string) => void
+  /** The wallet the BOOK is scoped to; absent for all wallets. */
+  wallet?: string
+  /** Resolve a mission's `Wallets:` line: "the primary wallet" and the labels it names. */
+  primary?: string | null
+  wallets?: readonly Wallet[]
 }) {
   const jobs = useAllJobs(enabled)
   const mandates = useMandates(true, enabled)
@@ -85,14 +99,18 @@ export function Automations({
   const [filter, setFilter] = useState<AutomationFilter>('all')
   const items = useMemo(
     () =>
-      automationItems({
-        jobs: jobs.data ?? [],
-        running: missions.running,
-        pendingApprovals,
-        mandates: mandates.mandates,
-        triggers: triggers.triggers,
-        brackets: brackets.brackets,
-      }),
+      automationsForWallet(
+        automationItems({
+          jobs: jobs.data ?? [],
+          running: missions.running,
+          pendingApprovals,
+          mandates: mandates.mandates,
+          triggers: triggers.triggers,
+          brackets: brackets.brackets,
+        }),
+        wallet,
+        { primary, wallets },
+      ),
     [
       jobs.data,
       missions.running,
@@ -100,6 +118,9 @@ export function Automations({
       mandates.mandates,
       triggers.triggers,
       brackets.brackets,
+      wallet,
+      primary,
+      wallets,
     ],
   )
   const counts = automationCounts(items)

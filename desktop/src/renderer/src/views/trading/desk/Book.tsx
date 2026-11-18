@@ -51,6 +51,7 @@ import type { Holding, Order, ProviderId, Totals, Wallet } from '../types'
 import { WalletHead } from '../WalletHead'
 import { WalletSheet, type WalletSheetMode } from '../WalletSheet'
 import { Automations } from './Automations'
+import { forWallet } from './automations-logic'
 import { BOOK_MAX, BOOK_MIN, watchTabStrip } from './desk-logic'
 import type { MissionsApi } from './missions'
 import { ToolsPanel } from './ToolsPanel'
@@ -171,7 +172,7 @@ export function Book({
   const [showHidden, setShowHidden] = useState(false)
   const portfolio = usePortfolio(walletAddress, !collapsed, showHidden)
   const tokenVisibility = useTokenVisibility()
-  const orders = useOrders(undefined, !collapsed && tab === 'orders')
+  const orders = useOrders(undefined, !collapsed && tab === 'orders', 50, walletAddress)
   const history = useHistory(walletAddress, undefined, !collapsed && tab === 'history')
   const totals = portfolio.data?.totals ?? EMPTY_TOTALS
   const holdings = portfolio.data?.holdings ?? []
@@ -180,11 +181,12 @@ export function Book({
     entering && !portfolio.isPending,
   )
   const pendingCount = orders.orders.filter(isAwaitingApproval).length
-  // The Automations tab's badge: proposals waiting on the operator, whichever chat made them.
+  // The Automations tab's badge: proposals waiting on the operator, whichever chat made them,
+  // for the selected wallet when one is.
   const needsCount =
-    missions.awaitingMandates.length +
-    missions.awaitingTriggers.length +
-    missions.awaitingBrackets.length
+    forWallet(missions.awaitingMandates, walletAddress).length +
+    forWallet(missions.awaitingTriggers, walletAddress).length +
+    forWallet(missions.awaitingBrackets, walletAddress).length
   // The hero is coloured by the book's own result — what was banked plus
   // what is still open — never by the day's price move, which is only the
   // chip's business.
@@ -516,6 +518,9 @@ export function Book({
               pendingApprovals={pendingCount}
               enabled={!collapsed}
               onOpenSession={onOpenSession}
+              wallet={walletAddress}
+              primary={primary}
+              wallets={wallets}
             />
           ) : tab === 'tools' ? (
             <ToolsPanel

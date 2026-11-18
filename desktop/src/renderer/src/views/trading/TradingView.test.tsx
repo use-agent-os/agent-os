@@ -340,3 +340,69 @@ describe('TradingView · the wallet rail', () => {
     expect(await screen.findAllByTestId('manage-address')).toHaveLength(2)
   })
 })
+
+describe('TradingView · one wallet selected', () => {
+  const SECOND = {
+    ...WALLET,
+    address: '0x2222222222222222222222222222222222222222',
+    label: '10k',
+    primary: false,
+  }
+  const asks = (address: string) => ({ wallet: { address, label: null } })
+
+  beforeEach(() => {
+    rpcCall.mockImplementation(async (method: string) => {
+      switch (method) {
+        case 'trading.status':
+          return {
+            enabled: true,
+            apiKeyConfigured: false,
+            chains: [],
+            limits: { approvalThresholdUsd: 100, dailyCapUsd: 1000, approvalTtlSeconds: 900 },
+            unlockMode: 'auto',
+            unlocked: true,
+            syncing: false,
+            lastSyncAt: null,
+            provider: 'aggregator',
+            providers: [],
+          }
+        case 'wallet.status':
+          return { initialized: true, unlocked: true, unlockMode: 'auto', walletCount: 2 }
+        case 'wallet.list':
+          return { wallets: [WALLET, SECOND], primary: WALLET.address }
+        case 'trading.orders.list':
+          return { orders: [], pendingApprovals: 0 }
+        default:
+          return {}
+      }
+    })
+  })
+
+  it('scopes Orders and the Automations count to that wallet', async () => {
+    const missions = {
+      missions: [],
+      running: new Set<string>(),
+      awaitingMandates: [asks(WALLET.address), asks(SECOND.address)],
+      awaitingTriggers: [asks(WALLET.address)],
+      awaitingBrackets: [asks(SECOND.address)],
+    } as unknown as MissionsApi
+    renderDesk(
+      <TradingView
+        automations={{ missions, sessionKey: 'agent:trading:s1', onOpenSession: vi.fn() }}
+      />,
+    )
+    await screen.findByTestId('trading-desk')
+    expect(screen.getByTestId('tab-automations')).toHaveTextContent('Automations4')
+    await waitFor(() => expect(rpcCall).toHaveBeenCalledWith('trading.orders.list', { limit: 50 }))
+
+    const rows = await screen.findAllByTestId('wallet-row')
+    fireEvent.click(rows.find((r) => r.textContent?.includes('10k'))!)
+    await waitFor(() =>
+      expect(rpcCall).toHaveBeenCalledWith('trading.orders.list', {
+        wallet: SECOND.address,
+        limit: 50,
+      }),
+    )
+    expect(screen.getByTestId('tab-automations')).toHaveTextContent('Automations2')
+  })
+})

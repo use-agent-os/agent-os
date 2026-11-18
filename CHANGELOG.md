@@ -18,6 +18,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   ignoring case and surrounding spaces.
 
 ### Fixed
+- Desktop: picking one wallet on the trading desk (full desk or the BOOK
+  beside the chat) now scopes the Orders, Approvals and Automations tabs to
+  that wallet, as Holdings and History already were. Orders are fetched with
+  the wallet filter `trading.orders.list` already had; DCA mandates, price
+  triggers and brackets are kept by their wallet, and a mission by the
+  wallets its contract's `Wallets:` line names (a hand-written mission that
+  names none stays visible). The Automations badge counts only that wallet's
+  asks. Opening an order from a notification switches back to all wallets so
+  the order is in view.
 - Desktop: the Markets tab's column head lines up with the values under it.
   The head and each pool row are separate grids that share one column
   template, and the head's last (action) cell was empty, so its `auto` column
