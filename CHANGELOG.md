@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- Desktop: the Automations cards (the Trade tab's Automations, and the BOOK
+  beside the chat) are about half as tall. The state word and the figures
+  share one line, and the controls sit beside the head instead of on a row
+  of their own; in the narrow BOOK the name keeps the head row and the
+  controls sit beside the state line. A truncated figures line shows in
+  full on hover.
+
 ## [2026.11.19] - 2026-11-19
 
 ### Added
