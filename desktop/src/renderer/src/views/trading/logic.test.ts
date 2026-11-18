@@ -30,12 +30,12 @@ import {
   isAwaitingApproval,
   isOrderLive,
   isPositiveAmount,
+  confirmWordMatches,
   needsRetype,
   orderTone,
   parseAmount,
   pnlTone,
   quoteCountdown,
-  retypeMatches,
   sameToken,
   shortAddress,
   sortHoldings,
@@ -329,17 +329,20 @@ describe('quote freshness and confirm rules', () => {
     expect(quoteCountdown(t0, t0 + 1_000, null).seconds).toBe(14)
     expect(quoteCountdown(0, t0, t0 + 30_000).expired).toBe(true)
   })
-  it('asks for a retype above 1,000 USD only', () => {
+  it('asks for the confirm word above 1,000 USD only', () => {
     expect(needsRetype(999.99)).toBe(false)
     expect(needsRetype(1000)).toBe(false)
     expect(needsRetype(1000.01)).toBe(true)
     expect(needsRetype(null)).toBe(false)
   })
-  it('matches a retyped amount by value', () => {
-    expect(retypeMatches('1.50', '1.5')).toBe(true)
-    expect(retypeMatches('1,5', '1.5')).toBe(true)
-    expect(retypeMatches('1.51', '1.5')).toBe(false)
-    expect(retypeMatches('', '1.5')).toBe(false)
+  it('matches the confirm word, not the amount', () => {
+    expect(confirmWordMatches('confirm')).toBe(true)
+    expect(confirmWordMatches('  Confirm ')).toBe(true)
+    expect(confirmWordMatches('CONFIRM')).toBe(true)
+    expect(confirmWordMatches('confir')).toBe(false)
+    expect(confirmWordMatches('confirmed')).toBe(false)
+    expect(confirmWordMatches('1.0')).toBe(false)
+    expect(confirmWordMatches('')).toBe(false)
   })
   it('times an approval', () => {
     const now = 5_000_000
