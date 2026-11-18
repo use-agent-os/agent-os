@@ -16,7 +16,9 @@ import {
   automationElsewhere,
   automationItems,
   automationSections,
+  automationsForWallet,
   bracketFireRows,
+  forWallet,
   isTradingJob,
   itemHistory,
   mandateRunRows,
@@ -196,6 +198,62 @@ describe('automations logic', () => {
   })
 })
 
+describe('automations for one wallet', () => {
+  const A = '0x1111111111111111111111111111111111111111'
+  const B = '0x2222222222222222222222222222222222222222'
+  const wallets = [
+    { address: A, label: 'Main', primary: true, createdAt: 0, chains: [8453] },
+    { address: B, label: '10k', primary: false, createdAt: 0, chains: [8453] },
+  ]
+  const ctx = { primary: A, wallets }
+  const scoped = (line: string | null, id: string) =>
+    job({ id, message: ['Goal: g', ...(line ? [line] : [])].join('\n') })
+  const items = automationItems({
+    jobs: [
+      scoped('Wallets: the primary wallet · Chains: Base', 'm-primary'),
+      scoped('Wallets: 10k · 0x2222…2222 · Chains: Base', 'm-b'),
+      scoped('Wallets: 10k · 0x2222…2222, Main · 0x1111…1111 · Chains: Base', 'm-both'),
+      scoped('Wallets: 0x9999…9999 · Chains: Base', 'm-gone'),
+      scoped(null, 'm-free'),
+    ],
+    running: new Set(),
+    pendingApprovals: 0,
+    mandates: [
+      mandate({ id: 'dca-a' }),
+      mandate({ id: 'dca-b', wallet: { address: B, label: '10k' } }),
+    ],
+    triggers: [trigger({ id: 'tr-b', wallet: { address: B, label: '10k' } })],
+    brackets: [bracket({ id: 'br-a' })],
+  })
+  const ids = (wallet: string | undefined) =>
+    automationsForWallet(items, wallet, ctx)
+      .map((it) => it.id)
+      .sort()
+
+  it('keeps every automation when no wallet is selected', () => {
+    expect(ids(undefined)).toHaveLength(items.length)
+  })
+
+  it('keeps only what the selected wallet is behind; a mission naming none stays', () => {
+    expect(ids(A)).toEqual(['br-a', 'dca-a', 'm-both', 'm-free', 'm-primary'])
+    expect(ids(B)).toEqual(['dca-b', 'm-b', 'm-both', 'm-free', 'tr-b'])
+    // A wallet the list no longer has claims its mission for nobody.
+    expect(ids(A)).not.toContain('m-gone')
+  })
+
+  it('reads "the primary wallet" as whichever is primary now', () => {
+    expect(automationsForWallet(items, B, { ...ctx, primary: B }).map((it) => it.id)).toContain(
+      'm-primary',
+    )
+  })
+
+  it('counts only the selected wallet’s proposals for the tab badge', () => {
+    const asks = [mandate({ id: 'x' }), mandate({ id: 'y', wallet: { address: B, label: null } })]
+    expect(forWallet(asks, B).map((m) => m.id)).toEqual(['y'])
+    expect(forWallet(asks, undefined)).toHaveLength(2)
+  })
+})
+
 describe('Automations tab', () => {
   const actions = () => ({
     pending: null,
@@ -289,6 +347,37 @@ describe('Automations tab', () => {
     // The state word is the same one the row above the composer says.
     expect(within(mine).getByTestId('auto-word')).toHaveTextContent(/^Active/)
     expect(within(mine).getByTestId('auto-facts')).toHaveTextContent('$120 / $300')
+  })
+
+  it('draws only the selected wallet’s automations', async () => {
+    const other = '0x2222222222222222222222222222222222222222'
+    lists.triggers = [trigger({ wallet: { address: other, label: '10k' } })]
+    try {
+      renderDesk(
+        <Automations
+          missions={missions()}
+          sessionKey={SESSION}
+          pendingApprovals={0}
+          enabled
+          onOpenSession={vi.fn()}
+          wallet={other}
+          primary={MANDATE.wallet.address}
+          wallets={[]}
+        />,
+      )
+      // The trigger is the other wallet's; the mandates and bracket are the
+      // primary's, and the two hand-written missions name no wallet.
+      await waitFor(() =>
+        expect(
+          screen
+            .getAllByTestId('auto-item')
+            .map((el) => el.dataset.id)
+            .sort(),
+        ).toEqual(['j1', 'j2', TRIGGER.id].sort()),
+      )
+    } finally {
+      lists.triggers = [trigger()]
+    }
   })
 
   it('filters by chip, and steers a row with the same controls as the composer row', async () => {

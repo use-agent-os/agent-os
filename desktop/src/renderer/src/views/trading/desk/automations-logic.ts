@@ -1,9 +1,10 @@
 import type { RawJob, RawRun } from '@/views/cron/logic'
 import type { MessageKey } from '~/i18n'
-import type { Bracket, Mandate, MandateRun, Trigger, TriggerFire } from '../types'
+import { sameAddress } from '../logic'
+import type { Bracket, Mandate, MandateRun, Trigger, TriggerFire, Wallet } from '../types'
 import { bracketFires, isTerminalBracket, legWord } from './bracket-logic'
 import { TRADING_AGENT_ID } from './agent'
-import { jobSessionKey, missionStatus } from './desk-logic'
+import { jobSessionKey, missionStatus, missionWallets } from './desk-logic'
 import { isTerminalMandate } from './mandate-logic'
 import { isTerminalTrigger } from './trigger-logic'
 
@@ -129,6 +130,41 @@ export function automationItems(input: {
       at: stamp(tr.updatedAt),
     })
   return items.sort((x, y) => y.at - x.at)
+}
+
+/**
+ * The items one wallet is behind, for a BOOK scoped to that wallet. A
+ * mandate, trigger or bracket names its wallet; a mission names its in the
+ * contract's `Wallets:` line, and one that names none is kept, since nothing
+ * says it belongs to another wallet. No wallet (all wallets) keeps every item.
+ */
+export function automationsForWallet(
+  items: readonly AutomationItem[],
+  wallet: string | null | undefined,
+  ctx: { primary: string | null; wallets: readonly Wallet[] },
+): AutomationItem[] {
+  if (!wallet) return [...items]
+  return items.filter((it) => {
+    if (it.kind === 'mission') {
+      const named = missionWallets(it.job, ctx.primary, ctx.wallets)
+      return named === null || named.some((a) => sameAddress(a, wallet))
+    }
+    const owner =
+      it.kind === 'mandate'
+        ? it.mandate.wallet
+        : it.kind === 'trigger'
+          ? it.trigger.wallet
+          : it.bracket.wallet
+    return sameAddress(owner?.address, wallet)
+  })
+}
+
+/** The proposals in a list that one wallet is behind; no wallet keeps them all. */
+export function forWallet<T extends { wallet: { address: string } | null }>(
+  list: readonly T[],
+  wallet: string | null | undefined,
+): T[] {
+  return wallet ? list.filter((x) => sameAddress(x.wallet?.address, wallet)) : [...list]
 }
 
 /** How many items each chip would show; `all` counts everything. */

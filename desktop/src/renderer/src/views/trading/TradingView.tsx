@@ -35,6 +35,7 @@ import { Overview } from './Overview'
 import { ChainMark } from './ChainMark'
 import { DecodeSheet } from './DecodeSheet'
 import { Automations } from './desk/Automations'
+import { forWallet } from './desk/automations-logic'
 import type { MissionsApi } from './desk/missions'
 import { ToolsPanel } from './desk/ToolsPanel'
 import { PanelBoundary, Spinner } from './parts'
@@ -284,6 +285,8 @@ function Desk({
     setSeenOrder(orderParam)
     setTab('approvals')
     setHighlight(orderParam)
+    // The order may be another wallet's; a BOOK scoped elsewhere would hide it.
+    setSelected('all')
   }
   useEffect(() => {
     if (orderParam) void navigate('/trading', { replace: true })
@@ -299,7 +302,7 @@ function Desk({
   const [showHidden, setShowHidden] = useState(false)
   const portfolio = usePortfolio(walletAddress, true, showHidden)
   const tokenVisibility = useTokenVisibility()
-  const orders = useOrders(undefined)
+  const orders = useOrders(undefined, true, 50, walletAddress)
   const history = useHistory(walletAddress, chain ?? undefined, tab === 'history')
   const limitsWallet: Wallet | null =
     wallets.find((w) => (selected === 'all' ? w.primary : sameAddress(w.address, selected))) ??
@@ -327,11 +330,12 @@ function Desk({
     [portfolio.data, chain],
   )
   const pending = orders.orders.filter(isAwaitingApproval).length
-  // The Automations tab's badge: proposals waiting on the operator, whichever chat made them.
+  // The Automations tab's badge: proposals waiting on the operator, whichever chat made them,
+  // for the selected wallet when one is.
   const needsCount = automations
-    ? automations.missions.awaitingMandates.length +
-      automations.missions.awaitingTriggers.length +
-      automations.missions.awaitingBrackets.length
+    ? forWallet(automations.missions.awaitingMandates, walletAddress).length +
+      forWallet(automations.missions.awaitingTriggers, walletAddress).length +
+      forWallet(automations.missions.awaitingBrackets, walletAddress).length
     : 0
   const tabs: Tab[] = [
     'holdings',
@@ -620,6 +624,9 @@ function Desk({
                     pendingApprovals={pending}
                     enabled
                     onOpenSession={automations.onOpenSession}
+                    wallet={walletAddress}
+                    primary={primary}
+                    wallets={wallets}
                   />
                 ) : tab === 'tools' ? (
                   <ToolsPanel

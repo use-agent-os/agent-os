@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Desktop: picking one wallet on the trading desk (full desk or the BOOK
+  beside the chat) now scopes the Orders, Approvals and Automations tabs to
+  that wallet, as Holdings and History already were. Orders are fetched with
+  the wallet filter `trading.orders.list` already had; DCA mandates, price
+  triggers and brackets are kept by their wallet, and a mission by the
+  wallets its contract's `Wallets:` line names (a hand-written mission that
+  names none stays visible). The Automations badge counts only that wallet's
+  asks. Opening an order from a notification switches back to all wallets so
+  the order is in view.
 - mem0 recall works on mem0 2.x. mem0 2.x moved search scoping into
   `filters={"user_id": ...}` and rejects a top-level `user_id` with a
   `ValueError`, which the provider caught and logged, so with the mem0
