@@ -357,6 +357,7 @@ class LpBook:
                     failed("the other protocols", exc)
             if result.v4_ok:
                 found = v4_env.progress.found or []
+                learned = False
                 for owner in owners:
                     before = (store.nfts.get(_v4_slot(owner)) or {}).get("ids") or []
                     ids = {int(p["tokenId"]) for p in found if _held_by(p, owner)}
@@ -364,10 +365,13 @@ class LpBook:
                         # An incomplete read proves what it found, not what it missed.
                         ids |= {int(i) for i in before}
                     if sorted(ids) != before:
+                        learned = learned or bool(ids - {int(i) for i in before})
                         store.nfts[_v4_slot(owner)] = {"ids": sorted(ids)}
                         store.changed = True
                 store.save()
-                if not v4_env.partial:
+                if not v4_env.partial or learned:
+                    # A search that is getting somewhere (a throttled node gives
+                    # up a few wallets per time budget) goes on at the next refresh.
                     self._v4_short_at.pop(spec.chain_id, None)
                 elif not v4_env.known_only:
                     self._v4_short_at[spec.chain_id] = self._now()

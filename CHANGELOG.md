@@ -58,6 +58,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   search stops returning hits from a conversation that no longer exists. What
   the session taught the agent stays (see `agentos memory forget`).
 
+## [2026.11.18.post1] - 2026-11-18
+
+### Added
+- Desktop: a Uniswap V4 row on the Trade tab's **Liquidity** tab has
+  **Collect** (when fees are owed) and **Remove** (the whole position, fees
+  included). Each prepares the same order the desk's chat does and moves to
+  the Approvals tab, where its card is approved; nothing is signed before
+  that. Positions on Uniswap V2 and V3, Aero and Aerodrome are still listed
+  only.
+
+### Fixed
+- Trading: Uniswap V4 positions went missing from the Liquidity tab and from
+  `agentos trade lp positions` on Robinhood Chain, and on Base for a user with
+  their own RPC endpoint. Robinhood Chain's public node stopped serving the
+  whole Transfer history: it now serves a one-wallet filter over 10,000,000
+  blocks and a many-wallet one over 100,000, and the search asked for every
+  wallet in one filter, which needed over a thousand requests and ran out of
+  time with nothing found. The search now walks one wallet at a time at the
+  span the node states (twelve requests a wallet), and a search that ran out
+  of time but found something goes on at the next refresh instead of waiting
+  fifteen minutes. On Base the search asks the configured endpoint
+  (`trading.rpc_urls`) for the history before the public node, which refuses
+  `eth_getLogs` from a busy address.
+
 ## [2026.11.18] - 2026-11-18
 
 ### Added

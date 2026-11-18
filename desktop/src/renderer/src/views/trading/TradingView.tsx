@@ -14,6 +14,7 @@ import {
   useLimits,
   useLpBook,
   useLpRefresh,
+  useLpWrite,
   useOrderDecision,
   useOrders,
   usePortfolio,
@@ -350,6 +351,8 @@ function Desk({
   // The engine reads LP positions only while someone asks: off this tab, nothing is asked.
   const lpBook = useLpBook(walletAddress, chain ?? undefined, tab === 'liquidity')
   const lpRefresh = useLpRefresh()
+  const lpWrite = useLpWrite()
+  const [lpActing, setLpActing] = useState<string | null>(null)
   // Token art for the pairs, from what the wallets hold.
   const logos = useMemo(() => {
     const m = new Map<string, string>()
@@ -667,6 +670,26 @@ function Desk({
                     showChain={chain === null}
                     logos={logos}
                     now={now}
+                    acting={lpWrite.isPending ? lpActing : null}
+                    onAction={(position, action) => {
+                      if (!position.tokenId) return
+                      setLpActing(position.id)
+                      lpWrite.mutate(
+                        { action, chainId: position.chain.id, tokenId: position.tokenId },
+                        {
+                          // The order's own card says what moves; approving it is there.
+                          onSuccess: ({ order }) => {
+                            toast.success(t('trading.liquidity.parked'))
+                            setHighlight(order.orderId)
+                            setTab('approvals')
+                          },
+                          onError: (err) =>
+                            toast.error(
+                              `${t('trading.liquidity.actionFailed')}: ${errorText(err)}`,
+                            ),
+                        },
+                      )
+                    }}
                   />
                 ) : tab === 'markets' ? (
                   <Markets deskChain={chain} />

@@ -87,6 +87,22 @@ export function formatShare(share: number | null | undefined): string | null {
   return `${pct >= 10 ? pct.toFixed(1) : pct.toFixed(2)}%`
 }
 
+/** What the desk can do to a position from the table. */
+export type LpAction = 'collect' | 'remove'
+
+/**
+ * The actions a row offers. Only Uniswap V4 positions have engine writes
+ * (`trading.lp.collect`, `trading.lp.remove`); every other protocol is
+ * listed, not managed. Collect needs fees to collect; remove takes the whole
+ * position out (and its fees with it), so it is offered for any V4 row.
+ */
+export function lpActions(position: LpPosition): LpAction[] {
+  if (position.protocol.key !== 'uniswap_v4' || !position.tokenId) return []
+  const nonZero = (raw: string | undefined) => Boolean(raw && raw !== '0')
+  const fees = nonZero(position.fees?.base.raw) || nonZero(position.fees?.quote.raw)
+  return fees ? ['collect', 'remove'] : ['remove']
+}
+
 /** Whether a position has anything waiting to be claimed (fees or gauge rewards). */
 export function hasClaimable(position: LpPosition): boolean {
   const nonZero = (raw: string | undefined) => Boolean(raw && raw !== '0')

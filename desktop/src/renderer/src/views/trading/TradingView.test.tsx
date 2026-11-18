@@ -318,6 +318,41 @@ describe('TradingView · Markets and the ticket', () => {
 
   // The engine reads the chain for LP positions only while someone asks, so
   // the desk must not ask until the tab is the one on screen.
+  // Only Uniswap V4 has engine writes: its rows carry the actions, and one
+  // parks an order whose card (on Approvals) is where it is approved.
+  it('removes a V4 position from its row and lands on the approval', async () => {
+    const v4: LpBook['positions'][number] = {
+      ...LP_ROW,
+      id: '4663:uniswap_v4:1307109:0xabc',
+      tokenId: '1307109',
+      chain: { id: 4663, key: 'robinhood', name: 'Robinhood Chain', explorer: '' },
+      protocol: { key: 'uniswap_v4', name: 'Uniswap V4', kind: 'concentrated' },
+    }
+    const base = rpcCall.getMockImplementation()!
+    rpcCall.mockImplementation(async (method: string, params?: unknown) => {
+      if (method === 'trading.lp.book') return { ...LP_BOOK, positions: [v4, LP_ROW] }
+      if (method === 'trading.lp.remove') return { order: { orderId: 'ord_lp1' } }
+      return base(method, params)
+    })
+    renderDesk(<TradingView />)
+    await screen.findByTestId('holding-row')
+    fireEvent.click(screen.getByTestId('tab-liquidity'))
+    const rows = await screen.findAllByTestId('lp-row')
+    // The V3 row is listed, not managed.
+    expect(within(rows[1]!).queryByTestId('lp-remove')).toBeNull()
+    fireEvent.click(within(rows[0]!).getByTestId('lp-remove'))
+    await waitFor(() =>
+      expect(rpcCall).toHaveBeenCalledWith('trading.lp.remove', {
+        chainId: 4663,
+        tokenId: '1307109',
+        initiator: 'manual',
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('tab-approvals')).toHaveAttribute('aria-selected', 'true'),
+    )
+  })
+
   it('reads liquidity only on its tab, and lists each position', async () => {
     renderDesk(<TradingView />)
     await screen.findByTestId('holding-row')

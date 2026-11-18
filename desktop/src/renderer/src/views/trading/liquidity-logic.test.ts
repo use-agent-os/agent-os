@@ -4,6 +4,7 @@ import {
   formatRate,
   formatShare,
   hasClaimable,
+  lpActions,
   lpStatusTone,
   positionTag,
   rangeMarker,
@@ -123,5 +124,22 @@ describe('rows', () => {
     expect(lpStatusTone('above-range')).toBe('warn')
     expect(lpStatusTone('below-range')).toBe('warn')
     expect(lpStatusTone('closed')).toBe('dim')
+  })
+})
+
+describe('lpActions', () => {
+  const v4 = { key: 'uniswap_v4', name: 'Uniswap V4', kind: 'concentrated' } as const
+  const owed: LpAmount = { raw: '5', human: '0.000005', usd: 0.01 }
+
+  it('offers remove for a V4 position, and collect when fees are owed', () => {
+    expect(lpActions(position({ protocol: v4 }))).toEqual(['remove'])
+    const earning = position({ protocol: v4, fees: { base: zero, quote: owed, usd: 0.01 } })
+    expect(lpActions(earning)).toEqual(['collect', 'remove'])
+  })
+
+  it('offers nothing where the engine has no write', () => {
+    // Uniswap V3, Aero and pairs are listed, not managed.
+    expect(lpActions(position({ fees: { base: owed, quote: owed, usd: 1 } }))).toEqual([])
+    expect(lpActions(position({ protocol: v4, tokenId: null }))).toEqual([])
   })
 })

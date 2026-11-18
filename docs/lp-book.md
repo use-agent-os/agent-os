@@ -7,9 +7,11 @@ readers fill it (`lp.py` for Uniswap V4, `lp_amm.py` for everything else).
 This file is the contract between the engine and its clients; change it
 before changing either side.
 
-Read-only. To collect fees or remove liquidity from a Uniswap V4 position use
-the LP writes ([`lp-write.md`](lp-write.md)); the other protocols are listed,
-not managed.
+The book itself is read-only. A Uniswap V4 row in the desktop's tab carries
+**Collect** (when fees are owed) and **Remove** (the whole position, fees
+included): each calls the LP writes ([`lp-write.md`](lp-write.md)), which park
+an order for approval, and the tab moves to Approvals where its card is. The
+other protocols are listed, not managed.
 
 ## What is covered
 
@@ -64,8 +66,15 @@ The book is built to make few RPC calls.
 - **Uniswap V4 starts warm.** V4 has no enumerable index, so finding a
   position needs an indexer or a log search. The ids found are remembered;
   while they account for the wallet's NFT balance the search is skipped. A
-  search that came up short is not repeated for 15 minutes unless a refresh
-  is asked for.
+  search that came up short and found nothing new is not repeated for 15
+  minutes unless a refresh is asked for; one that found something goes on at
+  the next refresh. The search asks the configured RPC endpoint
+  (`trading.rpc_urls`) for the whole Transfer history first, then the chain's
+  public node. A node that serves neither is walked back in windows: where it
+  serves a one-wallet filter over a wider span than a many-wallet one
+  (Robinhood Chain's public node: 10,000,000 blocks against 100,000), one
+  wallet at a time. That node throttles the walk, so the first read of many
+  wallets there fills in over a few refreshes.
 
 What never changes (which token is a pair, where a pool is, the gauge
 directory, cached id lists) is kept per chain under the state directory as
