@@ -544,7 +544,7 @@ describe('TRADING_WRITE_GATES covers every write (WAL-16)', () => {
   // What the renderer reads; everything else under trading.* / wallet.* is a
   // write and must say how Touch ID stands in front of it.
   const READ =
-    /\.(list|get|status|balances|batch|chart|decode|history|limits|network|portfolio|quote|resolve|search|markets|pool|position|positions|ranges)$/
+    /\.(list|get|status|balances|batch|chart|decode|history|limits|network|portfolio|quote|resolve|search|markets|pool|position|positions|ranges|book)$/
   const src = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
   it('classifies every trading/wallet write the desktop calls', () => {

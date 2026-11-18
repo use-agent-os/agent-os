@@ -1175,6 +1175,26 @@ async def _trading_lp_positions(params: dict | None, ctx: RpcContext) -> dict[st
     return _with_request(result, "positions", echo)
 
 
+@_d.method("trading.lp.book")
+async def _trading_lp_book(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """Every LP position of the vault's wallets, from the cache (``docs/lp-book.md``).
+
+    Uniswap v2/v3/V4, Aero and Aerodrome on both chains. Answers at once and
+    refreshes in the background when the cache is stale; ``wallet`` and
+    ``chainId`` narrow the answer, ``refresh`` asks for a fresh read now.
+    """
+    p = _params(params)
+    chain = _chain(p, required=False)
+    refresh = p.get("refresh", False)
+    if not isinstance(refresh, bool):
+        raise ValueError("params.refresh must be a boolean")
+    service = _service(ctx)
+    try:
+        return await service.lp_book.read(wallet=_str(p, "wallet"), chain=chain, refresh=refresh)
+    except Exception as exc:
+        raise _raise(exc) from exc
+
+
 # ── trading.markets (every pool a token trades in; docs/markets.md) ─────────
 
 

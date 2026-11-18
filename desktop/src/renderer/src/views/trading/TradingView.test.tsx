@@ -6,7 +6,7 @@ import { useUi } from '~/stores/ui'
 import type { MissionsApi } from './desk/missions'
 import { holding, renderDesk, USDC, WALLET } from './test-utils'
 import { TradingView } from './TradingView'
-import type { ProviderId } from './types'
+import type { LpBook, LpPosition, ProviderId } from './types'
 
 const rpcCall = vi.fn()
 vi.mock('@/app/providers', () => ({
@@ -195,6 +195,68 @@ describe('TradingView · the sync state', () => {
   })
 })
 
+const LP_AMOUNT = { raw: '1', human: '1', usd: 1 }
+const LP_ROW: LpPosition = {
+  id: '8453:uniswap_v3:77:0xabc',
+  chain: { id: 8453, key: 'base', name: 'Base', explorer: 'https://basescan.org' },
+  tokenId: '77',
+  owner: { address: WALLET.address, label: 'Main', inApp: true },
+  token: {
+    address: '0x4200000000000000000000000000000000000006',
+    symbol: 'WETH',
+    decimals: 18,
+    priceUsd: 2500,
+  },
+  quote: { address: USDC.address, symbol: 'USDC', decimals: 6, priceUsd: 1 },
+  pool: { poolId: '0xpool', feePct: '0.05%', tickSpacing: 10, tvlUsd: null, priceUsd: 2500 },
+  range: { priceLower: 2000, priceUpper: 2400 },
+  status: 'above-range',
+  principal: { base: LP_AMOUNT, quote: LP_AMOUNT, usd: 1300 },
+  fees: { base: LP_AMOUNT, quote: LP_AMOUNT, usd: 4 },
+  valueUsd: 1304,
+  distancePct: 4.2,
+  protocol: { key: 'uniswap_v3', name: 'Uniswap V3', kind: 'concentrated' },
+  staked: false,
+  gauge: null,
+  rewards: null,
+  share: null,
+}
+const LP_BOOK: LpBook = {
+  version: 1,
+  kind: 'book',
+  ready: true,
+  refreshing: false,
+  readAt: Date.now() / 1000 - 30,
+  partialScan: true,
+  warnings: ['Base: one gauge was not read'],
+  wallets: [{ address: WALLET.address, label: 'Main' }],
+  chains: [],
+  protocols: [
+    { key: 'uniswap_v3', name: 'Uniswap V3', count: 1, valueUsd: 1304 },
+    { key: 'aero_slipstream', name: 'Aero Slipstream', count: 1, valueUsd: 1996 },
+  ],
+  positions: [
+    LP_ROW,
+    {
+      ...LP_ROW,
+      id: '8453:aero_slipstream:900:0xabc',
+      tokenId: '900',
+      status: 'in-range',
+      distancePct: null,
+      range: { priceLower: 2000, priceUpper: 3000 },
+      protocol: { key: 'aero_slipstream', name: 'Aero Slipstream', kind: 'concentrated' },
+      staked: true,
+      gauge: '0xgauge',
+      valueUsd: 1996,
+      rewards: {
+        token: { address: '0xaero', symbol: 'xAERO', decimals: 18, priceUsd: 0.5 },
+        amount: { raw: '12500000000000000000', human: '12.5', usd: 6.25 },
+      },
+    },
+  ],
+  totals: { valueUsd: 3300, feesUsd: 8, rewardsUsd: 6.25, count: 2, outOfRange: 1, unpriced: 0 },
+}
+
 describe('TradingView · Markets and the ticket', () => {
   beforeEach(() => {
     useTradingUi.setState({
@@ -246,10 +308,45 @@ describe('TradingView · Markets and the ticket', () => {
             wallets: [],
             syncing: false,
           }
+        case 'trading.lp.book':
+          return LP_BOOK
         default:
           return {}
       }
     })
+  })
+
+  // The engine reads the chain for LP positions only while someone asks, so
+  // the desk must not ask until the tab is the one on screen.
+  it('reads liquidity only on its tab, and lists each position', async () => {
+    renderDesk(<TradingView />)
+    await screen.findByTestId('holding-row')
+    expect(rpcCall.mock.calls.some(([method]) => method === 'trading.lp.book')).toBe(false)
+    fireEvent.click(screen.getByTestId('tab-liquidity'))
+    const rows = await screen.findAllByTestId('lp-row')
+    expect(rpcCall).toHaveBeenCalledWith('trading.lp.book', {})
+    expect(rows).toHaveLength(2)
+    // Out of range first, as the engine sent them.
+    expect(rows[0]).toHaveAttribute('data-status', 'above-range')
+    expect(rows[0]).toHaveTextContent('WETH / USDC')
+    expect(rows[0]).toHaveTextContent('Uniswap V3 · 0.05% · #77')
+    expect(rows[0]).toHaveTextContent('Above range')
+    expect(rows[1]).toHaveTextContent('Aero Slipstream')
+    expect(rows[1]).toHaveTextContent('Staked')
+    expect(rows[1]).toHaveTextContent('12.5 xAERO')
+    const summary = screen.getByTestId('lp-summary')
+    expect(summary).toHaveTextContent('$3,300.00')
+    expect(summary).toHaveTextContent('1 out of range')
+    expect(screen.getByTestId('lp-partial')).toHaveAttribute(
+      'title',
+      'Base: one gauge was not read',
+    )
+    // A protocol chip narrows the table; the totals stay the book's.
+    fireEvent.click(screen.getByRole('radio', { name: /Aero Slipstream/ }))
+    expect(screen.getAllByTestId('lp-row')).toHaveLength(1)
+    // The refresh button asks the engine to read the chain now.
+    fireEvent.click(screen.getByTestId('lp-refresh'))
+    await waitFor(() => expect(rpcCall).toHaveBeenCalledWith('trading.lp.book', { refresh: true }))
   })
 
   it('puts Markets right after Holdings', async () => {
@@ -259,6 +356,7 @@ describe('TradingView · Markets and the ticket', () => {
     expect(tabs).toEqual([
       'tab-holdings',
       'tab-markets',
+      'tab-liquidity',
       'tab-history',
       'tab-orders',
       'tab-approvals',
@@ -318,6 +416,7 @@ describe('TradingView · Markets and the ticket', () => {
     expect(tabs).toEqual([
       'tab-holdings',
       'tab-markets',
+      'tab-liquidity',
       'tab-history',
       'tab-orders',
       'tab-approvals',

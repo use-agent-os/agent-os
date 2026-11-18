@@ -30,6 +30,8 @@ root release README with task-oriented guides.
 - [`features/trading.md`](features/trading.md) - engine-held wallets, Uniswap
   swaps on Base and Robinhood Chain, ledger/PnL, and agent guardrails.
   Contracts: [`lp-cards.md`](lp-cards.md), [`lp-write.md`](lp-write.md),
+  [`lp-book.md`](lp-book.md) (every LP position across Uniswap, Aero and
+  Aerodrome),
   [`bridge.md`](bridge.md) (Base ⇄ Robinhood Chain through Relay)
   (Uniswap V4 cards and writes), [`dca.md`](dca.md) (DCA mandates).
 - [`features/agentos-router.md`](features/agentos-router.md) - model routing.

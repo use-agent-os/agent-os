@@ -289,6 +289,14 @@ class ChainEnv:
     #: The first block a wallet can hold anything at (its creation block, when
     #: the vault recorded one), lower-cased address -> block.
     first_blocks: dict[str, int] = field(default_factory=dict)
+    #: Position ids these wallets held at the last read (the liquidity book's
+    #: cache). They are verified first, and when they account for every
+    #: wallet's balance the indexer and the log search are not run at all.
+    known_ids: tuple[int, ...] = ()
+    #: Verify ``known_ids`` and stop there, even when a wallet holds more: the
+    #: book sets it between two searches, so a wallet the node will not serve
+    #: logs for does not cost a full search every minute.
+    known_only: bool = False
     block: int = 0
     fetched_at: str = ""
     partial: bool = False
@@ -2197,6 +2205,40 @@ def _search_indexer(
         done.set()
 
 
+def _run_search(env: ChainEnv, search: _PositionSearch, holders: list[str]) -> list[str | None]:
+    """Race the indexer and the log search; what each left unread at the deadline."""
+    indexer_done = threading.Event()
+
+    def logs() -> str | None:
+        indexer_done.wait(INDEXER_HEAD_START_S)
+        if search.complete() or search.out_of_time():
+            return None
+        return _search_logs(env, search, holders)
+
+    pool = ThreadPoolExecutor(max_workers=2)
+    from_indexer = pool.submit(_search_indexer, env, search, holders, indexer_done)
+    from_logs = pool.submit(logs)
+    left = env.remaining()
+    # A verify wave or a log batch in flight at the deadline is not waited for:
+    # what is verified by then is the answer, and the reserve goes to pricing.
+    wait(
+        [from_indexer, from_logs],
+        timeout=None if left is None else max(left, 0.0) + DISCOVERY_GRACE_S,
+    )
+    pool.shutdown(wait=False)
+    skipped: list[str | None] = []
+    for future, unread in (
+        (from_indexer, "the indexer's remaining pages"),
+        (from_logs, "the Transfer logs"),
+    ):
+        if future.done():
+            skipped.append(future.result())
+        else:
+            search.stopped = True
+            skipped.append(unread)
+    return skipped
+
+
 def scan_positions(env: ChainEnv, owners: list[str]) -> list[dict[str, Any]]:
     """Every position NFT the ``owners`` hold on this chain, closed ones included.
 
@@ -2232,35 +2274,11 @@ def scan_positions(env: ChainEnv, owners: list[str]) -> list[dict[str, Any]]:
     holders = list(expected)
     search = _PositionSearch(env, expected)
     env.progress.search = search
-    indexer_done = threading.Event()
-
-    def logs() -> str | None:
-        indexer_done.wait(INDEXER_HEAD_START_S)
-        if search.complete() or search.out_of_time():
-            return None
-        return _search_logs(env, search, holders)
-
-    pool = ThreadPoolExecutor(max_workers=2)
-    from_indexer = pool.submit(_search_indexer, env, search, holders, indexer_done)
-    from_logs = pool.submit(logs)
-    left = env.remaining()
-    # A verify wave or a log batch in flight at the deadline is not waited for:
-    # what is verified by then is the answer, and the reserve goes to pricing.
-    wait(
-        [from_indexer, from_logs],
-        timeout=None if left is None else max(left, 0.0) + DISCOVERY_GRACE_S,
-    )
-    pool.shutdown(wait=False)
+    if env.known_ids:
+        search.verify(env.known_ids)
     skipped: list[str | None] = []
-    for future, unread in (
-        (from_indexer, "the indexer's remaining pages"),
-        (from_logs, "the Transfer logs"),
-    ):
-        if future.done():
-            skipped.append(future.result())
-        else:
-            search.stopped = True
-            skipped.append(unread)
+    if not search.complete() and not env.known_only:
+        skipped = _run_search(env, search, holders)
     found = search.snapshot()
     env.progress.found = found
     for owner in holders:
@@ -2272,6 +2290,8 @@ def scan_positions(env: ChainEnv, owners: list[str]) -> list[dict[str, Any]]:
                 f"{env.spec.name}: found {have} of the {need} position(s) held by "
                 f"{lib.hexutil.checksum_address(owner)}"
             )
+    if env.known_only and not search.complete():
+        env.warn(f"{env.spec.name}: the search for the missing position(s) resumes shortly")
     if search.stopped and not search.complete():
         env.partial = True
         unread = " and ".join(s for s in skipped if s) or "the rest of the search"
