@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Desktop: the trading desk's Wallets column offers **Manage wallets** under
+  *Create new* and *Import*, and the desk head's wallet menu offers it too.
+  The wallet manager was reachable only from the BOOK's wallet menu before.
+
 ### Changed
 - The Trade tab's confirm sheet asks you to type `confirm` instead of
   retyping the amount before it sends a swap worth more than 1,000 USD.

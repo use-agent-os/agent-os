@@ -120,3 +120,31 @@ describe("WalletRail · a row's menu", () => {
     expect(aside.scrollLeft).toBe(0)
   })
 })
+
+describe('WalletRail · the foot of the list', () => {
+  it('offers Create, Import and Manage wallets, each raising its own action', () => {
+    const onAction = vi.fn()
+    renderDesk(
+      <WalletRail
+        wallets={[WALLET]}
+        totals={new Map()}
+        selected="all"
+        onSelect={vi.fn()}
+        onAction={onAction}
+        onSetPrimary={vi.fn()}
+        limits={undefined}
+        limitsWallet={null}
+        chains={[]}
+        manualUnlock={false}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Create new' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Manage wallets' }))
+    expect(onAction.mock.calls.map((c) => c[0])).toEqual([
+      { kind: 'create' },
+      { kind: 'import' },
+      { kind: 'manage' },
+    ])
+  })
+})
