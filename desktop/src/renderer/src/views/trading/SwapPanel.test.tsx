@@ -289,6 +289,27 @@ describe('SwapPanel', () => {
     expect(screen.getByTestId('swap-review')).not.toBeDisabled()
   })
 
+  it('shows the AgentOS DEX fee in the sell token, with no dollar value', async () => {
+    const fee = { bps: 20, pct: 0.2, symbol: 'ETH', amount: '0.0002', amountRaw: '200000000000000' }
+    rpcCall.mockImplementation(async (method: string) =>
+      method === 'trading.quote' ? quote({ provider: 'aggregator', swapFee: fee }) : {},
+    )
+    mount({ provider: 'aggregator' })
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '0.1' } })
+    await waitFor(() => expect(screen.getByTestId('quote-dex-fee')).toBeInTheDocument())
+    const row = screen.getByTestId('quote-dex-fee')
+    expect(row).toHaveTextContent('AgentOS DEX Fee')
+    expect(row).toHaveTextContent('0.0002 ETH')
+    expect(row).not.toHaveTextContent('$')
+  })
+
+  it('has no DEX fee row when the quote carries no fee', async () => {
+    mount()
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '0.1' } })
+    await waitFor(() => expect(screen.getByTestId('quote-facts')).toBeInTheDocument())
+    expect(screen.queryByTestId('quote-dex-fee')).toBeNull()
+  })
+
   it('drops a wallet override once that wallet is gone', () => {
     const second = {
       ...WALLET,

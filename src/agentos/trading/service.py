@@ -363,6 +363,24 @@ def _client_order_id(value: str | None) -> str | None:
     return text
 
 
+def _format_swap_fee(quote: ProviderQuote, meta_in: TokenMeta, meta_out: TokenMeta) -> None:
+    """Write the provider's swap fee in its token's own decimals.
+
+    The aggregator names the fee token by symbol only (the sell token in
+    practice); it is matched against the two legs. An unmatched symbol keeps
+    the provider's own formatted amount.
+    """
+    fee = quote.swap_fee
+    if fee is None or fee.amount_raw is None:
+        return
+    symbol = fee.symbol.upper()
+    meta = next((m for m in (meta_in, meta_out) if m.symbol.upper() == symbol), None)
+    if meta is None:
+        return
+    fee.symbol = meta.symbol
+    fee.amount = format_amount(fee.amount_raw, meta.decimals)
+
+
 def _client_quote_json(
     expected_out_raw: int | None, min_out_raw: int | None, quote_id: str | None
 ) -> str | None:
@@ -2597,6 +2615,7 @@ class TradingService:
             # A non-finite provider figure is left as it came: the guardrails
             # already read it as unknown.
             quote.impact_checked = given is None or math.isfinite(float(given))
+        _format_swap_fee(quote, meta_in, meta_out)
         return quote
 
     async def _raw_for_usd(self, chain: ChainSpec, token: TokenMeta, amount_usd: float) -> int:
@@ -2697,6 +2716,7 @@ class TradingService:
             "minOutRaw": str(quote.min_out_raw),
             "priceImpactPct": quote.price_impact_pct,
             "gasUsd": quote.gas_usd,
+            "swapFee": quote.swap_fee.to_dict() if quote.swap_fee is not None else None,
             "valueUsd": value,
             "rate": rate,
             "slippagePct": quote.slippage_pct,
