@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.18] - 2026-11-18
+
 ### Added
 - Desktop: the Trade tab has a **Liquidity** tab that lists every liquidity
   position the desk's wallets hold, the way a wallet tracker does: Uniswap
