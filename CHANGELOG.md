@@ -11,6 +11,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   *Create new* and *Import*, and the desk head's wallet menu offers it too.
   The wallet manager was reachable only from the BOOK's wallet menu before.
 
+### Changed
+- The Trade tab's confirm sheet asks you to type `confirm` instead of
+  retyping the amount before it sends a swap worth more than 1,000 USD.
+  Retyping the amount no longer unlocks Swap now; the word is matched
+  ignoring case and surrounding spaces.
+
 ### Fixed
 - mem0 recall works on mem0 2.x. mem0 2.x moved search scoping into
   `filters={"user_id": ...}` and rejects a top-level `user_id` with a
