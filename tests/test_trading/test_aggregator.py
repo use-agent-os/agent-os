@@ -16,6 +16,7 @@ import pytest
 
 import agentos.trading.service as service_module
 from agentos.trading.aggregator import (
+    AGENTOS_ROUTER,
     ALLOWANCE_HOLDER,
     MAX_SLIPPAGE_BPS,
     NATIVE_SENTINEL,
@@ -286,8 +287,39 @@ class TestApprovalIntegrity:
             )
         assert info.value.code == "trading.tx_failed"
         assert "not a contract this desk trusts" in str(info.value)
-        assert TRUSTED_SPENDERS == frozenset({ALLOWANCE_HOLDER})
+        assert TRUSTED_SPENDERS == frozenset({ALLOWANCE_HOLDER, AGENTOS_ROUTER})
         assert foreign.lower() not in TRUSTED_SPENDERS
+
+    @pytest.mark.parametrize("contract", [ALLOWANCE_HOLDER, AGENTOS_ROUTER])
+    def test_each_trusted_contract_passes_as_spender_and_target(self, http, contract: str) -> None:
+        """Direct 0x quotes name AllowanceHolder; contract mode names the AgentOS Router."""
+        client = AggregatorClient(http=http)
+        # The gateway sends checksummed addresses; the pin compares lowercase.
+        checksummed = "0x4Cf93bac8920b1EFc92B0d2C84dcbE56802E530c"
+        if contract == AGENTOS_ROUTER:
+            assert checksummed.lower() == AGENTOS_ROUTER
+            contract = checksummed
+        body = _quote_body(
+            spender=contract, target=contract, approve_amount=10**6, amount_needed=10**6
+        )
+        parsed = client._parse_quote(body, chain=BASE, taker=WALLET, amount_raw=10**6)
+        assert parsed.approval is not None and parsed.spender == contract.lower()
+
+    @pytest.mark.parametrize(
+        ("spender", "target"),
+        [(AGENTOS_ROUTER, ALLOWANCE_HOLDER), (ALLOWANCE_HOLDER, AGENTOS_ROUTER)],
+    )
+    def test_two_trusted_contracts_still_must_be_the_same_one(
+        self, http, spender: str, target: str
+    ) -> None:
+        """Approving one trusted contract and calling the other is refused."""
+        client = AggregatorClient(http=http)
+        body = _quote_body(
+            spender=spender, target=target, approve_amount=10**6, amount_needed=10**6
+        )
+        with pytest.raises(ProviderError) as info:
+            client._parse_quote(body, chain=BASE, taker=WALLET, amount_raw=10**6)
+        assert "but the swap is sent to" in str(info.value)
 
     def test_a_trusted_spender_that_is_not_the_swap_target_is_refused(self, http) -> None:
         client = AggregatorClient(http=http)
@@ -348,7 +380,9 @@ class TestApprovalIntegrity:
         # The set the service checks against is the module's constant, not
         # whatever the response named.
         assert provider.trusted_spenders(BASE, quote) == TRUSTED_SPENDERS
-        assert provider.trusted_spenders(BASE, quote) == frozenset({ALLOWANCE_HOLDER})
+        assert provider.trusted_spenders(BASE, quote) == frozenset(
+            {ALLOWANCE_HOLDER, AGENTOS_ROUTER}
+        )
         spender = "0x" + approval["data"][10 + 24 : 10 + 64]
         assert spender.lower() in provider.trusted_spenders(BASE, quote)
 

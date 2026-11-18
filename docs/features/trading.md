@@ -74,7 +74,8 @@ gateway RPC surface (`wallet.*`, `trading.*`).
   for this; where one exists it only widens the set of tokens the sweep
   reads. A full resync drops and rebuilds the ledger.
 - **Swaps** — quote, approve (a plain ERC-20 approval to the provider's
-  spender: 0x's AllowanceHolder or Uniswap's proxy, no Permit2 signatures),
+  spender: the AgentOS Router or 0x's AllowanceHolder for the aggregator,
+  Uniswap's proxy for Uniswap, no Permit2 signatures),
   sign and broadcast, then confirm from the receipt. A Uniswap quote that
   carries `permitData` anyway is untrusted input: it is signed only when it
   is a Permit2 `PermitSingle` / `PermitTransferFrom` on the order's chain and
@@ -141,8 +142,12 @@ reports `deliveredToken` and the app offers a one-click unwrap
 The aggregator holds no key of its own and neither signs nor broadcasts:
 reading it cannot move funds. Before anything is signed the engine checks
 the one relation its calldata cannot hide — the approval's `spender` must be
-the same contract the swap transaction is sent `to` (0x's AllowanceHolder) —
-and refuses the quote outright otherwise. The approval is always for exactly
+the same contract the swap transaction is sent `to`, and that contract must be
+one the engine pins itself: the AgentOS Router
+(`0x4cf93bac8920b1efc92b0d2c84dcbe56802e530c`, the same immutable contract on
+Base and Robinhood Chain, which the gateway quotes through in contract mode)
+or 0x's AllowanceHolder (`0x0000000000001ff3684f28c67538d4d072c22734`, when
+it quotes 0x directly) — and refuses the quote outright otherwise. The approval is always for exactly
 the order's amount, never unlimited.
 
 The tokenised stocks on Robinhood Chain (29 of the 34 listed: AAPL, TSLA,

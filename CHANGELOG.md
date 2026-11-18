@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Swaps through the AgentOS Aggregator signed again once the gateway quoted
+  through the AgentOS Router (contract mode). The desk only trusted 0x's
+  AllowanceHolder, so every ERC-20 sell failed with "approval names spender
+  0x4cf9…530c, which is not a contract this desk trusts" and every native
+  sell with "swap target … is not a contract this desk trusts". The Router
+  (`0x4cf93bac8920b1efc92b0d2c84dcbe56802e530c`, the same immutable contract
+  on Base and Robinhood Chain) is now pinned alongside AllowanceHolder, as
+  both spender and swap target; an approval must still name the same
+  contract the swap is sent to, and allowance lists label it
+  "AgentOS Aggregator (AgentOS Router)".
+
 ## [2026.11.18.post2] - 2026-11-18
 
 ### Added
