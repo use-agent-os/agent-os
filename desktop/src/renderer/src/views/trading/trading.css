@@ -3731,6 +3731,15 @@ button:disabled > .trd-hero__spin {
   align-items: center;
   gap: 2px;
 }
+/* Holds the head's act column open to a row's width without showing, adding
+   height, or taking the head's uppercase tracking (which would widen it). */
+.trd-mk__act--sizer {
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  letter-spacing: normal;
+  text-transform: none;
+}
 .trd-mk__swap {
   height: 22px;
   padding: 0 8px;

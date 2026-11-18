@@ -27,6 +27,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   names none stays visible). The Automations badge counts only that wallet's
   asks. Opening an order from a notification switches back to all wallets so
   the order is in view.
+- Desktop: the Markets tab's column head lines up with the values under it.
+  The head and each pool row are separate grids that share one column
+  template, and the head's last (action) cell was empty, so its `auto` column
+  collapsed to 0px while each row's held the open and Swap buttons. The head's
+  flexible columns ran up to ~100px wider, leaving TVL, Vol 24h, Price, 24h
+  and Age labels to the right of their values. The head now sizes that cell
+  with an invisible copy of the row's buttons.
 - mem0 recall works on mem0 2.x. mem0 2.x moved search scoping into
   `filters={"user_id": ...}` and rejects a top-level `user_id` with a
   `ValueError`, which the provider caught and logged, so with the mem0
