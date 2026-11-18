@@ -33,30 +33,52 @@ from agentos.tools.builtin import shell
 GRANDCHILD_DELAY = 0.7
 SETTLE = 1.4
 
+# The Windows tree kill (``taskkill /T``) snapshots the tree. A timeout that
+# fires while the parent is still starting the grandchild misses it, which on
+# a loaded runner (xdist workers on every core) a 0.3 s timeout did. The
+# timeout test gives the tree time to exist first, and a grandchild delay that
+# outlasts the timeout so it cannot write the marker before the kill.
+TREE_TIMEOUT = 2.0
+TREE_TIMEOUT_GRANDCHILD_DELAY = 3.0
+TREE_TIMEOUT_SETTLE = 3.5
 
-def _tree(tmp_path: Path) -> tuple[str, Path]:
+
+def _tree(tmp_path: Path, grandchild_delay: float = GRANDCHILD_DELAY) -> tuple[str, Path]:
     """A command that spawns a parent which spawns a grandchild.
 
-    The grandchild sleeps, then writes *marker*. The parent keeps running so
-    the whole tree is alive when cleanup fires. Returns the command and the
+    The grandchild sleeps, then writes *marker*. The parent writes
+    ``parent-ready`` once the grandchild is started, then keeps running so the
+    whole tree is alive when cleanup fires. Returns the command and the
     marker path.
     """
     marker = tmp_path / "grandchild-survived"
+    ready = tmp_path / "parent-ready"
     grandchild = tmp_path / "grandchild.py"
     grandchild.write_text(
         "import pathlib, time\n"
-        f"time.sleep({GRANDCHILD_DELAY})\n"
+        f"time.sleep({grandchild_delay})\n"
         f"pathlib.Path({str(marker)!r}).write_text('survived')\n",
         encoding="utf-8",
     )
     parent = tmp_path / "parent.py"
     parent.write_text(
-        "import subprocess, sys, time\n"
+        "import pathlib, subprocess, sys, time\n"
         f"subprocess.Popen([sys.executable, {str(grandchild)!r}])\n"
+        f"pathlib.Path({str(ready)!r}).write_text('ready')\n"
         "time.sleep(30)\n",
         encoding="utf-8",
     )
     return f'"{sys.executable}" "{parent}"', marker
+
+
+async def _wait_for_tree(tmp_path: Path, timeout: float = 15.0) -> None:
+    """Wait until the parent has started the grandchild."""
+    ready = tmp_path / "parent-ready"
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not ready.exists():
+        assert loop.time() < deadline, "the process tree never started"
+        await asyncio.sleep(0.05)
 
 
 # ── the issue, with real processes ──────────────────────────────────────────
@@ -66,12 +88,13 @@ def _tree(tmp_path: Path) -> tuple[str, Path]:
 async def test_timeout_kills_the_grandchild_not_just_the_shell(tmp_path: Path) -> None:
     """Gap 1. On Windows before the fix the grandchild outlived the timeout
     and wrote the marker; on POSIX ``killpg`` already covered this."""
-    command, marker = _tree(tmp_path)
+    command, marker = _tree(tmp_path, grandchild_delay=TREE_TIMEOUT_GRANDCHILD_DELAY)
 
-    result = await shell.exec_command(command, timeout=0.3)
-    await asyncio.sleep(SETTLE)
+    result = await shell.exec_command(command, timeout=TREE_TIMEOUT)
+    await asyncio.sleep(TREE_TIMEOUT_SETTLE)
 
-    assert result.startswith("[timeout after 0.3s]")
+    assert result.startswith(f"[timeout after {TREE_TIMEOUT}s]")
+    assert (tmp_path / "parent-ready").exists(), "the tree was not built before the timeout"
     assert not marker.exists(), "the grandchild survived the timeout"
 
 
@@ -81,7 +104,7 @@ async def test_cancellation_kills_the_whole_tree(tmp_path: Path) -> None:
     command, marker = _tree(tmp_path)
 
     task = asyncio.ensure_future(shell.exec_command(command, timeout=30))
-    await asyncio.sleep(0.3)
+    await _wait_for_tree(tmp_path)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task

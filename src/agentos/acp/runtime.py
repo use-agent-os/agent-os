@@ -854,6 +854,17 @@ class AcpRuntimeImpl:
         turn.finished = True
         live.turn = None
 
+        # When the cancel ladder escalated to a kill, the prompt returns as
+        # soon as the pipe closes, while the ladder is still waiting for the
+        # process to be reaped. Let it finish, or the process still reads as
+        # alive here and the session stays "idle" on a dead harness. The
+        # ladder only waits on the (already finished) prompt task, so this
+        # never delays a harness that honoured the cancel.
+        cancel_task = turn.cancel_task
+        if cancel_task is not None and not cancel_task.done():
+            with contextlib.suppress(Exception):
+                await asyncio.shield(cancel_task)
+
         proc_ok = live.proc.alive
         if not proc_ok:
             h.status = "unhealthy"
