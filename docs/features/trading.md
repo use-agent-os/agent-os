@@ -115,7 +115,7 @@ gateway RPC surface (`wallet.*`, `trading.*`).
 | Chain | Id | Explorer | Notes |
 | --- | --- | --- | --- |
 | Base | 8453 | basescan.org | Uniswap Universal Router 2.0 default |
-| Robinhood Chain | 4663 | robinhoodchain.blockscout.com | Router 2.1.1 only; public RPC needs a `User-Agent` and has no archive data |
+| Robinhood Chain | 4663 | robin.etherscan.io | Router 2.1.1 only; public RPC needs a `User-Agent` and has no archive data |
 
 Only these two chains are enabled. Funds move between them only through
 `agentos trade bridge` (Relay): ETH↔ETH and USDC↔USDG, both directions; a

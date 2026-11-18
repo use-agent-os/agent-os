@@ -340,7 +340,7 @@ async def test_sections_split_by_side(service: TradingService, fake_markets: Fak
         "id": 4663,
         "key": "robinhood",
         "name": "Robinhood Chain",
-        "explorer": "https://robinhoodchain.blockscout.com",
+        "explorer": "https://robin.etherscan.io",
     }
     assert result["partial"] is False and result["warnings"] == []
     token = result["token"]
