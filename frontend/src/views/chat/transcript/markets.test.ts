@@ -90,7 +90,7 @@ function raw(overrides: Record<string, unknown> = {}): Record<string, unknown> {
       id: 4663,
       key: 'robinhood',
       name: 'Robinhood Chain',
-      explorer: 'https://robinhoodchain.blockscout.com',
+      explorer: 'https://robin.etherscan.io',
     },
     fetchedAt: '2026-10-06T04:12:00Z',
     partial: false,

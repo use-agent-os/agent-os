@@ -342,9 +342,7 @@ class TestExecute:
         assert bridge["depositTxHash"] == order["txHash"]
         assert bridge["depositExplorerUrl"] == f"https://basescan.org/tx/{order['txHash']}"
         assert bridge["fillStatus"] == "success" and bridge["destinationTxHash"] == DEST_TX
-        assert bridge["destinationExplorerUrl"] == (
-            f"https://robinhoodchain.blockscout.com/tx/{DEST_TX}"
-        )
+        assert bridge["destinationExplorerUrl"] == f"https://robin.etherscan.io/tx/{DEST_TX}"
         assert order["receivedOut"] == "0.00998862557607774"[:19] or float(
             order["receivedOut"]
         ) == pytest.approx(expected_out / 10**18)

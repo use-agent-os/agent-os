@@ -73,7 +73,7 @@ class TestChains:
             assert chains.normalize_address(address) == address.lower()
 
     def test_explorer_urls(self) -> None:
-        assert chains.ROBINHOOD.tx_url("0xabc") == "https://robinhoodchain.blockscout.com/tx/0xabc"
+        assert chains.ROBINHOOD.tx_url("0xabc") == "https://robin.etherscan.io/tx/0xabc"
         assert chains.BASE.token_url("0x1") == "https://basescan.org/token/0x1"
 
 

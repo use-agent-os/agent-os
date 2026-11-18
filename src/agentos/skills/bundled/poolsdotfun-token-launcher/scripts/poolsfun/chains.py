@@ -36,7 +36,7 @@ RPC_URL = "https://rpc.mainnet.chain.robinhood.com/"
 
 CHAIN_ID = 4663
 CHAIN_NAME = "Robinhood Chain"
-EXPLORER = "https://robinhoodchain.blockscout.com"
+EXPLORER = "https://robin.etherscan.io"
 
 NATIVE = "0x0000000000000000000000000000000000000000"
 MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11"

@@ -122,7 +122,7 @@ CHAINS: dict[str, dict] = {
         "chainId": 4663,
         "rpcEnv": [ENV_RPC_ROBINHOOD],
         "nativeCurrency": {"name": "Ether", "symbol": "ETH", "decimals": 18},
-        "explorer": "https://robinhoodchain.blockscout.com",
+        "explorer": "https://robin.etherscan.io",
         "poolManager": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
         "positionManager": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
         "stateView": "0xF3334192D15450CdD385c8B70e03f9A6bD9E673b",

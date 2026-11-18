@@ -106,7 +106,7 @@ ROBINHOOD = ChainSpec(
     native_symbol="ETH",
     native_name="Ether",
     rpc_url="https://rpc.mainnet.chain.robinhood.com",
-    explorer_url="https://robinhoodchain.blockscout.com",
+    explorer_url="https://robin.etherscan.io",
     # Resolved lazily from the CoinGecko list (see prices.py); the chain is
     # young and the canonical USDC/WETH addresses are not hard-coded here on
     # purpose — the list is the authoritative registry.

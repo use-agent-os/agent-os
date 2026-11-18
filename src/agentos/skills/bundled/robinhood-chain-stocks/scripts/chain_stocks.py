@@ -38,7 +38,7 @@ from agentos.skill_stdio import write_stdout as _write_stdout  # noqa: E402
 
 CHAIN_ID = 4663
 DEFAULT_RPC_URL = "https://rpc.mainnet.chain.robinhood.com"
-EXPLORER_URL = "https://robinhoodchain.blockscout.com"
+EXPLORER_URL = "https://robin.etherscan.io"
 TOKEN_LIST_URL = "https://tokens.coingecko.com/robinhood/all.json"
 FEEDS_URL = "https://reference-data-directory.vercel.app/feeds-robinhood-mainnet.json"
 

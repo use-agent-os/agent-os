@@ -1,7 +1,7 @@
 # PartyFactory reference
 
 Everything below was read from the verified source on
-[Blockscout](https://robinhoodchain.blockscout.com/address/0x626C3d09B65bF5d1D40E0D5F25e19fa49783B3D4)
+[Etherscan](https://robin.etherscan.io/address/0x626C3d09B65bF5d1D40E0D5F25e19fa49783B3D4)
 and confirmed with live `eth_call`s. Read this when the skill's behaviour needs
 explaining or when the factory is redeployed and constants have to be re-checked.
 
@@ -19,7 +19,7 @@ explaining or when the factory is redeployed and constants have to be re-checked
 | Factory owner | `0xd86EC279AD4871483f6c3D7ce54AD00067f120E9` |
 
 Chain: Robinhood Chain, id **4663**, RPC `https://rpc.mainnet.chain.robinhood.com/`,
-explorer `https://robinhoodchain.blockscout.com`. Solidity 0.8.25, viaIR, 200 runs.
+explorer `https://robin.etherscan.io`. Solidity 0.8.25, viaIR, 200 runs.
 
 ## `launch`
 
@@ -169,7 +169,7 @@ deliberately out of scope for this skill.
 
 ## Reference launch
 
-tx [`0x0978ee728eb9ae5e78c7f461fea96dc9372315b7eee5a69e91ba914d98d8d1c0`](https://robinhoodchain.blockscout.com/tx/0x0978ee728eb9ae5e78c7f461fea96dc9372315b7eee5a69e91ba914d98d8d1c0)
+tx [`0x0978ee728eb9ae5e78c7f461fea96dc9372315b7eee5a69e91ba914d98d8d1c0`](https://robin.etherscan.io/tx/0x0978ee728eb9ae5e78c7f461fea96dc9372315b7eee5a69e91ba914d98d8d1c0)
 
 ```
 name              Pools Fun          symbol   POOL

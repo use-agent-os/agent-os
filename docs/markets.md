@@ -172,7 +172,7 @@ async def markets(service, *, chain, target, side="all", min_tvl_usd=10_000.0,
 {
   "version": 1,
   "kind": "markets",
-  "chain": { "id": 4663, "key": "robinhood", "name": "Robinhood Chain", "explorer": "https://robinhoodchain.blockscout.com" },
+  "chain": { "id": 4663, "key": "robinhood", "name": "Robinhood Chain", "explorer": "https://robin.etherscan.io" },
   "fetchedAt": "2026-10-06T04:12:00Z",
   "partial": false,                       // paging stopped early (rate limit / cap): the card shows a badge
   "warnings": ["string"],

@@ -54,7 +54,7 @@ beforeEach(() => {
             key: 'robinhood',
             name: 'Robinhood Chain',
             native: 'ETH',
-            explorer: 'https://robinhoodchain.blockscout.com',
+            explorer: 'https://robin.etherscan.io',
             rpcUrl: 'https://rpc.mainnet.chain.robinhood.com',
             healthy: null,
           },

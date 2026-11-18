@@ -126,7 +126,7 @@ fields.
 {
   "query": "Apple",
   "chainId": 4663,
-  "explorer": "https://robinhoodchain.blockscout.com/token/0xaf3d...93f9",
+  "explorer": "https://robin.etherscan.io/token/0xaf3d...93f9",
   "token": {
     "address": "0xaf3d76f1834a1d425780943c99ea8a608f8a93f9",
     "symbol": "AAPL",
@@ -172,7 +172,7 @@ fields.
 |---|---|
 | Mainnet chain ID | `4663` |
 | Public RPC | `https://rpc.mainnet.chain.robinhood.com` (rate-limited, no archive) |
-| Explorer | `https://robinhoodchain.blockscout.com` |
+| Explorer | `https://robin.etherscan.io` |
 | Testnet chain ID | `46630` (`https://rpc.testnet.chain.robinhood.com`) |
 | Gas token | ETH |
 

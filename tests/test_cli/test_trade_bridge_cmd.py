@@ -57,7 +57,7 @@ def _order(status: str, **extra: Any) -> dict[str, Any]:
             "depositTxHash": "0xdep" if status != "awaiting_approval" else None,
             "destinationTxHash": "0xfill" if status == "confirmed" else None,
             "destinationExplorerUrl": (
-                "https://robinhoodchain.blockscout.com/tx/0xfill" if status == "confirmed" else None
+                "https://robin.etherscan.io/tx/0xfill" if status == "confirmed" else None
             ),
         },
         **extra,

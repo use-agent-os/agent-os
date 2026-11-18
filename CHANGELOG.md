@@ -16,6 +16,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   retyping the amount before it sends a swap worth more than 1,000 USD.
   Retyping the amount no longer unlocks Swap now; the word is matched
   ignoring case and surrounding spaces.
+- Robinhood Chain explorer links (transactions, tokens, addresses in the
+  trading desk, `trading.*` RPC results and the bundled Robinhood skills)
+  now open on Etherscan (`https://robin.etherscan.io`) instead of
+  `robinhoodchain.blockscout.com`.
 
 ### Fixed
 - Desktop: the trading desk no longer shows "Syncing" all the time once
