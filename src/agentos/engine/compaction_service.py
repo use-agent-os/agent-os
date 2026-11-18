@@ -696,6 +696,21 @@ async def summarize_messages(
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class _FoldPlan:
+    """What one compaction would fold (see ``CompactionService._plan``)."""
+
+    skip: str | None = None
+    payload: dict[str, Any] = field(default_factory=dict)
+    to_fold: list[Message] = field(default_factory=list)
+    kept_current: list[Message] = field(default_factory=list)
+    previous_summary: str | None = None
+    previous_files: FileActivity | None = None
+    folded_rounds: int = 0
+    overhead: int = 0
+    min_gain: int = 1
+
+
 class CompactionService:
     """Compact a live transcript to one summary exchange plus the current turn."""
 
@@ -802,7 +817,7 @@ class CompactionService:
             **compaction_lifecycle_payload(compaction_id, COMPACTION_TRIGGERED_EVENT),
         )
 
-    async def compact(
+    def skip_reason(
         self,
         messages: list[Message],
         *,
@@ -811,45 +826,52 @@ class CompactionService:
         window_tokens: int,
         message_tokens: Callable[[Sequence[Message]], int],
         force: bool = False,
-        input_entry: dict[str, Any] | None = None,
         budget_tokens: int | None = None,
         proactive: bool = False,
-    ) -> CompactionResult:
-        """Compact *messages* when over the trigger (or when *force* is set).
+    ) -> str | None:
+        """Why :meth:`compact` would leave *messages* as they are, or ``None``.
 
-        *message_tokens* estimates the provider size of a message list; the
-        rest of the request (system prompt, tools, config) is taken as
-        ``estimated_tokens - message_tokens(messages)``. *input_entry* is the
-        persisted user row of this turn (``{"role", "content"}``) that a
-        durable rewrite keeps; the agent passes it through ``kept_entries``.
-
-        *proactive* is the between-turns background job: it runs below the
-        trigger (the caller already decided it is worth it), keeps every
-        decline rule, and never folds rounds of the kept turn -- that turn is
-        persisted already and stays byte for byte.
+        The same checks :meth:`compact` runs before calling the summarizer
+        (``under_threshold``, ``mid_tool_round``, ``fixed_context_too_large``,
+        ``current_turn_too_large``, ``nothing_to_compact``,
+        ``not_worth_compacting``), with no side effect and no model call. A
+        ``None`` can still end in ``compaction_not_smaller`` once the real
+        summary is known.
         """
-        unchanged = CompactionResult(
-            status="skipped",
-            messages=messages,
+        return self._plan(
+            messages,
             turn_input_index=turn_input_index,
-            tokens_before=estimated_tokens,
-            tokens_after=estimated_tokens,
-        )
+            estimated_tokens=estimated_tokens,
+            window_tokens=window_tokens,
+            message_tokens=message_tokens,
+            force=force,
+            budget_tokens=budget_tokens,
+            proactive=proactive,
+        ).skip
+
+    def _plan(
+        self,
+        messages: list[Message],
+        *,
+        turn_input_index: int,
+        estimated_tokens: int,
+        window_tokens: int,
+        message_tokens: Callable[[Sequence[Message]], int],
+        force: bool,
+        budget_tokens: int | None,
+        proactive: bool,
+    ) -> _FoldPlan:
+        """Decide what :meth:`compact` folds, or why it would not; pure."""
         if (
             not force
             and not proactive
             and not self.should_compact(estimated_tokens, window_tokens, budget_tokens)
         ):
-            unchanged.reason = "under_threshold"
-            return unchanged
-        compaction_id = new_compaction_id()
+            return _FoldPlan(skip="under_threshold")
         if ends_mid_tool_round(messages):
             # Results are not appended yet; compacting now could separate a
             # tool_use from its results. The next request checks again.
-            unchanged.reason = "mid_tool_round"
-            unchanged.compaction_id = compaction_id
-            self._notify("skipped", compaction_id, reason="mid_tool_round")
-            return unchanged
+            return _FoldPlan(skip="mid_tool_round")
 
         split = max(0, min(turn_input_index, len(messages)))
         prefix = list(messages[:split])
@@ -890,19 +912,19 @@ class CompactionService:
         if not force and overhead > limit:
             # System prompt + tools alone are over the limit: no compaction
             # can help, and blaming the current turn would mislead.
-            return self._decline(
-                unchanged,
-                compaction_id,
-                "fixed_context_too_large",
-                tokens_before=estimated_tokens,
-                fixed_tokens=overhead,
-                limit_tokens=int(limit),
-                context_window_tokens=window_tokens,
-                hint=(
-                    "system prompt and tool definitions alone exceed the compaction "
-                    "limit; preflight_compact_ratio or the model context window is "
-                    "set too low"
-                ),
+            return _FoldPlan(
+                skip="fixed_context_too_large",
+                payload={
+                    "tokens_before": estimated_tokens,
+                    "fixed_tokens": overhead,
+                    "limit_tokens": int(limit),
+                    "context_window_tokens": window_tokens,
+                    "hint": (
+                        "system prompt and tool definitions alone exceed the compaction "
+                        "limit; preflight_compact_ratio or the model context window is "
+                        "set too low"
+                    ),
+                },
             )
         if not force and overhead + message_tokens(kept_current) > limit:
             # Preflight: the kept current turn alone is over the limit (a
@@ -911,18 +933,15 @@ class CompactionService:
             # and still not let this request through. (A forced call -- the
             # provider already refused -- carries the provider's numbers
             # instead of a live estimate and always tries.)
-            return self._decline(
-                unchanged,
-                compaction_id,
-                "current_turn_too_large",
-                tokens_before=estimated_tokens,
-                context_window_tokens=window_tokens,
+            return _FoldPlan(
+                skip="current_turn_too_large",
+                payload={
+                    "tokens_before": estimated_tokens,
+                    "context_window_tokens": window_tokens,
+                },
             )
         if not to_fold:
-            unchanged.reason = "nothing_to_compact"
-            unchanged.compaction_id = compaction_id
-            self._notify("skipped", compaction_id, reason="nothing_to_compact")
-            return unchanged
+            return _FoldPlan(skip="nothing_to_compact")
         # Required gain: a compaction that does not take at least 10% off the
         # request is not worth a summarizer call, a durable rewrite and a
         # cache miss. Checked first against an optimistic summary size, so a
@@ -933,14 +952,87 @@ class CompactionService:
         optimistic_summary = min(_OPTIMISTIC_SUMMARY_TOKENS, folded_tokens // 4)
         best_case = message_tokens(messages) - message_tokens(kept_current) - optimistic_summary
         if best_case < min_gain:
-            return self._decline(
-                unchanged,
-                compaction_id,
-                "not_worth_compacting",
-                tokens_before=estimated_tokens,
-                best_case_gain_tokens=max(0, best_case),
-                context_window_tokens=window_tokens,
+            return _FoldPlan(
+                skip="not_worth_compacting",
+                payload={
+                    "tokens_before": estimated_tokens,
+                    "best_case_gain_tokens": max(0, best_case),
+                    "context_window_tokens": window_tokens,
+                },
             )
+        return _FoldPlan(
+            to_fold=to_fold,
+            kept_current=kept_current,
+            previous_summary=previous_summary,
+            previous_files=previous_files,
+            folded_rounds=folded_rounds,
+            overhead=overhead,
+            min_gain=min_gain,
+        )
+
+    async def compact(
+        self,
+        messages: list[Message],
+        *,
+        turn_input_index: int,
+        estimated_tokens: int,
+        window_tokens: int,
+        message_tokens: Callable[[Sequence[Message]], int],
+        force: bool = False,
+        input_entry: dict[str, Any] | None = None,
+        budget_tokens: int | None = None,
+        proactive: bool = False,
+    ) -> CompactionResult:
+        """Compact *messages* when over the trigger (or when *force* is set).
+
+        *message_tokens* estimates the provider size of a message list; the
+        rest of the request (system prompt, tools, config) is taken as
+        ``estimated_tokens - message_tokens(messages)``. *input_entry* is the
+        persisted user row of this turn (``{"role", "content"}``) that a
+        durable rewrite keeps; the agent passes it through ``kept_entries``.
+
+        *proactive* is the between-turns background job: it runs below the
+        trigger (the caller already decided it is worth it), keeps every
+        decline rule, and never folds rounds of the kept turn -- that turn is
+        persisted already and stays byte for byte.
+        """
+        unchanged = CompactionResult(
+            status="skipped",
+            messages=messages,
+            turn_input_index=turn_input_index,
+            tokens_before=estimated_tokens,
+            tokens_after=estimated_tokens,
+        )
+        plan = self._plan(
+            messages,
+            turn_input_index=turn_input_index,
+            estimated_tokens=estimated_tokens,
+            window_tokens=window_tokens,
+            message_tokens=message_tokens,
+            force=force,
+            budget_tokens=budget_tokens,
+            proactive=proactive,
+        )
+        if plan.skip == "under_threshold":
+            unchanged.reason = "under_threshold"
+            return unchanged
+        compaction_id = new_compaction_id()
+        if plan.skip in {"mid_tool_round", "nothing_to_compact"}:
+            # Results are not appended yet (mid_tool_round), or there is no
+            # older history to fold: skipped, without a declined log line.
+            unchanged.reason = plan.skip
+            unchanged.compaction_id = compaction_id
+            self._notify("skipped", compaction_id, reason=plan.skip)
+            return unchanged
+        if plan.skip is not None:
+            return self._decline(unchanged, compaction_id, plan.skip, **plan.payload)
+        to_fold = plan.to_fold
+        kept_current = plan.kept_current
+        previous_summary = plan.previous_summary
+        previous_files = plan.previous_files
+        folded_rounds = plan.folded_rounds
+        overhead = plan.overhead
+        min_gain = plan.min_gain
 
         self._notify(
             "started",

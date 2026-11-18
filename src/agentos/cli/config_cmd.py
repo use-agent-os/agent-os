@@ -87,7 +87,13 @@ def config_set(
             for warning in persist.warnings:
                 console.print(f"[yellow]{escape(warning)}[/yellow]", soft_wrap=True)
             return
-        console.print("[yellow]Restart the gateway to apply this setting.[/yellow]")
+        from agentos.gateway.rpc_config import _has_unproven_live_change
+
+        if _has_unproven_live_change({key}):
+            console.print("[yellow]Restart the gateway to apply this setting.[/yellow]")
+        else:
+            # The same per-key table config.patch and config.reload use.
+            console.print("[dim]A running gateway applies this setting without a restart.[/dim]")
         return
 
     from agentos.gateway.config import GatewayConfig

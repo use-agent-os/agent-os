@@ -600,6 +600,27 @@ def _find_turn_boundary_cut(
     return cut
 
 
+def compaction_skip_reason(
+    entries: list[dict[str, Any]], context_window_tokens: int, config: CompactionConfig
+) -> str | None:
+    """Why :func:`compact_context_new` would summarise nothing, or ``None``.
+
+    Its decisions that need no model call -- ``no_entries``,
+    ``within_compaction_budget``, ``no_safe_turn_boundary`` -- on the same
+    entries, so a caller can skip work that only pays off when a summary is
+    written (the pre-compaction memory review). ``None`` can still end in a
+    later skip (a stale transcript, an empty summary).
+    """
+    if not entries:
+        return "no_entries"
+    total_tokens = sum(_entry_tokens(e) for e in entries)
+    if total_tokens * config.safety_margin <= context_window_tokens:
+        return "within_compaction_budget"
+    if _find_turn_boundary_cut(entries, context_window_tokens // 2) <= 0:
+        return "no_safe_turn_boundary"
+    return None
+
+
 async def compact_context_new(request: CompactionRequest) -> CompactionResult:
     """Cut-point + turn-boundary-aware + incremental-summary compaction (compaction).
 

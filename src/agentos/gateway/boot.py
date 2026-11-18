@@ -2593,6 +2593,10 @@ async def build_services(
                 if getattr(config.memory, "source", "state") == "workspace"
                 else None,
                 provider_managers=memory_provider_managers or None,
+                evidence_stores={
+                    aid: m.evidence for aid, m in memory_managers.items() if m.evidence is not None
+                }
+                or None,
             )
             log.info("build_services.memory_tools_registered", agents=list(memory_stores))
             # TODO(B4/B5): expose provider-routed tools. Every configured

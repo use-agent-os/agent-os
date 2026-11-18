@@ -33,6 +33,14 @@ import structlog
 
 from agentos.lines import split_lines_keepends
 from agentos.memory.curated import CuratedMemoryStore
+from agentos.memory.evidence import SessionRef
+from agentos.memory.lineage import (
+    duplicate_curated_adds,
+    note_block_written,
+    record_curated_changes,
+    record_note_write,
+    requested_curated_adds,
+)
 from agentos.memory.redaction import redact_memory_text
 from agentos.memory.source_paths import is_memory_source_path, is_searchable_source_path
 from agentos.memory.types import (
@@ -163,7 +171,12 @@ def _mirror_memory_write(
                 metadata,
             )
         except Exception as exc:  # noqa: BLE001 \u2014 mirror must never break the tool
-            logger.debug("memory_tool.provider_mirror_failed", action=op_action, error=str(exc))
+            # The type only: a provider's message can quote the entry text.
+            logger.debug(
+                "memory_tool.provider_mirror_failed",
+                action=op_action,
+                error_type=type(exc).__name__,
+            )
 
 
 def _scan_memory_content(content: str) -> str | None:
@@ -510,6 +523,7 @@ def create_memory_tools(
     workspace_base: str | None = None,
     config_root: Any | None = None,
     provider_managers: dict[str, Any] | None = None,
+    evidence_stores: dict[str, Any] | None = None,
 ) -> None:
     """Register memory tools. Accepts either a single store or a dict keyed by agent_id.
 
@@ -529,6 +543,12 @@ def create_memory_tools(
     mirrored to the active agent's provider via ``notify_memory_write`` (see
     ``_mirror_memory_write`` for the success-only, add/replace/remove gating).
     None/empty means no mirroring — zero cost on the disabled default path.
+
+    ``evidence_stores`` (optional): per-agent ``MemoryEvidenceStore`` instances.
+    When present, committed ``memory`` and ``memory_save`` writes record their
+    origin (session and writer) for lineage and forget; see
+    ``agentos.memory.lineage``. Recording is best effort and never changes a
+    tool result.
     """
     # Normalize to dict form
     if not isinstance(stores, dict):
@@ -551,6 +571,54 @@ def create_memory_tools(
         ctx = current_tool_context.get()
         agent_id = normalize_agent_id((ctx.agent_id if ctx else None) or "main")
         return provider_managers.get(agent_id) or provider_managers.get("main")
+
+    def _evidence_for_current_agent() -> Any | None:
+        """The active agent's evidence store, or None (no fallback to ``main``:
+        an origin recorded in another agent's database could never be forgotten)."""
+        if not evidence_stores:
+            return None
+        from agentos.session.keys import normalize_agent_id
+
+        ctx = current_tool_context.get()
+        return evidence_stores.get(normalize_agent_id((ctx.agent_id if ctx else None) or "main"))
+
+    def _lineage_origin() -> tuple[SessionRef, str]:
+        """Session and writer for an origin recorded by the current tool call."""
+        ctx = current_tool_context.get()
+        if ctx is None:
+            return SessionRef(), "tool"
+        session = SessionRef(
+            session_key=ctx.session_key or "",
+            session_id=ctx.artifact_session_id or "",
+        )
+        return session, "review" if ctx.source_kind == "memory_nudge" else "tool"
+
+    async def _record_curated_lineage(
+        store: CuratedMemoryStore,
+        target: str,
+        result: Any,
+        changes: list[dict[str, str]],
+        requested_adds: list[str],
+    ) -> None:
+        if not _memory_write_committed(result):
+            return
+        evidence = _evidence_for_current_agent()
+        if evidence is None:
+            return
+        session, writer = _lineage_origin()
+        entries_after = store.entries_for(target)
+        try:
+            await record_curated_changes(
+                evidence,
+                target=target,
+                changes=changes,
+                writer=writer,
+                session=session,
+                entries_after=entries_after,
+                duplicate_adds=duplicate_curated_adds(requested_adds, changes, entries_after),
+            )
+        except Exception as exc:  # noqa: BLE001 — lineage must never break the tool
+            logger.warning("memory_tool.lineage_record_failed", target=target, error=str(exc))
 
     class ResolvedAgent(NamedTuple):
         store: LongTermMemoryStore
@@ -843,7 +911,15 @@ def create_memory_tools(
             raise ToolError(message) from exc
         raise RuntimeError(message) from exc
 
-    async def _apply_memory_writes(r: ResolvedAgent, plans: list[PlannedWrite]) -> dict[str, int]:
+    async def _apply_memory_writes(
+        r: ResolvedAgent,
+        plans: list[PlannedWrite],
+        *,
+        written_blocks: list[tuple[str, str]] | None = None,
+    ) -> dict[str, int]:
+        """Write and index *plans*; ``written_blocks`` receives ``(path, block)``
+        per write, the block as read back from disk (see
+        ``agentos.memory.lineage.note_block_written``)."""
         from agentos.memory.types import MemorySource
 
         if not plans:
@@ -856,6 +932,10 @@ def create_memory_tools(
         snapshot_map = {snapshot.path: snapshot for snapshot in snapshots}
         touched_paths: set[str] = set()
         chunks_by_path: dict[str, int] = {}
+        current_text: dict[str, str | None] = {
+            snapshot.path: snapshot.content if snapshot.existed else None for snapshot in snapshots
+        }
+        blocks: list[tuple[str, str]] = []
 
         try:
             for plan in plans:
@@ -865,12 +945,26 @@ def create_memory_tools(
                 await _enforce_size_limits(r, workspace_dir, mem_path, content, plan.mode)
                 _write_content(mem_path, content, plan.mode)
                 written_content = mem_path.read_text(encoding="utf-8")
+                blocks.append(
+                    (
+                        plan.path,
+                        note_block_written(
+                            content=content,
+                            previous_text=current_text.get(plan.path),
+                            written_text=written_content,
+                            mode=plan.mode,
+                        ),
+                    )
+                )
+                current_text[plan.path] = written_content
                 touched_paths.add(plan.path)
                 chunks_by_path[plan.path] = await r.store.index_file(
                     path=plan.path,
                     content=written_content,
                     source=MemorySource.memory,
                 )
+            if written_blocks is not None:
+                written_blocks.extend(blocks)
             return chunks_by_path
         except Exception as exc:
             rollback_status = await _rollback_snapshots(r, snapshots, touched_paths)
@@ -995,12 +1089,31 @@ def create_memory_tools(
         if not path:
             path = f"memory/{today}.md"
             mode = "append"
+        from agentos.engine.pre_compaction_review import write_refusal
+
+        refusal = write_refusal(adds_only=mode == "append", what=f"memory_save mode {mode!r}")
+        if refusal is not None:
+            raise ToolError(refusal)
 
         _validate_memory_save_target(path, mode)
+        written_blocks: list[tuple[str, str]] = []
         chunks = await _apply_memory_writes(
             r,
             [PlannedWrite(path=path, content=content, mode=mode)],
+            written_blocks=written_blocks,
         )
+        evidence = _evidence_for_current_agent()
+        if evidence is not None:
+            session, writer = _lineage_origin()
+            for written_path, block in written_blocks:
+                try:
+                    await record_note_write(
+                        evidence, path=written_path, block=block, writer=writer, session=session
+                    )
+                except Exception as exc:  # noqa: BLE001 — lineage must never break the tool
+                    logger.warning(
+                        "memory_save.lineage_record_failed", path=written_path, error=str(exc)
+                    )
         # Notify snapshot refresh on successful write
         if on_memory_write is not None:
             ctx = current_tool_context.get()
@@ -1137,6 +1250,21 @@ def create_memory_tools(
         if target is None:
             target = "memory"
 
+        from agentos.engine.pre_compaction_review import write_refusal
+
+        if operations:
+            ops = operations if isinstance(operations, list) else [operations]
+            refused = sorted(
+                {str(op.get("action")) if isinstance(op, dict) else "?" for op in ops} - {"add"}
+            )
+            refusal = write_refusal(
+                adds_only=not refused, what=f"a batch with {', '.join(refused)}"
+            )
+        else:
+            refusal = write_refusal(adds_only=action == "add", what=f"action {action!r}")
+        if refusal is not None:
+            return json.dumps({"success": False, "error": refusal}, ensure_ascii=False)
+
         if target not in {"memory", "user"}:
             return json.dumps(
                 {"success": False, "error": f"Invalid target '{target}'. Use 'memory' or 'user'."},
@@ -1157,6 +1285,9 @@ def create_memory_tools(
                 )
             result = await asyncio.to_thread(
                 store.apply_batch, target, operations, caller_key=caller_key, changes=changes
+            )
+            await _record_curated_lineage(
+                store, target, result, changes, requested_curated_adds(operations=operations)
             )
             _mirror_memory_write(
                 _provider_manager_for_current_agent(),
@@ -1219,6 +1350,13 @@ def create_memory_tools(
                 ensure_ascii=False,
             )
 
+        await _record_curated_lineage(
+            store,
+            target,
+            result,
+            changes,
+            requested_curated_adds(action=action, content=content),
+        )
         _mirror_memory_write(
             _provider_manager_for_current_agent(),
             tool_result=result,

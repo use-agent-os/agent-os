@@ -829,7 +829,8 @@ class TurnFinalizerStage:
 
         # 4. Error persist (only when error_message is truthy; the
         # port folds the session-manager-None guard, and the helper
-        # also guards event-is-None internally).
+        # also guards event-is-None internally). The runner writes nothing
+        # for an internal turn (see ``TurnRunner._persist_turn_error``).
         if inp.error_message:
             await self._turn_error_persist.persist_error(
                 session_key=inp.session_key,

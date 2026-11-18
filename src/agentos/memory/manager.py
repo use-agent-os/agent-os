@@ -32,6 +32,7 @@ import structlog
 if TYPE_CHECKING:
     from agentos.gateway.config import GatewayConfig
 
+    from .evidence import MemoryEvidenceStore
     from .retrieval import MemoryRetriever
     from .store import LongTermMemoryStore
     from .sync_manager import MemorySyncManager
@@ -299,6 +300,10 @@ class MemoryManager:
     # ROOT ``GatewayConfig`` (or a zero-arg getter returning it). Curated char
     # limits are read through it on every call; see ``live_memory_config``.
     config_root: Any | None = None
+    # Durable lineage tables (origins, forgotten sessions) in the same
+    # ``memory.db`` (see ``memory/evidence.py``). ``build_memory_managers`` opens it at boot;
+    # ``None`` when it could not be opened or the manager was built by hand.
+    evidence: MemoryEvidenceStore | None = None
     degraded: list[MemoryDegradation] = field(default_factory=list, init=False)
 
     def _record_degradation(
@@ -449,7 +454,7 @@ class MemoryManager:
             user_char_limit=user_limit,
         )
         store.load_from_disk()
-        return {
+        status: dict[str, Any] = {
             "memory": {
                 "entries": len(store.entries_for("memory")),
                 "usage": store.usage_for("memory"),
@@ -459,6 +464,19 @@ class MemoryManager:
                 "usage": store.usage_for("user"),
             },
         }
+        if self.evidence is not None:
+            # Lineage counts are additive: a failing evidence table must not
+            # hide the curated usage above.
+            try:
+                from .lineage import curated_lineage_counts
+
+                counts = await curated_lineage_counts(self.evidence, store)
+            except Exception as exc:  # noqa: BLE001
+                self._record_degradation(component="evidence", operation="lineage", error=exc)
+            else:
+                for target, target_counts in counts.items():
+                    status[target].update(target_counts)
+        return status
 
     def curated_store(self) -> Any:
         """Return a loaded CuratedMemoryStore for the workspace root."""
@@ -509,6 +527,8 @@ class MemoryManager:
             await self._best_effort_call("provider_manager", "shutdown", self.provider_manager)
         await self._best_effort_call("sync_manager", "stop", self.sync_manager)
         await self._best_effort_call("retriever", "close", self.retriever)
+        if self.evidence is not None:
+            await self._best_effort_call("evidence", "close", self.evidence)
         await self._best_effort_call("store", "close", self.store)
 
 
@@ -614,6 +634,7 @@ async def build_memory_managers(
         EmbeddingProvider,
     )
     from .embedding_resolver import create_embedding_provider, resolve_memory_embedding
+    from .evidence import MemoryEvidenceStore
     from .retrieval import MemoryRetriever
     from .session_source import SessionSourceIndexer
     from .store import LongTermMemoryStore
@@ -647,6 +668,7 @@ async def build_memory_managers(
     managers: dict[str, MemoryManager] = {}
     in_flight_store: LongTermMemoryStore | None = None
     in_flight_sync: MemorySyncManager | None = None
+    in_flight_evidence: MemoryEvidenceStore | None = None
     try:
         for agent_id in agent_ids:
             # Resolve paths
@@ -700,11 +722,33 @@ async def build_memory_managers(
                         error=str(exc),
                     )
 
+            # The lineage tables share memory.db but not the index's rebuild
+            # paths. A failure here degrades lineage, never boot.
+            in_flight_evidence = MemoryEvidenceStore(db_path)
+            try:
+                await in_flight_evidence.initialize()
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "memory_manager.evidence_unavailable",
+                    agent_id=agent_id,
+                    error=str(exc),
+                )
+                try:
+                    await in_flight_evidence.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                in_flight_evidence = None
+
             session_indexer = (
                 SessionSourceIndexer(
                     storage=session_storage,
                     store=in_flight_store,
                     agent_id=agent_id,
+                    forgotten=(
+                        in_flight_evidence.forgotten_sessions
+                        if in_flight_evidence is not None
+                        else None
+                    ),
                 )
                 if session_storage is not None
                 and getattr(cfg, "session_source_enabled", False)
@@ -769,6 +813,7 @@ async def build_memory_managers(
                 vector_weight=effective_vector_weight,
                 text_weight=effective_text_weight,
                 config_root=config,
+                evidence=in_flight_evidence,
             )
 
             # ── External memory provider (Plan B, disabled by default) ────
@@ -791,6 +836,7 @@ async def build_memory_managers(
             # exception doesn't double-close them in the cleanup path.
             in_flight_store = None
             in_flight_sync = None
+            in_flight_evidence = None
 
             log.info(
                 "build_services.memory_agent_ready",
@@ -809,6 +855,16 @@ async def build_memory_managers(
                     "memory_manager.build_cleanup_failed",
                     component="sync_manager",
                     operation="stop",
+                    error=str(exc),
+                )
+        if in_flight_evidence is not None:
+            try:
+                await in_flight_evidence.close()
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "memory_manager.build_cleanup_failed",
+                    component="evidence",
+                    operation="close",
                     error=str(exc),
                 )
         if in_flight_store is not None:

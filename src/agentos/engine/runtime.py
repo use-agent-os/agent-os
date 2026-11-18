@@ -49,6 +49,7 @@ from agentos.contracts.attachments import (
 from agentos.contracts.attachments import (
     attachment_size_limit_for_mime as _attachment_size_limit_for_mime,
 )
+from agentos.engine import pre_compaction_review
 from agentos.engine.agent import Agent, ToolHandler
 from agentos.engine.approval_port import default_approval_waiter
 from agentos.engine.cache_break_monitor import notify_compaction
@@ -105,7 +106,10 @@ from agentos.engine.turn_runner.pre_provider_io import (
 )
 from agentos.engine.turn_runner.prompt_assembler_stage import RunPipelineRequest
 from agentos.engine.turn_runner.stream_consumer_stage import inline_compaction_phase
-from agentos.engine.turn_runner.turn_finalizer_stage import CostRollupResult
+from agentos.engine.turn_runner.turn_finalizer_stage import (
+    CostRollupResult,
+    _is_internal_turn,
+)
 from agentos.engine.types import (
     AgentConfig,
     AgentEvent,
@@ -244,6 +248,15 @@ _SESSION_LOCK_OWNER: contextvars.ContextVar[dict[int, asyncio.Task[Any]]] = cont
 _SESSION_LOCK_BYPASS_ONLY: contextvars.ContextVar[set[int] | None] = contextvars.ContextVar(
     "_session_lock_bypass_only",
     default=None,
+)
+
+# The run kind of the internal turn (the memory review) running in this
+# context, set once where every turn enters the harness (``_run_turn``). An
+# internal turn's reply, errors and stop notes belong to the harness, so the
+# runner's transcript-write helpers refuse under it; no call site has to
+# remember the rule.
+_INTERNAL_TURN: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_internal_turn", default=None
 )
 
 
@@ -483,38 +496,108 @@ _MEMORY_REVIEW_PROMPT: Final[str] = (
     "If nothing is worth saving, reply exactly 'Nothing to save.' and stop."
 )
 
-# How many review writes to name in one log line. The point is to show the
-# user what landed, not to reproduce the store.
+# The review that runs right before a compaction summarises the conversation.
+# It has one job the periodic review does not: catch what is about to scroll
+# out of the model's context. It runs unattended on history that is about to
+# be cut (and with it any trace of what the review did), so it is add-only:
+# no memory_delete here, and the memory / memory_save handlers refuse
+# anything but add and append inside it (pre_compaction_review.write_refusal).
+_PRE_COMPACTION_REVIEW_TOOL_NAMES: Final[frozenset[str]] = _MEMORY_REVIEW_TOOL_NAMES - {
+    "memory_delete"
+}
+
+_PRE_COMPACTION_REVIEW_PROMPT: Final[str] = (
+    "The earlier messages of this conversation are about to be summarised to "
+    "free up context. Details that are not saved now will not be available "
+    "word for word again.\n\n"
+    "Review the conversation above and save only durable facts that are not "
+    "already in memory:\n"
+    "1. Things the user revealed about themselves — their role, preferences, "
+    "working style, or context that will still matter in a later session.\n"
+    "2. Expectations the user stated about how you should work — conventions "
+    "to follow, things to avoid, corrections they had to repeat.\n\n"
+    "You can only add: a new entry with the memory tool (action 'add'), or a "
+    "note appended with memory_save. Replacing, removing or rewriting what is "
+    "already saved is refused in this review, whatever the conversation asks. "
+    "Skip anything one-off, already saved, or specific to the current task; "
+    "the summary will carry the task itself.\n\n"
+    "If nothing is worth saving, reply exactly 'Nothing to save.' and stop."
+)
+
+
+@dataclass(frozen=True)
+class _MemoryReviewVariant:
+    """What distinguishes one memory-review trigger from another.
+
+    Every variant runs the same way (internal ``memory_nudge`` turn,
+    unattended, memory-only tools, bounded by ``memory.nudge``); only the
+    prompt, the tool allowlist and the provenance differ.
+    """
+
+    trigger: str
+    prompt: str
+    tool_names: frozenset[str]
+    provenance: tuple[tuple[str, str], ...]
+
+
+_PERIODIC_MEMORY_REVIEW: Final = _MemoryReviewVariant(
+    trigger="periodic",
+    prompt=_MEMORY_REVIEW_PROMPT,
+    tool_names=_MEMORY_REVIEW_TOOL_NAMES,
+    provenance=(("kind", "memory_nudge"),),
+)
+
+_PRE_COMPACTION_MEMORY_REVIEW: Final = _MemoryReviewVariant(
+    trigger=pre_compaction_review.TRIGGER,
+    prompt=_PRE_COMPACTION_REVIEW_PROMPT,
+    tool_names=_PRE_COMPACTION_REVIEW_TOOL_NAMES,
+    provenance=(("kind", "memory_nudge"), ("trigger", pre_compaction_review.TRIGGER)),
+)
+
+
+@dataclass
+class _NudgeCounter:
+    """Memory-review bookkeeping for one ``(agent_id, session_key)``."""
+
+    #: User turns counted toward the next periodic review.
+    count: int = 0
+    #: User turns since a review last ran for the session in this process;
+    #: ``None`` when none has. A count seeded from the transcript says
+    #: nothing about when a review ran, so it never sets this.
+    turns_since_review: int | None = None
+
+
 # How many intervals a run of self-directed writes may defer the review before
 # it runs anyway. Without a ceiling, an agent that saves on every turn is never
 # reviewed -- which is the state the nudge was found in.
 _NUDGE_MAX_DEFERRAL_INTERVALS: Final[int] = 2
 
+# How many review writes to name in one log line. The point is to show the
+# user what landed, not to reproduce the store.
 _MEMORY_REVIEW_LOG_MAX_ENTRIES: Final[int] = 5
-_MEMORY_REVIEW_LOG_ENTRY_CHARS: Final[int] = 120
 
 
-def _summarize_memory_write(arguments: Any) -> str:
-    """Render one memory tool call as ``target/action: content``.
+def _summarize_memory_write(tool_name: str, arguments: Any) -> str:
+    """Render one memory tool call as ``tool:target/action``, without its text.
 
-    Batches collapse to their operation count: naming every op would push a
-    single log line past anything readable, and the count is enough to tell a
-    consolidation from a one-off save.
+    Never the content: a log line outlives ``agentos memory forget``, so what
+    the review saved (or tried to replace or remove) stays out of it. The
+    target, or the note path, and the action are enough to tell what landed.
+    Batches collapse to their operation count and actions.
     """
     if not isinstance(arguments, dict):
-        return "write"
+        return f"{tool_name}:write"
+    if tool_name == "memory_save":
+        path = str(arguments.get("path") or "daily-note")
+        return f"memory_save:{path}/{arguments.get('mode') or 'append'}"
     target = str(arguments.get("target") or "memory")
     operations = arguments.get("operations")
     if isinstance(operations, list) and operations:
         actions = ",".join(
             sorted({str(op.get("action", "?")) for op in operations if isinstance(op, dict)})
         )
-        return f"{target}/batch[{len(operations)} ops: {actions or '?'}]"
-    action = str(arguments.get("action") or "?")
-    content = str(arguments.get("content") or arguments.get("old_text") or "").strip()
-    if len(content) > _MEMORY_REVIEW_LOG_ENTRY_CHARS:
-        content = content[:_MEMORY_REVIEW_LOG_ENTRY_CHARS] + "…"
-    return f"{target}/{action}: {content}" if content else f"{target}/{action}"
+        return f"{tool_name}:{target}/batch[{len(operations)} ops: {actions or '?'}]"
+    return f"{tool_name}:{target}/{arguments.get('action') or '?'}"
 
 
 # Boot-path initialization of the safety baseline. All four submodules
@@ -1829,8 +1912,14 @@ class TurnRunner:
                 session_of=lambda key, _value: key[1],
             )
         )
-        # User turns since the last memory review, keyed (agent_id, session_key).
-        self._memory_nudge_counters: dict[tuple[str, str], int] = {}
+        # Memory-review bookkeeping, keyed (agent_id, session_key); bounded by
+        # _evict_nudge_counters_if_needed.
+        self._memory_nudge_counters: dict[tuple[str, str], _NudgeCounter] = {}
+        # Pre-compaction review task per (agent_id, session_key), held until
+        # the task itself finishes (its done callback drops it): a review its
+        # caller stopped waiting for may still be unwinding, and a second one
+        # must not start beside it.
+        self._pre_compaction_reviews: dict[tuple[str, str], asyncio.Task[Any]] = {}
         self._turn_compacted_sessions: set[str] = set()
         self._active_pre_compaction_flush_tasks: dict[str, asyncio.Task] = {}
         self._background_tasks: set[asyncio.Task] = set()
@@ -1912,7 +2001,7 @@ class TurnRunner:
             ),
         )
         # Memory-nudge reviews running in the background (MemoryNudgePort).
-        self._memory_nudge_pending: set[asyncio.Task[None]] = set()
+        self._memory_nudge_pending: set[asyncio.Task[Any]] = set()
 
     # ------------------------------------------------------------------
     # Stage ports: TurnRunner implements the stages' Protocol ports
@@ -2370,6 +2459,9 @@ class TurnRunner:
         snapshot = snapshots.get(session_key) if snapshots is not None else None
         if snapshot is not None and "snapshot" in params:
             persist_kwargs["snapshot"] = snapshot
+        # A compaction forced inside a turn has no room left for a memory
+        # review turn; say so where every pre-compaction decision is logged.
+        self.note_compaction_without_review(session_key=session_key, compaction=phase)
         # Durable pre-image before the destructive rewrite (the guarantee the
         # removed before-turn preflight/T3 paths gave). A failing checkpoint
         # raises here, so nothing is archived without it. Ephemeral sessions
@@ -2830,6 +2922,11 @@ class TurnRunner:
         self._turn_compacted_sessions.discard(session_key)
 
     def clear_compaction_turn_state(self, session_key: str) -> None:
+        if pre_compaction_review.is_pre_compaction_review(session_key):
+            # The review that runs before a compaction is not a turn of the
+            # session as far as compaction is concerned: this state belongs to
+            # the turns and the compaction around it.
+            return
         self._turn_compacted_sessions.discard(session_key)
         # The anchor only means something for the turn that loaded the history;
         # the next turn's _load_history records a fresh one.
@@ -3580,12 +3677,16 @@ class TurnRunner:
         key = (agent_id, session_key)
         self._evict_nudge_counters_if_needed()
         interval = int(getattr(nudge_cfg, "interval", 0))
-        prior = self._memory_nudge_counters.get(key)
-        if prior is None:
-            prior = self._hydrate_nudge_counter(
-                interval=interval, prior_user_turns=prior_user_turns
+        state = self._memory_nudge_counters.get(key)
+        if state is None:
+            state = self._memory_nudge_counters[key] = _NudgeCounter(
+                count=self._hydrate_nudge_counter(
+                    interval=interval, prior_user_turns=prior_user_turns
+                )
             )
-        count = prior + 1
+        if state.turns_since_review is not None:
+            state.turns_since_review += 1
+        count = state.count + 1
 
         # Every user turn advances the counter, including one that wrote to
         # memory itself. A self-directed write saves the fact that was salient
@@ -3603,14 +3704,30 @@ class TurnRunner:
             self._turn_used_memory_tool(turn_segments)
             and count < interval * _NUDGE_MAX_DEFERRAL_INTERVALS
         ):
-            self._memory_nudge_counters[key] = count
+            state.count = count
             return False
 
         if count < interval:
-            self._memory_nudge_counters[key] = count
+            state.count = count
             return False
-        self._memory_nudge_counters[key] = 0
+        # The caller starts the review now.
+        state.count = 0
+        state.turns_since_review = 0
         return True
+
+    def _note_memory_review_ran(self, agent_id: str, session_key: str) -> None:
+        """A review just ran outside the periodic count: restart the count.
+
+        Without this the periodic review would fire again a few turns later
+        over a conversation that was just reviewed.
+        """
+        key = (agent_id, session_key)
+        state = self._memory_nudge_counters.get(key)
+        if state is None:
+            self._evict_nudge_counters_if_needed()
+            state = self._memory_nudge_counters[key] = _NudgeCounter()
+        state.count = 0
+        state.turns_since_review = 0
 
     @staticmethod
     def _hydrate_nudge_counter(
@@ -3661,20 +3778,26 @@ class TurnRunner:
         *,
         agent_id: str,
         session_key: str,
-    ) -> None:
+        variant: _MemoryReviewVariant = _PERIODIC_MEMORY_REVIEW,
+    ) -> str:
         """Run one background review turn asking the agent to curate memory.
 
         Runs as its own turn against the same session, so the review sees the
         conversation it is reviewing. `input_mode="system_event"` plus the
         `memory_nudge` run kind keep it out of turn capture and out of its own
-        counter, so a review can never trigger another review.
+        counter, so a review can never trigger another review. *variant*
+        picks the trigger's prompt, tool allowlist and provenance.
+
+        Returns ``ran``, ``timeout``, ``error`` (the turn raised or ended on
+        an error event) or ``skipped`` (no nudge config). Never raises except
+        on cancellation.
         """
         nudge_cfg = self._memory_nudge_config()
         if nudge_cfg is None:
-            return
+            return pre_compaction_review.SKIPPED
         timeout = float(getattr(nudge_cfg, "timeout_seconds", 90.0))
 
-        async def _drive() -> None:
+        async def _drive() -> str | None:
             # The review writes to memory on the user's behalf with nobody
             # watching, so its outcome is recorded rather than discarded. A
             # memory the user cannot see is one they cannot correct, and a
@@ -3691,12 +3814,13 @@ class TurnRunner:
                 session_key=session_key,
                 workspace_dir=str(self._resolve_memory_source_dir(agent_id)),
                 source_kind="memory_nudge",
-                allowed_tools=set(_MEMORY_REVIEW_TOOL_NAMES),
+                allowed_tools=set(variant.tool_names),
             )
             writes: list[str] = []
             failures: list[str] = []
+            turn_error: str | None = None
             async for event in self.run(
-                message=_MEMORY_REVIEW_PROMPT,
+                message=variant.prompt,
                 session_key=session_key,
                 tool_context=tool_context,
                 agent_id=agent_id,
@@ -3705,14 +3829,19 @@ class TurnRunner:
                 no_memory_capture=True,
                 persist_input=False,
                 max_iterations=int(getattr(nudge_cfg, "max_iterations", 6)),
-                input_provenance={"kind": "memory_nudge"},
+                input_provenance=dict(variant.provenance),
             ):
+                if getattr(event, "kind", "") == "error":
+                    turn_error = str(getattr(event, "message", "") or "error")
+                    continue
                 if (
                     getattr(event, "kind", "") != "tool_result"
                     or getattr(event, "tool_name", "") not in _MEMORY_WRITE_TOOL_NAMES
                 ):
                     continue
-                summary = _summarize_memory_write(getattr(event, "arguments", None))
+                summary = _summarize_memory_write(
+                    str(getattr(event, "tool_name", "")), getattr(event, "arguments", None)
+                )
                 if getattr(event, "is_error", False):
                     failures.append(summary)
                 else:
@@ -3722,28 +3851,235 @@ class TurnRunner:
                 "memory_nudge.review_done",
                 agent_id=agent_id,
                 session_key=session_key,
+                trigger=variant.trigger,
                 wrote=len(writes),
                 failed=len(failures),
                 entries=writes[:_MEMORY_REVIEW_LOG_MAX_ENTRIES],
                 errors=failures[:_MEMORY_REVIEW_LOG_MAX_ENTRIES],
+                turn_error=turn_error,
             )
+            return turn_error
 
         try:
-            await asyncio.wait_for(_drive(), timeout=timeout)
+            turn_error = await asyncio.wait_for(_drive(), timeout=timeout)
         except TimeoutError:
             log.warning(
                 "memory_nudge.review_timeout",
                 agent_id=agent_id,
                 session_key=session_key,
+                trigger=variant.trigger,
                 timeout_seconds=timeout,
             )
+            return pre_compaction_review.TIMEOUT
         except Exception as exc:  # noqa: BLE001 — a failed review must not fail the turn
             log.warning(
                 "memory_nudge.review_failed",
                 agent_id=agent_id,
                 session_key=session_key,
+                trigger=variant.trigger,
                 error=str(exc),
             )
+            return pre_compaction_review.ERROR
+        return pre_compaction_review.ERROR if turn_error else pre_compaction_review.RAN
+
+    # -- Pre-compaction memory review ----------
+    # The periodic review's second trigger: once, right before a compaction
+    # summarises a private conversation. See agentos.engine.pre_compaction_review.
+
+    def _pre_compaction_review_skip_reason(self, session_key: str) -> str | None:
+        """Why *session_key* never gets a pre-compaction review, or ``None``.
+
+        The periodic review's eligibility (``memory.nudge`` on, a non-zero
+        interval, a private human conversation) plus ``before_compaction``.
+        The parts of it that judge a single turn (input mode, run kind) do
+        not apply: a compaction summarises the whole conversation, not the
+        turn that happened to cross the threshold.
+        """
+        nudge_cfg = self._memory_nudge_config()
+        if not getattr(nudge_cfg, "before_compaction", False) or not self._memory_nudge_allowed(
+            nudge_cfg=nudge_cfg,
+            no_memory_capture=False,
+            input_mode="user",
+            run_kind=None,
+        ):
+            return pre_compaction_review.DISABLED
+        if not allows_private_memory_prompt_injection(session_key):
+            return pre_compaction_review.INELIGIBLE
+        return None
+
+    def note_compaction_without_review(
+        self,
+        *,
+        session_key: str,
+        compaction: str,
+        reason: str = pre_compaction_review.NO_HEADROOM,
+        agent_id: str | None = None,
+    ) -> None:
+        """Log that a compaction of *session_key* runs without a memory review.
+
+        For the compactions that cannot be preceded by one: an in-turn or a
+        gateway overflow compaction is forced by a context that is already
+        full, so there is no room for a review turn (``no_headroom``). Never
+        raises: it only logs.
+        """
+        try:
+            key = canonicalize_session_key(session_key)
+            pre_compaction_review.log_outcome(
+                session_key=key,
+                compaction=compaction,
+                outcome=pre_compaction_review.SKIPPED,
+                reason=self._pre_compaction_review_skip_reason(key) or reason,
+                agent_id=agent_id,
+            )
+        except Exception:  # noqa: BLE001 — a log line must not fail a compaction
+            log.debug("pre_compaction_review.log_failed", session_key=session_key)
+
+    async def review_memory_before_compaction(
+        self,
+        *,
+        agent_id: str,
+        session_key: str,
+        compaction: str,
+        headroom: bool = True,
+    ) -> str:
+        """Run the memory review once before *compaction* summarises the session.
+
+        Same eligibility and turn as the periodic review, with its own prompt,
+        no ``memory_delete`` and provenance trigger ``pre_compaction``.
+        Skipped with a reason (``disabled``, ``ineligible``, ``no_headroom``
+        when *headroom* is false, ``in_progress``, ``recent_review``), else
+        run for at most ``memory.nudge.timeout_seconds``; afterwards the
+        session's periodic count restarts.
+
+        The caller compacts afterwards whatever this returns: there is no
+        receipt and no gate. It returns by the deadline even when a cancelled
+        review is slow to unwind; such a review stays the session's review
+        (``in_progress``) until its task ends, and cannot begin another memory
+        write. It never raises unless the caller itself is cancelled, and the
+        review turn cannot touch the session's compaction state. Like the
+        periodic review the turn runs without the session lock, so the caller
+        must not hold it.
+
+        Returns the logged outcome: ``ran``, ``timeout``, ``error`` or
+        ``skipped``.
+        """
+        session_key = canonicalize_session_key(session_key)
+        agent_id = normalize_agent_id(agent_id)
+        key = (agent_id, session_key)
+        reason = self._pre_compaction_review_skip_reason(session_key)
+        if reason is None and not headroom:
+            reason = pre_compaction_review.NO_HEADROOM
+        if reason is None and key in self._pre_compaction_reviews:
+            reason = pre_compaction_review.IN_PROGRESS
+        if reason is None:
+            state = self._memory_nudge_counters.get(key)
+            since = state.turns_since_review if state is not None else None
+            if since is not None and since <= pre_compaction_review.RECENT_REVIEW_USER_TURNS:
+                reason = pre_compaction_review.RECENT_REVIEW
+        if reason is not None:
+            pre_compaction_review.log_outcome(
+                session_key=session_key,
+                compaction=compaction,
+                outcome=pre_compaction_review.SKIPPED,
+                reason=reason,
+                agent_id=agent_id,
+            )
+            return pre_compaction_review.SKIPPED
+
+        timeout = float(getattr(self._memory_nudge_config(), "timeout_seconds", 90.0))
+        started = time.monotonic()
+        scope = pre_compaction_review.ReviewScope(session_key)
+        task = asyncio.create_task(
+            self._pre_compaction_review_turn(agent_id, session_key, scope),
+            name=f"agentos-pre-compaction-review:{session_key}",
+        )
+        # Held until it finishes: a review cancelled at the deadline may
+        # still be unwinding after this returns, and until then it is the
+        # session's review (in_progress).
+        self._memory_nudge_pending.add(task)
+        task.add_done_callback(self._memory_nudge_pending.discard)
+        self._pre_compaction_reviews[key] = task
+
+        def _release(done_task: asyncio.Task[Any]) -> None:
+            if self._pre_compaction_reviews.get(key) is done_task:
+                del self._pre_compaction_reviews[key]
+
+        task.add_done_callback(_release)
+        try:
+            done, _ = await asyncio.wait({task}, timeout=timeout)
+        except asyncio.CancelledError:
+            # The compaction itself was cancelled (a new user turn cancels a
+            # proactive job): the review goes with it, and says so. If it
+            # does not stop at once, it may not start another write.
+            scope.close_writes()
+            task.cancel()
+            pre_compaction_review.log_outcome(
+                session_key=session_key,
+                compaction=compaction,
+                outcome=pre_compaction_review.CANCELLED,
+                agent_id=agent_id,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                timeout_seconds=timeout,
+            )
+            raise
+        # Whatever happened, the compaction starts now; a review still
+        # running from here on cannot begin another memory write.
+        scope.close_writes()
+        if task not in done:
+            # Compaction does not wait for the review to unwind.
+            task.cancel()
+            outcome = pre_compaction_review.TIMEOUT
+        elif task.cancelled() or task.exception() is not None:
+            outcome = pre_compaction_review.ERROR
+        else:
+            outcome = task.result()
+        self._note_memory_review_ran(agent_id, session_key)
+        pre_compaction_review.log_outcome(
+            session_key=session_key,
+            compaction=compaction,
+            outcome=outcome,
+            agent_id=agent_id,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            timeout_seconds=timeout,
+        )
+        return outcome
+
+    async def _pre_compaction_review_turn(
+        self,
+        agent_id: str,
+        session_key: str,
+        scope: pre_compaction_review.ReviewScope | None = None,
+    ) -> str:
+        """The review turn, without the session lock and fenced off from compaction.
+
+        The periodic review starts inside the user's turn and inherits its
+        lock ownership, so it never takes the session lock and only writes
+        under the short write lock. This turn starts from a compaction
+        instead, so it claims the same arrangement explicitly. Holding the
+        session lock for the whole review would instead stall the user's
+        next message for up to the review timeout.
+        """
+        lock = self.get_session_lock(session_key)
+        inherited_owners = _SESSION_LOCK_OWNER.get(None)
+        owners: dict[int, asyncio.Task[Any]] = dict(inherited_owners or {})
+        current = asyncio.current_task()
+        if current is not None:
+            owners[id(lock)] = current
+        inherited_bypass = _SESSION_LOCK_BYPASS_ONLY.get(None)
+        bypass: set[int] = set(inherited_bypass or set())
+        bypass.add(id(lock))
+        owner_token = _SESSION_LOCK_OWNER.set(owners)
+        bypass_token = _SESSION_LOCK_BYPASS_ONLY.set(bypass)
+        try:
+            with pre_compaction_review.pre_compaction_review_scope(scope or session_key):
+                return await self._run_memory_nudge_review(
+                    agent_id=agent_id,
+                    session_key=session_key,
+                    variant=_PRE_COMPACTION_MEMORY_REVIEW,
+                )
+        finally:
+            _SESSION_LOCK_BYPASS_ONLY.reset(bypass_token)
+            _SESSION_LOCK_OWNER.reset(owner_token)
 
     @staticmethod
     def _capture_filter_matches(value: str | None, excluded_values: Any) -> bool:
@@ -3857,6 +4193,16 @@ class TurnRunner:
 
     async def _append_session_message(self, session_key: str, **append_kwargs: Any) -> Any:
         if self._session_manager is None:
+            return None
+        if _INTERNAL_TURN.get() is not None:
+            # Every transcript append of a turn comes through here: the reply,
+            # an error note, a stopped turn's partial reply.
+            log.info(
+                "turn_runner.internal_turn_write_skipped",
+                session_key=session_key,
+                run_kind=_INTERNAL_TURN.get(),
+                role=append_kwargs.get("role"),
+            )
             return None
         async with self._session_write_context(session_key):
             return await self._session_manager.append_message(
@@ -4055,7 +4401,8 @@ class TurnRunner:
             max_provider_retries=max_provider_retries,
             length_capped_continuations=length_capped_continuations,
             input_mode=input_mode,
-            persist_input=persist_input,
+            # An internal turn's input is never persisted, whatever the caller asked.
+            persist_input=persist_input and not _is_internal_turn(run_kind),
             input_provenance=input_provenance,
             history_has_persisted_user=history_has_persisted_user,
             fresh_user_session=fresh_user_session,
@@ -4069,11 +4416,19 @@ class TurnRunner:
             router_control_replay_depth=router_control_replay_depth,
             persisted_user_message_id=persisted_user_message_id,
         )
-        # aclosing: abandoning this generator closes the harness run at once,
-        # so its ``finally`` (budget release, progress detach) runs now.
-        async with aclosing(self._harness.run_turn(request)) as events:
-            async for event in events:
-                yield event
+        internal = _INTERNAL_TURN.set(run_kind) if _is_internal_turn(run_kind) else None
+        try:
+            # aclosing: abandoning this generator closes the harness run at once,
+            # so its ``finally`` (budget release, progress detach) runs now.
+            async with aclosing(self._harness.run_turn(request)) as events:
+                async for event in events:
+                    yield event
+        finally:
+            if internal is not None:
+                # Closed from another context (garbage collection): nothing
+                # to undo there.
+                with contextlib.suppress(ValueError):
+                    _INTERNAL_TURN.reset(internal)
 
     @staticmethod
     def _write_trace_event(
@@ -4276,6 +4631,16 @@ class TurnRunner:
     ) -> None:
         """Best-effort durable transcript record for terminal turn errors."""
         if self._session_manager is None or event is None:
+            return
+        if _INTERNAL_TURN.get() is not None:
+            # No error note, and no error-driven compaction either: both would
+            # change the transcript an internal turn must leave as it was.
+            log.info(
+                "turn_runner.internal_turn_error_not_persisted",
+                session_key=session_key,
+                run_kind=_INTERNAL_TURN.get(),
+                code=event.code,
+            )
             return
         error_code, message = sanitize_agent_error(
             {
@@ -6140,7 +6505,9 @@ class TurnRunner:
         of purely in-memory messages treats every persisted row as newer.
         """
         snapshots = getattr(self, "_compaction_snapshots", None)
-        if snapshots is None:
+        if snapshots is None or pre_compaction_review.is_pre_compaction_review(session_key):
+            # The pre-compaction review cannot compact, so it needs no anchor,
+            # and it must not replace the one a running turn recorded.
             return
         snapshots.pop(session_key, None)
         last = transcript[-1] if transcript else None

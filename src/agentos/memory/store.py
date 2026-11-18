@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import importlib
 import json
@@ -9,6 +10,8 @@ import math
 import re
 import struct
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -199,6 +202,24 @@ class LongTermMemoryStore:
         self._db: aiosqlite.Connection | None = None
         self._dirty = False
         self._embedding_usage: dict[str, Any] = _zero_embedding_usage(self._provider)
+        # Every write after initialize() runs under this lock. The store has
+        # one connection, and index_file() holds an explicit transaction
+        # across awaits: another write interleaved there either fails its own
+        # BEGIN or commits half of index_file's update.
+        self._write_lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def _writing(self) -> AsyncIterator[None]:
+        """Hold the write lock; roll back an open transaction on any exit by
+        exception, cancellation included, so none outlives the lock."""
+        async with self._write_lock:
+            try:
+                yield
+            except BaseException:
+                db = self._db
+                if db is not None and db.in_transaction:
+                    await asyncio.shield(db.rollback())
+                raise
 
     async def initialize(self) -> None:
         """Open DB, ensure schema, probe vector extension."""
@@ -483,15 +504,16 @@ class LongTermMemoryStore:
     async def _ensure_vec_table(self, dims: int) -> None:
         """Create or verify the vec virtual table with correct dimensions."""
         assert self._db is not None
-        await self._db.execute(
-            f"""
-            CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(
-                id TEXT PRIMARY KEY,
-                embedding FLOAT[{dims}]
+        async with self._writing():
+            await self._db.execute(
+                f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(
+                    id TEXT PRIMARY KEY,
+                    embedding FLOAT[{dims}]
+                )
+                """
             )
-            """
-        )
-        await self._db.commit()
+            await self._db.commit()
 
     # ------------------------------------------------------------------
     # Embedding cache helpers
@@ -585,6 +607,18 @@ class LongTermMemoryStore:
 
         provider_id, model, provider_key = self._cache_key_prefix()
         now = time.time()
+        async with self._writing():
+            await self._write_embedding_cache(items, provider_id, model, provider_key, now)
+
+    async def _write_embedding_cache(
+        self,
+        items: list[tuple[str, list[float]]],
+        provider_id: str,
+        model: str,
+        provider_key: str,
+        now: float,
+    ) -> None:
+        assert self._db is not None
         try:
             for h, vec in items:
                 await self._db.execute(
@@ -716,6 +750,26 @@ class LongTermMemoryStore:
 
         # Wrap all SQLite mutations in an explicit transaction so a crash mid-operation
         # leaves the DB in a consistent state (either fully updated or fully rolled back).
+        async with self._writing():
+            await self._write_chunks(
+                path, source, chunk_records, embeddings, file_hash, mtime, size
+            )
+
+        self._dirty = False
+        return len(chunk_records)
+
+    async def _write_chunks(
+        self,
+        path: str,
+        source: MemorySource,
+        chunk_records: list[tuple[Any, ...]],
+        embeddings: list[list[float] | None],
+        file_hash: str,
+        mtime: float,
+        size: int,
+    ) -> None:
+        """Replace *path*'s rows in one transaction; the caller holds the write lock."""
+        assert self._db is not None
         await self._db.execute("BEGIN IMMEDIATE")
         try:
             # Delete old chunks — vec first (needs chunk IDs before they're deleted)
@@ -771,24 +825,22 @@ class LongTermMemoryStore:
             await self._db.rollback()
             raise
 
-        self._dirty = False
-        return len(chunk_records)
-
     async def remove_file(self, path: str) -> None:
         assert self._db is not None
-        # Vec first — needs chunk IDs before they're deleted (same pattern as index_file)
-        if self._vec_available:
-            try:
-                await self._db.execute(
-                    "DELETE FROM chunks_vec WHERE id IN (SELECT id FROM chunks WHERE path = ?)",
-                    (path,),
-                )
-            except Exception:
-                pass
-        await self._db.execute("DELETE FROM chunks_fts WHERE path = ?", (path,))
-        await self._db.execute("DELETE FROM chunks WHERE path = ?", (path,))
-        await self._db.execute("DELETE FROM files WHERE path = ?", (path,))
-        await self._db.commit()
+        async with self._writing():
+            # Vec first — needs chunk IDs before they're deleted (same pattern as index_file)
+            if self._vec_available:
+                try:
+                    await self._db.execute(
+                        "DELETE FROM chunks_vec WHERE id IN (SELECT id FROM chunks WHERE path = ?)",
+                        (path,),
+                    )
+                except Exception:
+                    pass
+            await self._db.execute("DELETE FROM chunks_fts WHERE path = ?", (path,))
+            await self._db.execute("DELETE FROM chunks WHERE path = ?", (path,))
+            await self._db.execute("DELETE FROM files WHERE path = ?", (path,))
+            await self._db.commit()
 
     async def rebuild(self) -> None:
         """Clear rebuildable index rows.
@@ -797,15 +849,16 @@ class LongTermMemoryStore:
         memory sources and derived session sources after this call.
         """
         assert self._db is not None
-        if self._vec_available:
-            try:
-                await self._db.execute("DELETE FROM chunks_vec")
-            except Exception:
-                pass
-        await self._db.execute("DELETE FROM chunks_fts")
-        await self._db.execute("DELETE FROM chunks")
-        await self._db.execute("DELETE FROM files")
-        await self._db.commit()
+        async with self._writing():
+            if self._vec_available:
+                try:
+                    await self._db.execute("DELETE FROM chunks_vec")
+                except Exception:
+                    pass
+            await self._db.execute("DELETE FROM chunks_fts")
+            await self._db.execute("DELETE FROM chunks")
+            await self._db.execute("DELETE FROM files")
+            await self._db.commit()
         self._dirty = True
 
     async def health(self) -> dict[str, Any]:
