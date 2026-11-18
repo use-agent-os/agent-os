@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useGateway } from '~/stores/gateway'
 import { useTradingUi } from '~/stores/trading-ui'
@@ -296,5 +296,47 @@ describe('TradingView · Markets and the ticket', () => {
     fireEvent.click(await screen.findByTestId('tool-inspect'))
     expect(useTradingUi.getState()).toMatchObject({ sheet: null, deskMode: true })
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
+  })
+})
+
+describe('TradingView · the wallet rail', () => {
+  const SECOND = {
+    ...WALLET,
+    address: '0x2222222222222222222222222222222222222222',
+    label: 'Second',
+    primary: false,
+  }
+
+  it('opens the wallet manager from the rail', async () => {
+    rpcCall.mockImplementation(async (method: string) => {
+      switch (method) {
+        case 'trading.status':
+          return {
+            enabled: true,
+            apiKeyConfigured: false,
+            chains: [],
+            limits: { approvalThresholdUsd: 100, dailyCapUsd: 1000, approvalTtlSeconds: 900 },
+            unlockMode: 'auto',
+            unlocked: true,
+            syncing: false,
+            lastSyncAt: null,
+            provider: 'aggregator',
+            providers: [],
+          }
+        case 'wallet.status':
+          return { initialized: true, unlocked: true, unlockMode: 'auto', walletCount: 2 }
+        case 'wallet.list':
+          return { wallets: [WALLET, SECOND], primary: WALLET.address }
+        default:
+          return {}
+      }
+    })
+    renderDesk(<TradingView />)
+    await waitFor(() =>
+      expect(screen.getByTestId('trading-desk')).toHaveAttribute('data-rail', 'on'),
+    )
+    const rail = screen.getByRole('complementary', { name: 'Wallets' })
+    fireEvent.click(within(rail).getByRole('button', { name: 'Manage wallets' }))
+    expect(await screen.findAllByTestId('manage-address')).toHaveLength(2)
   })
 })

@@ -1,4 +1,4 @@
-import { CircleCheck, Download, Lock, MoreHorizontal, Plus } from 'lucide-react'
+import { CircleCheck, Download, Lock, MoreHorizontal, Plus, Settings2 } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { PopMenu } from '~/components/menu/PopMenu'
 import { Button } from '~/components/ui/button'
@@ -24,6 +24,7 @@ export type WalletSelection = 'all' | string
 export type WalletAction =
   | { kind: 'create' }
   | { kind: 'import' }
+  | { kind: 'manage' }
   | { kind: 'rename'; wallet: Wallet }
   | { kind: 'export'; wallet: Wallet }
   | { kind: 'remove'; wallet: Wallet }
@@ -162,6 +163,14 @@ export function WalletRail({
         >
           <Download className="size-3.5" strokeWidth={2} aria-hidden />
           {t('trading.rail.import')}
+        </button>
+        <button
+          type="button"
+          className="trd-rail__add app-no-drag"
+          onClick={() => onAction({ kind: 'manage' })}
+        >
+          <Settings2 className="size-3.5" strokeWidth={2} aria-hidden />
+          {t('trading.rail.manage')}
         </button>
       </div>
 
