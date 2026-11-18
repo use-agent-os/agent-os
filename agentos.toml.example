@@ -324,6 +324,12 @@ enabled = true
 interval = 10            # user turns between reviews; 0 disables
 # max_iterations = 6     # ceiling on the review turn's own tool loop
 # timeout_seconds = 90.0
+#
+# Review once more right before a proactive or manual compaction summarises
+# a private chat (not for a compaction forced by a full context). Bounded by
+# timeout_seconds; the compaction never depends on what it saved.
+# before_compaction = true
+
 
 
 [skills]

@@ -1003,6 +1003,11 @@ Every filter on `sessions list` runs client-side over the recent history rather
 than over the page `--limit` would show, so `--limit` bounds how many matches
 are printed, not how far back the filter looks.
 
+`sessions delete` also removes the session's derived memory index document
+(when session indexing is on), so memory search stops returning it. What the
+session taught the agent stays in memory; `agentos memory forget --session`
+removes that.
+
 Sessions are auto-named. `rename` gives one a human-readable label that shows
 up in `sessions list`, in the chat toolbar, and in the Web UI Sessions list, and
 that `--search`, `resume`, and `show` all accept in place of the key. Inside a
@@ -1618,6 +1623,7 @@ agentos memory raw-fallbacks show <path>
 agentos memory recall status [--session <session-key>] [--show-block] [--json]
 agentos memory recall pause --session <session-key>
 agentos memory recall resume --session <session-key>
+agentos memory forget --session <id-or-key> [--session ...] [--agent <id>] [--dry-run] [--json]
 ```
 
 `memory recall status` shows the `[memory.recall]` settings, paused sessions,
@@ -1631,6 +1637,27 @@ fallback). The same values are in `--json` as `deepProvider` / `deepModel` /
 `pause` / `resume` switch proactive recall off and on for one session only;
 the switch lives in the gateway until it restarts and does not change
 `[memory.recall] enabled`.
+
+`agentos config set <key> <value> --config <path>` says whether a running
+gateway applies the key on its own or needs a restart; `[memory.recall]` and
+`[memory.nudge]` apply without one.
+
+`memory status --json` also counts, for `MEMORY.md` and `USER.md`, the
+entries whose origin is recorded (`tracked`) and those without one
+(`untracked`).
+
+`memory forget` removes what the selected sessions taught the agent: curated
+entries with any origin from them (an entry that also came from other
+sessions is removed whole and listed as `mixed`), note blocks they saved where
+every copy of that text in the note is theirs (an edited, extended or shared
+block is listed as `unmatched`, reason `changed` or `ambiguous`, and left
+alone) and their session index documents. The sessions are then kept out of
+indexing; what could not be removed keeps its lineage, so running the forget
+again retries it. One forget runs at a time per agent. A selector is a full
+session id (that transcript) or a full session key (every transcript under
+it, including later ones); a prefix never matches. An unresolved selector changes nothing and exits 2; a report with
+`errors` exits 1. Transcripts, turn-capture files, checkpoints and untracked
+or hand-edited text are not removed; the report's `notCovered` says so.
 
 Read: [`features/memory.md`](features/memory.md)
 

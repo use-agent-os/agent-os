@@ -507,6 +507,95 @@ def memory_recall_resume_cmd(
     _set_recall_enabled(session, True, json_output)
 
 
+@memory_app.command("forget")
+def memory_forget_cmd(
+    sessions: list[str] = typer.Option(
+        ...,
+        "--session",
+        "-s",
+        help="Full session id or full session key to forget (repeatable; no prefixes).",
+    ),
+    agent_id: str = typer.Option("main", "--agent", help="Agent id (default: main)"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be removed and change nothing"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Remove what the selected sessions taught the agent.
+
+    Removes curated entries those sessions wrote, note blocks only they
+    wrote (edited or shared ones are reported, not removed) and their
+    session index documents, and keeps the sessions out of future indexing.
+    Transcripts are not deleted (use `agentos sessions delete`).
+    """
+
+    from agentos.cli.gateway_rpc import run_gateway_sync
+    from agentos.cli.output import print_json
+    from agentos.cli.ui import console
+
+    async def _run(client):
+        return await client.call(
+            "memory.forget",
+            {"agentId": agent_id, "sessions": list(sessions), "dryRun": dry_run},
+        )
+
+    payload = run_gateway_sync(_run, json_output=json_output)
+    errors = payload.get("errors") or []
+    if json_output:
+        print_json(payload)
+    else:
+        _print_forget_report(console, payload)
+    if errors:
+        raise typer.Exit(1)
+
+
+def _print_forget_report(console: Console, payload: dict) -> None:
+    dry_run = bool(payload.get("dryRun"))
+    verb = "would remove" if dry_run else "removed"
+    for session in payload.get("sessions") or []:
+        _print_stored_text(
+            console,
+            f"session {session.get('selector')} (by {session.get('matchedBy')}; "
+            f"key {session.get('sessionKey') or '-'}; "
+            f"ids {', '.join(session.get('sessionIds') or []) or '-'})"
+            + (" — already forgotten" if session.get("alreadyForgotten") else ""),
+        )
+    curated = payload.get("curated") or []
+    _print_stored_text(console, f"curated entries {verb}: {len(curated)}")
+    for row in curated:
+        mixed = " [mixed: also from other sessions]" if row.get("mixed") else ""
+        _print_stored_text(console, f"  {row.get('target')}: {row.get('entry')}{mixed}")
+    notes = payload.get("notes") or []
+    _print_stored_text(console, f"note blocks {verb}: {len(notes)}")
+    for row in notes:
+        _print_stored_text(
+            console,
+            f"  {row.get('path')} ({row.get('chars')} chars, x{row.get('occurrences')})",
+        )
+    for row in payload.get("unmatched") or []:
+        detail = f" ({row['detail']})" if row.get("detail") else ""
+        _print_stored_text(
+            console,
+            f"  unmatched {row.get('path')}: {row.get('reason')}{detail} (left unchanged)",
+        )
+    documents = payload.get("sessionDocuments") or []
+    _print_stored_text(console, f"session index documents {verb}: {len(documents)}")
+    untracked = payload.get("untracked") or {}
+    if untracked:
+        _print_stored_text(
+            console,
+            "untracked entries kept: "
+            + ", ".join(f"{target} {count}" for target, count in sorted(untracked.items())),
+        )
+    for error in payload.get("errors") or []:
+        _print_stored_text(
+            console, f"error ({error.get('stage')} {error.get('target')}): {error.get('message')}"
+        )
+    _print_stored_text(console, str(payload.get("notCovered") or ""))
+    if dry_run:
+        _print_stored_text(console, "Dry run: nothing was changed.")
+
+
 @memory_app.command("ingest")
 def memory_ingest_cmd(
     path: str = typer.Argument(

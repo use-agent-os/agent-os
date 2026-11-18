@@ -12,6 +12,9 @@ Four places ask for compaction:
 * ``proactive`` -- between turns, from
   :class:`~agentos.engine.proactive_compaction.ProactiveCompactionScheduler`.
 
+None of them compacts a session from inside the memory review that runs
+before that session's compaction (:mod:`agentos.engine.pre_compaction_review`).
+
 They used to call :class:`~agentos.engine.compaction_service.CompactionService`
 each in their own way. The coordinator builds the service for the caller,
 runs it, and records one ``compaction.decision`` log entry per request with
@@ -29,9 +32,11 @@ from typing import Any, Literal
 import structlog
 
 from agentos.engine.compaction_service import (
+    CompactionResult,
     CompactionService,
     auxiliary_chunk_summarizer,
 )
+from agentos.engine.pre_compaction_review import is_pre_compaction_review
 
 log = structlog.get_logger(__name__)
 
@@ -76,6 +81,17 @@ class CompactionCoordinator:
             kwargs["phase"] = phase
         return self._service_factory(**kwargs)
 
+    def skip_reason(
+        self, messages: list[Any], *, phase: str | None = None, **compact_kwargs: Any
+    ) -> str | None:
+        """Why :meth:`compact` would leave *messages* unchanged, without a model call.
+
+        See :meth:`CompactionService.skip_reason`; nothing is logged or
+        notified. Callers use it to skip work that only pays off when the
+        compaction really summarises (the pre-compaction memory review).
+        """
+        return self.service(phase=phase).skip_reason(messages, **compact_kwargs)
+
     async def compact(
         self,
         messages: list[Any],
@@ -88,6 +104,26 @@ class CompactionCoordinator:
 
         if trigger not in TRIGGERS:
             raise ValueError(f"unknown compaction trigger: {trigger!r}")
+        if is_pre_compaction_review(self._session_key):
+            # The memory review that runs before a compaction must leave the
+            # transcript exactly as it found it, so its own turn never
+            # compacts: the request goes out as is (a real overflow ends the
+            # review with an error) and the compaction it precedes runs next.
+            log.info(
+                "compaction.decision",
+                session_key=self._session_key,
+                trigger=trigger,
+                status="skipped",
+                reason="pre_compaction_review",
+                compacted=False,
+                forced=bool(compact_kwargs.get("force", False)),
+            )
+            return CompactionResult(
+                status="skipped",
+                messages=messages,
+                turn_input_index=int(compact_kwargs.get("turn_input_index", len(messages))),
+                reason="pre_compaction_review",
+            )
         result = await self.service(phase=phase).compact(messages, **compact_kwargs)
         reason = getattr(result, "reason", None)
         # The preflight check runs before every provider request; a request

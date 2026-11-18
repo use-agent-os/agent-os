@@ -1143,6 +1143,25 @@ fast one. The call is the auxiliary task `memory_recall`, so
 when no chat provider is configured. See
 [`features/memory.md`](features/memory.md#proactive-recall).
 
+The memory review (`[memory.nudge]`) is a short background turn that saves
+durable facts from the conversation: every `interval` user turns, and with
+`before_compaction` once more right before a proactive or manual compaction
+summarises a private chat. That review is bounded by `timeout_seconds`, can
+only add (new entries, appended notes; no replace, remove or overwrite), and
+is skipped when the compaction would summarise nothing
+(`nothing_to_compact`, decided without a model call) and for compactions
+forced by a full context; the compaction does not depend on what it saved.
+`[memory.nudge]` and `[memory.recall]` changes apply without a restart.
+
+```toml
+[memory.nudge]
+enabled = true
+interval = 10                  # user turns between reviews; 0 disables (both triggers)
+max_iterations = 6
+timeout_seconds = 90.0         # also the most a manual compaction waits for its review
+before_compaction = true       # review once before a proactive or manual compaction
+```
+
 ### Turn setup concurrency
 
 Before a turn's first model request AgentOS reads several independent things:
@@ -1294,11 +1313,13 @@ model = "openai/gpt-4o-mini"
 ```
 
 Point it at something cheap when these tasks do not need your main model. Tasks
-currently in use are `document`, `vision`, `session_title`, `suggest_next` and
+currently in use are `document`, `vision`, `session_title`, `suggest_next`,
 `compaction` (the in-turn context summary; it defaults to the router's cheapest
-text tier and is bounded by `[compaction] summary_timeout_seconds`); a task with a
-capability requirement wants its own entry, since a text-only model cannot
-describe an image.
+text tier and is bounded by `[compaction] summary_timeout_seconds`) and
+`memory_recall` (proactive recall's deep lane, which inherits the chat model
+rather than `[auxiliary]`; see [Memory Configuration](#memory-configuration)).
+A task with a capability requirement wants its own entry, since a text-only
+model cannot describe an image.
 
 Resolution runs highest-first: `AGENTOS_<TASK>_MODEL` (for example
 `AGENTOS_VISION_MODEL`), then `[auxiliary.tasks.<task>]`, then a

@@ -327,6 +327,11 @@ async def apply_context_overflow_policy(
                 outcome.refusal = _build_refusal_envelope(post_estimate, budget, outcome.reason)
                 return outcome
 
+            # Forced by a context that is already over budget: there is no
+            # room for the memory review that precedes other compactions.
+            note_no_review = getattr(compaction_marker, "note_compaction_without_review", None)
+            if callable(note_no_review):
+                note_no_review(session_key=session_key, compaction="gateway_auto_summarize")
             compaction_id = new_compaction_id()
             notify_compaction(
                 session_key,
