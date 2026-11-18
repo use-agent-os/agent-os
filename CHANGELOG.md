@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.18.post2] - 2026-11-18
+
 ### Added
 - A memory review before compaction. Right before a proactive or manual
   compaction summarises a private chat, the memory review runs once, so facts
