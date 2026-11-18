@@ -573,6 +573,10 @@ def test_router_judge_on_per_call_loops_leaks_no_sockets() -> None:
                 api_key=key or "local", model=model, base_url=url or base_url
             ),
         )
+        # Collect garbage that earlier tests in this process left behind first;
+        # the gc.collect() below would otherwise report their unclosed objects
+        # (e.g. anyio memory streams) as this test's leaks.
+        gc.collect()
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             results = [
