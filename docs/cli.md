@@ -1590,8 +1590,8 @@ every error is `{"error": …}` on stderr and writes no card.
 addresses, default empty: contracts an aggregator quote may name as the
 approval spender and swap target on top of the built-in AgentOS Router and
 0x AllowanceHolder; added, never replacing them; mixed case must pass its
-EIP-55 checksum; e.g. `agentos config set trading.aggregator_trusted_spenders
-'["0x…"]'`), `uniswap_api_key`, `uniswap_api_key_env`
+EIP-55 checksum; set it as a JSON list of the verified addresses, e.g.
+`'["0x…"]'`), `uniswap_api_key`, `uniswap_api_key_env`
 (default `UNISWAP_API_KEY`), `rpc_urls` (chain id → JSON-RPC URL; the wallet sync's bulk ERC-20
 balance read still tries the chain's public node first),
 `approval_threshold_usd`, `daily_cap_usd` (0 = agent swaps off),
