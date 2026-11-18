@@ -381,6 +381,22 @@ def test_ubuntu_quality_runs_frontend_source_gate_without_rebuilding() -> None:
     assert check["if"] == "needs.classify-changes.outputs.frontend_changed == 'true'"
 
 
+def test_ci_runs_slow_tests_serially_outside_xdist() -> None:
+    """Latency benchmarks (``-m slow``) must not share CPUs with xdist workers.
+
+    ``test_pilot_benchmark`` asserts a 50 ms warm p50; on a 4-vCPU runner with
+    four busy workers it measured 111 ms and failed main after #3920.
+    """
+    for job in ("ubuntu-quality", "windows-compat"):
+        commands = [str(step.get("run", "")) for step in _steps("ci.yml", job)]
+        parallel = [c for c in commands if c.startswith("uv run pytest tests") and "-n auto" in c]
+        serial = [c for c in commands if c.startswith("uv run pytest tests") and "-m slow" in c]
+
+        assert len(parallel) == 1, job
+        assert '-m "not slow"' in parallel[0], f"{job} must keep slow tests out of xdist"
+        assert serial == ["uv run pytest tests -q -m slow"], f"{job} must run slow tests serially"
+
+
 def test_ci_routes_expensive_jobs_by_event_and_change_class() -> None:
     """Runner minutes go where they buy signal.
 

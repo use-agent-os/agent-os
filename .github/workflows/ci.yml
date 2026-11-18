@@ -190,9 +190,15 @@ jobs:
       # The suite is mostly I/O wait (about 1/2 CPU serially), so xdist
       # workers cut wall time ~3x; tests/conftest.py gives each worker its own
       # state dir. --durations keeps the slow tail visible in the log.
+      # `slow` tests (latency benchmarks) run alone in the next step: sharing
+      # the runner's CPUs with busy workers doubles their measured p50.
       - name: Test
         shell: bash
-        run: uv run pytest tests -q -n auto --durations=25
+        run: uv run pytest tests -q -n auto -m "not slow" --durations=25
+
+      - name: Test (slow, serial)
+        shell: bash
+        run: uv run pytest tests -q -m slow
 
       - name: Verify metric counter names unchanged
         shell: bash
@@ -321,7 +327,11 @@ jobs:
 
       - name: Test
         shell: bash
-        run: uv run pytest tests -q -n auto
+        run: uv run pytest tests -q -n auto -m "not slow"
+
+      - name: Test (slow, serial)
+        shell: bash
+        run: uv run pytest tests -q -m slow
 
   release-packaging:
     name: Release packaging contracts
