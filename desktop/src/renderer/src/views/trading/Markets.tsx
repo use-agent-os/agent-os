@@ -609,7 +609,7 @@ function Section({
             <span>{t('trading.markets.col.price')}</span>
             <span>{t('trading.markets.col.change')}</span>
             <span>{t('trading.markets.col.age')}</span>
-            <span />
+            <ActSizer />
           </div>
           <ul className="trd-mk__rows">
             {shown.map((pool) => (
@@ -635,6 +635,26 @@ function Section({
         </>
       )}
     </section>
+  )
+}
+
+/**
+ * The head's last cell: an invisible copy of a row's buttons. The head and each
+ * row are separate grids sharing one column template, so an empty `auto` act
+ * column here would be 0px while every row's is as wide as its buttons — and
+ * the head's flexible columns would run wider than the values under them.
+ */
+function ActSizer() {
+  return (
+    <span className="trd-mk__act trd-mk__act--sizer">
+      <span className="mac-button trd-mk__open" data-variant="ghost" data-size="icon">
+        <ExternalLink className="size-3" strokeWidth={1.75} />
+      </span>
+      <span className="mac-button trd-mk__swap" data-variant="secondary" data-size="md">
+        <ArrowLeftRight className="size-3" strokeWidth={2} />
+        <span>{t('trading.markets.swap')}</span>
+      </span>
+    </span>
   )
 }
 
