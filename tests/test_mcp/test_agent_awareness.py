@@ -551,13 +551,28 @@ async def test_boot_connects_servers_at_once_and_registers_in_config_order(
     third = _fake("third", [_tool("other")], connect_delay=0.35)
     _install(monkeypatch, first, second, third)
 
-    started = time.perf_counter()
+    # Count the connects in flight instead of timing the boot: a wall-clock
+    # bound flakes on a slow runner (Windows CI took 0.86 s against 0.8 s).
+    in_flight = 0
+    peak = 0
+    for client in (first, second, third):
+
+        async def connect(original=client.connect) -> None:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            try:
+                await original()
+            finally:
+                in_flight -= 1
+
+        monkeypatch.setattr(client, "connect", connect)
+
     await _discover_configured_mcp_servers(
         _boot_config(tmp_path, ["first", "second", "third"]), registry
     )
-    elapsed = time.perf_counter() - started
 
-    assert elapsed < 0.8  # one after another would be 1.05 s
+    assert peak == 3  # one after another would never overlap
     by_server = {e.server_name: e.registered_tools for e in discovery.active_clients_snapshot()}
     assert by_server == {
         "first": ("mcp_lookup",),
