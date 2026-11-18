@@ -29,7 +29,14 @@ import { Notice } from '~/views/settings/parts'
 import { History } from './History'
 import { Holdings } from './Holdings'
 import { Markets } from './Markets'
-import { EMPTY_TOTALS, errorText, filterHoldings, isAwaitingApproval, sameAddress } from './logic'
+import {
+  EMPTY_TOTALS,
+  errorText,
+  filterHoldings,
+  isAwaitingApproval,
+  sameAddress,
+  syncShown,
+} from './logic'
 import { Orders } from './Orders'
 import { Overview } from './Overview'
 import { ChainMark } from './ChainMark'
@@ -472,7 +479,9 @@ function Desk({
             totals={totals}
             holdings={holdings}
             unpricedCount={portfolio.data?.unpricedCount ?? 0}
-            syncing={Boolean(portfolio.data?.syncing || status.data?.syncing)}
+            // The engine's routine pass is not shown: with many wallets it
+            // runs most of the time. A resync shows from the click on.
+            syncing={sync.isPending || syncShown(portfolio.data) || syncShown(status.data)}
             lastSyncAt={status.data?.lastSyncAt ?? null}
             now={now}
             loading={portfolio.isPending}

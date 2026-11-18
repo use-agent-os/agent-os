@@ -136,6 +136,65 @@ describe('TradingView · the venue pill', () => {
   })
 })
 
+describe('TradingView · the sync state', () => {
+  function engine(sync: { syncing: boolean; syncKind?: string | null }) {
+    rpcCall.mockImplementation(async (method: string) => {
+      switch (method) {
+        case 'trading.status':
+          return {
+            enabled: true,
+            apiKeyConfigured: false,
+            chains: [],
+            limits: { approvalThresholdUsd: 100, dailyCapUsd: 1000, approvalTtlSeconds: 900 },
+            unlockMode: 'auto',
+            unlocked: true,
+            lastSyncAt: Date.now() - 5_000,
+            ...sync,
+          }
+        case 'wallet.status':
+          return { initialized: true, unlocked: true, unlockMode: 'auto', walletCount: 1 }
+        case 'wallet.list':
+          return { wallets: [WALLET], primary: WALLET.address }
+        case 'trading.portfolio':
+          return {
+            totals: { valueUsd: 0 },
+            holdings: [],
+            wallets: [],
+            updatedAt: 0,
+            ...sync,
+          }
+        default:
+          return {}
+      }
+    })
+  }
+
+  it('keeps the routine pass quiet: the desk shows how fresh it is instead', async () => {
+    // Many wallets: the engine's own pass runs most of the time.
+    engine({ syncing: true, syncKind: 'background' })
+    renderDesk(<TradingView />)
+    expect(await screen.findByText(/Last sync/)).toBeInTheDocument()
+    expect(screen.queryByText('Syncing')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Resync from chain' })).toBeEnabled()
+  })
+
+  it.each(['requested', 'initial'])(
+    'shows a %s pass, which someone is waiting on',
+    async (kind) => {
+      engine({ syncing: true, syncKind: kind })
+      renderDesk(<TradingView />)
+      expect(await screen.findByText('Syncing')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Resync from chain' })).toBeDisabled()
+    },
+  )
+
+  it('reads an older engine, which sends no kind, as it always did', async () => {
+    engine({ syncing: true })
+    renderDesk(<TradingView />)
+    expect(await screen.findByText('Syncing')).toBeInTheDocument()
+  })
+})
+
 describe('TradingView · Markets and the ticket', () => {
   beforeEach(() => {
     useTradingUi.setState({

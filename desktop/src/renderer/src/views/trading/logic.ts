@@ -1,5 +1,15 @@
 import { keccak_256 } from '@noble/hashes/sha3.js'
-import type { ChainId, Entry, Holding, Initiator, Order, OrderStatus, Token, Totals } from './types'
+import type {
+  ChainId,
+  Entry,
+  Holding,
+  Initiator,
+  Order,
+  OrderStatus,
+  SyncKind,
+  Token,
+  Totals,
+} from './types'
 import { CHAINS } from './types'
 
 /**
@@ -262,6 +272,22 @@ export function sameToken(
 ): boolean {
   if (!a || !b) return false
   return a.chainId === b.chainId && a.address.toLowerCase() === b.address.toLowerCase()
+}
+
+// ── Sync ────────────────────────────────────────────────────────────────────
+
+/**
+ * Whether the desk shows "Syncing" for this payload. The engine's routine
+ * pass keeps the figures fresh and, with many wallets, runs most of the
+ * time: shown, it read as a desk that never finished. Only a pass someone
+ * waits on (a resync, a new wallet's first sweep, a rebuild) is shown. An
+ * older engine sends no `syncKind`; its `syncing` stands as it always did.
+ */
+export function syncShown(
+  state: { syncing?: boolean; syncKind?: SyncKind | null } | null | undefined,
+): boolean {
+  if (!state?.syncing) return false
+  return state.syncKind !== 'background'
 }
 
 // ── Tones ───────────────────────────────────────────────────────────────────

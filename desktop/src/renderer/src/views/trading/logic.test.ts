@@ -9,6 +9,7 @@ import {
   gasReserveEth,
   maxSpendable,
   splitDust,
+  syncShown,
   allocationSegments,
   amountFromPct,
   approvalSecondsLeft,
@@ -545,5 +546,20 @@ describe('activeFirst', () => {
     expect(input.map((x) => x.label)).toEqual(['a', 'b', 'c', 'd'])
     // No primary at all (a fresh vault): nothing moves.
     expect(activeFirst([w('a'), w('b')]).map((x) => x.label)).toEqual(['a', 'b'])
+  })
+})
+
+describe('syncShown', () => {
+  it('hides the engine routine pass and shows one someone waits on', () => {
+    expect(syncShown({ syncing: true, syncKind: 'background' })).toBe(false)
+    expect(syncShown({ syncing: true, syncKind: 'requested' })).toBe(true)
+    expect(syncShown({ syncing: true, syncKind: 'initial' })).toBe(true)
+  })
+
+  it('shows nothing while no pass runs, and trusts an older engine without a kind', () => {
+    expect(syncShown({ syncing: false, syncKind: null })).toBe(false)
+    expect(syncShown(undefined)).toBe(false)
+    expect(syncShown({ syncing: true })).toBe(true)
+    expect(syncShown({ syncing: true, syncKind: null })).toBe(true)
   })
 })

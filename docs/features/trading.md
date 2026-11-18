@@ -50,6 +50,12 @@ gateway RPC surface (`wallet.*`, `trading.*`).
   fails to answer leaves the stored amount alone and marks that wallet/chain
   read `partial` (`failed` when the node was unreachable), which
   `wallet.balances` reports per chain and the CLI prints under the table.
+  `trading.status` and `trading.portfolio` carry `syncing` and `syncKind`,
+  why the pass in flight runs: `background` (the loop's own clock),
+  `requested` (a resync, a wallet import, a `--refresh`) or `initial` (a
+  wallet/chain swept for the first time, or rebuilt); `null` while none
+  runs. The desktop shows "Syncing" for the last two only: with many
+  wallets the background pass runs most of the time.
 - **Junk stays out of sight** — anyone can airdrop a token to any address.
   A token is hidden automatically when nobody lists it (not in the chain's
   CoinGecko registry), nobody trades it (no DexScreener pool with at least

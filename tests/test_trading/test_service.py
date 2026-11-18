@@ -218,6 +218,82 @@ class TestTokensAndBalances:
         await asyncio.gather(*service._confirm_tasks)
         assert service.ledger.get_balance(8453, wallet, stray) == 4
 
+    async def test_sync_kind_tells_the_routine_pass_from_one_someone_waits_on(
+        self, funded_service: TradingService, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A client shows "syncing" only when the pass is not the engine's routine.
+
+        With many wallets the routine pass runs most of the time, so a
+        spinner bound to ``syncing`` alone never went out.
+        """
+        service = funded_service
+        wallet = service.test_wallet  # type: ignore[attr-defined]
+        seen: list[str | None] = []
+        real_sync = service.syncer.sync
+
+        async def spy(*args: object, **kwargs: object) -> bool:
+            seen.append(service.sync_kind)
+            return await real_sync(*args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(service.syncer, "sync", spy)
+        assert service.sync_kind is None
+
+        # A wallet's first sweep: its rows are not there yet.
+        await service.sync_all()
+        assert seen and set(seen) == {"initial"}
+        assert service.sync_kind is None
+
+        # The engine's own clock, once every pair has been swept.
+        seen.clear()
+        await service.sync_all()
+        assert seen and set(seen) == {"background"}
+
+        # Someone asked: the resync button, a wallet import.
+        seen.clear()
+        service.request_sync(wallet=wallet)
+        await asyncio.gather(*service._confirm_tasks)
+        assert seen and set(seen) == {"requested"}
+        assert service.sync_kind is None
+
+        # Both payloads a client polls carry it.
+        assert (await service.status())["syncKind"] is None
+        assert (await service.portfolio())["syncKind"] is None
+
+    async def test_a_request_during_the_routine_pass_makes_that_pass_its_own(
+        self, funded_service: TradingService, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The request is folded into the pass in flight, so that pass must show."""
+        service = funded_service
+        await service.sync_all()  # every pair swept once: the next pass is routine
+        started = asyncio.Event()
+        release = asyncio.Event()
+        real_sync = service.syncer.sync
+        seen: list[str | None] = []
+
+        async def held(*args: object, **kwargs: object) -> bool:
+            seen.append(service.sync_kind)
+            started.set()
+            await release.wait()
+            seen.append(service.sync_kind)
+            return await real_sync(*args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(service.syncer, "sync", held)
+        routine = asyncio.create_task(service.sync_all())
+        await asyncio.wait_for(started.wait(), 2)
+        assert service.sync_kind == "background"
+
+        assert await service.sync_all(read_all=True, kind="requested") == 0
+        assert service.sync_kind == "requested"
+
+        release.set()
+        await routine
+        assert seen[0] == "background" and seen[-1] == "requested"
+        # The next routine pass is routine again.
+        assert service.sync_kind is None
+        seen.clear()
+        await service.sync_all()
+        assert set(seen) == {"background"}
+
     async def test_balances_and_portfolio(
         self, funded_service: TradingService, base_chain: FakeChain
     ) -> None:

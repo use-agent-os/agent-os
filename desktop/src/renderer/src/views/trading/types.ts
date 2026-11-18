@@ -743,6 +743,13 @@ export interface Totals {
   change24hPct: number | null
 }
 
+/**
+ * Why the engine's ledger sync is running: its own clock (`background`),
+ * someone asked (`requested`), or a wallet/chain is swept for the first
+ * time or rebuilt (`initial`). `null` while no pass runs.
+ */
+export type SyncKind = 'background' | 'requested' | 'initial'
+
 export interface Portfolio {
   totals: Totals
   holdings: Holding[]
@@ -753,6 +760,8 @@ export interface Portfolio {
   wallets: { wallet: Wallet; totals: Totals; unpricedCount?: number }[]
   updatedAt: number
   syncing: boolean
+  /** Why the pass in flight runs; older engines omit it. */
+  syncKind?: SyncKind | null
 }
 
 export type GuardDecision = 'allow' | 'needs_approval' | 'blocked_daily_cap'
@@ -848,6 +857,8 @@ export interface TradingStatus {
   unlockMode: UnlockMode
   unlocked: boolean
   syncing: boolean
+  /** Why the pass in flight runs; older engines omit it. */
+  syncKind?: SyncKind | null
   lastSyncAt: number | null
   /** Older engines omit these; the app then assumes the default provider. */
   provider?: ProviderId
