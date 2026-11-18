@@ -64,6 +64,10 @@ class _Service:
     async def _emit(self, event: str, payload: dict[str, Any]) -> None:
         self.events.append((event, payload))
 
+    @property
+    def lp_book(self) -> lp_book.LpBook:
+        return self.book
+
 
 class _Setup:
     """A Base chain with V4 positions (``pepe_world``) and classic AMMs side by side."""
@@ -82,6 +86,7 @@ class _Setup:
         monkeypatch.setattr(lp, "_engine_env", self.env)
         monkeypatch.setattr(lp_book, "state_dir", lambda *parts: tmp_path.joinpath(*parts))
         self.book = self.new_book()
+        self.service.book = self.book
 
     def new_book(self) -> lp_book.LpBook:
         return lp_book.LpBook(self.service, now=lambda: self.clock[0])  # type: ignore[arg-type]
@@ -438,3 +443,42 @@ async def test_the_real_service_keeps_the_book(
     assert (await book.read(refresh=True))["refreshing"] is True
     await service.stop()
     assert book.refreshing is False
+
+
+# ── `trading.lp.positions` and the book share what they found (2026-11-18) ──
+
+
+async def test_the_positions_card_starts_from_the_ids_the_book_found(setup: _Setup) -> None:
+    """An agent asking `lp positions` after the tab was read searched all over again."""
+    await setup.read()
+    await setup.settle()
+    setup.blind = True  # no indexer, no logs: only the saved ids can find them
+    calls = setup.indexer_calls
+    card = await lp.lp_positions(setup.service, chains=[BASE])  # type: ignore[arg-type]
+    assert card["totals"]["count"] == 3 and card["partialScan"] is False
+    assert setup.indexer_calls == calls
+
+
+async def test_a_position_minted_since_is_still_searched_for(setup: _Setup) -> None:
+    await setup.read()
+    await setup.settle()
+    store = setup.book._amm_store(BASE.chain_id)
+    slot = lp_book._v4_slot(WALLET)
+    kept = store.nfts[slot]["ids"]
+    store.nfts[slot] = {"ids": kept[:-1]}
+    calls = setup.indexer_calls
+    card = await lp.lp_positions(setup.service, chains=[BASE])  # type: ignore[arg-type]
+    assert card["totals"]["count"] == 3 and setup.indexer_calls > calls
+    # ...and the card's find is the book's from then on.
+    assert store.nfts[slot]["ids"] == kept
+
+
+async def test_the_positions_card_leaves_ids_for_the_book(setup: _Setup) -> None:
+    card = await lp.lp_positions(setup.service, chains=[BASE])  # type: ignore[arg-type]
+    assert card["totals"]["count"] == 3
+    # The emptied position counts too: the wallet still holds its NFT.
+    assert len(setup.book.v4_ids(BASE, [WALLET.lower()])) == 4
+    # An address outside the vault is read, not remembered.
+    other = "0x" + "9" * 40
+    await lp.lp_positions(setup.service, chains=[BASE], wallets=[other])  # type: ignore[arg-type]
+    assert lp_book._v4_slot(other) not in setup.book._amm_store(BASE.chain_id).nfts

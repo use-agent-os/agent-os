@@ -17,7 +17,7 @@ from typing import Any
 import httpx
 import pytest
 
-from agentos.trading import lp
+from agentos.trading import lp, lp_book
 from agentos.trading.chains import BASE, ROBINHOOD
 from agentos.trading.prices import PriceInfo
 from agentos.trading.service import TradingError
@@ -363,6 +363,7 @@ class _Service:
         self.config = type("C", (), {"rpc_urls": {"base": "https://rpc.example/base-key"}})()
         self.prices = _Prices()
         self.vault = _Vault()
+        self.lp_book = lp_book.LpBook(self)  # type: ignore[arg-type]
 
     async def resolve_token(self, chain: Any, value: str) -> Any:
         raise TradingError("trading.invalid", f"Unknown token symbol {value!r}")
