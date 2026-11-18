@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.19.post1] - 2026-11-19
+
 ### Added
 - Desk → Trade: the swap box and the Confirm swap sheet now show an
   **AgentOS DEX Fee** row, the fee the AgentOS Aggregator takes on the swap,
