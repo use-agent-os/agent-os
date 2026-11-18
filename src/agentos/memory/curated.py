@@ -116,6 +116,17 @@ def _atomic_replace(tmp_path: str | Path, target: Path) -> None:
         pass
 
 
+def _entry_text(text: str) -> str:
+    """An entry as it will read back from disk: line endings as ``\n``, trimmed.
+
+    The files are read in text mode, which turns ``\r\n`` and ``\r`` into
+    ``\n``. Storing submitted text unnormalised makes the entry in memory
+    differ from the entry on disk, and on Windows a submitted ``\r\n`` is
+    written as ``\r\r\n`` and comes back as a blank line.
+    """
+    return text.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
 class CuratedMemoryStore:
     """Bounded curated memory with file persistence. One instance per agent."""
 
@@ -247,7 +258,7 @@ class CuratedMemoryStore:
         caller_key: str | None = None,
         changes: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
-        content = content.strip()
+        content = _entry_text(content)
         if not content:
             return {"success": False, "error": "Content cannot be empty."}
         scan_error = _scan(content)
@@ -302,7 +313,7 @@ class CuratedMemoryStore:
         changes: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         old_text = old_text.strip()
-        new_content = new_content.strip()
+        new_content = _entry_text(new_content)
         if not old_text:
             return {"success": False, "error": "old_text cannot be empty."}
         if not new_content:
@@ -550,7 +561,7 @@ class CuratedMemoryStore:
                 scan_error = _scan(new_content)
                 if scan_error:
                     return {"success": False, "error": f"Operation {i + 1}: {scan_error}"}
-                stripped = new_content.strip()
+                stripped = _entry_text(new_content)
                 if stripped and self._would_not_round_trip(stripped):
                     refusal = self._delimiter_error(stripped)
                     return {**refusal, "error": f"Operation {i + 1}: {refusal['error']}"}
@@ -570,7 +581,7 @@ class CuratedMemoryStore:
             for i, op in enumerate(operations):
                 op = op or {}
                 act = op.get("action")
-                content = (op.get("content") or "").strip()
+                content = _entry_text(op.get("content") or "")
                 old_text = (op.get("old_text") or "").strip()
                 pos = f"Operation {i + 1} ({act or 'unknown'})"
 
