@@ -2637,6 +2637,12 @@ class TradingConfig(BaseSettings):
     # Where the aggregator is served. Only change this to point at another
     # deployment of the same API.
     aggregator_base_url: str = "https://agg.useagentos.dev"
+    # Extra contracts an aggregator quote may name as the approval spender
+    # (and send the swap to), on top of the built-in pins: the AgentOS Router
+    # and 0x's AllowanceHolder. For when the gateway moves to a new contract
+    # before this build knows it. Each must be an address you have verified;
+    # one the wallet approves can move up to the approved amount.
+    aggregator_trusted_spenders: list[str] = Field(default_factory=list)
     # Where Relay (the Base ⇄ Robinhood Chain bridge) is served; public and
     # keyless. Only change this to point at another deployment of its API.
     relay_base_url: str = "https://api.relay.link"
@@ -2682,6 +2688,29 @@ class TradingConfig(BaseSettings):
         raise ValueError(
             f"{key} must use https (http is allowed only for 127.0.0.1, localhost or ::1)"
         )
+
+    @field_validator("aggregator_trusted_spenders")
+    @classmethod
+    def _spenders_must_be_contract_addresses(cls, value: list[str]) -> list[str]:
+        """Lower-cased, de-duplicated 0x addresses; a mixed-case one must pass
+        its EIP-55 checksum, so a mistyped letter is caught here rather than
+        trusted as some other contract. The zero / native address is refused."""
+        from agentos.trading.chains import is_native, normalize_address
+
+        out: list[str] = []
+        for raw in value or []:
+            text = str(raw or "").strip()
+            if is_native(text):
+                raise ValueError(
+                    f"trading.aggregator_trusted_spenders: {text!r} is not a contract address"
+                )
+            try:
+                address = normalize_address(text)
+            except ValueError as exc:
+                raise ValueError(f"trading.aggregator_trusted_spenders: {exc}") from exc
+            if address not in out:
+                out.append(address)
+        return out
 
     def resolved_uniswap_api_key(self) -> str:
         """The API key to send: explicit config value, else the named env var."""
