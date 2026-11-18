@@ -493,6 +493,7 @@ function Desk({
                 totals={railTotals}
                 onAction={onWalletAction}
                 onSetPrimary={onSetPrimary}
+                onManage={() => setSheet({ kind: 'manage' })}
                 chains={status.data?.chains ?? []}
                 railOpen={railOpen}
                 onToggleRail={() => setRailWanted(!railWanted)}

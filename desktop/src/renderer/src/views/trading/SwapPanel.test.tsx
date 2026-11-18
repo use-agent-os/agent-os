@@ -162,7 +162,7 @@ describe('SwapPanel', () => {
     expect(screen.getByTestId('quote-guard')).toHaveTextContent('you are confirming it yourself')
   })
 
-  it('opens the confirm sheet from Review and asks the amount to be retyped above 1,000 USD', async () => {
+  it('opens the confirm sheet from Review and asks for "confirm" to be typed above 1,000 USD', async () => {
     rpcCall.mockImplementation(async (method: string) =>
       method === 'trading.quote'
         ? quote({ valueUsd: 2500, amountIn: '1', amountOut: '2500' })
@@ -192,7 +192,11 @@ describe('SwapPanel', () => {
 
     const send = await screen.findByTestId('confirm-send')
     expect(send).toBeDisabled()
-    fireEvent.change(screen.getByTestId('confirm-retype'), { target: { value: '1.0' } })
+    expect(screen.getByLabelText('Large swap. Type "confirm" to send it.')).toBeInTheDocument()
+    // Retyping the amount no longer unlocks it; only the word does.
+    fireEvent.change(screen.getByTestId('confirm-retype'), { target: { value: '1' } })
+    expect(send).toBeDisabled()
+    fireEvent.change(screen.getByTestId('confirm-retype'), { target: { value: 'confirm' } })
     expect(send).not.toBeDisabled()
     fireEvent.click(send)
 
