@@ -218,6 +218,31 @@ async def test_a_search_that_came_up_short_is_not_repeated_every_minute(setup: _
     assert book["partialScan"] is False
 
 
+async def test_a_short_search_that_found_something_goes_on_at_the_next_refresh(
+    setup: _Setup,
+) -> None:
+    """Robinhood Chain's node throttles the log walk to a few wallets per time
+    budget: a search that is getting somewhere must not wait out the back-off."""
+    await setup.read()
+    await setup.settle()
+    pool = next(iter(setup.v4.pools.values()))
+    setup.v4.add_position(pool, 99_003, -210_000, -200_000, 10**18, WALLET)
+    setup.v4.add_position(pool, 99_004, -210_000, -200_000, 10**18, WALLET)
+    answers = [[99_003], [99_004]]
+    setup.indexer = lambda owner, **kwargs: answers.pop(0)  # type: ignore[method-assign]
+
+    async def refresh() -> dict[str, Any]:
+        setup.clock[0] += lp_book.BOOK_TTL_S
+        await setup.read()
+        await setup.settle()
+        return await setup.read()
+
+    book = await refresh()
+    assert book["totals"]["count"] == 4 and book["partialScan"] is True
+    book = await refresh()
+    assert answers == [] and book["totals"]["count"] == 5 and book["partialScan"] is False
+
+
 async def test_gauges_are_walked_on_the_first_read_and_then_only_when_asked(
     setup: _Setup,
 ) -> None:

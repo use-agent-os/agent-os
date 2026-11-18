@@ -79,6 +79,7 @@ def _shape(value: Any) -> Any:
 def _isolated_cache(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENTOS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(lp, "_full_range_refused", {})
+    monkeypatch.setattr(lp, "_stated_spans", {})
     monkeypatch.setattr(lp, "_in_flight", {})
     monkeypatch.setattr(lp, "_shared_logs", {})
     monkeypatch.setattr(lp, "LOG_RETRY_DELAY_S", 0.0)
@@ -686,6 +687,100 @@ def test_refused_full_history_walks_back_until_the_wallet_is_complete() -> None:
     assert int(first["toBlock"], 16) - int(first["fromBlock"], 16) + 1 == BASE.approval_log_span
 
 
+class _ValueCappedNode:
+    """Robinhood Chain's public node since 2026-11: a filter with one value per
+    topic position is served over 10,000,000 blocks, one with several values in
+    a position over 100,000 only -- and no filter over the whole history."""
+
+    ONE, MANY = 10_000_000, 100_000
+
+    def __init__(self, world: Any, minted: dict[str, tuple[int, list[int]]]) -> None:
+        self.world, self.minted = world, minted
+        self.url = "https://value-capped.example"
+        self.requests = 0
+        self.filters: list[dict[str, Any]] = []
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.world, name)
+
+    def _logs(self, params: dict[str, Any]) -> list[Any]:
+        topics = params["topics"]
+        received = len(topics) > 2
+        owners = topics[2] if received else topics[1]
+        owners = owners if isinstance(owners, list) else [owners]
+        allowed = self.ONE if len(owners) == 1 else self.MANY
+        head = self.world.block
+        lo = int(params["fromBlock"], 16)
+        hi = head if params["toBlock"] == "latest" else int(params["toBlock"], 16)
+        if hi - lo + 1 > allowed:
+            hint = "" if len(owners) == 1 else ", or send one value per position"
+            raise RuntimeError(
+                f"eth_getLogs: query spans {hi - lo + 1} blocks ({lo} to {hi}), but only "
+                f"{allowed} are allowed for this request; narrow the block range{hint}"
+            )
+        self.filters.append(params)
+        out: list[Any] = []
+        for owner in owners if received else []:
+            block, ids = self.minted.get("0x" + owner[-40:], (0, []))
+            if lo <= block <= hi:
+                out += [
+                    {
+                        "topics": [LIB.abi.TOPIC_ERC721_TRANSFER, "0x" + "0" * 64, owner, hex(t)],
+                        "blockNumber": hex(block),
+                    }
+                    for t in ids
+                ]
+        return out
+
+    def get_logs(self, params: dict[str, Any]) -> list[Any]:
+        self.requests += 1
+        return self._logs(params)
+
+    def batch(self, calls: list[dict[str, Any]], chunk_size: int = 20) -> list[Any]:
+        self.requests += 1
+        out: list[Any] = []
+        for call in calls:
+            try:
+                out.append(self._logs(call["params"][0]))
+            except RuntimeError as exc:
+                out.append({"error": {"code": -32602, "message": str(exc)}})
+        return out
+
+
+def test_a_node_capping_many_valued_filters_is_walked_one_wallet_at_a_time() -> None:
+    """Robinhood Chain, 2026-11-18: every V4 position of fifteen wallets went
+    missing. The node stopped serving the whole history, and the walk that
+    replaced it asked for all the wallets in one filter, which the node serves
+    100,000 blocks at a time: 1,170 windows, far past the time budget. One
+    wallet per filter is served 10,000,000 blocks at a time."""
+    world = pepe_world()
+    world.block = 117_250_000
+    node = _ValueCappedNode(
+        world,
+        {
+            WALLET.lower(): (50_955_037, [48_213, 48_214, 48_215, 48_216]),
+            OUTSIDER.lower(): (30_000_000, [47_100]),
+        },
+    )
+    env = env_for(world)
+    env.client = node
+    rows = lp.build_chain_positions(env, [WALLET.lower(), OUTSIDER.lower()], True)
+    assert len(rows) == 5 and env.partial is False and env.warnings == []
+    assert node.requests <= 8
+    assert node.filters and all(not isinstance(f["topics"][-1], list) for f in node.filters)
+
+
+def test_one_wallet_is_walked_at_the_span_the_node_states() -> None:
+    world = pepe_world()
+    world.block = 117_250_000
+    node = _ValueCappedNode(world, {WALLET.lower(): (50_955_037, [48_213, 48_214, 48_215, 48_216])})
+    env = env_for(world)
+    env.client = node
+    rows = lp.build_chain_positions(env, [WALLET.lower()], True)
+    assert len(rows) == 4 and env.partial is False
+    assert node.requests <= 4
+
+
 def test_window_walk_stops_at_the_wallets_creation_block() -> None:
     world = pepe_world()
     world.block = 30_000_000
@@ -771,6 +866,38 @@ def test_full_history_falls_back_to_the_public_node_for_logs_only() -> None:
     env.log_client = PublicNode()
     rows = lp.build_chain_positions(env, [WALLET.lower()], False)
     assert len(rows) == 3 and env.partial is False
+
+
+def test_the_configured_endpoint_is_asked_for_the_history_before_the_public_node() -> None:
+    """Base, 2026-11-18: the public node answered every ``eth_getLogs`` with
+    "request limit reached" while the user's own endpoint served the whole
+    history in one request -- and was never asked."""
+    world = pepe_world()
+    world.logs_refused = False
+    topic = "0x" + "0" * 24 + WALLET[2:].lower()
+    asked: list[str] = []
+
+    def get_logs(params: dict[str, Any]) -> list[dict[str, Any]]:
+        asked.append(params["toBlock"])
+        if len(params["topics"]) < 3:
+            return []
+        return [
+            {"topics": [LIB.abi.TOPIC_ERC721_TRANSFER, "0x" + "0" * 64, topic, hex(t)]}
+            for t in (48_213, 48_214, 48_215, 48_216)
+        ]
+
+    world.get_logs = get_logs  # type: ignore[method-assign]
+
+    class PublicNode:
+        url = "https://public.example"
+
+        def get_logs(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+            pytest.fail("the public node is only asked when the configured one refuses")
+
+    env = env_for(world)
+    env.log_client = PublicNode()
+    rows = lp.build_chain_positions(env, [WALLET.lower()], True)
+    assert len(rows) == 4 and env.partial is False and asked == ["latest", "latest"]
 
 
 # ── choosing the pool (live-chain regressions, 2026-09-27) ─────────────────
@@ -982,6 +1109,16 @@ def test_log_failures_are_classified_by_message(message: str, kind: str) -> None
         ("range over 100000 blocks is not supported", 100_000),
         ("query exceeds max block span 10000", 10_000),
         ("block range too large", None),
+        (
+            "query spans 117246425 blocks (9070 to 117255494), but only 10000000 are "
+            "allowed for this request; narrow the block range",
+            10_000_000,
+        ),
+        (
+            "query spans 9998977 blocks (107256509 to 117255485), but only 100000 are allowed "
+            "for this request; narrow the block range, or send one value per position",
+            100_000,
+        ),
     ],
 )
 def test_a_span_refusal_states_its_span(message: str, span: int | None) -> None:
