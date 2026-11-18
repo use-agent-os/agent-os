@@ -21,6 +21,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   controls sit beside the state line. A truncated figures line shows in
   full on hover.
 
+### Fixed
+- Desk → Liquidity: a long pool line under the pair (wallet, protocol, fee
+  tier, NFT id such as `Uniswap V4 · dynamic · #1933797`) no longer runs
+  over the Range column. It now ends with an ellipsis at the edge of the Pool
+  cell, and hovering it shows the whole line.
+
 ## [2026.11.19] - 2026-11-19
 
 ### Added
