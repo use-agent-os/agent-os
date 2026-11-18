@@ -381,14 +381,20 @@ function Item({
         </span>
         <ChevronDown className="trd-auto__chev size-3.5" strokeWidth={1.75} aria-hidden />
       </button>
-      <div className="trd-auto__word" data-testid="auto-word">
-        {d.word}
+      <div className="trd-auto__line">
+        <span className="trd-auto__word" data-testid="auto-word">
+          {d.word}
+        </span>
+        {d.facts.length ? (
+          <span
+            className="trd-auto__facts trd-mono"
+            title={d.facts.filter(Boolean).join(' · ')}
+            data-testid="auto-facts"
+          >
+            {d.facts.filter(Boolean).join(' · ')}
+          </span>
+        ) : null}
       </div>
-      {d.facts.length ? (
-        <div className="trd-auto__facts trd-mono" data-testid="auto-facts">
-          {d.facts.filter(Boolean).join(' · ')}
-        </div>
-      ) : null}
       {d.reason ? (
         <div className="trd-auto__reason" data-testid="auto-reason">
           {d.reason}
