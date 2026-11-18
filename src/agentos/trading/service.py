@@ -597,6 +597,13 @@ class TradingService:
                 else AggregatorClient(base_url=base, http=self._http)
             )
             self._aggregator_base = base
+        # Read on every use, like the base URL: an edit to the config file
+        # takes effect without a restart.
+        self._aggregator.extra_spenders = frozenset(
+            str(a).strip().lower()
+            for a in (getattr(self.config, "aggregator_trusted_spenders", None) or [])
+            if str(a).strip()
+        )
         return self._aggregator
 
     def provider_id(self) -> str:
@@ -5861,7 +5868,12 @@ class TradingService:
                 "trading.tx_failed",
                 f"swap target {to or '(none)'} is not a contract this desk trusts for "
                 f"{provider_label(provider)} on {chain.name}"
-                + ("" if targets else " (no swap contract is pinned for this chain)"),
+                + ("" if targets else " (no swap contract is pinned for this chain)")
+                + (
+                    " (if you have verified it, add it to trading.aggregator_trusted_spenders)"
+                    if provider == "aggregator"
+                    else ""
+                ),
             )
 
     @staticmethod

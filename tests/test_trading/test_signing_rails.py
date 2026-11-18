@@ -34,6 +34,7 @@ from tests.test_trading.fakes import (
 from tests.test_trading.test_service import _wire_swap_effects
 
 WETH_RH = "0xaaaa000000000000000000000000000000000003"
+NEW_GATEWAY_CONTRACT = "0x7777777777777777777777777777777777777777"
 
 
 async def _swap(service: TradingService, **overrides: object) -> dict:
@@ -113,6 +114,50 @@ class TestPinnedSwapTargets:
             approve = decode_fake_raw(base_chain.sent[0])
             assert approve["to"].lower() == USDC.lower()
             assert AGENTOS_ROUTER[2:] in approve["data"].lower()
+
+    @pytest.mark.parametrize(
+        ("token_in", "token_out", "amount_in", "needs_approval"),
+        [("USDC", "WETH", "10", True), ("ETH", "USDC", "0.001", False)],
+    )
+    async def test_a_contract_from_the_config_file_is_signed_for(
+        self,
+        funded_service: TradingService,
+        base_chain: FakeChain,
+        fake_aggregator: FakeAggregator,
+        token_in: str,
+        token_out: str,
+        amount_in: str,
+        needs_approval: bool,
+    ) -> None:
+        """A gateway moved to a contract this build does not know: the operator adds it."""
+        service = funded_service
+        wallet = service.test_wallet  # type: ignore[attr-defined]
+        if token_out == "USDC":
+            _wire_swap_effects(base_chain, wallet, out_token=USDC, out_amount=10 * 10**6)
+            fake_aggregator.tx_value = str(10**15)
+        else:
+            _wire_swap_effects(base_chain, wallet, out_amount=5 * 10**15)
+        fake_aggregator.approval_needed = needs_approval
+        fake_aggregator.tx_to = NEW_GATEWAY_CONTRACT
+        # Before it is configured: refused unsigned, at the spender or target pin.
+        order = await _swap(service, token_in=token_in, token_out=token_out, amount_in=amount_in)
+        assert order["status"] == "failed", order
+        assert "not a contract this desk trusts" in order["reason"]
+        assert "trading.aggregator_trusted_spenders" in order["reason"]
+        assert base_chain.sent == []
+        # Configured (as a config.set would: the value goes through the validator).
+        service.config.aggregator_trusted_spenders = [
+            NEW_GATEWAY_CONTRACT.upper().replace("0X", "0x")
+        ]
+        order = await _swap(service, token_in=token_in, token_out=token_out, amount_in=amount_in)
+        assert order["status"] == "confirmed", order
+        assert decode_fake_raw(base_chain.sent[-1])["to"].lower() == NEW_GATEWAY_CONTRACT
+        # And taken out again: the next order is refused without a restart.
+        service.config.aggregator_trusted_spenders = []
+        sent = len(base_chain.sent)
+        order = await _swap(service, token_in=token_in, token_out=token_out, amount_in=amount_in)
+        assert order["status"] == "failed", order
+        assert len(base_chain.sent) == sent
 
     async def test_the_aggregator_pins_the_allowance_holder_for_every_sell(
         self, http: httpx.AsyncClient, fake_aggregator: FakeAggregator

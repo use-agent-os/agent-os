@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- `trading.aggregator_trusted_spenders`: a list of extra contracts an
+  AgentOS Aggregator quote may name as the approval spender and swap target,
+  on top of the built-in AgentOS Router and 0x AllowanceHolder. When the
+  gateway moves to a new contract, the operator can add its verified address
+  (`agentos config set trading.aggregator_trusted_spenders '["0x…"]'`)
+  instead of waiting for a release. It only adds to the built-in pins, the
+  spender must still be the swap target, each entry is checked as a 0x
+  address (EIP-55 for mixed case, zero address refused), and it applies on
+  the next quote without a restart. Operator-only, like every `trading.*`
+  key. The "not a contract this desk trusts" errors now name the key.
+
 ### Fixed
 - Swaps through the AgentOS Aggregator signed again once the gateway quoted
   through the AgentOS Router (contract mode). The desk only trusted 0x's

@@ -147,7 +147,9 @@ one the engine pins itself: the AgentOS Router
 (`0x4cf93bac8920b1efc92b0d2c84dcbe56802e530c`, the same immutable contract on
 Base and Robinhood Chain, which the gateway quotes through in contract mode)
 or 0x's AllowanceHolder (`0x0000000000001ff3684f28c67538d4d072c22734`, when
-it quotes 0x directly) — and refuses the quote outright otherwise. The approval is always for exactly
+it quotes 0x directly), or one the operator added with
+`trading.aggregator_trusted_spenders` — and refuses the quote outright
+otherwise. The approval is always for exactly
 the order's amount, never unlimited.
 
 The tokenised stocks on Robinhood Chain (29 of the 34 listed: AAPL, TSLA,
@@ -187,6 +189,7 @@ CoinGecko / your RPC node); only quoting and calldata do.
 enabled = true
 provider = "aggregator"              # or "uniswap"
 aggregator_base_url = "https://agg.useagentos.dev"
+aggregator_trusted_spenders = []     # extra aggregator spender/target contracts, on top of the built-in pins
 uniswap_api_key = ""                 # only for provider = "uniswap"; or set UNISWAP_API_KEY
 uniswap_api_key_env = "UNISWAP_API_KEY"
 approval_threshold_usd = 100.0       # agent orders above this wait for approval
@@ -219,6 +222,24 @@ because dRPC, Alchemy and Infura keys live in the path. Writing that
 redacted form back through `config.apply` / `config.patch` keeps the stored
 URL. `aggregator_base_url` must be `https`; `http` is accepted only for
 `127.0.0.1`, `localhost` or `::1`.
+
+`aggregator_trusted_spenders` adds contracts an aggregator quote may name as
+the approval spender and send the swap to, on top of the two the engine pins
+itself (the AgentOS Router and 0x's AllowanceHolder). It is for when the
+gateway moves to a contract this build does not know yet: rather than waiting
+for a release, the operator verifies the new address and adds it:
+
+```bash
+agentos config set trading.aggregator_trusted_spenders '["0x…"]'
+```
+
+It only adds; the built-in pins always stay trusted, and the approval's
+spender must still be the contract the swap is sent to. Each entry must be a
+0x address (a mixed-case one must pass its EIP-55 checksum; the zero address
+is refused), and is stored lower-cased. It takes effect on the next quote,
+without a restart. Like every `trading.*` key it is operator-only: an agent
+cannot add a spender. Trust only a contract you have checked — a spender the
+wallet approves can move up to the approved amount of that token.
 Get a key from the Uniswap developer dashboard; the desktop's **Settings →
 Trading** pane has a *Test key* button (`trading.probe`).
 
