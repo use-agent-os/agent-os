@@ -184,6 +184,11 @@ _loaded: Unilp | None = None
 #: there, the span limit the refusal stated or ``None``).
 _full_range_refused: dict[str, tuple[float, int | None]] = {}
 #: Full-history requests in flight, and answers shared for a few seconds, by
+#: (RPC URL, whether the filter was many-valued) -> the block span the node
+#: last said it serves for such a filter. Robinhood Chain's public node serves
+#: one value per topic position over 10,000,000 blocks and several values over
+#: 100,000 only, so the two are remembered apart.
+_stated_spans: dict[tuple[str, bool], int] = {}
 #: (URL, address, topics): see :func:`full_range_logs`.
 _flights_lock = threading.Lock()
 _in_flight: dict[tuple[str, str, str], Future[tuple[list[Any] | None, str, int | None]]] = {}
@@ -432,6 +437,10 @@ _STATED_SPAN = re.compile(
     r"|(\d[\d,]{2,}) blocks?\b",
     re.IGNORECASE,
 )
+#: Robinhood Chain's node names the span asked for before the one it allows:
+#: "query spans 117246425 blocks (...), but only 10000000 are allowed". The
+#: allowance is the rule, so this form is looked for first.
+_ALLOWED_SPAN = re.compile(r"\bonly (\d[\d,]{2,})", re.IGNORECASE)
 
 
 def log_failure_kind(error: object) -> str:
@@ -461,15 +470,26 @@ def _log_error_message(error: object) -> str:
 
 def stated_span(error: object) -> int | None:
     """The block span a span refusal says the node allows, when it says one."""
-    match = _STATED_SPAN.search(_log_error_message(error))
+    message = _log_error_message(error)
+    match = _ALLOWED_SPAN.search(message) or _STATED_SPAN.search(message)
     if match is None:
         return None
-    span = int((match.group(1) or match.group(2)).replace(",", ""))
+    span = int(next(g for g in match.groups() if g).replace(",", ""))
     return span or None
 
 
+def _many_valued(topics: Iterable[Any]) -> bool:
+    """Whether a log filter offers several values in one topic position."""
+    return any(isinstance(t, list) and len(t) > 1 for t in topics)
+
+
 def full_range_logs(
-    env: ChainEnv, address: str, topics: list[Any], *, recent_fallback: bool = False
+    env: ChainEnv,
+    address: str,
+    topics: list[Any],
+    *,
+    recent_fallback: bool = False,
+    client: Any | None = None,
 ) -> list[Any] | None:
     """One ``eth_getLogs`` over the chain's whole V4 history; ``None`` when refused.
 
@@ -487,8 +507,11 @@ def full_range_logs(
     (and its answer, for ``FULL_RANGE_SHARE_TTL_S``): nine desk turns reading
     one wallet sent nine identical full-history requests, and Robinhood
     Chain's node answered HTTP 429 to most of them.
+
+    ``client`` asks that node instead (the position search asks the user's own
+    endpoint first).
     """
-    client = env.log_client or env.client
+    client = client or env.log_client or env.client
     url = getattr(client, "url", None)
     refused = _full_range_refused.get(url) if isinstance(url, str) else None
     if refused is not None and time.monotonic() - refused[0] < FULL_RANGE_REFUSAL_TTL_S:
@@ -582,6 +605,8 @@ def _full_range_request(
                 span = stated_span(exc)
                 if isinstance(url, str):
                     _full_range_refused[url] = (time.monotonic(), span)
+                    if span is not None:
+                        _stated_spans[(url, _many_valued(request["topics"]))] = span
                 return None, kind, span
             if kind != "transient":
                 return None, kind, None
@@ -2070,7 +2095,7 @@ def _search_logs(env: ChainEnv, search: _PositionSearch, owners: list[str]) -> s
     """Feed the search from ERC-721 Transfer logs into and out of ``owners``.
 
     Full history first, both directions at once, from a node that serves it
-    (Robinhood Chain's public one does, in about a second): what the wallets
+    (the engine's configured endpoint, then the chain's public one): what the wallets
     still hold by the logs is verified first, then -- only if that falls short
     of the balance -- everything they ever received, newest first. A node that
     refuses walks back from the head in batches of windows it does accept and
@@ -2085,11 +2110,20 @@ def _search_logs(env: ChainEnv, search: _PositionSearch, owners: list[str]) -> s
     padded = [lib.hexutil.pad(o.lower(), size=32) for o in owners]
     manager = chain["positionManager"]
     transfer = lib.abi.TOPIC_ERC721_TRANSFER
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        received, sent = pool.map(
-            lambda topics: full_range_logs(env, manager, topics),
-            ([transfer, None, padded], [transfer, padded]),
-        )
+    # The user's own endpoint first, when there is one: Base's public node
+    # answers every ``eth_getLogs`` from a busy address with "request limit
+    # reached", while a provider's Base node serves the whole history at once.
+    nodes = [env.client] if env.log_client is None else [env.client, env.log_client]
+    received: list[Any] | None = None
+    sent: list[Any] | None = None
+    for node in nodes:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            received, sent = pool.map(
+                lambda topics, node=node: full_range_logs(env, manager, topics, client=node),  # type: ignore[misc]
+                ([transfer, None, padded], [transfer, padded]),
+            )
+        if received is not None:
+            break
     if received is not None:
         held, ever = holdings_from_logs([*received, *(sent or [])], owners)
         if sent is not None:
@@ -2099,20 +2133,105 @@ def _search_logs(env: ChainEnv, search: _PositionSearch, owners: list[str]) -> s
         search.verify(ever, until_complete=True)
         return "part of the logged transfers" if search.stopped else None
 
-    base_filter = {"address": manager, "topics": [transfer, None, padded]}
     genesis = int(chain["logScan"].get("fromBlock", 0))
-    floor = min(env.first_blocks.get(o.lower(), genesis) for o in owners)
-    floor = max(floor, genesis)
     deadline = time.monotonic() + LOG_SCAN_BUDGET_S
     if env.deadline is not None:
         deadline = min(deadline, env.deadline)
     top = env.block or int(env.client.block_number())
-    spans = [env.spec.approval_log_span, env.spec.max_log_span]
-    retries = 0
-    while spans and top >= floor and not search.complete():
-        if time.monotonic() >= deadline or search.out_of_time():
+    narrow = [env.spec.approval_log_span, env.spec.max_log_span]
+    wide = _one_owner_span(env, manager, [transfer, None, padded[0]], many=len(owners) > 1)
+    walks: list[tuple[Any, list[str], Any, list[int]]]
+    if wide is not None and wide >= len(owners) * narrow[0]:
+        # Fewer windows one wallet at a time than for all of them in one filter.
+        client = env.log_client or env.client
+        walks = [(client, [o], p, [wide, *narrow]) for o, p in zip(owners, padded, strict=True)]
+    else:
+        walks = [(env.client, owners, padded, narrow)]
+    unserved: int | None = None
+    for client, group, to_topic, spans in walks:
+        floor = max(min(env.first_blocks.get(o.lower(), genesis) for o in group), genesis)
+        reached, timed_out = _walk_logs(
+            env,
+            search,
+            client,
+            {"address": manager, "topics": [transfer, None, to_topic]},
+            group,
+            spans,
+            top,
+            floor,
+            deadline,
+        )
+        if timed_out:
             search.stopped = True
-            return f"Transfer logs before block {top:,}"
+            return f"Transfer logs before block {reached:,}"
+        if reached >= floor and not _accounted_for(search, group):
+            unserved = reached if unserved is None else max(unserved, reached)
+    if unserved is not None:
+        env.warn(
+            f"{env.spec.name}: the node would not serve Transfer logs before block {unserved:,}"
+        )
+    return None
+
+
+def _accounted_for(search: _PositionSearch, owners: Iterable[str]) -> bool:
+    """Whether every one of ``owners`` has as many verified positions as it holds."""
+    for owner in owners:
+        need = search.expected.get(owner.lower(), 0)
+        if need < 0 or search.have(owner.lower()) < need:
+            return False
+    return True
+
+
+def _one_owner_span(env: ChainEnv, address: str, topics: list[Any], *, many: bool) -> int | None:
+    """The block span the log node says it serves for a one-wallet filter.
+
+    Known from the full-history request just refused when that asked for one
+    wallet. When it asked for several and the node stated a span for that, the
+    node may serve one wallet over a wider span (Robinhood Chain's does, a
+    hundred times wider): it is asked once, for the first wallet, and its
+    answer is remembered. ``None`` when the node states no span.
+    """
+    client = env.log_client or env.client
+    url = getattr(client, "url", None)
+    if not isinstance(url, str):
+        return None
+    known = _stated_spans.get((url, False))
+    if known is not None or not many or (url, True) not in _stated_spans:
+        return known
+    genesis = int(env.chain["logScan"].get("fromBlock", 0))
+    request = {"address": address, "topics": topics, "fromBlock": hex(genesis), "toBlock": "latest"}
+    logs, _, _ = _full_range_request(env, client, url, request)
+    if logs is not None:
+        # Served whole: one window a wallet, whatever the chain's length.
+        return max(1, (env.block or int(env.client.block_number())) - genesis + 1)
+    return _stated_spans.get((url, False))
+
+
+def _walk_logs(
+    env: ChainEnv,
+    search: _PositionSearch,
+    client: Any,
+    base_filter: dict[str, Any],
+    owners: list[str],
+    spans: list[int],
+    top: int,
+    floor: int,
+    deadline: float,
+) -> tuple[int, bool]:
+    """Walk ``base_filter`` back from ``top`` in windows until ``owners`` are accounted for.
+
+    Windows go out ``LOG_WINDOWS_PER_BATCH`` to a JSON-RPC batch at the first
+    of ``spans``; a node that refuses that span is asked at the one it states,
+    or at the next. Returns the block the walk got down to (below ``floor``
+    when it read everything) and whether the time ran out first.
+    """
+    spans = list(spans)
+    url = getattr(client, "url", None)
+    many = _many_valued(base_filter["topics"])
+    retries = 0
+    while spans and top >= floor and not _accounted_for(search, owners):
+        if time.monotonic() >= deadline or search.out_of_time():
+            return top, True
         span = spans[0]
         calls = []
         to_block = top
@@ -2124,7 +2243,7 @@ def _search_logs(env: ChainEnv, search: _PositionSearch, owners: list[str]) -> s
             calls.append({"method": "eth_getLogs", "params": [window]})
             to_block = from_block - 1
         try:
-            results = env.client.batch(calls)
+            results = client.batch(calls)
         except Exception as exc:  # noqa: BLE001 - classified below, like a per-call error
             results = [{"error": str(exc)}]
         errors = [r["error"] for r in results if isinstance(r, dict) and "error" in r]
@@ -2140,15 +2259,24 @@ def _search_logs(env: ChainEnv, search: _PositionSearch, owners: list[str]) -> s
                 time.sleep(LOG_RETRY_DELAY_S)
                 continue
             retries = 0
-            spans.pop(0)
+            stated = [
+                s
+                for s in (stated_span(e) for e in errors if log_failure_kind(e) == "refused")
+                if s is not None and s < span
+            ]
+            if stated:
+                # The node's own rule: walk at it, and start there next time.
+                spans = [min(stated), *(s for s in spans[1:] if s < min(stated))]
+                if isinstance(url, str):
+                    _stated_spans[(url, many)] = min(stated)
+            else:
+                spans.pop(0)
             continue
         retries = 0
         logs = [entry for batch in results if isinstance(batch, list) for entry in batch]
         search.verify(holdings_from_logs(logs, owners)[1], until_complete=True)
         top = to_block
-    if top >= floor and not search.complete():
-        env.warn(f"{env.spec.name}: the node would not serve Transfer logs before block {top:,}")
-    return None
+    return top, False
 
 
 def _search_indexer(
