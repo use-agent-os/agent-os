@@ -75,6 +75,11 @@ The book is built to make few RPC calls.
   (Robinhood Chain's public node: 10,000,000 blocks against 100,000), one
   wallet at a time. That node throttles the walk, so the first read of many
   wallets there fills in over a few refreshes.
+- **The positions card shares those ids.** `trading.lp.positions`
+  (`agentos trade lp positions`, what an agent runs) reads the chain live,
+  but it verifies the remembered ids first and searches only for a wallet
+  whose NFT balance they do not cover. What it finds for the vault's wallets
+  is remembered for the book in turn.
 
 What never changes (which token is a pair, where a pool is, the gauge
 directory, cached id lists) is kept per chain under the state directory as

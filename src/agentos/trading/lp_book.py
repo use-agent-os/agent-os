@@ -122,6 +122,50 @@ class LpBook:
     def refreshing(self) -> bool:
         return self._task is not None and not self._task.done()
 
+    # ── the V4 ids every read shares ───────────────────────────────────
+
+    def _amm_store(self, chain_id: int) -> lp_amm.AmmStore:
+        store = self._stores.get(chain_id)
+        if store is None:
+            store = lp_amm.AmmStore.load(state_dir("lp", f"amm-{chain_id}.json"))
+            self._stores[chain_id] = store
+        return store
+
+    def v4_ids(self, spec: ChainSpec, owners: list[str]) -> tuple[int, ...]:
+        """The V4 position ids the last reads found for ``owners`` (``ChainEnv.known_ids``)."""
+        nfts = self._amm_store(spec.chain_id).nfts
+        return tuple(
+            sorted(
+                {
+                    int(i)
+                    for owner in owners
+                    for i in (nfts.get(_v4_slot(owner)) or {}).get("ids") or []
+                }
+            )
+        )
+
+    def learn_v4(
+        self, spec: ChainSpec, owners: list[str], found: list[dict[str, Any]], *, partial: bool
+    ) -> bool:
+        """Keep the ids a V4 read ``found`` for ``owners``; whether any is new.
+
+        A complete read replaces a wallet's ids; an incomplete one only adds,
+        since it proves what it found, not what it missed.
+        """
+        store = self._amm_store(spec.chain_id)
+        learned = False
+        for owner in owners:
+            before = (store.nfts.get(_v4_slot(owner)) or {}).get("ids") or []
+            ids = {int(p["tokenId"]) for p in found if _held_by(p, owner)}
+            if partial:
+                ids |= {int(i) for i in before}
+            if sorted(ids) != before:
+                learned = learned or bool(ids - {int(i) for i in before})
+                store.nfts[_v4_slot(owner)] = {"ids": sorted(ids)}
+                store.changed = True
+        store.save()
+        return learned
+
     # ── reading ────────────────────────────────────────────────────────
 
     async def read(
@@ -296,19 +340,10 @@ class LpBook:
             token = str(balance["token"]).lower()
             if owner in held and not is_native(token) and int(balance["raw"] or 0) > 0:
                 held[owner].add(token)
-        store = self._stores.get(spec.chain_id)
-        if store is None:
-            store = lp_amm.AmmStore.load(state_dir("lp", f"amm-{spec.chain_id}.json"))
-            self._stores[spec.chain_id] = store
+        store = self._amm_store(spec.chain_id)
         # Every V4 NFT the wallets held last time, emptied ones included: the
         # search is only skipped when they account for the whole balance.
-        v4_env.known_ids = tuple(
-            sorted(
-                int(i)
-                for owner in owners
-                for i in (store.nfts.get(_v4_slot(owner)) or {}).get("ids") or []
-            )
-        )
+        v4_env.known_ids = self.v4_ids(spec, owners)
         short_at = self._v4_short_at.get(spec.chain_id)
         v4_env.known_only = (
             not forced and short_at is not None and self._now() - short_at < V4_SEARCH_RETRY_S
@@ -356,19 +391,9 @@ class LpBook:
                 except Exception as exc:  # noqa: BLE001 - the other half still counts
                     failed("the other protocols", exc)
             if result.v4_ok:
-                found = v4_env.progress.found or []
-                learned = False
-                for owner in owners:
-                    before = (store.nfts.get(_v4_slot(owner)) or {}).get("ids") or []
-                    ids = {int(p["tokenId"]) for p in found if _held_by(p, owner)}
-                    if v4_env.partial:
-                        # An incomplete read proves what it found, not what it missed.
-                        ids |= {int(i) for i in before}
-                    if sorted(ids) != before:
-                        learned = learned or bool(ids - {int(i) for i in before})
-                        store.nfts[_v4_slot(owner)] = {"ids": sorted(ids)}
-                        store.changed = True
-                store.save()
+                learned = self.learn_v4(
+                    spec, owners, v4_env.progress.found or [], partial=v4_env.partial
+                )
                 if not v4_env.partial or learned:
                     # A search that is getting somewhere (a throttled node gives
                     # up a few wallets per time budget) goes on at the next refresh.

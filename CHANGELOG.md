@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Trading: `agentos trade lp positions` (the read an agent runs when asked for
+  a wallet's liquidity) searched the chain for Uniswap V4 positions from
+  nothing every time, although the Liquidity tab had already found and saved
+  them. On Robinhood Chain that search takes most of the 25 s budget for a
+  vault of several wallets and can come back partial. It now verifies the
+  saved position ids first and searches only for a wallet whose NFT balance
+  they do not account for, and the ids it finds are kept for the Liquidity
+  tab too.
+
 ## [2026.11.18.post1] - 2026-11-18
 
 ### Added

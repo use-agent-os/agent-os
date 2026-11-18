@@ -3183,11 +3183,16 @@ async def lp_positions(
     if named:
         await _refuse_token_addresses(list(envs_by_key.values()), named)
 
+    # The liquidity book's ids come first: when they account for every wallet's
+    # balance nothing is searched, and whatever this read finds is kept for it.
+    book = service.lp_book
+
     async def one(spec: ChainSpec) -> tuple[ChainEnv, list[dict[str, Any]]]:
         env = envs_by_key[spec.key]
         if not owners:
             env.fetched_at = _now_iso()
             return env, []
+        env.known_ids = book.v4_ids(spec, owners)
         work = asyncio.ensure_future(
             asyncio.to_thread(lambda: build_chain_positions(start(env), owners, include_closed))
         )
@@ -3220,6 +3225,11 @@ async def lp_positions(
             env.partial = True
             env.warn(f"{spec.name} could not be read: {error}")
             return env, []
+        held = env.progress.found
+        mine = [o for o in owners if o in vault]
+        if held is not None and mine and not book.refreshing:
+            # A refresh in flight keeps its own finds; two writers would race.
+            book.learn_v4(spec, mine, held, partial=env.partial)
         return env, rows
 
     done = await asyncio.gather(*(one(spec) for spec in specs))
