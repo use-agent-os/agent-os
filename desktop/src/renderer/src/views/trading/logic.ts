@@ -437,18 +437,19 @@ export function quoteCountdown(
   return { seconds: Math.ceil(left / 1000), fraction: Math.min(1, left / span), expired: false }
 }
 
-/** Above this the confirm sheet asks the amount to be typed again. */
+/** Above this the confirm sheet asks for the confirm word to be typed. */
 export const RETYPE_ABOVE_USD = 1000
+
+/** The word typed to send a large swap. Not translated: it is a fixed key. */
+export const CONFIRM_WORD = 'confirm'
 
 export function needsRetype(valueUsd: number | null): boolean {
   return valueUsd !== null && Number.isFinite(valueUsd) && valueUsd > RETYPE_ABOVE_USD
 }
 
-/** The retyped amount matches when it parses to the same decimal string. */
-export function retypeMatches(typed: string, amount: string): boolean {
-  const a = parseAmount(typed)
-  const b = parseAmount(amount)
-  return a !== null && b !== null && a === b
+/** The typed text matches the confirm word, ignoring case and outer spaces. */
+export function confirmWordMatches(typed: string): boolean {
+  return typed.trim().toLowerCase() === CONFIRM_WORD
 }
 
 /** Price impact above this is shown as a warning, above the second as danger. */

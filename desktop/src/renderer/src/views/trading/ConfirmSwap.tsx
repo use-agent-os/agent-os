@@ -12,11 +12,12 @@ import {
   formatAmount,
   formatPct,
   formatUsd,
+  CONFIRM_WORD,
+  confirmWordMatches,
   impactTone,
   needsRetype,
   PRICE_MOVED,
   quoteCountdown,
-  retypeMatches,
   toRaw,
   walletLabel,
 } from './logic'
@@ -32,12 +33,12 @@ const timeFmt = new Intl.DateTimeFormat(undefined, {
 
 /**
  * The only door a swap leaves through. Restates both legs, the wallet, the
- * facts; above 1,000 USD it asks for the amount to be typed again; a price
+ * facts; above 1,000 USD it asks for "confirm" to be typed; a price
  * older than its window must be refreshed before Swap now enables.
  *
  * The quote is frozen when the sheet opens: the panel behind keeps
  * re-quoting every 15 s, and the numbers a person reads must be the ones
- * they retype against. "Refresh quote" (and the stale-price refresh) adopt
+ * they confirm. "Refresh quote" (and the stale-price refresh) adopt
  * the next answer; nothing else changes them.
  */
 export function ConfirmSwap({
@@ -90,13 +91,13 @@ export function ConfirmSwap({
   const stale = quoteCountdown(fetchedAt, now, quote.expiresAt).expired
   const retype = needsRetype(quote.valueUsd)
   const [typed, setTyped] = useState('')
-  const retypeOk = !retype || retypeMatches(typed, amount)
+  const retypeOk = !retype || confirmWordMatches(typed)
   const swap = useSwap()
   const retypeId = useId()
   const impact = impactTone(quote.priceImpactPct)
 
   function send() {
-    // The numbers the person read and retyped against are the ones the
+    // The numbers the person read and confirmed are the ones the
     // engine is held to: it re-quotes on send and refuses to fill at a
     // worse price than this frozen quote promised.
     const expectedOutRaw =
@@ -280,15 +281,17 @@ export function ConfirmSwap({
 
       {retype ? (
         <div className="trd-field">
-          <label htmlFor={retypeId}>{t('trading.confirm.retype')}</label>
+          <label htmlFor={retypeId}>
+            {t('trading.confirm.retype').replace('{word}', CONFIRM_WORD)}
+          </label>
           <input
             id={retypeId}
             className="mac-input"
             data-mono="true"
-            inputMode="decimal"
             autoComplete="off"
+            autoCapitalize="off"
             spellCheck={false}
-            placeholder={t('trading.confirm.retype.placeholder')}
+            placeholder={CONFIRM_WORD}
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
             data-testid="confirm-retype"
