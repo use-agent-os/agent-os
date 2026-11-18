@@ -1168,3 +1168,105 @@ export interface MarketsPayload {
   sections: { quote: MarketsPool[]; base: MarketsPool[] }
   request: { kind: 'markets'; params: MarketsParams }
 }
+
+// ── Liquidity (the engine's liquidity book; docs/lp-book.md) ────────────────
+
+export type LpStatus = 'in-range' | 'above-range' | 'below-range' | 'full-range' | 'closed'
+
+export interface LpAmount {
+  /** Base units, as a decimal string. */
+  raw: string
+  human: string
+  /** `null` when no price is known; never `0` for "unknown". */
+  usd: number | null
+}
+
+export interface LpToken {
+  address: string
+  symbol: string
+  decimals: number
+  priceUsd: number | null
+}
+
+export interface LpSides {
+  base: LpAmount
+  quote: LpAmount
+  usd: number | null
+}
+
+export interface LpProtocol {
+  /** `uniswap_v4`, `uniswap_v3`, `uniswap_v2`, `aero_slipstream`, `aero_basic`, … */
+  key: string
+  name: string
+  /** A ranged NFT position, or a share of a full-range pair. */
+  kind: 'concentrated' | 'pair'
+}
+
+export interface LpPosition {
+  /** Stable across refreshes: chain, protocol, position and owner. */
+  id: string
+  chain: { id: number; key: string; name: string; explorer: string }
+  /** The position NFT's id; `null` for a pair (its balance is the position). */
+  tokenId: string | null
+  owner: { address: string; label: string | null; inApp: boolean }
+  token: LpToken
+  quote: LpToken
+  pool: {
+    poolId: string
+    /** `"0.3%"`, `"dynamic"`, or `"stable"` / `"volatile"` for an Aero basic pool. */
+    feePct: string | null
+    tickSpacing: number | null
+    tvlUsd: number | null
+    priceUsd: number | null
+  }
+  /** Quote per one base token; `null` for a pair. */
+  range: { priceLower: number | null; priceUpper: number | null } | null
+  status: LpStatus
+  principal: LpSides
+  /** Uncollected trading fees; `null` where they compound or could not be read. */
+  fees: LpSides | null
+  valueUsd: number | null
+  /** How far the price is outside the range, in percent; `null` in range. */
+  distancePct: number | null
+  protocol: LpProtocol
+  /** Deposited in a gauge: it earns `rewards`, not trading fees. */
+  staked: boolean
+  gauge: string | null
+  rewards: { token: LpToken; amount: LpAmount } | null
+  /** Share of the pool (pairs only), 0–1. */
+  share: number | null
+}
+
+export interface LpBook {
+  version: number
+  kind: 'book'
+  /** Every wallet/chain asked for has been read at least once. */
+  ready: boolean
+  /** A refresh is running; `trading.changed` announces its end. */
+  refreshing: boolean
+  /** Unix seconds of the oldest read behind this answer; `null` until `ready`. */
+  readAt: number | null
+  partialScan: boolean
+  warnings: string[]
+  wallets: { address: string; label: string | null }[]
+  chains: {
+    id: number
+    key: string
+    name: string
+    explorer: string
+    readAt: number | null
+    asOfBlock: number
+  }[]
+  protocols: { key: string; name: string; count: number; valueUsd: number | null }[]
+  /** Out of range first, then by value; at most 200 rows. */
+  positions: LpPosition[]
+  /** Over every position, listed or not. */
+  totals: {
+    valueUsd: number | null
+    feesUsd: number | null
+    rewardsUsd: number | null
+    count: number
+    outOfRange: number
+    unpriced: number
+  }
+}

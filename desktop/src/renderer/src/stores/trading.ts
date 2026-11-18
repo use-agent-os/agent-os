@@ -42,6 +42,7 @@ import type {
   Decoded,
   Entry,
   Limits,
+  LpBook,
   Mandate,
   MandateListPayload,
   MandatePayload,
@@ -101,6 +102,9 @@ export const TRADING_KEYS = {
   allowances: (wallet?: string, chainId?: number) =>
     ['trading', 'allowances', wallet ?? 'primary', chainId ?? 'all'] as const,
   network: ['trading', 'network'] as const,
+  /** The liquidity book (docs/lp-book.md), per wallet and chain filter. */
+  lpBook: (wallet?: string, chainId?: number) =>
+    ['trading', 'lp-book', wallet ?? 'all', chainId ?? 'all'] as const,
   /** DCA mandates (docs/dca.md): the live ones, or every one ever made. */
   dca: (all = false) => ['trading', 'dca', all ? 'all' : 'live'] as const,
   /** Price triggers (docs/triggers.md): the live ones, or every one ever made. */
@@ -994,6 +998,45 @@ export function useUnwrap() {
     mutationFn: (params: { chainId: number; wallet: string; amount?: string }) =>
       rpc.call<{ txHash: string }>('trading.unwrap', params),
     onSettled: () => invalidateTrading(queryClient),
+  })
+}
+
+/**
+ * Every LP position of the desk's wallets (Uniswap, Aero, Aerodrome), from
+ * the engine's cache. The engine reads the chain only while someone asks:
+ * keep this disabled unless the Liquidity tab is on screen. It answers at
+ * once and refreshes behind the answer; `trading.changed` (which knocks every
+ * `['trading']` key stale) says when the fresh rows are in, so the interval
+ * is only what keeps the engine's cache warm while the tab stays open.
+ */
+export function useLpBook(wallet: string | undefined, chainId: number | undefined, enabled = true) {
+  const rpc = useRpc()
+  const connected = useConnected()
+  return useQuery<LpBook>({
+    queryKey: TRADING_KEYS.lpBook(wallet, chainId),
+    enabled: connected && enabled,
+    queryFn: async () => {
+      await rpc.waitForConnection()
+      return rpc.call<LpBook>('trading.lp.book', {
+        ...(wallet ? { wallet } : {}),
+        ...(chainId ? { chainId } : {}),
+      })
+    },
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+    placeholderData: (prev) => prev,
+  })
+}
+
+/** Ask the engine to re-read the chain now (it honours one every few seconds). */
+export function useLpRefresh() {
+  const rpc = useRpc()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (params: { wallet?: string; chainId?: number }) =>
+      rpc.call<LpBook>('trading.lp.book', { ...params, refresh: true }),
+    onSuccess: (book, params) =>
+      queryClient.setQueryData(TRADING_KEYS.lpBook(params.wallet, params.chainId), book),
   })
 }
 

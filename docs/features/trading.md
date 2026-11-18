@@ -89,6 +89,11 @@ gateway RPC surface (`wallet.*`, `trading.*`).
 - **Agent trading** — the agent signs on its own within code-enforced limits
   (below). Orders above the per-order threshold wait for a human in the
   desktop app; the agent is told the outcome and decides what to do next.
+- **Liquidity book** — every liquidity position the vault's wallets hold,
+  across Uniswap V2/V3/V4, Aero and Aerodrome on Base and Robinhood Chain,
+  staked positions and their rewards included. Cached by the engine and read
+  only while someone looks (`docs/lp-book.md`); the desktop's Liquidity tab
+  shows it.
 - **Uniswap V4 liquidity** — read a token's pools, their liquidity ranges
   and the vault's positions (cards in the chat, `docs/lp-cards.md`), and
   change them: collect fees, remove liquidity (100 % burns the NFT), add
@@ -479,6 +484,7 @@ Every client goes through the same gateway methods:
 | `trading.orders.approve`, `trading.orders.reject` | the user's decision on a parked order (operator-only). `approve` takes `approvalDigest`, the `approval.digest` the order (or its batch) showed: **required for a multisend** (without it: `trading.approval_binding_required`; one approve runs every awaiting leg) and checked when given for a single order; a digest that no longer matches — a leg changed, added or dropped since it was shown — is refused with `trading.approval_changed`. The digest covers chain, wallet, tokens, raw amounts, recipients, provider, slippage, the approved floor, the plan and the expiry of every leg; the engine holds each leg to it again where the transaction is built and signed, and a send or revoke to its exact `to`/`value`/`data`, so a parked order changed after the approval is failed, not signed |
 | `trading.decode` | explain a transaction hash or raw calldata |
 | `trading.lp.pool`, `trading.lp.ranges`, `trading.lp.position`, `trading.lp.positions` | Uniswap V4 read-outs (read-only, allowed for an agent): a token's deepest pool, its liquidity distribution, one position NFT, every position of the vault's (or given) wallets; each echoes `request: {kind, params}` so a card can re-read itself. Payloads: [`../lp-cards.md`](../lp-cards.md) |
+| `trading.lp.book` | every LP position of the vault's wallets across Uniswap V2/V3/V4, Aero and Aerodrome, from the engine's cache (read-only, allowed for an agent). Params: `wallet`, `chainId`, `refresh`. Answers at once and refreshes behind the answer when the cache is stale; `trading.changed` (`reason: "lp"`) says when. Contract: [`../lp-book.md`](../lp-book.md) |
 | `trading.lp.collect`, `trading.lp.remove`, `trading.lp.add` | Uniswap V4 writes (allowed for an agent: they only create an order, which always parks for approval). Params mirror the CLI in camelCase — `chainId`, `tokenId`, `pct`, `slippagePct`, `token`, `usd`, `amountBase`, `amountQuote`, `range`, `toPosition`, `wallet`, `note`, `clientOrderId`; the answer is `{"order": …}` with `plan`. Contract: [`../lp-write.md`](../lp-write.md) |
 | `trading.bridge.quote`, `trading.bridge.create`, `trading.bridge.status`, `trading.bridge.routes` | bridge ETH or USDC↔USDG between Base and Robinhood Chain through Relay (allowed for an agent: `create` only creates an order, which always parks for approval). `chainId`/`chain` is the origin, `toChainId`/`toChain` the destination, `token`, exactly one of `amount` / `amountUsd` / `amountPct`, `wallet`, `note`, `clientOrderId`, `wait`; `status` takes `orderId` or Relay's `requestId`. The order stays `submitted` until the fill lands, then `confirmed`. Contract: [`../bridge.md`](../bridge.md) |
 | `trading.dca.create`, `trading.dca.get`, `trading.dca.list` | DCA mandates (agent-callable; an agent's `create` parks as `awaiting_approval`): propose a recurring buy, read one, list live ones (`all` for finished). Every answer is a full card payload with `request` echoed. Contract: [`../dca.md`](../dca.md) |

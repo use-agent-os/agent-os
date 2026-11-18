@@ -145,3 +145,35 @@ async def test_the_echoed_request_keeps_the_fee(
         "chainId": 8453,
         "feePct": "0.05%",
     }
+
+
+async def test_book_reads_the_cache_and_validates_its_params(
+    stack: dict[str, Any],  # noqa: F811
+    ctx: RpcContext,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``trading.lp.book``: registered, readable by the agent, params reach the book."""
+    from agentos.trading import lp_book
+
+    asked: list[dict[str, Any]] = []
+
+    async def read(self: Any, **kwargs: Any) -> dict[str, Any]:
+        asked.append(kwargs)
+        return {"version": 1, "kind": "book", "positions": []}
+
+    monkeypatch.setattr(lp_book.LpBook, "read", read)
+    assert "trading.lp.book" in set(get_dispatcher().methods())
+    res = await call("trading.lp.book", {}, _agent_ctx(stack))
+    assert res.ok, res.error
+    assert res.payload["kind"] == "book"
+    res = await call(
+        "trading.lp.book", {"wallet": "Main", "chainId": "robinhood", "refresh": True}, ctx
+    )
+    assert res.ok, res.error
+    assert asked[0] == {"wallet": None, "chain": None, "refresh": False}
+    assert asked[1]["wallet"] == "Main" and asked[1]["chain"].chain_id == 4663
+    assert asked[1]["refresh"] is True
+    for params in ({"refresh": "yes"}, {"chainId": 1}):
+        res = await call("trading.lp.book", params, ctx)
+        assert res.ok is False, params
+    assert len(asked) == 2

@@ -413,6 +413,29 @@ CREATE TABLE IF NOT EXISTS chain_reads (
     PRIMARY KEY (chain_id, wallet)
 );
 
+-- The liquidity book (lp_book.py): the last read of every LP position a
+-- wallet holds, one row per position, and how each wallet/chain read went.
+-- A cache, never a source of truth: a refresh replaces a wallet/chain's rows.
+CREATE TABLE IF NOT EXISTS lp_positions (
+    chain_id INTEGER NOT NULL,
+    wallet TEXT NOT NULL,
+    row_id TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    PRIMARY KEY (chain_id, wallet, row_id)
+);
+
+CREATE TABLE IF NOT EXISTS lp_reads (
+    chain_id INTEGER NOT NULL,
+    wallet TEXT NOT NULL,
+    read_at REAL NOT NULL,
+    -- When every gauge was last asked for this wallet (NULL: never).
+    deep_at REAL,
+    block INTEGER NOT NULL DEFAULT 0,
+    partial INTEGER NOT NULL DEFAULT 0,
+    warnings_json TEXT NOT NULL DEFAULT '[]',
+    PRIMARY KEY (chain_id, wallet)
+);
+
 -- A full rebuild sweeps into these shadow tables and swaps in only when the
 -- sweep is complete, so the live ledger keeps serving meanwhile and an
 -- interrupted rebuild resumes from scanned_down_to instead of starting over.
@@ -971,6 +994,8 @@ class Ledger:
                 "allowances",
                 "allowance_scan",
                 "ledger_repairs",
+                "lp_positions",
+                "lp_reads",
             ):
                 column = "address" if table == "wallets" else "wallet"
                 self._conn.execute(f"DELETE FROM {table} WHERE {column} = ?", (key,))  # noqa: S608
@@ -2612,6 +2637,85 @@ class Ledger:
                     params,
                 )
             )
+
+    # ── the liquidity book's cache ─────────────────────────────────────
+
+    def replace_lp_positions(
+        self,
+        chain_id: int,
+        wallet: str,
+        rows: list[dict[str, Any]],
+        *,
+        read_at: float,
+        deep_at: float | None,
+        block: int,
+        partial: bool,
+        warnings: list[str],
+    ) -> None:
+        """Swap in one wallet/chain's positions and stamp the read, atomically.
+
+        ``deep_at`` of ``None`` keeps the stamp the last deep read left.
+        """
+        key = wallet.lower()
+        with self.transaction():
+            self._conn.execute(
+                "DELETE FROM lp_positions WHERE chain_id = ? AND wallet = ?", (chain_id, key)
+            )
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO lp_positions (chain_id, wallet, row_id, payload_json) "
+                "VALUES (?, ?, ?, ?)",
+                [
+                    (chain_id, key, str(row["id"]), json.dumps(row, separators=(",", ":")))
+                    for row in rows
+                ],
+            )
+            self._conn.execute(
+                "INSERT INTO lp_reads (chain_id, wallet, read_at, deep_at, block, partial, "
+                "warnings_json) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(chain_id, wallet) DO UPDATE SET read_at = excluded.read_at, "
+                "deep_at = COALESCE(excluded.deep_at, lp_reads.deep_at), block = excluded.block, "
+                "partial = excluded.partial, warnings_json = excluded.warnings_json",
+                (
+                    chain_id,
+                    key,
+                    float(read_at),
+                    deep_at,
+                    int(block),
+                    1 if partial else 0,
+                    json.dumps(list(warnings)),
+                ),
+            )
+
+    def lp_positions(
+        self, wallet: str | None = None, chain_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        """The cached position rows (decoded), optionally of one wallet and/or chain."""
+        clauses = ["1=1"]
+        params: list[Any] = []
+        if wallet:
+            clauses.append("wallet = ?")
+            params.append(wallet.lower())
+        if chain_id is not None:
+            clauses.append("chain_id = ?")
+            params.append(chain_id)
+        with self._lock:
+            found = self._conn.execute(
+                f"SELECT payload_json FROM lp_positions WHERE {' AND '.join(clauses)}",  # noqa: S608
+                params,
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in found:
+            try:
+                payload = json.loads(row["payload_json"])
+            except ValueError:
+                continue
+            if isinstance(payload, dict):
+                out.append(payload)
+        return out
+
+    def lp_reads(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return _rows(self._conn.execute("SELECT * FROM lp_reads"))
 
     def set_chain_read(
         self, chain_id: int, wallet: str, status: str, reason: str | None = None

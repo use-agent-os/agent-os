@@ -60,6 +60,7 @@ export const DESKTOP_REQUIRED_METHODS: readonly string[] = [
   'trading.decode',
   'trading.history',
   'trading.limits',
+  'trading.lp.book',
   'trading.lp.collect',
   'trading.lp.remove',
   'trading.network',

@@ -7,6 +7,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Desktop: the Trade tab has a **Liquidity** tab that lists every liquidity
+  position the desk's wallets hold, the way a wallet tracker does: Uniswap
+  V2, V3 and V4, Aero (Slipstream and basic pools) and Aerodrome, on Base and
+  Robinhood Chain. Each row shows the pair, the range with the pool's price
+  marked on it, what is deposited, unclaimed fees, gauge rewards and the
+  value; positions staked in a gauge are found too. Out-of-range positions
+  come first, and the table can be narrowed by protocol, wallet and chain.
+- `trading.lp.book`: the liquidity book behind that tab (`docs/lp-book.md`).
+  It is built to make few RPC calls. Nothing is read until someone asks; an
+  answer comes from the ledger's cache and a refresh runs behind it when the
+  cache is older than a minute. One refresh batches every wallet of a chain
+  into the same multicalls, position ids are read from the enumerable
+  managers and cached, and gauges are walked only on a wallet's first read,
+  after its balances moved, on an explicit refresh and every six hours. A
+  wallet with no positions costs one multicall per chain. Uniswap V4
+  positions already found are re-read without repeating the log search.
 - Desktop: the trading desk's Wallets column offers **Manage wallets** under
   *Create new* and *Import*, and the desk head's wallet menu offers it too.
   The wallet manager was reachable only from the BOOK's wallet menu before.

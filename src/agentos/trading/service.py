@@ -25,7 +25,7 @@ import time
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 import structlog
@@ -134,6 +134,9 @@ from agentos.trading.vault import (
     WalletNotFoundError,
     WalletRecord,
 )
+
+if TYPE_CHECKING:  # pragma: no cover
+    from agentos.trading.lp_book import LpBook
 
 log = structlog.get_logger(__name__)
 
@@ -527,6 +530,9 @@ class TradingService:
         # When each wallet last had a chain read forced through wallet.balances,
         # so a client polling with refresh=true cannot turn into a load test.
         self._manual_sync_at: dict[str, float] = {}
+        # The liquidity book (lp_book.py), made on first use: it reads nothing
+        # until someone opens it.
+        self._lp_book: LpBook | None = None
         self._network_cache: dict[str, Any] | None = None
         self._network_cache_at = 0.0
         # One Approval-log scan per wallet/chain at a time; a review call
@@ -863,6 +869,8 @@ class TradingService:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await scan
         self._allowance_scans.clear()
+        if self._lp_book is not None:
+            await self._lp_book.stop()
 
     async def aclose(self) -> None:
         await self.stop()
@@ -970,6 +978,14 @@ class TradingService:
                 log.warning("trading.recover_failed", order=order_id, error=str(exc))
 
     async def _emit(self, event: str, payload: dict[str, Any]) -> None:
+        if (
+            self._lp_book is not None
+            and event == "trading.changed"
+            and payload.get("reason") in ("sync", "order")
+        ):
+            # A balance moved or an order filled: a position may have been
+            # opened, closed or staked. The book looks closer next time it is read.
+            self._lp_book.mark_dirty(payload.get("wallet"))
         try:
             await self._broadcast(event, {"schema_version": 1, **payload})
         except Exception:  # pragma: no cover
@@ -3255,6 +3271,15 @@ class TradingService:
         return self.get_order(order_id)
 
     # ── Uniswap V4 LP writes (docs/lp-write.md) ────────────────────────
+
+    @property
+    def lp_book(self) -> LpBook:
+        """Every LP position of the vault's wallets, cached (``docs/lp-book.md``)."""
+        if self._lp_book is None:
+            from agentos.trading.lp_book import LpBook
+
+            self._lp_book = LpBook(self, now=self._now)
+        return self._lp_book
 
     def _lp_env(self, chain: ChainSpec) -> Any:
         """A fresh ``lp.ChainEnv`` for one plan: the engine's RPC, prices and vault."""

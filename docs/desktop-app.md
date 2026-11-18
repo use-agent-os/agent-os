@@ -122,6 +122,13 @@ Trading commands run with `--json` publish cards the chat renders live:
 - **Uniswap V4 liquidity** cards show a pool, its range distribution or a
   position. See [LP cards](lp-cards.md) and [LP writes](lp-write.md).
 
+The trading desk's **Liquidity** tab lists every liquidity position the
+desk's wallets hold on Uniswap (V2, V3, V4), Aero and Aerodrome, on Base and
+Robinhood Chain: the pair, the range with the price marked on it, what is
+deposited, unclaimed fees and gauge rewards, and the value. Out-of-range
+positions come first. The engine reads the chain only while the tab is open
+and serves its cache in between. See [the liquidity book](lp-book.md).
+
 ## Sidebar
 
 The sidebar lists your sessions, grouped by Today, Yesterday and This week,

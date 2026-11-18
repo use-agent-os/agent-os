@@ -12,6 +12,8 @@ import { useGateway } from '~/stores/gateway'
 import {
   useHistory,
   useLimits,
+  useLpBook,
+  useLpRefresh,
   useOrderDecision,
   useOrders,
   usePortfolio,
@@ -28,6 +30,7 @@ import { useUi } from '~/stores/ui'
 import { Notice } from '~/views/settings/parts'
 import { History } from './History'
 import { Holdings } from './Holdings'
+import { Liquidity } from './Liquidity'
 import { Markets } from './Markets'
 import {
   EMPTY_TOTALS,
@@ -63,7 +66,15 @@ import { WalletHead } from './WalletHead'
 import { Budget, WalletRail, type WalletAction, type WalletSelection } from './WalletRail'
 import { WalletSheet, type WalletSheetMode } from './WalletSheet'
 
-type Tab = 'holdings' | 'markets' | 'history' | 'orders' | 'approvals' | 'automations' | 'tools'
+type Tab =
+  | 'holdings'
+  | 'liquidity'
+  | 'markets'
+  | 'history'
+  | 'orders'
+  | 'approvals'
+  | 'automations'
+  | 'tools'
 
 /**
  * What the full desk needs from the frame to show the Automations tab: the
@@ -336,6 +347,16 @@ function Desk({
     () => filterHoldings(portfolio.data?.holdings ?? [], chain),
     [portfolio.data, chain],
   )
+  // The engine reads LP positions only while someone asks: off this tab, nothing is asked.
+  const lpBook = useLpBook(walletAddress, chain ?? undefined, tab === 'liquidity')
+  const lpRefresh = useLpRefresh()
+  // Token art for the pairs, from what the wallets hold.
+  const logos = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const h of portfolio.data?.holdings ?? [])
+      if (h.token.logoUrl) m.set(h.token.address.toLowerCase(), h.token.logoUrl)
+    return m
+  }, [portfolio.data])
   const pending = orders.orders.filter(isAwaitingApproval).length
   // The Automations tab's badge: proposals waiting on the operator, whichever chat made them,
   // for the selected wallet when one is.
@@ -347,6 +368,7 @@ function Desk({
   const tabs: Tab[] = [
     'holdings',
     'markets',
+    'liquidity',
     'history',
     'orders',
     'approvals',
@@ -625,6 +647,27 @@ function Desk({
                       }}
                     />
                   </>
+                ) : tab === 'liquidity' ? (
+                  <Liquidity
+                    book={lpBook.data}
+                    loading={lpBook.isPending}
+                    error={lpBook.isError ? lpBook.error : undefined}
+                    onRetry={() => void lpBook.refetch()}
+                    onRefresh={() =>
+                      lpRefresh.mutate(
+                        { wallet: walletAddress, chainId: chain ?? undefined },
+                        {
+                          onError: (err) =>
+                            toast.error(`${t('trading.error.title')}: ${errorText(err)}`),
+                        },
+                      )
+                    }
+                    refreshing={lpRefresh.isPending}
+                    wallets={wallets}
+                    showChain={chain === null}
+                    logos={logos}
+                    now={now}
+                  />
                 ) : tab === 'markets' ? (
                   <Markets deskChain={chain} />
                 ) : tab === 'automations' && automations ? (
