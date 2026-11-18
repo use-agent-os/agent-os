@@ -2631,7 +2631,7 @@ class TradingConfig(BaseSettings):
     )
 
     enabled: bool = True
-    # Swap provider: the AgentOS Aggregator (default, no key) or Uniswap's
+    # Swap provider: the AgentOS DEX (default, no key) or Uniswap's
     # Trading API (fallback, needs an API key).
     provider: Literal["aggregator", "uniswap"] = "aggregator"
     # Where the aggregator is served. Only change this to point at another

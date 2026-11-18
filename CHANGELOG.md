@@ -14,6 +14,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `amount`, `amountRaw`), or `null` when the provider charges none.
 
 ### Changed
+- The default swap provider is now shown as "AgentOS DEX" instead of
+  "AgentOS Aggregator" everywhere it is displayed: the desktop's Trading
+  settings, provider menu and quotes, `agentos trade` output, allowance
+  spender labels and the docs. The provider id stays `aggregator`, so
+  `trading.provider`, `agentos trade provider aggregator` and every
+  `trading.aggregator_*` key are unchanged.
 - Desktop: the Automations cards (the Trade tab's Automations, and the BOOK
   beside the chat) are about half as tall. The state word and the figures
   share one line, and the controls sit beside the head instead of on a row

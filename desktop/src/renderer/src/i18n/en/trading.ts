@@ -421,11 +421,11 @@ export const trading = {
   'trading.provider.switch': 'Switch provider',
   'trading.settings.provider': 'Swap provider',
   'trading.settings.provider.help':
-    'Who finds the route and builds the transaction. The AgentOS Aggregator is the default and needs no key; Uniswap is the fallback and needs an API key.',
+    'Who finds the route and builds the transaction. The AgentOS DEX is the default and needs no key; Uniswap is the fallback and needs an API key.',
   'trading.settings.provider.saved': 'Provider saved',
-  'trading.settings.aggregator': 'AgentOS Aggregator',
+  'trading.settings.aggregator': 'AgentOS DEX',
   'trading.settings.aggregator.blurb':
-    'No key. Routes and unsigned calldata come from the AgentOS Aggregator; your wallet still does every signature.',
+    'No key. Routes and unsigned calldata come from the AgentOS DEX; your wallet still does every signature.',
   'trading.settings.aggregator.test': 'Test connection',
   'trading.settings.aggregator.testing': 'Testing…',
   'trading.settings.aggregator.works': 'Reachable.',

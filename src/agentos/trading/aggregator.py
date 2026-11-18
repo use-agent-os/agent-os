@@ -1,4 +1,4 @@
-"""AgentOS Aggregator — the default swap route.
+"""AgentOS DEX — the default swap route.
 
 An HTTP API in front of 0x Swap API v2, served at
 ``https://agg.useagentos.dev``. Every endpoint is a plain ``GET`` and there

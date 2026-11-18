@@ -85,7 +85,7 @@ describe('TradingView · the venue pill', () => {
             providers: [
               {
                 id: 'aggregator',
-                label: 'AgentOS Aggregator',
+                label: 'AgentOS DEX',
                 needsKey: false,
                 keyConfigured: true,
                 healthy: null,
@@ -115,7 +115,7 @@ describe('TradingView · the venue pill', () => {
     renderDesk(<TradingView />)
 
     const pill = await screen.findByTestId('provider-pill')
-    expect(pill).toHaveTextContent('AgentOS Aggregator')
+    expect(pill).toHaveTextContent('AgentOS DEX')
     // The keyless aggregator: the ticket has no key to ask for.
     expect(screen.getByTestId('swap-review')).not.toHaveTextContent('Add a Uniswap key')
 

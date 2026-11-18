@@ -136,7 +136,7 @@ reports `deliveredToken` and the app offers a one-click unwrap
 
 | Provider | Key | Notes |
 | --- | --- | --- |
-| `aggregator` (default) | none | AgentOS Aggregator at `https://agg.useagentos.dev`, an HTTP API in front of 0x Swap v2. One `GET /v1/quote` returns the price *and* the unsigned calldata, including the ERC-20 approval when one is needed. 20 bps integrator fee, reported in the quote and already deducted from the output. Quotes expire in 30 s upstream; the engine stops trusting them at 20 s. |
+| `aggregator` (default) | none | AgentOS DEX at `https://agg.useagentos.dev`, an HTTP API in front of 0x Swap v2. One `GET /v1/quote` returns the price *and* the unsigned calldata, including the ERC-20 approval when one is needed. 20 bps integrator fee, reported in the quote and already deducted from the output. Quotes expire in 30 s upstream; the engine stops trusting them at 20 s. |
 | `uniswap` | Uniswap Trading API key | Universal Router; `x-agent-info` attribution on every call. Quotes fresh for 30 s. |
 
 The aggregator holds no key of its own and neither signs nor broadcasts:

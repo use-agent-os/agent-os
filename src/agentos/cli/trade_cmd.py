@@ -77,7 +77,7 @@ app = typer.Typer(
 )
 
 AGENT_ENV_MARKERS = ("AGENTOS_SESSION_KEY", "AGENTOS_AGENT")
-PROVIDERS: dict[str, str] = {"aggregator": "AgentOS Aggregator", "uniswap": "Uniswap"}
+PROVIDERS: dict[str, str] = {"aggregator": "AgentOS DEX", "uniswap": "Uniswap"}
 # Statuses that still move on their own after ``trading.swap`` returns.
 _PENDING_STATUSES = frozenset({"awaiting_approval", "approved", "submitted", "quoted"})
 

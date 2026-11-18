@@ -7,7 +7,7 @@ import type { ProviderId, ProviderStatus } from './types'
 const PROVIDERS: ProviderStatus[] = [
   {
     id: 'aggregator',
-    label: 'AgentOS Aggregator',
+    label: 'AgentOS DEX',
     needsKey: false,
     keyConfigured: true,
     healthy: null,
@@ -56,7 +56,7 @@ describe('ProviderMenu · the route as a pop-up button', () => {
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
     const rows = screen.getAllByRole('menuitemradio')
     expect(rows.map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'true'])
-    expect(rows[0]).toHaveTextContent('AgentOS Aggregator')
+    expect(rows[0]).toHaveTextContent('AgentOS DEX')
     expect(rows[0]).toHaveTextContent('no key')
     expect(rows[1]).toHaveTextContent('Uniswap')
     expect(rows[1]).toHaveTextContent('needs an API key')
@@ -65,7 +65,7 @@ describe('ProviderMenu · the route as a pop-up button', () => {
   it('switches to another route, and picking the current one changes nothing', () => {
     const { trigger, onSwitch, onOpenSettings } = mount({ provider: 'aggregator' })
     fireEvent.click(trigger)
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /^AgentOS Aggregator/ }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /^AgentOS DEX/ }))
     expect(screen.queryByRole('menu')).toBeNull()
     expect(onSwitch).not.toHaveBeenCalled()
 
@@ -83,7 +83,7 @@ describe('ProviderMenu · the route as a pop-up button', () => {
     const { trigger } = mount()
     trigger.focus()
     fireEvent.keyDown(trigger, { key: 'ArrowDown' })
-    const first = screen.getByRole('menuitemradio', { name: /^AgentOS Aggregator/ })
+    const first = screen.getByRole('menuitemradio', { name: /^AgentOS DEX/ })
     expect(document.activeElement).toBe(first)
 
     fireEvent.keyDown(first, { key: 'Escape' })

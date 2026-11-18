@@ -840,7 +840,7 @@ export type ProviderId = 'aggregator' | 'uniswap'
 
 /** Ordered as the engine orders them: the default first. */
 export const PROVIDERS: readonly { id: ProviderId; label: string }[] = [
-  { id: 'aggregator', label: 'AgentOS Aggregator' },
+  { id: 'aggregator', label: 'AgentOS DEX' },
   { id: 'uniswap', label: 'Uniswap' },
 ]
 

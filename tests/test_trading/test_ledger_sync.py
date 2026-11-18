@@ -789,7 +789,7 @@ class TestLedgerRules:
         assert revoke["kind"] == "approval" and revoke["tx_hash"] == revoke_tx
         assert revoke["amount_in_raw"] == "0" and revoke["amount_out_raw"] is None
         assert revoke["gas_usd"] == pytest.approx(0.000002 * 2000.0)
-        assert "AgentOS Aggregator" in revoke["note"]
+        assert "AgentOS DEX" in revoke["note"]
         # The send's Transfer log is not booked a second time from the chain.
         assert len([e for e in entries if e["tx_hash"] == send_tx]) == 1
         # Lots: 100 in, 30 out, nothing sold by the revoke; no USDC opening needed.
