@@ -6,6 +6,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- A memory review before compaction. Right before a proactive or manual
+  compaction summarises a private chat, the memory review runs once, so facts
+  only the older messages hold can still be saved. It can only add new
+  entries and append notes (replace, remove and overwrite are refused in
+  it). It is bounded by `[memory.nudge] timeout_seconds` and the compaction
+  comes out the same whatever it did; it is skipped for compactions forced by
+  a full context, for cron, sub-agent, group and channel sessions, within two
+  user turns of another review, and when the compaction would summarise
+  nothing anyway (`nothing_to_compact`, decided before any model call). Turn
+  it off with `[memory.nudge] before_compaction = false`. Each decision is
+  logged as a `pre_compaction_review` event (`ran`, `timeout`, `error`,
+  `cancelled` or `skipped`).
+- Memory lineage and `agentos memory forget`. Curated entries and note blocks
+  now record which session wrote them (and whether the model, the memory
+  review or an operator did). `agentos memory forget --session
+  <full id or key>` previews (`--dry-run`) or removes what the selected
+  sessions taught the agent: curated entries with an origin from them, the
+  note blocks they saved where every copy of that text in the note is theirs
+  (a block edited or extended since, or one another session or the user also
+  wrote, is reported as `unmatched` and left alone; nothing else in the note
+  changes, line endings included), and their session index documents. The
+  sessions are then kept out of indexing. What a forget could not remove keeps
+  its lineage, so running it again retries. One forget runs at a time per
+  agent. Transcripts, turn-capture files,
+  checkpoints and untracked text are not removed, and the report says so.
+  `agentos memory status --json` counts tracked and untracked curated entries.
+  RPC: `memory.forget` (Control only).
+
+### Fixed
+- Memory index writes no longer collide. The index holds one database
+  connection, and two writes at once (session indexing next to a
+  `memory_save`, or a session delete while a note was being indexed) failed
+  with `cannot start a transaction within a transaction` or committed half of
+  the other write. Index writes now take turns, and a cancelled one rolls back.
+- A memory review that timed out, failed, was stopped, was refused by a spend
+  budget or found no provider no longer leaves an `[interrupted]` or
+  `Error: ...` row in the conversation. The review is an internal turn whose
+  reply is never kept, but the error and cancel paths still wrote a row,
+  which the next turn replayed as context, which made a pending proactive
+  compaction skip, and which a manual compaction then summarised.
+- The memory review's `memory_nudge.review_done` log line no longer includes
+  the text it saved, replaced or removed (it kept up to 120 characters per
+  write, which outlived `agentos memory forget`). It now lists each write as
+  tool, target or note path, and action, with the counts as before.
+- `[memory.nudge]` and `[memory.recall]` changes no longer report that a
+  gateway restart is needed: they apply on the next turn. `agentos config set
+  --config` says per key whether a running gateway applies it on its own.
+- Deleting a session now removes its derived memory index document, so memory
+  search stops returning hits from a conversation that no longer exists. What
+  the session taught the agent stays (see `agentos memory forget`).
+
 ## [2026.11.18] - 2026-11-18
 
 ### Added
