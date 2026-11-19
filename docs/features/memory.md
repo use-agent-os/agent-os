@@ -271,7 +271,17 @@ It runs at two moments:
 
 - **Every few turns** (`[memory.nudge] interval`, default 10 user turns),
   after the reply has been delivered. It is skipped for a turn in which the
-  agent already wrote to memory on its own.
+  agent already wrote to memory on its own. This review goes through every
+  message the user sent in the conversation, lists the durable facts in them
+  (including ones mentioned in passing while asking for something else),
+  checks each against what `USER.md` and `MEMORY.md` already hold, then adds
+  what is missing and replaces values that changed (keeping the rest of the
+  entry), one topic per entry. It leaves out small talk, passing moods and
+  events, one-off questions and the task itself. Each run
+  is logged as a `memory_nudge.review_done` event: what it wrote (target and
+  action, never the text), and the review turn's own `input_tokens`,
+  `output_tokens` and `iterations`. The review has no transcript entry, so
+  that line is where its cost shows up.
 - **Once before a compaction** (`[memory.nudge] before_compaction`, default
   `true`). A compaction replaces older messages with a summary, so this is the
   last chance to save what only those messages hold. The review runs right
@@ -476,10 +486,22 @@ full reindex happens on the next sync; no manual `--force` step is needed.
 Two small, bounded files are injected into every system prompt so the agent
 always has the highest-signal facts on hand without a retrieval round-trip:
 
-- `MEMORY.md` — the agent's own notes (environment facts, conventions, tool
-  quirks, lessons learned).
-- `USER.md` — what the agent knows about the user (name, role, preferences,
-  style).
+- `USER.md` — a short profile of the user: name, how to address them,
+  pronouns, language, role, and how they like answers.
+- `MEMORY.md` — every other durable fact: the user's work, the people in
+  their life, their home, routines, schedules and plans, plus the agent's own
+  notes (environment facts, conventions, tool quirks, lessons learned). It is
+  the larger store, so most facts go here.
+
+The agent saves what it judges durable during a turn, and the memory review
+catches what the turns missed, including facts mentioned in passing while
+asking for something else. When a fact changes, it is told to replace the
+entry holding it and keep every other detail of that entry. When a store is
+nearly full, it is told to keep saving anyway (merge related entries, shorten
+wordy ones, or use the other store if it has room) and not to drop a fact
+that is still true just to make room. These are instructions to the model,
+not checks: once `MEMORY.md` is at its limit a model can still overwrite an
+entry it should have kept, so a store that stays full is worth reviewing.
 
 Both stores live at the workspace root and are §-delimited lists of small
 entries, not free-form prose. A new workspace (the main one and each

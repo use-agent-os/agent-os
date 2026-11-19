@@ -178,6 +178,13 @@ class DoneEvent:
     #: presence of an error -- is what a consumer reads to learn the result.
     #: ``None`` only on events built outside the agent loop (legacy callers).
     outcome: TurnOutcome | None = None
+    #: This turn's own provider usage. ``input_tokens`` / ``output_tokens``
+    #: are the session usage tracker's delta over the turn, which also counts
+    #: another turn of the same session running at the same time (a
+    #: background memory review overlapping the next user turn); these never
+    #: do.
+    own_input_tokens: int = 0
+    own_output_tokens: int = 0
 
     @property
     def upstream_cost_usd(self) -> float:

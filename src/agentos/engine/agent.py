@@ -1226,6 +1226,8 @@ class Agent:
             stop_reason=t.turn_stop_reason,
             stop_details=t.turn_stop_details,
             outcome=turn_outcome,
+            own_input_tokens=t.total_input_tokens,
+            own_output_tokens=t.total_output_tokens,
         )
         # Reset for next turn
         self._state = AgentState.IDLE

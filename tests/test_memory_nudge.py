@@ -491,6 +491,54 @@ class _ReviewRunner:
         yield  # pragma: no cover - makes this an async generator
 
 
+class _UsageReviewRunner(_ReviewRunner):
+    """Ends the review turn the way the agent loop does: one DoneEvent."""
+
+    async def run(self, message: str, session_key: str, **kwargs: Any) -> Any:
+        from agentos.engine.types import DoneEvent
+
+        self.contexts.append(kwargs["tool_context"])
+        # The session delta (input/output_tokens) also counts a user turn that
+        # ran at the same time; the review's own usage is what gets logged.
+        yield DoneEvent(
+            text="Nothing to save.",
+            input_tokens=95000,
+            output_tokens=900,
+            own_input_tokens=31000,
+            own_output_tokens=42,
+            iterations=1,
+        )
+
+
+async def test_review_log_reports_the_review_turns_token_usage():
+    """The review is internal, so no transcript entry carries its cost.
+
+    Without the usage on the log line nobody can tell what reviewing more
+    often, or more thoroughly, costs. It is the review's own usage: the
+    session delta also holds whatever user turn overlapped the review.
+    """
+    import structlog
+
+    runner = _UsageReviewRunner()
+    with structlog.testing.capture_logs() as logs:
+        assert await runner._run_memory_nudge_review(agent_id="main", session_key="s1") == "ran"
+
+    (done,) = [entry for entry in logs if entry.get("event") == "memory_nudge.review_done"]
+    assert (done["input_tokens"], done["output_tokens"], done["iterations"]) == (31000, 42, 1)
+    assert done["wrote"] == 0
+
+
+async def test_review_log_reports_zero_usage_when_the_turn_reports_none():
+    import structlog
+
+    runner = _ReviewRunner()
+    with structlog.testing.capture_logs() as logs:
+        await runner._run_memory_nudge_review(agent_id="main", session_key="s1")
+
+    (done,) = [entry for entry in logs if entry.get("event") == "memory_nudge.review_done"]
+    assert (done["input_tokens"], done["output_tokens"], done["iterations"]) == (0, 0, 0)
+
+
 async def test_review_turn_is_unattended_and_memory_only():
     """A background review must never be able to raise an approval prompt.
 

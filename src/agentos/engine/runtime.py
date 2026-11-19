@@ -478,22 +478,39 @@ _MEMORY_REVIEW_TOOL_NAMES: Final[frozenset[str]] = frozenset(
 _MAX_NUDGE_COUNTERS: Final[int] = 2048
 
 # Prompt for the periodic memory review. Adapted from hermes-agent
-# (MIT, © 2025 Nous Research). Two properties matter and are easy to lose:
-# it names what is worth keeping (durable facts about the user, not task
-# chatter), and it gives an explicit way to decline, so a review with nothing
-# to save stops instead of inventing an entry to justify the call.
+# (MIT, © 2025 Nous Research). Properties that matter and are easy to lose:
+# - It walks the user's messages and checks each durable fact against what is
+#   already saved. Asked only for what "stands out", a review saved one or
+#   two facts out of the five or more the window held, and skipped most facts
+#   the user mentioned while asking for something else.
+# - It names what is not worth keeping (small talk, passing moods and events,
+#   one-off questions, the task itself), so being thorough does not mean
+#   saving chatter.
+# - It says where a fact goes. USER.md is the smaller store; when every fact
+#   about the user's life went there it filled up while MEMORY.md stayed
+#   mostly empty.
+# - It gives an explicit way to decline, so a review with nothing to save
+#   stops instead of inventing an entry to justify the call.
 _MEMORY_REVIEW_PROMPT: Final[str] = (
-    "Review the conversation above and consider saving to memory.\n\n"
-    "Focus on:\n"
-    "1. Has the user revealed durable things about themselves — their role, "
-    "preferences, working style, or context that will still matter in a "
-    "later session?\n"
-    "2. Has the user stated expectations about how you should work — "
-    "conventions to follow, things to avoid, corrections they had to repeat?\n\n"
-    "Save anything that stands out with the memory tool, consolidating "
-    "existing entries rather than duplicating them. Skip anything one-off, "
-    "already saved, or specific to the current task.\n\n"
-    "If nothing is worth saving, reply exactly 'Nothing to save.' and stop."
+    "Review the conversation above and save what is worth remembering.\n\n"
+    "1. Go through every message the user sent, from the first one, and list "
+    "each durable fact in it, one per line: about the user and the people in "
+    "their life, their work, home, health, routines, schedules and plans, and "
+    "how they want you to work. A fact mentioned in passing while asking for "
+    "something else counts as much as one stated on its own.\n"
+    "2. Mark each fact 'saved' if USER PROFILE or MEMORY already holds it with "
+    "the same details, 'outdated' if an entry holds an older value, and "
+    "'missing' otherwise.\n"
+    "3. Leave out what will not matter in a later session: small talk, "
+    "passing moods and one-time events, one-off questions, and the content "
+    "of the task itself.\n\n"
+    "Then, with the memory tool, add every missing fact and replace every "
+    "outdated entry, keeping its other details, one batch call per target. "
+    "Keep names, numbers, dates and places as the user gave them, and keep "
+    "one topic per entry. Use target 'user' for who the user is (name, how to address "
+    "them, language, role, how they like answers) and 'memory' for everything "
+    "else.\n\n"
+    "If no fact is missing or outdated, finish with 'Nothing to save.' and stop."
 )
 
 # The review that runs right before a compaction summarises the conversation.
@@ -3836,6 +3853,16 @@ class TurnRunner:
             writes: list[str] = []
             failures: list[str] = []
             turn_error: str | None = None
+            # The review is an internal turn with no transcript entry, so the
+            # log line is the only place its own cost shows up. Its own usage,
+            # not the session delta: the review usually overlaps the user's
+            # next turn, and the delta would count that turn too.
+            usage = {"input_tokens": 0, "output_tokens": 0, "iterations": 0}
+            usage_fields = {
+                "input_tokens": "own_input_tokens",
+                "output_tokens": "own_output_tokens",
+                "iterations": "iterations",
+            }
             async for event in self.run(
                 message=variant.prompt,
                 session_key=session_key,
@@ -3850,6 +3877,11 @@ class TurnRunner:
             ):
                 if getattr(event, "kind", "") == "error":
                     turn_error = str(getattr(event, "message", "") or "error")
+                    continue
+                if getattr(event, "kind", "") == "done":
+                    for key, field_name in usage_fields.items():
+                        value = getattr(event, field_name, 0)
+                        usage[key] += value if isinstance(value, int) else 0
                     continue
                 if (
                     getattr(event, "kind", "") != "tool_result"
@@ -3876,6 +3908,7 @@ class TurnRunner:
                 entries=writes[:_MEMORY_REVIEW_LOG_MAX_ENTRIES],
                 errors=failures[:_MEMORY_REVIEW_LOG_MAX_ENTRIES],
                 turn_error=turn_error,
+                **usage,
             )
             return turn_error
 
