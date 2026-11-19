@@ -54,6 +54,7 @@ from agentos.trading.bridge import (
 from agentos.trading.chains import (
     CHAINS,
     NATIVE_ADDRESS,
+    WRAPPED_NATIVE,
     ChainSpec,
     UnsupportedChainError,
     checksum_address,
@@ -186,8 +187,9 @@ HIDDEN_RESCAN_S = 3600.0
 SYNC_BACKGROUND = "background"
 SYNC_REQUESTED = "requested"
 SYNC_INITIAL = "initial"
-# WETH9 ``withdraw(uint256)``.
+# WETH9 ``withdraw(uint256)`` and ``deposit()``.
 SEL_WETH_WITHDRAW = "0x2e1a7d4d"
+SEL_WETH_DEPOSIT = "0xd0e30db0"
 # A multisend is one decision and one wallet lock; beyond this many legs it
 # is a script, not an order.
 MAX_SEND_RECIPIENTS = 200
@@ -361,6 +363,24 @@ def _client_order_id(value: str | None) -> str | None:
             "clientOrderId must be 1-64 characters of letters, digits, '.', '_', ':' or '-'",
         )
     return text
+
+
+def _format_swap_fee(quote: ProviderQuote, meta_in: TokenMeta, meta_out: TokenMeta) -> None:
+    """Write the provider's swap fee in its token's own decimals.
+
+    The aggregator names the fee token by symbol only (the sell token in
+    practice); it is matched against the two legs. An unmatched symbol keeps
+    the provider's own formatted amount.
+    """
+    fee = quote.swap_fee
+    if fee is None or fee.amount_raw is None:
+        return
+    symbol = fee.symbol.upper()
+    meta = next((m for m in (meta_in, meta_out) if m.symbol.upper() == symbol), None)
+    if meta is None:
+        return
+    fee.symbol = meta.symbol
+    fee.amount = format_amount(fee.amount_raw, meta.decimals)
 
 
 def _client_quote_json(
@@ -597,6 +617,13 @@ class TradingService:
                 else AggregatorClient(base_url=base, http=self._http)
             )
             self._aggregator_base = base
+        # Read on every use, like the base URL: an edit to the config file
+        # takes effect without a restart.
+        self._aggregator.extra_spenders = frozenset(
+            str(a).strip().lower()
+            for a in (getattr(self.config, "aggregator_trusted_spenders", None) or [])
+            if str(a).strip()
+        )
         return self._aggregator
 
     def provider_id(self) -> str:
@@ -2590,6 +2617,7 @@ class TradingService:
             # A non-finite provider figure is left as it came: the guardrails
             # already read it as unknown.
             quote.impact_checked = given is None or math.isfinite(float(given))
+        _format_swap_fee(quote, meta_in, meta_out)
         return quote
 
     async def _raw_for_usd(self, chain: ChainSpec, token: TokenMeta, amount_usd: float) -> int:
@@ -2690,6 +2718,7 @@ class TradingService:
             "minOutRaw": str(quote.min_out_raw),
             "priceImpactPct": quote.price_impact_pct,
             "gasUsd": quote.gas_usd,
+            "swapFee": quote.swap_fee.to_dict() if quote.swap_fee is not None else None,
             "valueUsd": value,
             "rate": rate,
             "slippagePct": quote.slippage_pct,
@@ -5105,6 +5134,7 @@ class TradingService:
                 chain=chain,
                 record=record,
                 meta_in=meta_in,
+                meta_out=meta_out,
                 amount_raw=amount_raw,
                 provider=provider.id,
                 targets=provider.trusted_targets(chain, quote),
@@ -5822,6 +5852,7 @@ class TradingService:
         chain: ChainSpec,
         record: WalletRecord,
         meta_in: TokenMeta,
+        meta_out: TokenMeta,
         amount_raw: int,
         provider: str,
         targets: frozenset[str],
@@ -5837,6 +5868,13 @@ class TradingService:
         native sell has no approval to anchor the target to, so this is the
         only thing standing between a tampered response and ETH sent to an
         attacker; an empty ``targets`` refuses every swap.
+
+        One exception to the target pin: wrapping or unwrapping the gas coin.
+        The aggregator sends ETH <-> WETH straight to the chain's WETH9 (no
+        router, no fee), so that transaction is accepted when it goes to the
+        WETH pinned in :data:`WRAPPED_NATIVE` and its calldata is exactly
+        ``deposit()`` or ``withdraw(amount)`` — and ``tx["data"]`` is then
+        re-encoded here, so the provider's bytes never reach the signer.
         """
         if str(tx.get("from") or "").lower() != record.key:
             raise TradingError("trading.tx_failed", "swap transaction is not from this wallet")
@@ -5854,6 +5892,14 @@ class TradingService:
                 f"swap transaction carries {value} wei, order allows {expected_value}",
             )
         to = str(tx.get("to") or "").lower()
+        wrapped = WRAPPED_NATIVE.get(chain.chain_id)
+        if wrapped is not None and to == wrapped:
+            if meta_in.native and meta_out.address.lower() == wrapped:
+                tx["data"] = self._wrap_calldata(tx, SEL_WETH_DEPOSIT)
+                return
+            if meta_out.native and meta_in.address.lower() == wrapped:
+                tx["data"] = self._wrap_calldata(tx, SEL_WETH_WITHDRAW + pad_uint(amount_raw))
+                return
         if to == record.key or to == meta_in.address.lower():
             raise TradingError("trading.tx_failed", "swap transaction has an implausible 'to'")
         if not targets or to not in targets:
@@ -5861,8 +5907,29 @@ class TradingService:
                 "trading.tx_failed",
                 f"swap target {to or '(none)'} is not a contract this desk trusts for "
                 f"{provider_label(provider)} on {chain.name}"
-                + ("" if targets else " (no swap contract is pinned for this chain)"),
+                + ("" if targets else " (no swap contract is pinned for this chain)")
+                + (
+                    " (if you have verified it, add it to trading.aggregator_trusted_spenders)"
+                    if provider == "aggregator"
+                    else ""
+                ),
             )
+
+    @staticmethod
+    def _wrap_calldata(tx: dict[str, Any], expected: str) -> str:
+        """``expected`` when the provider's calldata starts with it, else refuse.
+
+        A trailing suffix (0x appends a tracking id) is allowed and dropped:
+        WETH9 ignores it, and the transaction signed is the one encoded here.
+        """
+        data = str(tx.get("data") or "").lower()
+        if not data.startswith(expected):
+            raise TradingError(
+                "trading.tx_failed",
+                "wrap/unwrap transaction is not exactly WETH deposit()/withdraw(amount); "
+                "refusing to sign",
+            )
+        return expected
 
     @staticmethod
     def _check_approval_tx(

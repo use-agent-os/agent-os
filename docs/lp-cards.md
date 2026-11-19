@@ -1,4 +1,6 @@
-# LP cards (`application/vnd.agentos.lp+json`)
+# LP cards
+
+Artifact type: `application/vnd.agentos.lp+json`.
 
 Uniswap V4 liquidity read-outs rendered as cards in the chat transcript.
 The engine produces the payload (`agentos trade lp …`), the transcript
@@ -97,7 +99,9 @@ come from the engine's price lookup.
 }
 ```
 
-### kind = "ranges"  (liquidity distribution)
+### kind = "ranges"
+
+Liquidity distribution.
 
 ```jsonc
 {

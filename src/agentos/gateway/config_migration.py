@@ -681,7 +681,7 @@ def migrate_config_payload(data: dict[str, Any]) -> ConfigMigrationResult:
             builder.removed_fields.extend(sorted(deprecated_subagents))
             handle_deprecated_subagents_fields(deprecated_subagents, "config_migration")
 
-    # 2026-09: the KyberSwap provider was removed and the AgentOS Aggregator
+    # 2026-09: the KyberSwap provider was removed and the AgentOS DEX
     # became the default. TradingConfig forbids extras, so an existing
     # agentos.toml carrying `kyber_client_id` would fail validation at boot;
     # and `provider = "kyber"` now names a provider that no longer exists.
@@ -696,7 +696,7 @@ def migrate_config_payload(data: dict[str, Any]) -> ConfigMigrationResult:
             builder.changes.append(f"trading.provider: kyber -> {DEFAULT_SWAP_PROVIDER}")
             builder.warnings.append(
                 "The KyberSwap provider was removed; swaps now route through the "
-                "AgentOS Aggregator, which needs no API key"
+                "AgentOS DEX, which needs no API key"
             )
 
     # 2026-07: the skills-block budget default rose from 8000 to 24000 once the

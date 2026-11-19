@@ -50,10 +50,10 @@ KNOWN_SPENDERS: dict[str, str] = {
     "0x8876789976decbfcbbbe364623c63652db8c0904": "Uniswap Universal Router (Robinhood Chain)",
     "0x204faca1764b154221e35c0d20abb3c525710498": "Uniswap Universal Router v2.1.2 (Robinhood)",
     "0x2626664c2603336e57b271c5c0b26f421741e481": "Uniswap V3 SwapRouter02",
-    # What the AgentOS Aggregator's approvals name (0x AllowanceHolder), seen live 2026-09-20.
-    "0x0000000000001ff3684f28c67538d4d072c22734": "AgentOS Aggregator (0x AllowanceHolder)",
+    # What the AgentOS DEX's approvals name (0x AllowanceHolder), seen live 2026-09-20.
+    "0x0000000000001ff3684f28c67538d4d072c22734": "AgentOS DEX (0x AllowanceHolder)",
     # What its approvals name in contract mode: AgentOSRouter, same address on Base and Robinhood.
-    "0x4cf93bac8920b1efc92b0d2c84dcbe56802e530c": "AgentOS Aggregator (AgentOS Router)",
+    "0x4cf93bac8920b1efc92b0d2c84dcbe56802e530c": "AgentOS DEX (AgentOS Router)",
     "0x6131b5fae19ea4f9d964eac0408e4408b66337b5": "KyberSwap MetaAggregationRouter",
     # The V4 PositionManager LP writes approve through Permit2 (docs/lp-write.md).
     "0x7c5f5a4bbd8fd63184577525326123b519429bdc": "Uniswap V4 PositionManager (Base)",

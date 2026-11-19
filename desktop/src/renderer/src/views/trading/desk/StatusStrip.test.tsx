@@ -223,7 +223,7 @@ describe('ComposerSeats', () => {
     )
     expect(screen.getByTestId('composer-seats')).toHaveAttribute('data-typing')
     expect(screen.getByTestId('quick-swap')).toHaveAttribute('tabindex', '-1')
-    expect(screen.getByTestId('provider-seat')).toHaveTextContent('AgentOS Aggregator')
+    expect(screen.getByTestId('provider-seat')).toHaveTextContent('AgentOS DEX')
   })
 })
 
@@ -244,7 +244,7 @@ describe('ProviderSeat', () => {
           },
           {
             id: 'aggregator',
-            label: 'AgentOS Aggregator',
+            label: 'AgentOS DEX',
             needsKey: false,
             keyConfigured: true,
             healthy: null,
@@ -259,7 +259,7 @@ describe('ProviderSeat', () => {
       />,
     )
     fireEvent.click(screen.getByTestId('provider-seat'))
-    const aggregator = screen.getByRole('menuitemradio', { name: /AgentOS Aggregator/ })
+    const aggregator = screen.getByRole('menuitemradio', { name: /AgentOS DEX/ })
     expect(screen.getByRole('menuitemradio', { name: /^Uniswap/ })).toHaveTextContent(
       'needs an API key',
     )

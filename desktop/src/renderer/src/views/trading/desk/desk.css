@@ -339,6 +339,13 @@
   font-weight: 600;
   color: var(--muted-foreground);
 }
+/* The hint and the "Opening the desk" line share the transcript box and both
+   centre in it, so shown together the loading line landed between the
+   hint's title and body. The hint waits for the history to load and takes
+   the loading line's place. */
+.chat-thread[data-history-ready='false'] ~ .trd-chat__empty {
+  visibility: hidden;
+}
 
 /* ── Seats ────────────────────────────────────────────────────────────────── */
 
@@ -3507,13 +3514,31 @@ button.trd-tool[data-tone='danger']:hover {
 
 /* ── Automations inside the BOOK ────────────────────────────────────────────
    Every mission, DCA, trigger and bracket, grouped by what the user has to
-   do about it. A card per item: head (light · tag · name · disclose), the
-   state word, the figures, the reason when there is one, then the same
-   controls as the row above the composer. Opened, its history. */
+   do about it. A compact card per item: head (light · tag · name ·
+   disclose) over one line of state word and figures, with the same controls
+   as the row above the composer to the right of both; the reason, when
+   there is one, under them. Opened, its history. */
 .trd-auto {
   display: flex;
   flex-direction: column;
+  container: trd-auto / inline-size;
+}
+.trd-auto__scroll {
+  display: flex;
+  flex-direction: column;
   padding-bottom: 12px;
+}
+/* In the BOOK the filter row sits outside the scrolling list: when an opened
+   history makes the list scroll, the scrollbar takes its 12 px from the list
+   only, so the chips keep their width and "Finished" stays on the line. */
+.trd-book__body[data-tab='automations'] > .trd-auto {
+  overflow-y: hidden;
+}
+.trd-book__body[data-tab='automations'] .trd-auto__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .trd-auto__filters {
   position: sticky;
@@ -3563,11 +3588,17 @@ button.trd-tool[data-tone='danger']:hover {
 }
 .trd-auto__item {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'head ctl'
+    'line ctl'
+    'reason reason'
+    'hist hist';
+  column-gap: 6px;
+  align-items: center;
   min-width: 0;
-  padding: 7px 8px 6px 10px;
+  padding: 5px 6px 5px 10px;
   border-radius: 10px;
   background: color-mix(in srgb, var(--foreground) 4%, transparent);
   box-shadow: inset 0 0 0 0.5px var(--hairline);
@@ -3582,6 +3613,7 @@ button.trd-tool[data-tone='danger']:hover {
   opacity: 0.78;
 }
 .trd-auto__head {
+  grid-area: head;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -3638,10 +3670,23 @@ button.trd-tool[data-tone='danger']:hover {
 .trd-auto__item[data-open] .trd-auto__chev {
   transform: rotate(180deg);
 }
-.trd-auto__word {
+.trd-auto__line {
+  grid-area: line;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  min-width: 0;
+  margin-top: 1px;
   padding-left: 12px;
+}
+.trd-auto__word {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted-foreground);
@@ -3653,7 +3698,7 @@ button.trd-tool[data-tone='danger']:hover {
   color: var(--warn);
 }
 .trd-auto__facts {
-  padding-left: 12px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3661,6 +3706,8 @@ button.trd-tool[data-tone='danger']:hover {
   color: var(--muted-foreground);
 }
 .trd-auto__reason {
+  grid-area: reason;
+  margin-top: 2px;
   padding-left: 12px;
   font-size: 11px;
   line-height: 1.35;
@@ -3671,15 +3718,24 @@ button.trd-tool[data-tone='danger']:hover {
   color: var(--dim);
 }
 .trd-auto__foot {
+  grid-area: ctl;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  min-height: 24px;
-  padding-left: 8px;
+  gap: 2px;
 }
-.trd-auto__foot .trd-mctl__ctl {
-  margin-left: auto;
+/* Narrow (the BOOK beside the chat): the name takes the head row's whole
+   width, and the controls drop beside the state line, which wraps. */
+@container trd-auto (max-width: 440px) {
+  .trd-auto__item {
+    grid-template-areas:
+      'head head'
+      'line ctl'
+      'reason reason'
+      'hist hist';
+  }
+  .trd-auto__line {
+    margin-top: 2px;
+  }
 }
 .trd-auto__foot .trd-mctl__ctl button,
 .trd-auto__foot .trd-mctl__ctl .mac-button {
@@ -3688,6 +3744,7 @@ button.trd-tool[data-tone='danger']:hover {
 }
 /* History under an opened card. */
 .trd-auto__hist {
+  grid-area: hist;
   margin-top: 4px;
   padding: 6px 0 2px 12px;
   border-top: 0.5px solid var(--hairline);

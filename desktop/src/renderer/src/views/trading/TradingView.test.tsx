@@ -4,9 +4,9 @@ import { useGateway } from '~/stores/gateway'
 import { useTradingUi } from '~/stores/trading-ui'
 import { useUi } from '~/stores/ui'
 import type { MissionsApi } from './desk/missions'
-import { holding, renderDesk, USDC, WALLET } from './test-utils'
+import { holding, LP_ROW, renderDesk, USDC, WALLET } from './test-utils'
 import { TradingView } from './TradingView'
-import type { LpBook, LpPosition, ProviderId } from './types'
+import type { LpBook, ProviderId } from './types'
 
 const rpcCall = vi.fn()
 vi.mock('@/app/providers', () => ({
@@ -85,7 +85,7 @@ describe('TradingView · the venue pill', () => {
             providers: [
               {
                 id: 'aggregator',
-                label: 'AgentOS Aggregator',
+                label: 'AgentOS DEX',
                 needsKey: false,
                 keyConfigured: true,
                 healthy: null,
@@ -115,7 +115,7 @@ describe('TradingView · the venue pill', () => {
     renderDesk(<TradingView />)
 
     const pill = await screen.findByTestId('provider-pill')
-    expect(pill).toHaveTextContent('AgentOS Aggregator')
+    expect(pill).toHaveTextContent('AgentOS DEX')
     // The keyless aggregator: the ticket has no key to ask for.
     expect(screen.getByTestId('swap-review')).not.toHaveTextContent('Add a Uniswap key')
 
@@ -195,32 +195,6 @@ describe('TradingView · the sync state', () => {
   })
 })
 
-const LP_AMOUNT = { raw: '1', human: '1', usd: 1 }
-const LP_ROW: LpPosition = {
-  id: '8453:uniswap_v3:77:0xabc',
-  chain: { id: 8453, key: 'base', name: 'Base', explorer: 'https://basescan.org' },
-  tokenId: '77',
-  owner: { address: WALLET.address, label: 'Main', inApp: true },
-  token: {
-    address: '0x4200000000000000000000000000000000000006',
-    symbol: 'WETH',
-    decimals: 18,
-    priceUsd: 2500,
-  },
-  quote: { address: USDC.address, symbol: 'USDC', decimals: 6, priceUsd: 1 },
-  pool: { poolId: '0xpool', feePct: '0.05%', tickSpacing: 10, tvlUsd: null, priceUsd: 2500 },
-  range: { priceLower: 2000, priceUpper: 2400 },
-  status: 'above-range',
-  principal: { base: LP_AMOUNT, quote: LP_AMOUNT, usd: 1300 },
-  fees: { base: LP_AMOUNT, quote: LP_AMOUNT, usd: 4 },
-  valueUsd: 1304,
-  distancePct: 4.2,
-  protocol: { key: 'uniswap_v3', name: 'Uniswap V3', kind: 'concentrated' },
-  staked: false,
-  gauge: null,
-  rewards: null,
-  share: null,
-}
 const LP_BOOK: LpBook = {
   version: 1,
   kind: 'book',

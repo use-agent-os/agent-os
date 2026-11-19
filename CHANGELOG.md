@@ -33,6 +33,87 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - The `memory_nudge.review_done` log line reports the review turn's own
   `input_tokens`, `output_tokens` and `iterations`.
 
+## [2026.11.19.post2] - 2026-11-19
+
+### Added
+- Desktop: the BOOK beside the chat (Chat → Trade) has a **Liquidity** tab,
+  the same LP positions table as the full desk's Liquidity tab — every
+  wallet's positions across chains, with refresh, Collect and Remove. A
+  Collect or Remove parks its order and opens the Orders tab to approve it.
+
+### Fixed
+- Curated memory no longer starts out holding its own instructions. A new
+  workspace was seeded with a `MEMORY.md` and a `USER.md` explaining what each
+  file is for, and those are curated stores: the text took 630 of the
+  4,000-char `MEMORY.md` budget (as eight entries after the free-form
+  migration) and 325 of the 2,000-char `USER.md` budget, was injected into
+  every prompt as if the agent remembered it, and was never what a full store
+  gave up. When memory filled, real facts were removed instead. New
+  workspaces, including `workspace/agents/<id>/`, now get both files empty;
+  the guidance was already in the system prompt. In existing workspaces that
+  text is left out from now on: entries that are exactly the old template (or
+  its migrated pieces) are dropped, a template you only filled in or added to
+  keeps what you typed, and anything edited or merely similar is left alone.
+  Read-only commands (`agentos memory status`, `memory curated get`, `memory
+  forget --dry-run`) show it gone without writing anything; the next turn or
+  the first write removes it from the file, without a `.bak` file.
+  `agentos memory status --json` counts drop by the removed untracked entries.
+- Wrapping ETH into WETH, or unwrapping WETH back to ETH, with a swap through
+  the AgentOS DEX no longer fails with "swap target … is not a contract this
+  desk trusts" or "swap transaction has an implausible 'to'". The DEX sends
+  that pair straight to the chain's WETH contract (no router, no fee); the
+  desk now accepts it only for the WETH pinned in code for Base and Robinhood
+  Chain, and only as exactly `deposit()` or `withdraw(amount)`, re-encoding
+  the calldata itself before signing. Nothing needs adding to
+  `trading.aggregator_trusted_spenders`.
+- Desktop: in the BOOK beside the chat, opening an automation's history no
+  longer pushes the "Finished" filter chip onto a second line. The filter
+  row now stays put above the list, and only the list scrolls, so the
+  scrollbar no longer takes width from the chips.
+
+## [2026.11.19.post1] - 2026-11-19
+
+### Added
+- Desk → Trade: the swap box and the Confirm swap sheet now show an
+  **AgentOS DEX Fee** row, the fee the AgentOS Aggregator takes on the swap,
+  in the token you sell (e.g. `0.02 USDC` for 0.2% of 10 USDC). The quote RPC
+  (`trading.quote`) carries it as `swapFee` (`bps`, `pct`, `symbol`,
+  `amount`, `amountRaw`), or `null` when the provider charges none.
+
+### Changed
+- The default swap provider is now shown as "AgentOS DEX" instead of
+  "AgentOS Aggregator" everywhere it is displayed: the desktop's Trading
+  settings, provider menu and quotes, `agentos trade` output, allowance
+  spender labels and the docs. The provider id stays `aggregator`, so
+  `trading.provider`, `agentos trade provider aggregator` and every
+  `trading.aggregator_*` key are unchanged.
+- Desktop: the Automations cards (the Trade tab's Automations, and the BOOK
+  beside the chat) are about half as tall. The state word and the figures
+  share one line, and the controls sit beside the head instead of on a row
+  of their own; in the narrow BOOK the name keeps the head row and the
+  controls sit beside the state line. A truncated figures line shows in
+  full on hover.
+
+### Fixed
+- Desk → Liquidity: a long pool line under the pair (wallet, protocol, fee
+  tier, NFT id such as `Uniswap V4 · dynamic · #1933797`) no longer runs
+  over the Range column. It now ends with an ellipsis at the edge of the Pool
+  cell, and hovering it shows the whole line.
+
+## [2026.11.19] - 2026-11-19
+
+### Added
+- `trading.aggregator_trusted_spenders`: a list of extra contracts an
+  AgentOS Aggregator quote may name as the approval spender and swap target,
+  on top of the built-in AgentOS Router and 0x AllowanceHolder. When the
+  gateway moves to a new contract, the operator can add its verified address
+  (`agentos config set trading.aggregator_trusted_spenders '["0x…"]'`)
+  instead of waiting for a release. It only adds to the built-in pins, the
+  spender must still be the swap target, each entry is checked as a 0x
+  address (EIP-55 for mixed case, zero address refused), and it applies on
+  the next quote without a restart. Operator-only, like every `trading.*`
+  key. The "not a contract this desk trusts" errors now name the key.
+
 ### Fixed
 - Swaps through the AgentOS Aggregator signed again once the gateway quoted
   through the AgentOS Router (contract mode). The desk only trusted 0x's

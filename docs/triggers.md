@@ -1,4 +1,6 @@
-# Price triggers (`application/vnd.agentos.trigger+json`)
+# Price triggers
+
+Artifact type: `application/vnd.agentos.trigger+json`.
 
 A **trigger** is a conditional order the trading engine watches and fires by
 itself: *sell half my ETH if it drops under $3,800*, *buy $50 of ETH when it
@@ -398,7 +400,9 @@ agentos trade trigger fire    <id> [--wait --wait-seconds N] [--json] [--no-card
   the agent says the card has an **Approve & arm** button and never approves
   itself.
 
-## Rendering (shared renderer, `frontend/src/views/chat/transcript/trigger.ts`)
+## Rendering
+
+Shared renderer: `frontend/src/views/chat/transcript/trigger.ts`.
 
 Same skeleton as `dca.ts`: `isTriggerArtifact`, `normalizeTriggerPayload`,
 `createTriggerMounter({ fetchPayload, call, actions })`, registered in

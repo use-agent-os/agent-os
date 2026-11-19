@@ -426,6 +426,20 @@ def _agentos_bootstrap_template_text(filename: str) -> str | None:
 def _dest_is_pristine_bootstrap_template(destination: Path, filename: str) -> bool:
     if not destination.is_file():
         return False
+    from agentos.memory.curated_template import (
+        TEMPLATE_TARGETS,
+        holds_only_bootstrap_template,
+    )
+
+    curated_target = TEMPLATE_TARGETS.get(filename)
+    if curated_target is not None:
+        # MEMORY.md / USER.md are seeded empty. Older workspaces got
+        # instructional text instead, which holds nothing the user wrote.
+        try:
+            existing = destination.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError):
+            return False
+        return holds_only_bootstrap_template(curated_target, existing)
     template = _agentos_bootstrap_template_text(filename)
     if template is None:
         return False

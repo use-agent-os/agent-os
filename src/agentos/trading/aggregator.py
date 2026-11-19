@@ -1,4 +1,4 @@
-"""AgentOS Aggregator — the default swap route.
+"""AgentOS DEX — the default swap route.
 
 An HTTP API in front of 0x Swap API v2, served at
 ``https://agg.useagentos.dev``. Every endpoint is a plain ``GET`` and there
@@ -11,10 +11,12 @@ facts from that response are checked here before anything is signed:
 
 * the approval's ``spender`` is one of the contracts this desk knows the
   aggregator to use (:data:`TRUSTED_SPENDERS`: the AgentOS Router, or 0x's
-  AllowanceHolder for a gateway that quotes 0x directly) *and* the same
-  contract the swap transaction is sent ``to``. The set is pinned
-  here, not read from the response: a response that names some other
-  address, however consistently, is refused, not signed;
+  AllowanceHolder for a gateway that quotes 0x directly, plus any the
+  operator added with ``trading.aggregator_trusted_spenders``) *and* the
+  same contract the swap transaction is sent ``to``. The set is pinned
+  here and in the config file, never read from the response: a response
+  that names some other address, however consistently, is refused, not
+  signed;
 * the approval is for exactly what the order needs — the API never asks for
   an unlimited allowance, so one that does is refused too.
 
@@ -27,7 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -41,6 +43,7 @@ from agentos.trading.providers import (
     ProbeResult,
     ProviderError,
     ProviderQuote,
+    SwapFee,
 )
 from agentos.trading.uniswap import DecisionOrigin
 
@@ -65,8 +68,9 @@ ALLOWANCE_HOLDER = "0x0000000000001ff3684f28c67538d4d072c22734"
 #: Immutable, deployed 2026-11-18 at the same CREATE2 address on Base and
 #: Robinhood Chain.
 AGENTOS_ROUTER = "0x4cf93bac8920b1efc92b0d2c84dcbe56802e530c"
-#: The only spenders an approval for this provider may carry, and the only
-#: contracts a swap may be sent to. Each plays both roles, so an approval's
+#: The built-in spenders an approval for this provider may carry, and the
+#: contracts a swap may be sent to; ``trading.aggregator_trusted_spenders``
+#: can add to them, never remove. Each plays both roles, so an approval's
 #: spender must also be the swap's target.
 TRUSTED_SPENDERS: frozenset[str] = frozenset({ALLOWANCE_HOLDER, AGENTOS_ROUTER})
 
@@ -185,13 +189,24 @@ class AggregatorClient:
         timeout: float = 15.0,
         max_retries: int = 2,
         sleep: Callable[[float], Any] | None = None,
+        extra_spenders: Iterable[str] = (),
     ) -> None:
         self.base_url = (base_url or AGGREGATOR_BASE).rstrip("/")
+        #: Operator-configured additions to :data:`TRUSTED_SPENDERS`
+        #: (``trading.aggregator_trusted_spenders``), lower-cased.
+        self.extra_spenders: frozenset[str] = frozenset(
+            str(a).strip().lower() for a in extra_spenders if str(a).strip()
+        )
         self._own_http = http is None
         self._http = http or httpx.AsyncClient(timeout=timeout)
         self._timeout = timeout
         self._max_retries = max(0, int(max_retries))
         self._sleep = sleep or asyncio.sleep
+
+    @property
+    def trusted_spenders(self) -> frozenset[str]:
+        """The built-in pins plus what the operator configured — never the response."""
+        return TRUSTED_SPENDERS | self.extra_spenders
 
     async def aclose(self) -> None:
         if self._own_http:
@@ -355,13 +370,13 @@ class AggregatorClient:
         self._check_approval(parsed)
         return parsed
 
-    @staticmethod
-    def _check_approval(parsed: AggregatorResponse) -> None:
+    def _check_approval(self, parsed: AggregatorResponse) -> None:
         """An approval may only name a pinned spender, and it must be the swap target.
 
         The aggregator's calldata is opaque, but two things are not. The
-        spender has to be one of :data:`TRUSTED_SPENDERS` — a constant of this
-        module, never something the response gets to choose, or the check
+        spender has to be one of :attr:`trusted_spenders` — this module's
+        constants plus the operator's config, never something the response
+        gets to choose, or the check
         would only prove the response agrees with itself. And each trusted
         contract (the AgentOS Router, 0x's AllowanceHolder) is both the
         spender and the swap target, so the two must match. The amount is
@@ -372,12 +387,14 @@ class AggregatorClient:
             return
         spender = str(parsed.approval.get("spender") or "").lower()
         target = str((parsed.transaction or {}).get("to") or "").lower()
-        if spender not in TRUSTED_SPENDERS:
+        trusted = self.trusted_spenders
+        if spender not in trusted:
             raise AggregatorError(
                 "trading.tx_failed",
                 f"Aggregator approval names spender {spender or '(none)'}, which is not "
-                f"a contract this desk trusts ({', '.join(sorted(TRUSTED_SPENDERS))}); "
-                "refusing to sign",
+                f"a contract this desk trusts ({', '.join(sorted(trusted))}); "
+                "refusing to sign (if you have verified it, add it to "
+                "trading.aggregator_trusted_spenders)",
             )
         if spender != target:
             raise AggregatorError(
@@ -496,6 +513,7 @@ class AggregatorProvider:
             fresh_for_s=fresh_for,
             raw=parsed,
             warnings=[*(extra_warnings or []), *parsed.warnings],
+            swap_fee=_swap_fee(parsed.fee),
         )
 
     async def approval_tx(
@@ -521,15 +539,19 @@ class AggregatorProvider:
         }
 
     def trusted_spenders(self, chain: ChainSpec, quote: ProviderQuote) -> frozenset[str]:
-        # Pinned, not read from the quote: what the response names is exactly
-        # the thing this set exists to check.
-        return TRUSTED_SPENDERS
+        # Pinned (in code and the operator's config), not read from the quote:
+        # what the response names is exactly the thing this set exists to check.
+        return self.client.trusted_spenders
 
     def trusted_targets(self, chain: ChainSpec, quote: ProviderQuote) -> frozenset[str]:
         # The AgentOS Router (contract mode) or 0x's AllowanceHolder (direct)
         # is the entry point for every route the aggregator builds, ERC-20 and
-        # native sells alike; the swap is sent there or not at all.
-        return TRUSTED_SPENDERS
+        # native sells alike; the swap is sent there or not at all. A contract
+        # the operator added to trading.aggregator_trusted_spenders is too.
+        # The one exception, ETH <-> WETH sent straight to WETH9, is not a
+        # target here: the service accepts it only for the chain's pinned
+        # WETH and exact deposit()/withdraw() calldata (_check_swap_tx).
+        return self.client.trusted_spenders
 
     async def build(
         self,
@@ -572,6 +594,25 @@ class AggregatorProvider:
         if gas > 0:
             tx["gasLimit"] = str(int(gas * 1.2))
         return tx
+
+
+def _swap_fee(fee: dict[str, Any] | None) -> SwapFee | None:
+    """The quote's ``fee`` block — ``{bps, token, amount: {raw, formatted}}`` —
+    as a :class:`SwapFee`; ``None`` when absent or empty."""
+    if not fee:
+        return None
+    bps = _f(fee.get("bps"))
+    amount = fee.get("amount")
+    amount_raw = _raw(amount)
+    if bps is None and amount_raw is None:
+        return None
+    formatted = amount.get("formatted") if isinstance(amount, dict) else None
+    return SwapFee(
+        bps=int(bps) if bps is not None else None,
+        symbol=str(fee.get("token") or "").strip(),
+        amount_raw=amount_raw,
+        amount=str(formatted) if formatted not in (None, "") else None,
+    )
 
 
 def _chain_for(chain_id: int) -> ChainSpec:

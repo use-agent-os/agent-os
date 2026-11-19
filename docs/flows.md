@@ -131,7 +131,7 @@ Running a flow spends money, so `flows run` and `flows stop` are the user's
 actions: from an agent's shell (an agent-bound connection) the gateway refuses
 them with `flows.operator_required`. Agents use `flow_run` instead.
 
-## Agents: `flow_list`, `flow_run` and `flow_publish`
+## Agent tools
 
 Three built-in tools let an agent use the flows you built (three more let it
 build and edit them: see [Agents can build flows](#agents-can-build-flows)). All are in the

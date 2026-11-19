@@ -42,7 +42,7 @@ function render(
       providers={[
         {
           id: 'aggregator',
-          label: 'AgentOS Aggregator',
+          label: 'AgentOS DEX',
           needsKey: false,
           keyConfigured: true,
           healthy: null,
@@ -103,7 +103,7 @@ describe('Overview · the desk head', () => {
       'aria-checked',
       'true',
     )
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /^AgentOS Aggregator/ }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /^AgentOS DEX/ }))
     expect(onSwitchProvider).toHaveBeenCalledWith('aggregator')
     expect(screen.queryByRole('menu')).toBeNull()
 
