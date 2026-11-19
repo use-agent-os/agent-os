@@ -47,12 +47,13 @@ def test_system_prompt_carries_the_old_curated_template_guidance() -> None:
     )
 
     # What belongs in MEMORY.md, and what does not.
-    assert "durable non-profile facts, preferences, decisions, and constraints" in prompt
+    assert "for every other durable fact" in prompt
+    assert "preferences, decisions, and constraints" in prompt
     assert "Do not put assistant rename/persona requests into `MEMORY.md`" in prompt
     assert "`memory/YYYY-MM-DD.md` and `memory/**/*.md`" in prompt
     assert "ordinary task deliverables" in prompt
     # What belongs in USER.md.
-    assert "name, preferred address, pronouns, and durable profile notes" in prompt
+    assert "a short profile: name, preferred address, pronouns" in prompt
     # No secrets in memory.
     assert "never paste their values into replies, code, or memory files" in prompt
 
