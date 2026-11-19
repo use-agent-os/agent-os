@@ -46,7 +46,15 @@ function save(key: string, value: string): void {
 }
 
 export type BookTab =
-  'portfolio' | 'swap' | 'markets' | 'liquidity' | 'orders' | 'history' | 'tools' | 'automations'
+  | 'portfolio'
+  | 'swap'
+  | 'bridge'
+  | 'markets'
+  | 'liquidity'
+  | 'orders'
+  | 'history'
+  | 'tools'
+  | 'automations'
 
 /**
  * A swap asked for from anywhere — a Markets row, a chat card's Swap, a

@@ -33,6 +33,7 @@ import type {
   AllowanceList,
   Balance,
   Bracket,
+  BridgeQuote,
   BracketLeg,
   BracketListPayload,
   BracketPayload,
@@ -546,6 +547,75 @@ export function useSwap() {
   })
 }
 
+export interface BridgeParams {
+  /** The origin chain; `toChainId` is where the same asset lands. */
+  chainId: number
+  toChainId: number
+  /** The origin token's address (the gas coin's zero address for ETH). */
+  token: string
+  amount: string
+  wallet: string
+}
+
+/**
+ * A live price for the bridge form (docs/bridge.md), on the swap quote's
+ * cadence: Relay is asked again every 15 s while the form is complete.
+ */
+export function useBridgeQuote(params: BridgeParams | null) {
+  const rpc = useRpc()
+  const connected = useConnected()
+  const key = params
+    ? [
+        'trading',
+        'bridge-quote',
+        params.chainId,
+        params.toChainId,
+        params.wallet,
+        params.token.toLowerCase(),
+        params.amount,
+      ]
+    : ['trading', 'bridge-quote', 'none']
+  const query = useQuery<BridgeQuote>({
+    queryKey: key,
+    enabled: connected && params !== null,
+    queryFn: async () => {
+      await rpc.waitForConnection()
+      const res = await rpc.call<{ quote: BridgeQuote }>('trading.bridge.quote', {
+        ...params,
+        initiator: 'manual',
+      })
+      return res.quote
+    },
+    refetchInterval: QUOTE_REFRESH_MS,
+    refetchOnWindowFocus: false,
+    retry: false,
+    staleTime: QUOTE_REFRESH_MS,
+    placeholderData: (prev) => prev,
+  })
+  // As for a swap: a price kept from the previous params is already expired.
+  const fetchedAt = query.isPlaceholderData ? 0 : query.dataUpdatedAt
+  return { ...query, fetchedAt }
+}
+
+/**
+ * A bridge typed by the user: it runs at once, so with Touch ID on the
+ * fingerprint comes first (`touchId` names it in the sheet; never sent).
+ */
+export function useBridge() {
+  const rpc = useRpc()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ touchId, ...params }: BridgeParams & { touchId?: WriteContext }) =>
+      gatedCall<{ order: Order }>(
+        (m, p) => rpc.call(m, p),
+        'trading.bridge.create',
+        { ...params, initiator: 'manual' },
+        touchId,
+      ),
+    onSettled: () => invalidateTrading(queryClient),
+  })
+}
+
 export interface SendRecipient {
   to: string
   amount?: string
@@ -733,7 +803,7 @@ function bracketGate(op: BracketTouchOp): WriteGate {
   }
 }
 
-function manualGate(op: 'swap' | 'send'): WriteGate {
+function manualGate(op: 'swap' | 'send' | 'bridge'): WriteGate {
   return async (params, ctx) => ({
     ...manualTradeTouchId(op, {
       what: ctx.what ?? '',
@@ -823,6 +893,7 @@ export const TRADING_WRITE_GATES: Readonly<Record<string, WriteGate>> = {
   'trading.orders.reject': null,
   'trading.swap': manualGate('swap'),
   'trading.send': manualGate('send'),
+  'trading.bridge.create': manualGate('bridge'),
   'trading.allowances.revoke': null,
   'trading.unwrap': null,
   'trading.sync': null,

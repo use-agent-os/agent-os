@@ -813,6 +813,36 @@ export interface Quote {
   }
 }
 
+/**
+ * `trading.bridge.quote` (docs/bridge.md): what `amountIn` of `tokenIn` on the
+ * origin chain is expected to deliver on the destination, and what Relay keeps.
+ */
+export interface BridgeQuote {
+  wallet: string
+  originChainId: number
+  destinationChainId: number
+  tokenIn: Token
+  tokenOut: Token
+  amountIn: string
+  amountInRaw?: string
+  expectedOut: string
+  expectedOutRaw?: string
+  /** The floor the engine holds its own re-quote to before it signs. */
+  minOut: string
+  minOutRaw?: string
+  /** Destination units per origin unit; null when unknown. */
+  rate: string | number | null
+  feesUsd: number | null
+  fees?: { gasUsd: number | null; relayerUsd: number | null; appUsd: number | null } | null
+  timeEstimateSeconds: number | null
+  requestId?: string | null
+  valueUsd: number | null
+  /** When Relay answered (ms). */
+  fetchedAt?: number
+  provider?: string
+  guard: Quote['guard']
+}
+
 export type UnlockMode = 'auto' | 'manual'
 
 export interface WalletStatus {

@@ -261,12 +261,12 @@ export async function mandateAskById(
 }
 
 /**
- * A swap or a send typed at the desk: it runs at once (a manual order never
+ * A swap, a send or a bridge typed at the desk: it runs at once (a manual order never
  * parks), so with Touch ID on the fingerprint comes first. High-risk when
  * it moves the card's high-risk line or more, or its worth is unknown.
  */
 export function manualTradeTouchId(
-  op: 'swap' | 'send',
+  op: 'swap' | 'send' | 'bridge',
   trade: { what: string; chainId: number; valueUsd?: number | null },
 ): TouchIdAsk {
   const usd = trade.valueUsd

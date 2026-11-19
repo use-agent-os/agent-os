@@ -367,12 +367,13 @@ describe('Book · Markets and swaps asked for from anywhere', () => {
   })
   afterEach(reset)
 
-  it('puts Markets right after Swap', () => {
+  it('puts Bridge beside Swap, then Markets', () => {
     render()
     const tabs = screen.getAllByRole('tab').map((tab) => tab.getAttribute('data-testid'))
     expect(tabs).toEqual([
       'book-tab-portfolio',
       'book-tab-swap',
+      'book-tab-bridge',
       'book-tab-markets',
       'book-tab-liquidity',
       'book-tab-orders',
@@ -380,6 +381,15 @@ describe('Book · Markets and swaps asked for from anywhere', () => {
       'book-tab-automations',
       'book-tab-tools',
     ])
+  })
+
+  it('the Bridge tab opens the bridge ticket, the same asset on the other chain', () => {
+    render()
+    fireEvent.click(screen.getByTestId('book-tab-bridge'))
+    expect(screen.getByTestId('bridge-review')).toBeInTheDocument()
+    expect(screen.getByTestId('bridge-token-out')).toHaveTextContent('ETH')
+    // The BOOK's tab row is the Swap | Bridge switch: the ticket carries none.
+    expect(screen.queryByTestId('ticket-mode-swap')).not.toBeInTheDocument()
   })
 
   it('keeps the Holdings Swap button: the ticket opens on that token', async () => {

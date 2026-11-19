@@ -140,6 +140,11 @@ come back, an external deposit: net balance right, small realized-PnL noise.
   `toChainId|toChain`, `token`, exactly one of `amount` / `amountUsd` /
   `amountPct`, `wallet`, `note`, `clientOrderId`, `wait`),
   `trading.bridge.status` (`orderId` or `requestId`), `trading.bridge.routes`.
+- Desktop: the full desk's ticket switches **Swap | Bridge**, and the BOOK
+  beside the chat has a **Bridge** tab. Both are the same form over
+  `trading.bridge.quote` and `trading.bridge.create` (`initiator: "manual"`,
+  so it runs at once after the confirm sheet, behind Touch ID when on); the
+  order is then followed on Orders like any other bridge.
 - Config: `trading.relay_base_url` (https, or http on loopback).
 - Errors: `trading.bridge.unsupported_route` (exit 2, `details.supportedRoutes`),
   `trading.bridge.provider` (Relay unreachable or refusing; exit 1),

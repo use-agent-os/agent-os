@@ -11,6 +11,7 @@ import {
   Maximize2,
   TrendingDown,
   TrendingUp,
+  Waypoints,
   Wrench,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -33,6 +34,7 @@ import {
   useTradingStatus,
   useWalletMutation,
 } from '~/stores/trading'
+import { BridgePanel } from '../BridgePanel'
 import { DecodeSheet } from '../DecodeSheet'
 import { History } from '../History'
 import { Holdings } from '../Holdings'
@@ -64,6 +66,7 @@ import { ToolsPanel } from './ToolsPanel'
 const TABS: readonly { id: BookTab; icon: typeof BookOpen }[] = [
   { id: 'portfolio', icon: BookOpen },
   { id: 'swap', icon: ArrowLeftRight },
+  { id: 'bridge', icon: Waypoints },
   { id: 'markets', icon: Layers },
   { id: 'liquidity', icon: Droplets },
   { id: 'orders', icon: ListChecks },
@@ -513,6 +516,14 @@ export function Book({
               onOpenSettings={onOpenSettings}
               unlocked={unlocked}
               prefill={prefill}
+              onSent={() => setTab('orders')}
+            />
+          ) : tab === 'bridge' ? (
+            <BridgePanel
+              wallets={wallets}
+              primary={primary}
+              selectedWallet={selected}
+              unlocked={unlocked}
               onSent={() => setTab('orders')}
             />
           ) : tab === 'markets' ? (

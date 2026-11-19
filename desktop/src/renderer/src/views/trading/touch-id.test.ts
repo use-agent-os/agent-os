@@ -256,6 +256,9 @@ describe('Buy now and a manual trade', () => {
     expect(manualTradeTouchId('send', { what: '5 USDC', chainId: 8453, valueUsd: null }).kind).toBe(
       'approve-high',
     )
+    expect(
+      manualTradeTouchId('bridge', { what: '0.1 ETH → ETH', chainId: 8453, valueUsd: 20 }),
+    ).toEqual({ kind: 'approve', reason: 'bridge 0.1 ETH → ETH from Base' })
     expect(manualTradeTouchId('swap', { what: 'x', chainId: 8453, valueUsd: 900 }).kind).toBe(
       'approve-high',
     )

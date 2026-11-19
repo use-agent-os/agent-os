@@ -48,6 +48,8 @@ export const DESKTOP_REQUIRED_METHODS: readonly string[] = [
   'trading.bracket.reject',
   'trading.bracket.resume',
   'trading.bracket.stop',
+  'trading.bridge.create',
+  'trading.bridge.quote',
   'trading.chart',
   'trading.dca.approve',
   'trading.dca.create',
