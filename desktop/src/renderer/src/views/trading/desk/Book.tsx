@@ -534,6 +534,7 @@ export function Book({
               refreshing={lpRefresh.isPending}
               wallets={wallets}
               showChain
+              layout="cards"
               logos={logos}
               now={now}
               acting={lpWrite.isPending ? lpActing : null}

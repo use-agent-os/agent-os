@@ -48,6 +48,7 @@ export function Liquidity({
   now,
   onAction,
   acting,
+  layout = 'table',
 }: {
   book: LpBook | undefined
   loading: boolean
@@ -67,6 +68,11 @@ export function Liquidity({
   onAction?: (position: LpPosition, action: LpAction) => void
   /** The position (by id) whose action is on its way to the engine. */
   acting?: string | null
+  /**
+   * `table` is the full desk's six columns. `cards` is for a rail too narrow
+   * for them (the BOOK beside the chat): one stacked card per position.
+   */
+  layout?: 'table' | 'cards'
 }) {
   const [protocol, setProtocol] = useState<string | null>(null)
   const positions = book?.positions ?? []
@@ -190,6 +196,40 @@ export function Liquidity({
     )
   }
 
+  if (layout === 'cards') {
+    return (
+      <div className="trd-lpcards" data-testid="lp-cards">
+        {summary}
+        {filters}
+        <ul className="trd-lpcards__list" aria-label={t('trading.liquidity.title')}>
+          {loading && positions.length === 0
+            ? [0, 1, 2].map((i) => (
+                <li key={i} className="trd-lpcard" aria-hidden>
+                  <div className="trd-lpcard__head">
+                    <Skeleton width={150} />
+                    <Skeleton width={72} />
+                  </div>
+                  <Skeleton width={200} />
+                  <Skeleton width={120} />
+                </li>
+              ))
+            : rows.map((position) => (
+                <Card
+                  key={position.id}
+                  position={position}
+                  showChain={showChain}
+                  wallet={walletName(position)}
+                  logos={logos}
+                  onAction={onAction}
+                  busy={acting === position.id}
+                  locked={Boolean(acting)}
+                />
+              ))}
+        </ul>
+      </div>
+    )
+  }
+
   return (
     <div className="trd-tablewrap">
       {summary}
@@ -307,15 +347,7 @@ function asToken(token: LpToken, chainId: number, logos?: ReadonlyMap<string, st
   }
 }
 
-function Row({
-  position,
-  showChain,
-  wallet,
-  logos,
-  onAction,
-  busy,
-  locked,
-}: {
+interface RowProps {
   position: LpPosition
   showChain: boolean
   wallet?: string
@@ -325,111 +357,191 @@ function Row({
   busy: boolean
   /** Some row's action is on its way: one order at a time. */
   locked: boolean
-}) {
+}
+
+/** The pair, where it lives and whose it is: the same ident in a row and on a card. */
+function PoolIdent({
+  position,
+  showChain,
+  wallet,
+  logos,
+}: Pick<RowProps, 'position' | 'showChain' | 'wallet' | 'logos'>) {
+  const meta = [position.protocol.name, position.pool.feePct, positionTag(position)]
+    .filter(Boolean)
+    .join(' · ')
+  return (
+    <span className="trd-lppool">
+      <span className="trd-lppool__logos" aria-hidden>
+        <TokenLogo token={asToken(position.token, position.chain.id, logos)} size={20} />
+        <TokenLogo token={asToken(position.quote, position.chain.id, logos)} size={20} />
+      </span>
+      <span className="trd-asset__text">
+        <span className="trd-asset__symbol">
+          <button
+            type="button"
+            className="trd-lppool__pair app-no-drag"
+            title={`${t('trading.liquidity.copyPool')}: ${position.pool.poolId}`}
+            onClick={() => void copyAddress(position.pool.poolId)}
+          >
+            {position.token.symbol} / {position.quote.symbol}
+          </button>
+          {showChain ? (
+            <span className="trd-asset__chainmark" title={position.chain.name}>
+              <ChainMark chainId={position.chain.id} />
+            </span>
+          ) : null}
+          {position.staked ? (
+            <span className="trd-lptag" title={t('trading.liquidity.staked.help')}>
+              {t('trading.liquidity.staked')}
+            </span>
+          ) : null}
+        </span>
+        <span className="trd-asset__name" title={meta}>
+          {wallet ? (
+            <span className="trd-asset__wallet trd-mono" data-testid="asset-wallet">
+              {wallet}
+            </span>
+          ) : null}
+          {meta}
+        </span>
+      </span>
+    </span>
+  )
+}
+
+function Deposited({ position }: { position: LpPosition }) {
+  return (
+    <span className="trd-lpstack">
+      <span>
+        {formatAmountCompact(position.principal.base.human)} {position.token.symbol}
+      </span>
+      <span>
+        {formatAmountCompact(position.principal.quote.human)} {position.quote.symbol}
+      </span>
+    </span>
+  )
+}
+
+function Earned({ position }: { position: LpPosition }) {
+  return (
+    <span className="trd-lpstack">
+      <span>{position.fees ? formatUsdCell(position.fees.usd) : '—'}</span>
+      {position.rewards ? (
+        <span className="trd-lpstack__reward">
+          {formatAmountCompact(position.rewards.amount.human)} {position.rewards.token.symbol}
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
+function earnedTitle(position: LpPosition): string | undefined {
+  return position.fees === null && !position.rewards ? t('trading.liquidity.noFees') : undefined
+}
+
+function Value({ position }: { position: LpPosition }) {
+  return (
+    <Tick value={position.valueUsd}>
+      {position.valueUsd === null
+        ? t('trading.holdings.noPrice')
+        : formatUsdCell(position.valueUsd)}
+    </Tick>
+  )
+}
+
+function Actions({ position, onAction, busy, locked }: RowProps) {
   const actions = onAction ? lpActions(position) : []
-  const tag = positionTag(position)
-  const share = formatShare(position.share)
-  const fee = position.pool.feePct
-  const claimable = hasClaimable(position)
-  const meta = [position.protocol.name, fee, tag].filter(Boolean).join(' · ')
+  if (!onAction || actions.length === 0) return null
+  return (
+    <span className="trd-lpact">
+      {busy ? <Spinner className="size-3" /> : null}
+      {actions.map((action) => (
+        <Button
+          key={action}
+          variant="secondary"
+          className="trd-lpact__btn"
+          disabled={locked}
+          title={t(`trading.liquidity.action.${action}.help`)}
+          onClick={() => onAction(position, action)}
+          data-testid={`lp-${action}`}
+        >
+          {t(`trading.liquidity.action.${action}`)}
+        </Button>
+      ))}
+    </span>
+  )
+}
+
+function Row(props: RowProps) {
+  const { position, onAction } = props
   return (
     <tr data-testid="lp-row" data-status={position.status}>
       <td className="trd-col--asset">
-        <span className="trd-lppool">
-          <span className="trd-lppool__logos" aria-hidden>
-            <TokenLogo token={asToken(position.token, position.chain.id, logos)} size={20} />
-            <TokenLogo token={asToken(position.quote, position.chain.id, logos)} size={20} />
-          </span>
-          <span className="trd-asset__text">
-            <span className="trd-asset__symbol">
-              <button
-                type="button"
-                className="trd-lppool__pair app-no-drag"
-                title={`${t('trading.liquidity.copyPool')}: ${position.pool.poolId}`}
-                onClick={() => void copyAddress(position.pool.poolId)}
-              >
-                {position.token.symbol} / {position.quote.symbol}
-              </button>
-              {showChain ? (
-                <span className="trd-asset__chainmark" title={position.chain.name}>
-                  <ChainMark chainId={position.chain.id} />
-                </span>
-              ) : null}
-              {position.staked ? (
-                <span className="trd-lptag" title={t('trading.liquidity.staked.help')}>
-                  {t('trading.liquidity.staked')}
-                </span>
-              ) : null}
-            </span>
-            <span className="trd-asset__name" title={meta}>
-              {wallet ? (
-                <span className="trd-asset__wallet trd-mono" data-testid="asset-wallet">
-                  {wallet}
-                </span>
-              ) : null}
-              {meta}
-            </span>
-          </span>
-        </span>
+        <PoolIdent {...props} />
       </td>
       <td className="trd-col--range">
-        <RangeCell position={position} share={share} />
+        <RangeCell position={position} share={formatShare(position.share)} />
       </td>
       <td className="trd-col--amounts" title={formatUsd(position.principal.usd)}>
-        <span className="trd-lpstack">
-          <span>
-            {formatAmountCompact(position.principal.base.human)} {position.token.symbol}
-          </span>
-          <span>
-            {formatAmountCompact(position.principal.quote.human)} {position.quote.symbol}
-          </span>
-        </span>
+        <Deposited position={position} />
       </td>
       <td
-        className={cn('trd-col--earned', !claimable && 'trd-cell--muted')}
-        title={
-          position.fees === null && !position.rewards ? t('trading.liquidity.noFees') : undefined
-        }
+        className={cn('trd-col--earned', !hasClaimable(position) && 'trd-cell--muted')}
+        title={earnedTitle(position)}
       >
-        <span className="trd-lpstack">
-          <span>{position.fees ? formatUsdCell(position.fees.usd) : '—'}</span>
-          {position.rewards ? (
-            <span className="trd-lpstack__reward">
-              {formatAmountCompact(position.rewards.amount.human)} {position.rewards.token.symbol}
-            </span>
-          ) : null}
-        </span>
+        <Earned position={position} />
       </td>
       <td className="trd-col--value" title={formatUsd(position.valueUsd)}>
-        <Tick value={position.valueUsd}>
-          {position.valueUsd === null
-            ? t('trading.holdings.noPrice')
-            : formatUsdCell(position.valueUsd)}
-        </Tick>
+        <Value position={position} />
       </td>
       {onAction ? (
         <td className="trd-col--lpact">
-          {actions.length ? (
-            <span className="trd-lpact">
-              {busy ? <Spinner className="size-3" /> : null}
-              {actions.map((action) => (
-                <Button
-                  key={action}
-                  variant="secondary"
-                  className="trd-lpact__btn"
-                  disabled={locked}
-                  title={t(`trading.liquidity.action.${action}.help`)}
-                  onClick={() => onAction(position, action)}
-                  data-testid={`lp-${action}`}
-                >
-                  {t(`trading.liquidity.action.${action}`)}
-                </Button>
-              ))}
-            </span>
-          ) : null}
+          <Actions {...props} />
         </td>
       ) : null}
     </tr>
+  )
+}
+
+/**
+ * The same position for a narrow rail: who and how much on the first line,
+ * the range across the full width, then the figures as labelled lines.
+ */
+function Card(props: RowProps) {
+  const { position, onAction } = props
+  const hasActions = Boolean(onAction) && lpActions(position).length > 0
+  return (
+    <li className="trd-lpcard" data-testid="lp-row" data-status={position.status}>
+      <div className="trd-lpcard__head">
+        <PoolIdent {...props} />
+        <span className="trd-lpcard__value" title={formatUsd(position.valueUsd)}>
+          <Value position={position} />
+        </span>
+      </div>
+      <RangeCell position={position} share={formatShare(position.share)} />
+      <dl className="trd-lpcard__figs">
+        <div title={formatUsd(position.principal.usd)}>
+          <dt>{t('trading.liquidity.col.amounts')}</dt>
+          <dd>
+            <Deposited position={position} />
+          </dd>
+        </div>
+        <div
+          className={cn(!hasClaimable(position) && 'trd-cell--muted')}
+          title={earnedTitle(position)}
+        >
+          <dt>{t('trading.liquidity.col.earned')}</dt>
+          <dd>
+            <Earned position={position} />
+          </dd>
+        </div>
+      </dl>
+      {hasActions ? (
+        <div className="trd-lpcard__acts">
+          <Actions {...props} />
+        </div>
+      ) : null}
+    </li>
   )
 }
 

@@ -3465,6 +3465,115 @@ button:disabled > .trd-hero__spin {
   background: var(--warn);
 }
 
+/* The same book for a rail too narrow for six columns (the BOOK beside the
+   chat): one card per position. Who and how much, the range across the full
+   width, then the figures as labelled lines. It is its own scroller. */
+.trd-lpcards {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* A scrolling flex column would squeeze its bands to fit: they keep their height. */
+.trd-lpcards > * {
+  flex-shrink: 0;
+}
+.trd-lpcards > .trd-lpbar {
+  gap: 4px 16px;
+  padding-left: 12px;
+}
+.trd-lpcards > .trd-lpfilter {
+  padding-left: 12px;
+}
+.trd-lpcards__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.trd-lpcard {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px 12px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.trd-lpcard__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.trd-lpcard__head > .trd-lppool {
+  flex: 1 1 auto;
+}
+/* A long pair gives way before the chain mark, the Staked tag or the value. */
+.trd-lpcard .trd-lppool__pair {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trd-lpcard .trd-asset__chainmark,
+.trd-lpcard .trd-lptag {
+  flex-shrink: 0;
+}
+.trd-lpcard__value {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+  white-space: nowrap;
+}
+.trd-lpcard .trd-lprange {
+  display: flex;
+  max-width: none;
+}
+.trd-lpcard .trd-lprange__bounds {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.trd-lpcard__figs {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+}
+.trd-lpcard__figs > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.trd-lpcard__figs dt {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.trd-lpcard__figs dd {
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.trd-lpcard__acts .trd-lpact {
+  display: flex;
+  justify-content: flex-start;
+}
+.trd-lpcard__acts .trd-lpact__btn {
+  flex: 1;
+}
+
 /* ── Markets (docs/markets.md) ─────────────────────────────────────────────── */
 
 /* Every pool one token trades in. The same instrument as the ledger: a
