@@ -1,4 +1,6 @@
-# DCA mandates (`application/vnd.agentos.dca+json`)
+# DCA mandates
+
+Artifact type: `application/vnd.agentos.dca+json`.
 
 A **DCA mandate** is a recurring buy the trading engine owns and runs by
 itself: *buy $10 of ETH with USDC on Base every day until $300 is spent*.
@@ -351,7 +353,9 @@ agentos trade dca update <id> [--usd X] [--cap X] [--runs N] [--every 12h] [--ma
   the agent tells the user the card has an **Approve & start** button and
   never approves itself (`trading.operator_required` otherwise).
 
-## Rendering (shared renderer, `frontend/src/views/chat/transcript/dca.ts`)
+## Rendering
+
+Shared renderer: `frontend/src/views/chat/transcript/dca.ts`.
 
 Same skeleton as `lp.ts`: `isDcaArtifact`, `normalizeDcaPayload`,
 `createDcaMounter({ fetchPayload, call, actions })`, registered in

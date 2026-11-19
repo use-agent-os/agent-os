@@ -1,4 +1,4 @@
-# LP writes: collect, remove, add (phase 2)
+# LP writes
 
 Phase 1 (`docs/lp-cards.md`) reads Uniswap V4 liquidity. Phase 2 lets the
 desk act on it — collect fees, remove liquidity, add liquidity — through the

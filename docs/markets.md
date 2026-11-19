@@ -1,4 +1,6 @@
-# Markets: every pool a Stock Token trades in (`application/vnd.agentos.markets+json`)
+# Stock Token markets
+
+Artifact type: `application/vnd.agentos.markets+json`.
 
 *Which tokens trade against NVDA?* On Robinhood Chain a Stock Token is not
 only something you buy: it is the **quote asset** for hundreds of other
@@ -273,7 +275,9 @@ With `--json`: JSON on stdout, the card written to
 exactly as `docs/lp-cards.md` describes for LP cards. Errors are the
 `{"error": {...}}` envelope on stderr, exit 1, no card.
 
-## Chat card (shared renderer, `frontend/src/views/chat/transcript/markets.ts`)
+## Chat card
+
+Shared renderer: `frontend/src/views/chat/transcript/markets.ts`.
 
 Mounted by `createMarketsMounter` from `useTranscript.ts` beside
 `createLpMounter`. One card per payload:
@@ -308,7 +312,9 @@ column gives way first, then Vol and Age disappear (≤ 420 px), the venue
 pills wrap as a group under the pair, and "Uniswap" never breaks mid-word.
 A premium of ±0.0 % is shown as `0.0%` with the flat tone.
 
-### CSS hooks (verbatim; the desktop skins these, the web styles them)
+### CSS hooks
+
+Verbatim; the desktop skins these, the web styles them.
 
 ```
 .mk-card                       the card root; data-chain="4663"; data-partial="true" when partial
