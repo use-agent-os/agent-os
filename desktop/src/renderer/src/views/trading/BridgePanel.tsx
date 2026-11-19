@@ -22,7 +22,7 @@ import {
   walletLabel,
 } from './logic'
 import { TokenLogo } from './parts'
-import { Leg } from './SwapPanel'
+import { Leg, useAmountFit } from './SwapPanel'
 import { TicketModes, type TicketMode } from './TicketModes'
 import {
   CHAINS,
@@ -154,6 +154,10 @@ export function BridgePanel({
   const live = ready && fresh !== null
   const eta = fresh ? formatEta(fresh.timeEstimateSeconds) : null
 
+  const [inRef, inStyle] = useAmountFit<HTMLInputElement>(amount)
+  const outText = live ? formatAmount(fresh.expectedOut) : ready && quote.isFetching ? '…' : '0'
+  const [outRef, outStyle] = useAmountFit<HTMLOutputElement>(outText)
+
   return (
     <aside className="trd-ticket" aria-label={t('trading.bridge.title')} data-mode="bridge">
       <div className="trd-ticket__head">
@@ -240,6 +244,8 @@ export function BridgePanel({
         >
           <input
             className="trd-amount"
+            ref={inRef}
+            style={inStyle}
             inputMode="decimal"
             autoComplete="off"
             spellCheck={false}
@@ -273,11 +279,14 @@ export function BridgePanel({
         >
           <output
             className="trd-amount trd-amount--out"
+            ref={outRef}
+            style={outStyle}
+            title={outText}
             data-pending={quote.isFetching && !fresh ? 'true' : undefined}
             aria-label={t('trading.swap.to')}
             data-testid="bridge-out"
           >
-            {live ? formatAmount(fresh.expectedOut) : ready && quote.isFetching ? '…' : '0'}
+            {outText}
           </output>
         </Leg>
 

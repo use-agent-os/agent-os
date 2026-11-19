@@ -322,6 +322,36 @@ describe('SwapPanel', () => {
     expect(screen.getByTestId('swap-review')).not.toBeDisabled()
   })
 
+  it('shrinks a long amount to fit the leg instead of scrolling the ticket', async () => {
+    // jsdom lays nothing out: stand in for the 136 px the cell has on the desk.
+    class Observer {
+      constructor(private cb: () => void) {}
+      observe(el: Element) {
+        Object.defineProperty(el, 'clientWidth', { configurable: true, value: 136 })
+        this.cb()
+      }
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', Observer)
+    try {
+      rpcCall.mockImplementation(async (method: string) =>
+        method === 'trading.quote' ? quote({ amountOut: '104356182.822803' }) : {},
+      )
+      mount()
+      const input = screen.getByLabelText('Amount')
+      expect(input.style.fontSize).toBe('')
+      fireEvent.change(input, { target: { value: '0.1890352125' } })
+      const out = await screen.findByTestId('quote-out')
+      await waitFor(() => expect(out).toHaveTextContent('104,356,182.822803'))
+      expect(out.style.fontSize).toBe('12px')
+      // Clipped or not, the whole figure is one hover away.
+      expect(out).toHaveAttribute('title', '104,356,182.822803')
+      expect(input.style.fontSize).toBe('18px')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('shows the AgentOS DEX fee in the sell token, with no dollar value', async () => {
     const fee = { bps: 20, pct: 0.2, symbol: 'ETH', amount: '0.0002', amountRaw: '200000000000000' }
     rpcCall.mockImplementation(async (method: string) =>

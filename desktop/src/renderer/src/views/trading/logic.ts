@@ -167,6 +167,25 @@ export function formatAmount(amount: unknown, maxDecimals = 6): string {
   return cut ? `${grouped}.${cut}` : grouped
 }
 
+/** A leg's amount at rest, and the smallest it shrinks to, in px. */
+export const AMOUNT_FONT_MAX = 22
+export const AMOUNT_FONT_MIN = 11
+/** A monospace digit's advance per px of type, rounded up so a fit never clips. */
+const AMOUNT_CH = 0.61
+
+/**
+ * The type size at which `chars` monospace characters fit in `width` px, so a
+ * long figure shrinks beside the token button instead of running out of the
+ * leg. `undefined` leaves the stylesheet's size: the figure already fits, or
+ * nothing has been measured yet. Below the floor the caller clips.
+ */
+export function amountFontSize(chars: number, width: number): number | undefined {
+  if (chars <= 0 || width <= 0) return undefined
+  const fit = Math.floor(width / (chars * AMOUNT_CH))
+  if (fit >= AMOUNT_FONT_MAX) return undefined
+  return Math.max(AMOUNT_FONT_MIN, fit)
+}
+
 const SUBSCRIPT_DIGITS = '₀₁₂₃₄₅₆₇₈₉'
 
 function subscript(n: number): string {

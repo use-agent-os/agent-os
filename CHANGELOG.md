@@ -78,6 +78,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   now a stacked card: pair and value on top, the range bar across the full
   width, then Deposited and Unclaimed as labelled lines, with Collect and
   Remove underneath. The full desk's Liquidity table is unchanged.
+- Desktop: a long amount on the Swap or Bridge ticket no longer gives the
+  ticket a sideways scrollbar. A nine-digit receive amount (say
+  `104,356,182.822803` of a low-priced token) ran out of its leg and pushed the
+  whole form wider than its column. The pay and receive figures now shrink to
+  fit the room beside the token button; one too long even at the smallest size
+  ends in an ellipsis, with the full figure on hover.
 
 ## [2026.11.19.post2] - 2026-11-19
 

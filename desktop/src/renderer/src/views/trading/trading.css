@@ -1896,6 +1896,7 @@ tr:focus-within .trd-row__actions {
   flex-direction: column;
   gap: 8px;
   padding: 10px;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -2050,6 +2051,15 @@ tr:focus-within .trd-row__actions {
   text-align: right;
   color: var(--foreground);
   user-select: text;
+}
+/* A long figure shrinks to fit (`useAmountFit` sets the size inline); past
+   the floor the read-only side clips with an ellipsis and keeps the whole
+   figure in its `title`. Nothing here may widen the ticket into a scroll. */
+output.trd-amount {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .trd-amount::placeholder {
   color: var(--dim);
