@@ -56,7 +56,7 @@ KEY = "agent:main:webchat:direct:precompact"
 SUMMARY = "SUMMARY: the user is moving the billing service to Postgres"
 # Distinctive slices of the two review prompts (no line breaks inside).
 PRE_COMPACTION_MARK = "are about to be summarised to free up context"
-PERIODIC_MARK = "Review the conversation above and consider saving to memory."
+PERIODIC_MARK = "Review the conversation above and save what is worth remembering."
 NOTHING = "Nothing to save."
 
 INELIGIBLE_KEYS = [

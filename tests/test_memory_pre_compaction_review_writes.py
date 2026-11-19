@@ -43,7 +43,7 @@ from agentos.tools.registry import ToolRegistry
 
 KEY = "agent:main:webchat:direct:review-writes"
 PRE_COMPACTION_MARK = "are about to be summarised to free up context"
-PERIODIC_MARK = "Review the conversation above and consider saving to memory."
+PERIODIC_MARK = "Review the conversation above and save what is worth remembering."
 REFUSAL = "pre-compaction memory review can only add"
 KEPT_ENTRY = "The user prefers short answers."
 NOTE = "memory/notes.md"
