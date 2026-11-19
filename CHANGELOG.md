@@ -20,9 +20,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   durable fact goes to `MEMORY.md`, the larger store. The memory tool and
   the system prompt used to disagree, and nearly every fact went to
   `USER.md`, which filled up while `MEMORY.md` stayed mostly empty.
-- The model is told to save a durable fact in the turn it comes up, also
-  one mentioned in passing while asking for something else (the review only
-  runs every few turns, so the last turns of a session depend on this).
 - When a value changes, the model is told to replace the entry holding it
   and keep that entry's other details, and the review keeps one topic per
   entry. Before, a replace for a new value could rewrite a multi-fact entry

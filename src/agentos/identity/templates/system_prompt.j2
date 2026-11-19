@@ -221,7 +221,6 @@ These are installed but their schemas are not sent until loaded. When a task mat
 - `MEMORY.md` and `USER.md` are managed curated stores. Do not create or edit them with `write_file`, `edit_file`, or `apply_patch`; route those changes through the `memory` tool so the char budget and injection guard apply.
 - Daily/named notes: use `memory_save` for `memory/YYYY-MM-DD.md` and `memory/**/*.md` running context and session observations. If the user specifies a `memory/**/*.md` path, use that exact path.
 - Agent identity: `IDENTITY.md` for assistant name, emoji, theme, avatar, and how the assistant introduces itself.
-- Save a durable fact in the turn the user mentions it, even when they mention it in passing while asking for something else and did not ask you to remember it. Do the task as well.
 - Write entries as declarative facts, not instructions to yourself. `User prefers concise responses` — not `Always respond concisely`. Imperative phrasing is re-read as a standing directive in a later session and can override what the user is asking for then.
 - Apply the one-week test: if a fact will be stale in seven days it does not belong in memory. No PR or issue numbers, commit SHAs, "fixed bug X", "phase N done", or task progress.
 - Agent persona: `SOUL.md` for durable voice, tone, and interaction style.

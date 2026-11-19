@@ -150,13 +150,3 @@ def test_a_replace_keeps_the_entrys_other_details(tmp_path: Path) -> None:
     # Entries that mix unrelated facts are what a later replace tears apart.
     assert "one topic per entry" in _MEMORY_REVIEW_PROMPT
 
-
-def test_a_fact_mentioned_in_passing_is_saved_in_that_turn(tmp_path: Path) -> None:
-    # The review runs every few turns; the turns after the last one in a
-    # session are only covered by saving in the turn itself.
-    tool = _memory_tool_description(tmp_path)
-    guidance = _write_guidance()
-
-    assert "in passing while asking for something else" in tool
-    assert "in passing while asking for something else" in guidance
-    assert "Save it in the turn it comes up" in tool

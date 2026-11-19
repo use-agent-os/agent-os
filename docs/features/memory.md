@@ -493,9 +493,9 @@ always has the highest-signal facts on hand without a retrieval round-trip:
   notes (environment facts, conventions, tool quirks, lessons learned). It is
   the larger store, so most facts go here.
 
-The agent is told to save a durable fact in the turn it comes up, including
-one mentioned in passing while asking for something else; the memory review
-catches what a turn missed. When a fact changes, it is told to replace the
+The agent saves what it judges durable during a turn, and the memory review
+catches what the turns missed, including facts mentioned in passing while
+asking for something else. When a fact changes, it is told to replace the
 entry holding it and keep every other detail of that entry. When a store is
 nearly full, it is told to keep saving anyway (merge related entries, shorten
 wordy ones, or use the other store if it has room) and not to drop a fact
