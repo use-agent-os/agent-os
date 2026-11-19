@@ -30,6 +30,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - The `memory_nudge.review_done` log line reports the review turn's own
   `input_tokens`, `output_tokens` and `iterations`.
 
+### Fixed
+- Desktop: the Liquidity tab in the BOOK beside the chat (Chat → Trade) no
+  longer squeezes the desk's six-column table into the narrow rail, where the
+  range, deposit and value columns printed over each other. Each position is
+  now a stacked card: pair and value on top, the range bar across the full
+  width, then Deposited and Unclaimed as labelled lines, with Collect and
+  Remove underneath. The full desk's Liquidity table is unchanged.
+
 ## [2026.11.19.post2] - 2026-11-19
 
 ### Added
