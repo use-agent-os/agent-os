@@ -23,6 +23,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   forget --dry-run`) show it gone without writing anything; the next turn or
   the first write removes it from the file, without a `.bak` file.
   `agentos memory status --json` counts drop by the removed untracked entries.
+- Wrapping ETH into WETH, or unwrapping WETH back to ETH, with a swap through
+  the AgentOS DEX no longer fails with "swap target … is not a contract this
+  desk trusts" or "swap transaction has an implausible 'to'". The DEX sends
+  that pair straight to the chain's WETH contract (no router, no fee); the
+  desk now accepts it only for the WETH pinned in code for Base and Robinhood
+  Chain, and only as exactly `deposit()` or `withdraw(amount)`, re-encoding
+  the calldata itself before signing. Nothing needs adding to
+  `trading.aggregator_trusted_spenders`.
 
 ## [2026.11.19.post1] - 2026-11-19
 
