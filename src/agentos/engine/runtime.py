@@ -3853,10 +3853,16 @@ class TurnRunner:
             writes: list[str] = []
             failures: list[str] = []
             turn_error: str | None = None
-            # The review is an internal turn: its usage reaches neither the
-            # transcript nor the per-session spend, so the log line is the
-            # only place its cost shows up.
+            # The review is an internal turn with no transcript entry, so the
+            # log line is the only place its own cost shows up. Its own usage,
+            # not the session delta: the review usually overlaps the user's
+            # next turn, and the delta would count that turn too.
             usage = {"input_tokens": 0, "output_tokens": 0, "iterations": 0}
+            usage_fields = {
+                "input_tokens": "own_input_tokens",
+                "output_tokens": "own_output_tokens",
+                "iterations": "iterations",
+            }
             async for event in self.run(
                 message=variant.prompt,
                 session_key=session_key,
@@ -3873,9 +3879,9 @@ class TurnRunner:
                     turn_error = str(getattr(event, "message", "") or "error")
                     continue
                 if getattr(event, "kind", "") == "done":
-                    for field_name in usage:
+                    for key, field_name in usage_fields.items():
                         value = getattr(event, field_name, 0)
-                        usage[field_name] += value if isinstance(value, int) else 0
+                        usage[key] += value if isinstance(value, int) else 0
                     continue
                 if (
                     getattr(event, "kind", "") != "tool_result"

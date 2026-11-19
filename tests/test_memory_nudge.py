@@ -498,14 +498,24 @@ class _UsageReviewRunner(_ReviewRunner):
         from agentos.engine.types import DoneEvent
 
         self.contexts.append(kwargs["tool_context"])
-        yield DoneEvent(text="Nothing to save.", input_tokens=31000, output_tokens=42, iterations=1)
+        # The session delta (input/output_tokens) also counts a user turn that
+        # ran at the same time; the review's own usage is what gets logged.
+        yield DoneEvent(
+            text="Nothing to save.",
+            input_tokens=95000,
+            output_tokens=900,
+            own_input_tokens=31000,
+            own_output_tokens=42,
+            iterations=1,
+        )
 
 
 async def test_review_log_reports_the_review_turns_token_usage():
-    """The review is internal, so no transcript or spend row carries its cost.
+    """The review is internal, so no transcript entry carries its cost.
 
     Without the usage on the log line nobody can tell what reviewing more
-    often, or more thoroughly, costs.
+    often, or more thoroughly, costs. It is the review's own usage: the
+    session delta also holds whatever user turn overlapped the review.
     """
     import structlog
 
