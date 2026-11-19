@@ -67,6 +67,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `input_tokens`, `output_tokens` and `iterations`.
 
 ### Fixed
+- Desktop: a holding's Swap button no longer fills the ticket with the same
+  token on both sides. When the token it puts on the pay side (say ETH) was
+  already the receive token, or the receive token sat on the other chain, the
+  receive side now goes back to token select instead of showing ETH → ETH and
+  "Pick two different tokens".
 - Desktop: the Liquidity tab in the BOOK beside the chat (Chat → Trade) no
   longer squeezes the desk's six-column table into the narrow rail, where the
   range, deposit and value columns printed over each other. Each position is

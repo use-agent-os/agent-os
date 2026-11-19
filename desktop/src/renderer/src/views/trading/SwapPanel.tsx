@@ -149,9 +149,20 @@ export function SwapPanel({
   if (prefill && prefill.seq !== appliedSeq) {
     setAppliedSeq(prefill.seq)
     if (prefill.chainId === 8453 || prefill.chainId === 4663) setChainId(prefill.chainId)
-    if (prefill.tokenIn) setTokenIn(prefill.tokenIn)
-    else if (prefill.tokenOut) setTokenIn(nativeToken(prefill.chainId))
-    if (prefill.tokenOut !== undefined) setTokenOut(prefill.tokenOut ?? null)
+    const nextIn = prefill.tokenIn ?? (prefill.tokenOut ? nativeToken(prefill.chainId) : tokenIn)
+    let nextOut = prefill.tokenOut !== undefined ? (prefill.tokenOut ?? null) : tokenOut
+    // A row that fills only the pay side keeps the receive side it found,
+    // unless that leg is now the same token (ETH → ETH) or sits on the chain
+    // the ticket just left: then the receive side goes back to "Select".
+    if (
+      prefill.tokenOut === undefined &&
+      nextOut &&
+      (sameToken(nextIn, nextOut) || nextOut.chainId !== prefill.chainId)
+    ) {
+      nextOut = null
+    }
+    setTokenIn(nextIn)
+    setTokenOut(nextOut)
     if (prefill.wallet) setWalletChoice((c) => ({ ...c, override: prefill.wallet ?? null }))
     setAmount('')
   }

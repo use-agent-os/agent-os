@@ -119,6 +119,39 @@ describe('SwapPanel', () => {
     expect(screen.getByRole('textbox', { name: 'Amount' })).toHaveValue('12.5')
   })
 
+  it("clears the receive side when a row's Swap fills it in as the pay token", () => {
+    const ticket = (prefill: Parameters<typeof SwapPanel>[0]['prefill']) => (
+      <SwapPanel
+        wallets={[WALLET]}
+        primary={WALLET.address}
+        selectedWallet="all"
+        provider="uniswap"
+        providerReady
+        onOpenSettings={vi.fn()}
+        unlocked
+        prefill={prefill}
+        onSent={vi.fn()}
+      />
+    )
+    const DAI = { ...USDC, address: '0x50c5725949a6f0c72e6c4a641f24049a917db0cb', symbol: 'DAI' }
+    const { rerender } = renderDesk(ticket({ chainId: 8453, tokenIn: USDC, tokenOut: ETH, seq: 1 }))
+    expect(screen.getByTestId('swap-review')).toHaveTextContent('Enter an amount')
+
+    // A Holdings row's Swap sends only the pay side: ETH, already on receive.
+    rerender(ticket({ chainId: 8453, tokenIn: ETH, seq: 2 }))
+    expect(screen.getByTestId('swap-review')).toHaveTextContent('Choose token')
+    expect(screen.getByTestId('swap-review')).not.toHaveTextContent('Pick two different tokens')
+
+    // A different pay token keeps the receive side it found.
+    rerender(ticket({ chainId: 8453, tokenIn: USDC, tokenOut: ETH, seq: 3 }))
+    rerender(ticket({ chainId: 8453, tokenIn: DAI, seq: 4 }))
+    expect(screen.getByTestId('swap-review')).toHaveTextContent('Enter an amount')
+
+    // A pay token on the other chain cannot keep a receive leg from this one.
+    rerender(ticket({ chainId: 4663, tokenIn: { ...ETH, chainId: 4663 }, seq: 5 }))
+    expect(screen.getByTestId('swap-review')).toHaveTextContent('Choose token')
+  })
+
   it('refuses more than the wallet holds', async () => {
     mount()
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '5' } })
