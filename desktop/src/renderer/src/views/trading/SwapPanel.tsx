@@ -142,8 +142,11 @@ export function SwapPanel({
       ? walletChoice.override
       : null
   const wallet = override ?? followed
-  const setWallet = (address: string) =>
+  const setWallet = (address: string) => {
+    // The amount was sized to the old wallet's balance: a new payer starts empty.
+    if (!sameAddress(address, wallet)) setAmount('')
     setWalletChoice((c) => ({ ...c, override: address || null }))
+  }
 
   // A row's Swap button fills the ticket: applied once per prefill.
   const [appliedSeq, setAppliedSeq] = useState<number | null>(null)
