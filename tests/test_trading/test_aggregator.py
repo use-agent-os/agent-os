@@ -1,4 +1,4 @@
-"""The AgentOS Aggregator provider: its own contract, and one swap end to end.
+"""The AgentOS DEX provider: its own contract, and one swap end to end.
 
 The shared swap machinery is covered in ``test_service.py``, which now runs
 on this provider because it is the default. What lives here is what is
@@ -50,6 +50,10 @@ def _provider(http) -> AggregatorProvider:
     return AggregatorProvider(AggregatorClient(http=http))
 
 
+#: A contract the operator trusts through ``trading.aggregator_trusted_spenders``.
+CONFIGURED = "0x9999999999999999999999999999999999999999"
+
+
 def _quote_body(*, spender: str, target: str, approve_amount: int, amount_needed: int) -> dict:
     """A minimal ``/v1/quote`` body with an approval, for the parser alone."""
     return {
@@ -80,7 +84,7 @@ class TestRegistry:
         assert DEFAULT_PROVIDER_ID == "aggregator"
         assert PROVIDER_IDS[0] == "aggregator"
         assert PROVIDER_IDS == ("aggregator", "uniswap")
-        assert provider_label("aggregator") == "AgentOS Aggregator"
+        assert provider_label("aggregator") == "AgentOS DEX"
         assert "kyber" not in PROVIDER_IDS
 
     def test_config_default_matches_the_registry(self) -> None:
@@ -305,6 +309,40 @@ class TestApprovalIntegrity:
         parsed = client._parse_quote(body, chain=BASE, taker=WALLET, amount_raw=10**6)
         assert parsed.approval is not None and parsed.spender == contract.lower()
 
+    def test_a_configured_spender_is_trusted_as_spender_and_target(self, http) -> None:
+        """``trading.aggregator_trusted_spenders`` adds to the pins, for both roles."""
+        body = _quote_body(
+            spender=CONFIGURED, target=CONFIGURED, approve_amount=10**6, amount_needed=10**6
+        )
+        # Not trusted until the operator says so — and the refusal names the key.
+        with pytest.raises(ProviderError) as info:
+            AggregatorClient(http=http)._parse_quote(
+                body, chain=BASE, taker=WALLET, amount_raw=10**6
+            )
+        assert "not a contract this desk trusts" in str(info.value)
+        assert "trading.aggregator_trusted_spenders" in str(info.value)
+        client = AggregatorClient(
+            http=http, extra_spenders=[CONFIGURED.upper().replace("0X", "0x")]
+        )
+        parsed = client._parse_quote(body, chain=BASE, taker=WALLET, amount_raw=10**6)
+        assert parsed.spender == CONFIGURED
+        assert client.trusted_spenders == TRUSTED_SPENDERS | {CONFIGURED}
+        provider = AggregatorProvider(client)
+        assert provider.trusted_spenders(BASE, None) == client.trusted_spenders  # type: ignore[arg-type]
+        assert provider.trusted_targets(BASE, None) == client.trusted_spenders  # type: ignore[arg-type]
+        # The module's pins are untouched: config adds per client, never globally.
+        assert CONFIGURED not in TRUSTED_SPENDERS
+
+    def test_a_configured_spender_still_must_be_the_swap_target(self, http) -> None:
+        client = AggregatorClient(http=http, extra_spenders=[CONFIGURED])
+        for spender, target in ((CONFIGURED, AGENTOS_ROUTER), (AGENTOS_ROUTER, CONFIGURED)):
+            body = _quote_body(
+                spender=spender, target=target, approve_amount=10**6, amount_needed=10**6
+            )
+            with pytest.raises(ProviderError) as info:
+                client._parse_quote(body, chain=BASE, taker=WALLET, amount_raw=10**6)
+            assert "but the swap is sent to" in str(info.value)
+
     @pytest.mark.parametrize(
         ("spender", "target"),
         [(AGENTOS_ROUTER, ALLOWANCE_HOLDER), (ALLOWANCE_HOLDER, AGENTOS_ROUTER)],
@@ -488,7 +526,7 @@ class TestThroughTheService:
         order = orders[0]
         assert order["status"] == "confirmed", order
         assert order["provider"] == "aggregator"
-        assert order["providerLabel"] == "AgentOS Aggregator"
+        assert order["providerLabel"] == "AgentOS DEX"
         assert order["approvalTxHash"] and order["txHash"]
         # Approval first, then the swap — two transactions, in that order.
         assert len(base_chain.sent) == 2
@@ -509,6 +547,41 @@ class TestThroughTheService:
             chain=BASE, wallet=None, token_in="USDC", token_out="WETH", amount_in="10"
         )
         assert quote["gasUsd"] == pytest.approx(0.8)
+
+    async def test_quote_carries_the_agentos_dex_fee_in_the_sell_token(
+        self, funded_service: TradingService
+    ) -> None:
+        quote = await funded_service.quote(
+            chain=BASE, wallet=None, token_in="USDC", token_out="WETH", amount_in="10"
+        )
+        # 20 bps of 10 USDC, written in USDC's own six decimals.
+        assert quote["swapFee"] == {
+            "bps": 20,
+            "pct": 0.2,
+            "symbol": "USDC",
+            "amount": "0.02",
+            "amountRaw": "20000",
+        }
+
+    async def test_an_unmatched_fee_token_keeps_the_aggregators_own_amount(
+        self, funded_service: TradingService, fake_aggregator: FakeAggregator
+    ) -> None:
+        fake_aggregator.fee_symbol = "XYZ"
+        fake_aggregator.fee_formatted = "0.02"
+        quote = await funded_service.quote(
+            chain=BASE, wallet=None, token_in="USDC", token_out="WETH", amount_in="10"
+        )
+        assert quote["swapFee"]["symbol"] == "XYZ"
+        assert quote["swapFee"]["amount"] == "0.02"
+
+    async def test_no_fee_block_means_no_swap_fee(
+        self, funded_service: TradingService, fake_aggregator: FakeAggregator
+    ) -> None:
+        fake_aggregator.fee_bps = None
+        quote = await funded_service.quote(
+            chain=BASE, wallet=None, token_in="USDC", token_out="WETH", amount_in="10"
+        )
+        assert quote["swapFee"] is None
 
     async def test_status_lists_the_aggregator_first_and_active(
         self, funded_service: TradingService
@@ -721,3 +794,45 @@ class TestSigning:
         )
         assert orders[0]["status"] == "confirmed", orders[0]
         assert lagging["reads"] > 3, lagging
+
+
+class TestTrustedSpendersConfig:
+    def test_default_is_empty(self) -> None:
+        from agentos.gateway.config import TradingConfig
+
+        assert TradingConfig().aggregator_trusted_spenders == []
+
+    def test_addresses_are_lowercased_and_deduplicated(self) -> None:
+        from agentos.gateway.config import TradingConfig
+
+        checksummed = "0x4Cf93bac8920b1EFc92B0d2C84dcbE56802E530c"
+        cfg = TradingConfig(
+            aggregator_trusted_spenders=[f"  {checksummed} ", checksummed.lower(), CONFIGURED]
+        )
+        assert cfg.aggregator_trusted_spenders == [AGENTOS_ROUTER, CONFIGURED]
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "0x4Cf93bac8920b1EFc92B0d2C84dcbE56802E530C",  # one letter's case flipped
+            "0x1234",
+            "not-an-address",
+            "0x" + "zz" * 20,
+            "0x0000000000000000000000000000000000000000",
+            "",
+            "eth",
+        ],
+    )
+    def test_a_bad_address_is_refused(self, bad: str) -> None:
+        from agentos.gateway.config import TradingConfig
+
+        with pytest.raises(ValueError, match="aggregator_trusted_spenders"):
+            TradingConfig(aggregator_trusted_spenders=[bad])
+
+    def test_validate_assignment_applies(self) -> None:
+        from agentos.gateway.config import TradingConfig
+
+        cfg = TradingConfig()
+        with pytest.raises(ValueError):
+            cfg.aggregator_trusted_spenders = ["0x1234"]
+        assert cfg.aggregator_trusted_spenders == []

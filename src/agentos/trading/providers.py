@@ -1,7 +1,7 @@
 """Swap providers: one protocol, two implementations.
 
 The service only ever talks to a :class:`SwapProvider`: quote, approval
-transaction (if any), swap transaction. The AgentOS Aggregator is the
+transaction (if any), swap transaction. The AgentOS DEX is the
 default and needs no key; Uniswap's Trading API is the fallback, and needs
 one. Each provider normalises its own quirks — native-token sentinel, quote
 freshness, slippage units — so the order pipeline stays provider-agnostic.
@@ -31,7 +31,7 @@ ProviderId = Literal["aggregator", "uniswap"]
 PROVIDER_IDS: tuple[str, ...] = ("aggregator", "uniswap")
 DEFAULT_PROVIDER_ID = "aggregator"
 PROVIDER_LABELS: dict[str, str] = {
-    "aggregator": "AgentOS Aggregator",
+    "aggregator": "AgentOS DEX",
     "uniswap": "Uniswap",
     # Not a swap provider: the bridge an order of kind ``bridge`` runs through.
     "relay": "Relay",
@@ -65,6 +65,30 @@ class ProbeResult:
 
 
 @dataclass
+class SwapFee:
+    """The fee a provider takes on the swap itself (not gas).
+
+    ``symbol`` names the token the fee is paid in (the sell token), as the
+    provider spells it; ``amount_raw`` is in that token's base units and
+    ``amount`` its decimal form.
+    """
+
+    bps: int | None
+    symbol: str
+    amount_raw: int | None
+    amount: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "bps": self.bps,
+            "pct": self.bps / 100.0 if self.bps is not None else None,
+            "symbol": self.symbol,
+            "amount": self.amount,
+            "amountRaw": str(self.amount_raw) if self.amount_raw is not None else None,
+        }
+
+
+@dataclass
 class ProviderQuote:
     """A provider-neutral quote. ``raw`` is the provider's own object."""
 
@@ -92,6 +116,9 @@ class ProviderQuote:
     # (both sides priced). A provider's figure alone is shown, never trusted:
     # the agent guardrails read an unchecked impact as unknown.
     impact_checked: bool = False
+    # The provider's own fee on the swap (the AgentOS DEX fee on the
+    # aggregator); ``None`` when the provider charges none or says nothing.
+    swap_fee: SwapFee | None = None
 
     @property
     def age_s(self) -> float:

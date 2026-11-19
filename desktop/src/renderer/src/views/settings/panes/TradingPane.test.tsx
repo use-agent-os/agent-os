@@ -162,7 +162,7 @@ describe('TradingPane · Swap provider', () => {
     mount()
     // A config that names no provider is on the default: the aggregator. The
     // Uniswap key is then kept but not in use, and the hint says so.
-    const aggregator = await screen.findByRole('radio', { name: 'AgentOS Aggregator' })
+    const aggregator = await screen.findByRole('radio', { name: 'AgentOS DEX' })
     expect(aggregator).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByTestId('uniswap-key-hint')).toHaveTextContent('Only used while')
     fireEvent.click(screen.getByRole('radio', { name: 'Uniswap' }))
@@ -186,7 +186,7 @@ describe('TradingPane · Swap provider', () => {
           providers: [
             {
               id: 'aggregator',
-              label: 'AgentOS Aggregator',
+              label: 'AgentOS DEX',
               needsKey: false,
               keyConfigured: true,
               healthy: null,
@@ -218,7 +218,7 @@ describe('TradingPane · Swap provider', () => {
       return {}
     })
     mount()
-    expect(await screen.findByRole('radio', { name: 'AgentOS Aggregator' })).toHaveAttribute(
+    expect(await screen.findByRole('radio', { name: 'AgentOS DEX' })).toHaveAttribute(
       'aria-checked',
       'true',
     )

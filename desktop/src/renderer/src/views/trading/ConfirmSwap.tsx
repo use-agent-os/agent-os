@@ -22,7 +22,7 @@ import {
   walletLabel,
 } from './logic'
 import { Sheet } from './parts'
-import { QuoteWarnings } from './SwapPanel'
+import { DexFeeFact, QuoteWarnings } from './SwapPanel'
 import { providerLabel, type Order, type Quote, type Token, type Wallet } from './types'
 
 const timeFmt = new Intl.DateTimeFormat(undefined, {
@@ -224,6 +224,7 @@ export function ConfirmSwap({
           </span>
           <b data-tone={impact}>{formatPct(quote.priceImpactPct)}</b>
         </div>
+        {quote.swapFee ? <DexFeeFact fee={quote.swapFee} /> : null}
         <div className="trd-fact">
           <span>{t('trading.swap.gas')}</span>
           <b>{formatUsd(quote.gasUsd)}</b>

@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.19.post1] - 2026-11-19
+
+### Added
+- Desk → Trade: the swap box and the Confirm swap sheet now show an
+  **AgentOS DEX Fee** row, the fee the AgentOS Aggregator takes on the swap,
+  in the token you sell (e.g. `0.02 USDC` for 0.2% of 10 USDC). The quote RPC
+  (`trading.quote`) carries it as `swapFee` (`bps`, `pct`, `symbol`,
+  `amount`, `amountRaw`), or `null` when the provider charges none.
+
+### Changed
+- The default swap provider is now shown as "AgentOS DEX" instead of
+  "AgentOS Aggregator" everywhere it is displayed: the desktop's Trading
+  settings, provider menu and quotes, `agentos trade` output, allowance
+  spender labels and the docs. The provider id stays `aggregator`, so
+  `trading.provider`, `agentos trade provider aggregator` and every
+  `trading.aggregator_*` key are unchanged.
+- Desktop: the Automations cards (the Trade tab's Automations, and the BOOK
+  beside the chat) are about half as tall. The state word and the figures
+  share one line, and the controls sit beside the head instead of on a row
+  of their own; in the narrow BOOK the name keeps the head row and the
+  controls sit beside the state line. A truncated figures line shows in
+  full on hover.
+
+### Fixed
+- Desk → Liquidity: a long pool line under the pair (wallet, protocol, fee
+  tier, NFT id such as `Uniswap V4 · dynamic · #1933797`) no longer runs
+  over the Range column. It now ends with an ellipsis at the edge of the Pool
+  cell, and hovering it shows the whole line.
+
+## [2026.11.19] - 2026-11-19
+
+### Added
+- `trading.aggregator_trusted_spenders`: a list of extra contracts an
+  AgentOS Aggregator quote may name as the approval spender and swap target,
+  on top of the built-in AgentOS Router and 0x AllowanceHolder. When the
+  gateway moves to a new contract, the operator can add its verified address
+  (`agentos config set trading.aggregator_trusted_spenders '["0x…"]'`)
+  instead of waiting for a release. It only adds to the built-in pins, the
+  spender must still be the swap target, each entry is checked as a 0x
+  address (EIP-55 for mixed case, zero address refused), and it applies on
+  the next quote without a restart. Operator-only, like every `trading.*`
+  key. The "not a contract this desk trusts" errors now name the key.
+
 ### Fixed
 - Swaps through the AgentOS Aggregator signed again once the gateway quoted
   through the AgentOS Router (contract mode). The desk only trusted 0x's

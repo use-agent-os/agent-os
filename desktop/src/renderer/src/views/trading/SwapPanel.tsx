@@ -38,9 +38,20 @@ import {
   type Order,
   type ProviderId,
   type Quote,
+  type SwapFee,
   type Token,
   type Wallet,
 } from './types'
+
+/** The AgentOS DEX fee on the swap, in the token it is paid in (the sell token). */
+export function DexFeeFact({ fee }: { fee: SwapFee }) {
+  return (
+    <div className="trd-fact" data-testid="quote-dex-fee">
+      <span>{t('trading.swap.dexFee')}</span>
+      <b>{fee.amount != null ? `${formatAmount(fee.amount)} ${fee.symbol}` : '—'}</b>
+    </div>
+  )
+}
 
 /** What the provider flagged about this pair (a transfer fee, say): shown, never hidden. */
 export function QuoteWarnings({ warnings }: { warnings: string[] | undefined }) {
@@ -359,6 +370,7 @@ export function SwapPanel({
                 {formatAmount(fresh.minOut)} {tokenOut?.symbol}
               </b>
             </div>
+            {fresh.swapFee ? <DexFeeFact fee={fresh.swapFee} /> : null}
             <div className="trd-fact">
               <span>{t('trading.swap.gas')}</span>
               <b>{formatUsd(fresh.gasUsd)}</b>

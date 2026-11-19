@@ -33,7 +33,7 @@ available without `uv tool list` or `pip show`.
 | `agentos acp` | Drive external coding harnesses (Claude Code, Codex, Gemini CLI, ...) over ACP: `list`, `doctor`, `run`, `sessions`, `cancel`, `close`. |
 | `agentos projects` | Group sessions into projects with shared knowledge injected into every member session. |
 | `agentos wallet` | Create, import, export and unlock wallets in the engine's vault; show balances. |
-| `agentos trade` | Quote and swap tokens on Base / Robinhood Chain through the AgentOS Aggregator (default) or Uniswap; orders, approvals, history, PnL; Uniswap V4 liquidity; DCA mandates; price triggers (stop-loss, take-profit, trailing stop, buy-the-dip, alerts); brackets (take-profit + stop-loss on one position, one cancels the other). |
+| `agentos trade` | Quote and swap tokens on Base / Robinhood Chain through the AgentOS DEX (default) or Uniswap; orders, approvals, history, PnL; Uniswap V4 liquidity; DCA mandates; price triggers (stop-loss, take-profit, trailing stop, buy-the-dip, alerts); brackets (take-profit + stop-loss on one position, one cancels the other). |
 | `agentos skills` | List, search, view, install, update, publish, inspect, and tap skills. |
 | `agentos memory` | Inspect and maintain memory. |
 | `agentos channels` | Configure and inspect messaging channels. |
@@ -1216,7 +1216,7 @@ always asks the vault password. Passwords are read from a hidden prompt or
 keystore) — never from the command line.
 
 Swaps run on Base (8453) and Robinhood Chain (4663) through one of two
-providers. The **AgentOS Aggregator** (the default,
+providers. The **AgentOS DEX** (the default,
 `trading.provider = "aggregator"`, served at `https://agg.useagentos.dev`)
 needs no key and no account: one GET returns the price *and* the unsigned
 calldata, including the ERC-20 approval when one is needed. It never signs
@@ -1586,7 +1586,12 @@ every error is `{"error": …}` on stderr and writes no card.
 `[trading]` config keys (each also an environment variable with the
 `AGENTOS_TRADING_` prefix): `enabled`, `provider` (`aggregator` |
 `uniswap`), `aggregator_base_url` (default
-`https://agg.useagentos.dev`), `uniswap_api_key`, `uniswap_api_key_env`
+`https://agg.useagentos.dev`), `aggregator_trusted_spenders` (list of 0x
+addresses, default empty: contracts an aggregator quote may name as the
+approval spender and swap target on top of the built-in AgentOS Router and
+0x AllowanceHolder; added, never replacing them; mixed case must pass its
+EIP-55 checksum; set it as a JSON list of the verified addresses, e.g.
+`'["0x…"]'`), `uniswap_api_key`, `uniswap_api_key_env`
 (default `UNISWAP_API_KEY`), `rpc_urls` (chain id → JSON-RPC URL; the wallet sync's bulk ERC-20
 balance read still tries the chain's public node first),
 `approval_threshold_usd`, `daily_cap_usd` (0 = agent swaps off),

@@ -331,6 +331,7 @@ function Row({
   const share = formatShare(position.share)
   const fee = position.pool.feePct
   const claimable = hasClaimable(position)
+  const meta = [position.protocol.name, fee, tag].filter(Boolean).join(' · ')
   return (
     <tr data-testid="lp-row" data-status={position.status}>
       <td className="trd-col--asset">
@@ -360,13 +361,13 @@ function Row({
                 </span>
               ) : null}
             </span>
-            <span className="trd-asset__name">
+            <span className="trd-asset__name" title={meta}>
               {wallet ? (
                 <span className="trd-asset__wallet trd-mono" data-testid="asset-wallet">
                   {wallet}
                 </span>
               ) : null}
-              {[position.protocol.name, fee, tag].filter(Boolean).join(' · ')}
+              {meta}
             </span>
           </span>
         </span>

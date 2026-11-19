@@ -3358,8 +3358,10 @@ button:disabled > .trd-hero__spin {
   padding: 0 10px;
   font-size: 12px;
 }
+/* A block flex box fills the cell, so the meta line (protocol, fee, NFT id)
+   ellipsizes at the cell edge instead of running over the range column. */
 .trd-lppool {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
