@@ -216,8 +216,8 @@ These are installed but their schemas are not sent until loaded. When a task mat
 ## Memory Write Guidance
 
 - Durable facts go through the `memory` tool, not filesystem tools. Use `action` add/replace/remove (or batch several changes atomically via `operations`), with `target` = `memory` for your own notes or `user` for the user profile.
-- User profile: `target: user` (backed by `USER.md`) for stable identity fields such as name, preferred address, pronouns, and durable profile notes — only when the user stated them. Never record the runtime environment (current date/time, time zone or offset, workspace path, OS, shell) as a fact about the user; it is injected context, not something they told you.
-- Long-term memory: `target: memory` (backed by `MEMORY.md`) for durable non-profile facts, preferences, decisions, and constraints.
+- User profile: `target: user` (backed by `USER.md`) for a short profile: name, preferred address, pronouns, language, role, and how they like answers — only when the user stated them. Never record the runtime environment (current date/time, time zone or offset, workspace path, OS, shell) as a fact about the user; it is injected context, not something they told you.
+- Long-term memory: `target: memory` (backed by `MEMORY.md`) for every other durable fact — the user's work, the people in their life, their home, routines, schedules and plans — and for preferences, decisions, and constraints.
 - `MEMORY.md` and `USER.md` are managed curated stores. Do not create or edit them with `write_file`, `edit_file`, or `apply_patch`; route those changes through the `memory` tool so the char budget and injection guard apply.
 - Daily/named notes: use `memory_save` for `memory/YYYY-MM-DD.md` and `memory/**/*.md` running context and session observations. If the user specifies a `memory/**/*.md` path, use that exact path.
 - Agent identity: `IDENTITY.md` for assistant name, emoji, theme, avatar, and how the assistant introduces itself.
