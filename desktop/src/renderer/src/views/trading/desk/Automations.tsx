@@ -173,22 +173,24 @@ export function Automations({
           </button>
         ))}
       </div>
-      {sections.length === 0 ? (
-        <p className="trd-auto__none">{t('trading.auto.empty.filtered')}</p>
-      ) : null}
-      {sections.map((section) => (
-        <Section
-          key={section.group}
-          group={section.group}
-          items={section.items}
-          folded={section.group === 'finished' && filter === 'all'}
-          now={now}
-          missions={missions}
-          pendingApprovals={pendingApprovals}
-          sessionKey={sessionKey}
-          onOpenSession={onOpenSession}
-        />
-      ))}
+      <div className="trd-auto__scroll">
+        {sections.length === 0 ? (
+          <p className="trd-auto__none">{t('trading.auto.empty.filtered')}</p>
+        ) : null}
+        {sections.map((section) => (
+          <Section
+            key={section.group}
+            group={section.group}
+            items={section.items}
+            folded={section.group === 'finished' && filter === 'all'}
+            now={now}
+            missions={missions}
+            pendingApprovals={pendingApprovals}
+            sessionKey={sessionKey}
+            onOpenSession={onOpenSession}
+          />
+        ))}
+      </div>
     </div>
   )
 }
