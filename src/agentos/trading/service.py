@@ -54,6 +54,7 @@ from agentos.trading.bridge import (
 from agentos.trading.chains import (
     CHAINS,
     NATIVE_ADDRESS,
+    WRAPPED_NATIVE,
     ChainSpec,
     UnsupportedChainError,
     checksum_address,
@@ -186,8 +187,9 @@ HIDDEN_RESCAN_S = 3600.0
 SYNC_BACKGROUND = "background"
 SYNC_REQUESTED = "requested"
 SYNC_INITIAL = "initial"
-# WETH9 ``withdraw(uint256)``.
+# WETH9 ``withdraw(uint256)`` and ``deposit()``.
 SEL_WETH_WITHDRAW = "0x2e1a7d4d"
+SEL_WETH_DEPOSIT = "0xd0e30db0"
 # A multisend is one decision and one wallet lock; beyond this many legs it
 # is a script, not an order.
 MAX_SEND_RECIPIENTS = 200
@@ -5132,6 +5134,7 @@ class TradingService:
                 chain=chain,
                 record=record,
                 meta_in=meta_in,
+                meta_out=meta_out,
                 amount_raw=amount_raw,
                 provider=provider.id,
                 targets=provider.trusted_targets(chain, quote),
@@ -5849,6 +5852,7 @@ class TradingService:
         chain: ChainSpec,
         record: WalletRecord,
         meta_in: TokenMeta,
+        meta_out: TokenMeta,
         amount_raw: int,
         provider: str,
         targets: frozenset[str],
@@ -5864,6 +5868,13 @@ class TradingService:
         native sell has no approval to anchor the target to, so this is the
         only thing standing between a tampered response and ETH sent to an
         attacker; an empty ``targets`` refuses every swap.
+
+        One exception to the target pin: wrapping or unwrapping the gas coin.
+        The aggregator sends ETH <-> WETH straight to the chain's WETH9 (no
+        router, no fee), so that transaction is accepted when it goes to the
+        WETH pinned in :data:`WRAPPED_NATIVE` and its calldata is exactly
+        ``deposit()`` or ``withdraw(amount)`` — and ``tx["data"]`` is then
+        re-encoded here, so the provider's bytes never reach the signer.
         """
         if str(tx.get("from") or "").lower() != record.key:
             raise TradingError("trading.tx_failed", "swap transaction is not from this wallet")
@@ -5881,6 +5892,14 @@ class TradingService:
                 f"swap transaction carries {value} wei, order allows {expected_value}",
             )
         to = str(tx.get("to") or "").lower()
+        wrapped = WRAPPED_NATIVE.get(chain.chain_id)
+        if wrapped is not None and to == wrapped:
+            if meta_in.native and meta_out.address.lower() == wrapped:
+                tx["data"] = self._wrap_calldata(tx, SEL_WETH_DEPOSIT)
+                return
+            if meta_out.native and meta_in.address.lower() == wrapped:
+                tx["data"] = self._wrap_calldata(tx, SEL_WETH_WITHDRAW + pad_uint(amount_raw))
+                return
         if to == record.key or to == meta_in.address.lower():
             raise TradingError("trading.tx_failed", "swap transaction has an implausible 'to'")
         if not targets or to not in targets:
@@ -5895,6 +5914,22 @@ class TradingService:
                     else ""
                 ),
             )
+
+    @staticmethod
+    def _wrap_calldata(tx: dict[str, Any], expected: str) -> str:
+        """``expected`` when the provider's calldata starts with it, else refuse.
+
+        A trailing suffix (0x appends a tracking id) is allowed and dropped:
+        WETH9 ignores it, and the transaction signed is the one encoded here.
+        """
+        data = str(tx.get("data") or "").lower()
+        if not data.startswith(expected):
+            raise TradingError(
+                "trading.tx_failed",
+                "wrap/unwrap transaction is not exactly WETH deposit()/withdraw(amount); "
+                "refusing to sign",
+            )
+        return expected
 
     @staticmethod
     def _check_approval_tx(
