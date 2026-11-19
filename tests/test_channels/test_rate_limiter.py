@@ -9,6 +9,8 @@ arithmetic is exact and the suite never actually waits.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from agentos.channels import _util
@@ -88,3 +90,9 @@ async def test_burst_up_to_max_tokens_never_sleeps(clock: _VirtualClock) -> None
         await limiter.acquire()
 
     assert clock.sleeps == []
+
+
+@pytest.mark.parametrize("max_tokens, refill_rate", [(0, 1.0), (1, 0.0), (1, -1.0), (1, math.nan)])
+def test_invalid_rate_limits_fail_at_construction(max_tokens: int, refill_rate: float) -> None:
+    with pytest.raises(ValueError):
+        RateLimiter(max_tokens=max_tokens, refill_rate=refill_rate)
