@@ -1,4 +1,4 @@
-# Bridge: Base ⇄ Robinhood Chain through Relay
+# Bridge
 
 The trading engine moves ETH and the USD stable between its two chains
 through [Relay](https://docs.relay.link) — a public, keyless REST API that

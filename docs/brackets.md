@@ -1,4 +1,6 @@
-# Brackets: take-profit + stop-loss on one position (`application/vnd.agentos.trigger+json`, kind `bracket`)
+# Brackets
+
+Artifact type: `application/vnd.agentos.trigger+json`, kind `bracket`.
 
 A **bracket** protects a position with two price triggers at once: *sell my
 ETH when it is up 20 %, or when it is down 10 %, whichever comes first*. The
@@ -360,7 +362,9 @@ agentos trade bracket fire    <id> [--leg tp|sl] [--wait --wait-seconds N] [--js
   the agent says the card has one **Approve & arm** button for both legs and
   never approves itself.
 
-## Rendering (shared renderer, `frontend/src/views/chat/transcript/trigger.ts`)
+## Rendering
+
+Shared renderer: `frontend/src/views/chat/transcript/trigger.ts`.
 
 `trigger.ts` handles the two new kinds in the same module (one mime, one
 mounter, one registration): `TriggerKind` becomes `'trigger' | 'triggers'

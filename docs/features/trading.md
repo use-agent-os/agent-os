@@ -425,7 +425,9 @@ provider keys live in the URL path; `trading.aggregator_base_url` must be
 files); it is the difference between a guardrail a prompt can talk its way
 around and one it cannot.
 
-## Guardrails (code-enforced, agent-initiated swaps only)
+## Guardrails
+
+Code-enforced, and applied to agent-initiated swaps only.
 
 | Rule | Default | Outcome when hit |
 | --- | --- | --- |
