@@ -3,6 +3,8 @@ import {
   CircleCheck,
   Copy,
   Download,
+  Eye,
+  EyeOff,
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
@@ -13,6 +15,7 @@ import {
 import { MenuItem, MenuSep, PopMenu } from '~/components/menu/PopMenu'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
+import { useBalanceMask, useBalancePrivacy } from '~/stores/balance-privacy'
 import { blockieDataUrl } from './blockie'
 import { copyAddress, usePopUp, WalletMenuItems } from './WalletMenu'
 import { activeFirst, formatUsd, sameAddress, shortAddress, walletLabel } from './logic'
@@ -81,6 +84,8 @@ export function WalletHead({
   const allUsd = [...totals.values()].reduce((sum, tt) => sum + tt.valueUsd, 0)
 
   const markSize = compact ? 30 : 40
+  const { hidden, mask } = useBalanceMask()
+  const toggleHidden = useBalancePrivacy((s) => s.toggle)
 
   return (
     <header className="trd-head" data-compact={compact ? 'true' : undefined}>
@@ -140,7 +145,9 @@ export function WalletHead({
                   role="menuitemradio"
                   checked={selected === 'all'}
                   label={t('trading.rail.all')}
-                  aside={<span className="trd-mono">{formatUsd(allUsd, { compact: true })}</span>}
+                  aside={
+                    <span className="trd-mono">{mask(formatUsd(allUsd, { compact: true }))}</span>
+                  }
                   onSelect={() => onSelect('all')}
                 />
                 <MenuSep />
@@ -158,7 +165,7 @@ export function WalletHead({
                     label={walletLabel(w)}
                     aside={
                       <span className="trd-mono">
-                        {tt ? formatUsd(tt.valueUsd, { compact: true }) : ''}
+                        {tt ? mask(formatUsd(tt.valueUsd, { compact: true })) : ''}
                       </span>
                     }
                     onSelect={() => onSelect(w.address)}
@@ -185,6 +192,23 @@ export function WalletHead({
       </div>
 
       <div className="trd-head__acts">
+        {/* One switch for the desk and the BOOK alike: it lives in the head
+            both of them wear, and the state behind it is shared. */}
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={hidden ? t('trading.head.showBalances') : t('trading.head.hideBalances')}
+          aria-pressed={hidden}
+          title={hidden ? t('trading.head.showBalances') : t('trading.head.hideBalances')}
+          data-testid="balance-toggle"
+          onClick={toggleHidden}
+        >
+          {hidden ? (
+            <EyeOff className="size-4 text-muted-foreground" strokeWidth={1.75} aria-hidden />
+          ) : (
+            <Eye className="size-4 text-muted-foreground" strokeWidth={1.75} aria-hidden />
+          )}
+        </Button>
         {wallet ? (
           <>
             <Button

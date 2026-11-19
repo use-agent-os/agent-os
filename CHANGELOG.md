@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Desktop: a **Hide balances** button (the eye in the wallet head) masks every
+  wallet figure as `******` — the total, today's move, the Unrealized /
+  Realized / Cost basis / Gas tiles, each wallet's total in the rail and the
+  switcher, the Amount, Value and Unrealized columns of Holdings, Liquidity
+  totals and positions, and the balances in the swap ticket and token picker.
+  Their hover titles, PnL colours and rates go with them. It is one switch for
+  the full desk (Trade) and the BOOK beside the chat (Chat → Trade): hiding in
+  one hides in the other, and the choice is remembered across launches. Token
+  prices and 24h moves stay visible, and the sheet that removes a wallet still
+  states what the wallet holds.
+
 ### Changed
 - The periodic memory review saves far more of what the user tells the
   agent. It now goes through every message the user sent, lists the durable
