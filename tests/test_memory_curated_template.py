@@ -301,7 +301,9 @@ def test_an_unmigrated_template_never_reaches_the_prompt(tmp_path: Path) -> None
 def test_a_template_written_with_windows_line_endings_is_recognised(tmp_path: Path) -> None:
     (tmp_path / "USER.md").write_bytes(USER_TEMPLATE.replace("\n", "\r\n").encode("utf-8"))
     _write(tmp_path / "MEMORY.md", MIGRATED_MEMORY_TEMPLATE)
-    raw = (tmp_path / "MEMORY.md").read_bytes()
+    # Normalise first: on Windows the helper already wrote \r\n, and doubling
+    # it would give \r\r\n, which reads back as a blank line.
+    raw = (tmp_path / "MEMORY.md").read_bytes().replace(b"\r\n", b"\n")
     (tmp_path / "MEMORY.md").write_bytes(raw.replace(b"\n", b"\r\n"))
 
     store = _load(tmp_path)
