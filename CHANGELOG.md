@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.19.post2] - 2026-11-19
+
 ### Added
 - Desktop: the BOOK beside the chat (Chat → Trade) has a **Liquidity** tab,
   the same LP positions table as the full desk's Liquidity tab — every
