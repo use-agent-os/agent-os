@@ -7,9 +7,11 @@ import {
   keyLabel,
   matchesFilters,
   movePin,
+  orderPins,
   nestSessions,
   parsePins,
   reorderPins,
+  sessionPinned,
   sessionChannel,
   sessionIsRunning,
   sessionTitle,
@@ -181,6 +183,22 @@ describe('pins', () => {
     expect(movePin(pins, 'B', -1)).toEqual(['B', 'A'])
     expect(reorderPins(['a', 'b', 'c'], 0, 2)).toEqual(['b', 'c', 'a'])
     expect(togglePin(pins, 'A')).toEqual(['B'])
+  })
+
+  it('orders the gateway-pinned rows: this browser’s order, then the rest by pin time', () => {
+    const rows = [
+      { key: 'A', pinned: true, pinned_at: 300 },
+      { key: 'B', pinned: true, pinned_at: 200 },
+      { key: 'C', pinned: true, pinnedAt: 100 },
+      { key: 'D', pinned: false },
+      { key: 'E' },
+    ]
+    expect(orderPins(rows, [])).toEqual(['C', 'B', 'A'])
+    // A stored key that is not pinned (D), or not listed (gone), is skipped.
+    expect(orderPins(rows, ['A', 'D', 'gone', 'A'])).toEqual(['A', 'C', 'B'])
+    expect(sessionPinned(rows[0]!)).toBe(true)
+    expect(sessionPinned(rows[3]!)).toBe(false)
+    expect(sessionPinned({ key: 'x', pinned: 'yes' as unknown as boolean })).toBe(false)
   })
 
   it('parses stored pins defensively', () => {

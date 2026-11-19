@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Pinned sessions are shared. A session can be pinned from the Web UI or the
+  desktop app (right-click → **Pin** / **Unpin**), from the CLI
+  (`agentos sessions pin|unpin <id-or-name>`), or by asking the agent in chat
+  ("pin this session", "pin the session called api-refactor" — the new
+  `session_pin` tool). Pins are now stored on the gateway (`sessions.pin`;
+  `sessions.list` rows carry `pinned` / `pinnedAt`, and `includePinned`
+  returns pinned sessions beyond the page) instead of in each client, so
+  every client shows the same **Pinned** section. In the desktop app that
+  section now sits at the top of the sidebar, above Projects. A pinned
+  session stays listed however old it is, and pinning does not bump its
+  last-activity time. Pins an older build kept in the browser or the desktop
+  app are handed to the gateway on first load.
 - Desktop: bridge between Base and Robinhood Chain from the ticket, without
   asking the agent. The full desk's ticket head now switches **Swap | Bridge**,
   and the BOOK beside the chat (Chat → Trade) has a **Bridge** tab next to
@@ -28,6 +40,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   states what the wallet holds.
 
 ### Changed
+- Deferred tool loading. `session_pin` joins the deferred set, which now holds
+  32 rarely used builtins; deferral cuts a stock request from 71 to 40 tool
+  schemas.
 - The periodic memory review saves far more of what the user tells the
   agent. It now goes through every message the user sent, lists the durable
   facts (including ones mentioned in passing while asking for something

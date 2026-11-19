@@ -4,6 +4,7 @@ const KEY = 'agentos-desktop.sessionMarks'
 
 /** What the app remembers about a session that the gateway does not. */
 export interface SessionMarks {
+  /** Legacy local pins not yet handed to the gateway; nothing renders from it. */
   pinned: ReadonlySet<string>
   archived: ReadonlySet<string>
   unread: ReadonlySet<string>
@@ -57,10 +58,11 @@ interface SessionMarksStore extends SessionMarks {
 }
 
 /**
- * Pinned, archived and unread, kept on this Mac (localStorage) because the
- * gateway has no such fields. Pinned rows float to the top of the sidebar,
- * archived rows hide unless the view asks for them, unread rows read bold
- * until opened.
+ * Archived and unread, kept on this Mac (localStorage) because the gateway
+ * has no such fields: archived rows hide unless the view asks for them,
+ * unread rows read bold until opened. `pinned` is what an older build kept
+ * here; pins are the gateway's now (`sessions.pin`), and `useAdoptLocalPins`
+ * hands these over and empties the set.
  */
 export const useSessionMarks = create<SessionMarksStore>((set, get) => {
   const commit = (patch: Partial<SessionMarks>) => {

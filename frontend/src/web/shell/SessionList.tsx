@@ -71,6 +71,7 @@ import {
   hasActiveFilters,
   matchesFilters,
   movePin,
+  orderPins,
   nestSessions,
   parsePins,
   reorderPins,
@@ -79,7 +80,8 @@ import {
   sessionIsRunning,
   keyLabel,
   sessionTitle,
-  togglePin,
+  PINS_ADOPTED_KEY,
+  sessionPinned,
   type SessionFilters,
   type SessionGrouping,
   type SessionNode,
@@ -140,6 +142,7 @@ function store(key: string, value: string): void {
   }
 }
 
+/** The order this browser arranged the pinned sessions in (not which are pinned). */
 export function usePins(): [string[], (next: string[]) => void] {
   const [pins, setPinsState] = useState<string[]>(readPins)
   const setPins = useCallback((next: string[]) => {
@@ -147,6 +150,44 @@ export function usePins(): [string[], (next: string[]) => void] {
     store(PINS_KEY, JSON.stringify(next))
   }, [])
   return [pins, setPins]
+}
+
+function pinsAdopted(): boolean {
+  try {
+    return localStorage.getItem(PINS_ADOPTED_KEY) === '1'
+  } catch {
+    return true
+  }
+}
+
+/**
+ * Pins used to live in this browser only. Hand the ones still stored here to
+ * the gateway once, so an upgrade does not empty the Pinned section; after
+ * that the stored list is only an order. A pin the gateway refuses leaves the
+ * flag unset, and the next load tries again.
+ */
+function useAdoptLocalPins(rows: readonly SessionRow[], ready: boolean, order: readonly string[]) {
+  const rpc = useRpc()
+  const queryClient = useQueryClient()
+  const started = useRef(false)
+  useEffect(() => {
+    if (!ready || started.current || pinsAdopted()) return
+    started.current = true
+    const known = new Map(rows.map((row) => [row.key, row]))
+    const pending = order.filter((key) => {
+      const row = known.get(key)
+      return row !== undefined && !row.provisional && !sessionPinned(row)
+    })
+    void (async () => {
+      const results = await Promise.allSettled(
+        pending.map((key) => rpc.call('sessions.pin', { key, pinned: true })),
+      )
+      if (results.every((r) => r.status === 'fulfilled')) store(PINS_ADOPTED_KEY, '1')
+      if (pending.length > 0) {
+        await queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY })
+      }
+    })()
+  }, [rpc, queryClient, rows, ready, order])
 }
 
 function sectionTitle(section: SessionSection): string {
@@ -210,7 +251,7 @@ export function SessionList({ onNavigate }: { onNavigate?: () => void }) {
   const setFilters = useShell((s) => s.setFilters)
   const clearFilters = useShell((s) => s.clearFilters)
   const [grouping, setGroupingState] = useState<SessionGrouping>(readGrouping)
-  const [pins, setPins] = usePins()
+  const [pinOrder, setPins] = usePins()
   const { pathname } = useLocation()
   const currentKey = pathname.startsWith('/chat/') ? pathToSessionKey(pathname) : null
 
@@ -221,6 +262,8 @@ export function SessionList({ onNavigate }: { onNavigate?: () => void }) {
   }
 
   const rows = sessions.rows
+  useAdoptLocalPins(rows, sessions.isSuccess, pinOrder)
+  const pins = useMemo(() => orderPins(rows, pinOrder), [rows, pinOrder])
   const options = useMemo(() => filterOptions(rows), [rows])
   const sections = useMemo(() => {
     const visible = rows.filter((row) => matchesFilters(row, filters))
@@ -536,7 +579,7 @@ function SessionItem(props: ItemProps) {
   const navigate = useNavigate()
   const title = sessionTitle(row)
   const running = sessionIsRunning(row)
-  const pinned = pins.includes(row.key)
+  const pinned = sessionPinned(row)
   const [expanded, setExpanded] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(title)
@@ -586,6 +629,26 @@ function SessionItem(props: ItemProps) {
     }
   }
 
+  // The row moves at once; the gateway stores the pin so every client (and
+  // the agent) shares it. A refused call puts the row back with the refetch.
+  const setPinned = async (on: boolean) => {
+    setError(null)
+    await queryClient.cancelQueries({ queryKey: SESSIONS_QUERY_KEY, exact: true })
+    const at = on ? Date.now() : null
+    queryClient.setQueryData<SessionRow[]>(SESSIONS_QUERY_KEY, (prev) =>
+      prev?.map((r) => (r.key === row.key ? { ...r, pinned: on, pinned_at: at, pinnedAt: at } : r)),
+    )
+    const others = pins.filter((k) => k !== row.key)
+    setPins(on ? [...others, row.key] : others)
+    try {
+      await rpc.call('sessions.pin', { key: row.key, pinned: on })
+    } catch (e) {
+      const action = on ? t('webShell.actionPin') : t('webShell.actionUnpin')
+      setError(t('webShell.actionFailed', { action, message: errorMessage(e) }))
+    }
+    void refresh()
+  }
+
   const onAction = (id: ActionId, projectId?: string | null) => {
     switch (id) {
       case 'rename':
@@ -593,7 +656,7 @@ function SessionItem(props: ItemProps) {
         setRenaming(true)
         return
       case 'pin':
-        setPins(togglePin(pins, row.key))
+        void setPinned(!pinned)
         return
       case 'move-up':
         setPins(movePin(pins, row.key, -1))

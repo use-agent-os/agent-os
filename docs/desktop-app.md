@@ -148,6 +148,12 @@ with project folders above them.
   never overwritten. See [Session titles](configuration.md#session-titles).
 - **Right-click a session** to rename, pin, mark as unread, export as
   Markdown, move it to a project, archive or delete it.
+- **Pinned** sessions sit in their own section at the top of the sidebar,
+  above Projects. Right-click a session and choose **Pin** (or **Unpin**), or
+  ask the agent in chat ("pin this session"). Pins are stored on the gateway,
+  so the Web UI shows the same ones; a pinned session filed in a project
+  appears both on top and in its folder. See
+  [Pin a Session](sessions.md#pin-a-session).
 
 ### Selecting several sessions
 

@@ -79,6 +79,28 @@ You can also just ask the agent — "call this session api-refactor". The
 `session_rename` tool renames the session the agent is running in, and only
 that one; asking it to clear the name drops back to the auto name.
 
+## Pin a Session
+
+Pinned sessions sit in a **Pinned** section at the top of the session list, in
+the Web UI and in the desktop app (there, above the project folders). Pin the
+ones you keep coming back to:
+
+```sh
+agentos sessions pin <session-key>
+agentos sessions pin api-refactor       # target by name or short id
+agentos sessions unpin <session-key>
+```
+
+In the Web UI and the desktop app, right-click a session and choose **Pin** or
+**Unpin**. You can also ask the agent — "pin this session", or "pin the
+session called api-refactor". The `session_pin` tool pins the session the agent
+is running in unless you name another one.
+
+Pins are stored on the gateway, so every client shows the same Pinned section.
+A pinned session stays listed however old it gets, and pinning is not
+activity: the session keeps its place in time. Deleting a session removes its
+pin.
+
 ## Resume a Session
 
 ```sh

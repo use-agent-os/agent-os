@@ -151,8 +151,40 @@ function byUpdatedDesc(a: SessionNode, b: SessionNode): number {
 }
 
 // ── Pins ─────────────────────────────────────────────────────────────────────
+//
+// Which sessions are pinned is the gateway's (`sessions.pin`, the row's
+// `pinned`), so the desktop app, the CLI and the agent's `session_pin` tool
+// all see the same set. This browser keeps only the order the user arranged
+// them in, under the key that used to hold the pins themselves.
 
 export const PINS_KEY = 'agentos.ui.pinnedSessions'
+/** Set once this browser's pre-gateway pins have been handed over. */
+export const PINS_ADOPTED_KEY = 'agentos.ui.pinnedSessions.adopted'
+
+export function sessionPinned(row: SessionRow): boolean {
+  return row.pinned === true
+}
+
+function sessionPinnedMs(row: SessionRow): number {
+  const raw = row.pinned_at ?? row.pinnedAt
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : 0
+}
+
+/**
+ * The pinned keys in display order: the ones this browser has arranged, in
+ * that order, then any pinned elsewhere since (another client, the agent),
+ * oldest pin first. A stored key the gateway no longer has pinned is skipped.
+ */
+export function orderPins(rows: readonly SessionRow[], order: readonly string[]): string[] {
+  const pinned = new Map(rows.filter(sessionPinned).map((row) => [row.key, row]))
+  const arranged = [...new Set(order)].filter((key) => pinned.has(key))
+  const seen = new Set(arranged)
+  const rest = [...pinned.values()]
+    .filter((row) => !seen.has(row.key))
+    .sort((a, b) => sessionPinnedMs(a) - sessionPinnedMs(b) || a.key.localeCompare(b.key))
+    .map((row) => row.key)
+  return [...arranged, ...rest]
+}
 
 export function togglePin(pins: readonly string[], key: string): string[] {
   return pins.includes(key) ? pins.filter((k) => k !== key) : [...pins, key]

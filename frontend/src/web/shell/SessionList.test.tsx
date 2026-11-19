@@ -8,7 +8,7 @@ import { renderShell, resetShellState, sessionRow, shellRpc } from '@/test/web-s
 import { webRoutes } from '@/web/app/WebApp'
 import { createSessionOptimistic, SESSIONS_REFRESH_MS } from './session-data'
 import { sessionHeadline } from './SessionList'
-import { PINS_KEY } from './session-list'
+import { PINS_ADOPTED_KEY, PINS_KEY } from './session-list'
 
 beforeEach(resetShellState)
 afterEach(() => vi.useRealTimers())
@@ -254,12 +254,13 @@ describe('row actions', () => {
     expect(await screen.findByRole('menu')).toBeInTheDocument()
   })
 
-  it('pins A then B, moves B above A, and keeps the order', async () => {
+  it('pins A then B on the gateway, moves B above A, and keeps the order', async () => {
     const user = userEvent.setup()
-    renderShell(
-      '/home',
-      shellRpc([sessionRow(A, { display_name: 'Alpha' }), sessionRow(B, { display_name: 'Beta' })]),
-    )
+    const rpc = shellRpc([
+      sessionRow(A, { display_name: 'Alpha' }),
+      sessionRow(B, { display_name: 'Beta' }),
+    ])
+    renderShell('/home', rpc)
     for (const title of ['Alpha', 'Beta']) {
       const menu = await openRowMenu(user, title)
       await user.click(within(menu).getByRole('menuitem', { name: 'Pin' }))
@@ -267,20 +268,85 @@ describe('row actions', () => {
     const menu = await openRowMenu(user, 'Beta')
     await user.click(within(menu).getByRole('menuitem', { name: 'Move up' }))
     const pinned = screen.getByRole('region', { name: 'Pinned' })
+    const shown = () =>
+      within(pinned)
+        .getAllByRole('link')
+        .map((l) => l.textContent)
+    expect(shown()).toEqual([expect.stringContaining('Beta'), expect.stringContaining('Alpha')])
+    expect(rpc.callsTo('sessions.pin')).toEqual([
+      { key: A, pinned: true },
+      { key: B, pinned: true },
+    ])
+    // The order is this browser's; it survives the refetch that follows a pin.
+    expect(JSON.parse(localStorage.getItem(PINS_KEY)!)).toEqual([B, A])
+    await waitFor(() => expect(rpc.callsTo('sessions.list').length).toBeGreaterThan(2))
+    expect(shown()).toEqual([expect.stringContaining('Beta'), expect.stringContaining('Alpha')])
+  })
+
+  it('shows what the gateway has pinned, whoever pinned it, oldest pin first', async () => {
+    renderShell(
+      '/home',
+      shellRpc([
+        sessionRow(A, { display_name: 'Alpha', pinned: true, pinned_at: 200 }),
+        sessionRow(B, { display_name: 'Beta', pinned: true, pinned_at: 100 }),
+        sessionRow('agent:main:webchat:c', { display_name: 'Gamma' }),
+      ]),
+    )
+    const pinned = await screen.findByRole('region', { name: 'Pinned' })
     expect(
       within(pinned)
         .getAllByRole('link')
         .map((l) => l.textContent),
     ).toEqual([expect.stringContaining('Beta'), expect.stringContaining('Alpha')])
-    expect(JSON.parse(localStorage.getItem(PINS_KEY)!)).toEqual([B, A])
+    expect(within(pinned).queryByText('Gamma')).toBeNull()
   })
 
-  it('hides a pin whose session is gone but keeps it stored', async () => {
+  it('unpins from the right-click menu and takes the row out of Pinned', async () => {
+    const user = userEvent.setup()
+    const rpc = shellRpc([sessionRow(A, { display_name: 'Alpha', pinned: true, pinned_at: 1 })])
+    renderShell('/home', rpc)
+    const pinned = await screen.findByRole('region', { name: 'Pinned' })
+    fireEvent.contextMenu(within(pinned).getByRole('link', { name: /Alpha/ }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Unpin' }))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Pinned' })).toBeNull())
+    expect(rpc.callsTo('sessions.pin')).toEqual([{ key: A, pinned: false }])
+    expect(screen.getByRole('link', { name: /Alpha/ })).toBeInTheDocument()
+  })
+
+  it('puts the row back and says why when the gateway refuses the pin', async () => {
+    const user = userEvent.setup()
+    const rpc = shellRpc([sessionRow(A, { display_name: 'Alpha' })]).handle('sessions.pin', () => {
+      throw new Error('storage locked')
+    })
+    renderShell('/home', rpc)
+    const menu = await openRowMenu(user, 'Alpha')
+    await user.click(within(menu).getByRole('menuitem', { name: 'Pin' }))
+    expect(await screen.findByText('Pin failed: storage locked')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Pinned' })).toBeNull())
+  })
+
+  it('hands pins an older build kept in this browser to the gateway, once', async () => {
     localStorage.setItem(PINS_KEY, JSON.stringify(['agent:main:webchat:gone', A]))
-    renderShell('/home', shellRpc([sessionRow(A, { display_name: 'Alive' })]))
+    const rpc = shellRpc([
+      sessionRow(A, { display_name: 'Alive' }),
+      sessionRow(B, { display_name: 'Beta' }),
+    ])
+    const first = renderShell('/home', rpc)
     const pinned = await screen.findByRole('region', { name: 'Pinned' })
     expect(within(pinned).getAllByRole('link')).toHaveLength(1)
-    expect(JSON.parse(localStorage.getItem(PINS_KEY)!)).toHaveLength(2)
+    expect(within(pinned).getByRole('link', { name: /Alive/ })).toBeInTheDocument()
+    expect(rpc.callsTo('sessions.pin')).toEqual([{ key: A, pinned: true }])
+    await waitFor(() => expect(localStorage.getItem(PINS_ADOPTED_KEY)).toBe('1'))
+
+    // Adopted: a stored key is only an order now, so a session unpinned
+    // elsewhere is not pinned back by the next load.
+    first.unmount()
+    await rpc.call('sessions.pin', { key: A, pinned: false })
+    rpc.calls.length = 0
+    renderShell('/home', rpc)
+    await screen.findByRole('link', { name: /Alive/ })
+    expect(screen.queryByRole('region', { name: 'Pinned' })).toBeNull()
+    expect(rpc.callsTo('sessions.pin')).toEqual([])
   })
 })
 

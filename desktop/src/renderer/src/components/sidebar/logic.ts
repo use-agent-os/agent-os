@@ -1,6 +1,7 @@
 // Pure helpers for the sidebar's session list: how the view menu's choices
-// (grouping, ordering, filters) and the local marks (pinned, archived,
-// unread) turn the gateway's rows into the sections on screen.
+// (grouping, ordering, filters) and the local marks (archived, unread) turn
+// the gateway's rows into the sections on screen. Pinned rows are not
+// sectioned here: they have their own block above the project folders.
 
 import { projectId, projectName, sessionProjectId, type RawProject } from '@/views/projects/logic'
 import { agentIdFromKey, sessionRunStatus } from '@/views/sessions/logic'
@@ -134,36 +135,25 @@ export interface SectionLabels {
   today: string
   yesterday: string
   week: string
-  pinned: string
-  /** The unpinned rows when nothing groups them and a pinned section sits above. */
-  others: string
   noProject: string
   agent: (id: string) => string
 }
 
 /**
- * Split ordered rows into labelled sections. Pinned rows always form the
- * first section. By date the first section is unlabelled when it is
- * today's, as the list has always shown; a month carries its own name.
+ * Split ordered rows into labelled sections. By date the first section is
+ * unlabelled when it is today's, as the list has always shown; a month
+ * carries its own name. The caller keeps pinned rows out of `rows`.
  */
 export function sectionRows(
   rows: SessionRow[],
   view: Pick<SessionView, 'grouping'>,
-  marks: Pick<SessionMarks, 'pinned'>,
   labels: SectionLabels,
   projects: RawProject[] = [],
   now = Date.now(),
 ): Section[] {
-  const out: Section[] = []
-  const pinned = rows.filter((r) => marks.pinned.has(r.key))
-  const rest = rows.filter((r) => !marks.pinned.has(r.key))
-  if (pinned.length > 0) out.push({ key: 'pinned', label: labels.pinned, items: pinned })
-
+  const rest = rows
   if (view.grouping === 'none') {
-    if (rest.length > 0) {
-      out.push({ key: 'all', label: pinned.length ? labels.others : '', items: rest })
-    }
-    return out
+    return rest.length > 0 ? [{ key: 'all', label: '', items: rest }] : []
   }
 
   const sections = new Map<string, Section>()
@@ -187,15 +177,15 @@ export function sectionRows(
     }
     const list = [...sections.values()]
     // Today's section at the top needs no caption; the rows speak for it.
-    if (pinned.length === 0 && list[0]?.key === 'today') list[0] = { ...list[0], label: '' }
-    return out.concat(list)
+    if (list[0]?.key === 'today') list[0] = { ...list[0], label: '' }
+    return list
   }
   if (view.grouping === 'agent') {
     for (const row of rest) {
       const id = rowAgentId(row)
       push(`agent:${id}`, labels.agent(id), row)
     }
-    return out.concat([...sections.values()].sort((a, b) => a.label.localeCompare(b.label)))
+    return [...sections.values()].sort((a, b) => a.label.localeCompare(b.label))
   }
   // By project: known projects in their sidebar order, then the loose rows.
   const names = new Map(projects.map((p) => [projectId(p), projectName(p)]))
@@ -212,7 +202,7 @@ export function sectionRows(
   }
   const loose = sections.get('project:')
   if (loose) ordered.push(loose)
-  return out.concat(ordered)
+  return ordered
 }
 
 /** Distinct agent ids across the rows, alphabetical, for the Agent filter. */
@@ -226,15 +216,18 @@ export function hiddenCount(all: SessionRow[], shown: SessionRow[]): number {
 }
 
 /**
- * The session rows as the sidebar draws them, top to bottom: the chats in
- * each open folder, then the sections. A pinned chat filed in a project is
- * drawn twice (in its folder and on top), and both copies are listed.
+ * The session rows as the sidebar draws them, top to bottom: the pinned
+ * block, the chats in each open folder, then the sections. A pinned chat
+ * filed in a project is drawn twice (on top and in its folder), and both
+ * copies are listed.
  */
 export function visibleSlots(
   folders: ReadonlyArray<readonly SessionRow[]>,
   sections: ReadonlyArray<{ items: readonly SessionRow[] }>,
+  pinned: readonly SessionRow[] = [],
 ): ListSlot[] {
   return [
+    ...pinned.map((row) => ({ row, nested: false })),
     ...folders.flat().map((row) => ({ row, nested: true })),
     ...sections.flatMap((s) => s.items).map((row) => ({ row, nested: false })),
   ]

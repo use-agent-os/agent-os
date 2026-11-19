@@ -1,4 +1,4 @@
-"""Sessions command — list/show/rename/resume/delete/export sessions."""
+"""Sessions command — list/show/rename/pin/resume/delete/export sessions."""
 
 from __future__ import annotations
 
@@ -404,6 +404,39 @@ def sessions_rename(
         console.print(f"Renamed session {key!r} to [{ACCENT}]{markup_escape(new_name)}[/]")
     else:
         console.print(f"Cleared the custom name for session {key!r}")
+
+
+def _pin(session_id: str, pinned: bool, json_output: bool) -> None:
+    async def _run(client):
+        return await client.pin_session(session_id, pinned)
+
+    payload = run_gateway_sync(_run, json_output=json_output)
+    if json_output:
+        print_json(payload)
+        return
+    key = payload.get("key") or session_id
+    if not payload.get("changed", True):
+        console.print(f"Session {key!r} is {'already' if pinned else 'not'} pinned")
+    else:
+        console.print(f"{'Pinned' if pinned else 'Unpinned'} session {key!r}")
+
+
+@app.command("pin")
+def sessions_pin(
+    session_id: str = typer.Argument(..., help="Session ID (or current name) to pin"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Pin a session to the Pinned section at the top of every session list."""
+    _pin(session_id, True, json_output)
+
+
+@app.command("unpin")
+def sessions_unpin(
+    session_id: str = typer.Argument(..., help="Session ID (or current name) to unpin"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Remove a session from the Pinned section."""
+    _pin(session_id, False, json_output)
 
 
 @app.command("delete")

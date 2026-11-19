@@ -133,7 +133,7 @@ than reading a version out of `uv tool list` or `pip show`.
 | `providers` | `list`, `status`, `configure <id> [-m MODEL] [-k API_KEY] [--base-url] [--proxy]` |
 | `models` | `list [--provider] [--capability/-c] [--json]` |
 | `skills` | `init`, `list`, `search`, `view`, `install`, `uninstall`, `update`, `publish`, `tap add/list/remove` |
-| `sessions` | `list`, `show`, `rename`, `resume`, `abort`, `delete` (`-y`), `export` (`--format md\|json`, `--output`/`-o`; default file `<session-id>.<format>`) |
+| `sessions` | `list`, `show`, `rename`, `pin`, `unpin`, `resume`, `abort`, `delete` (`-y`), `export` (`--format md\|json`, `--output`/`-o`; default file `<session-id>.<format>`) |
 | `acp` | `list` (`--local`, `--json`; every harness id, launch source `override`/`installed`/`package-exec`, missing CLIs, allowed), `doctor [ID]` (`--probe` spawns the harness and runs ACP initialize, 30 s cap; `--local`; exits 1 when ID cannot launch), `run ID "PROMPT"` (`--cwd`, `--mode <harness session mode>`, `--oneshot`, `--resume <acp-session-id>`, `--model`, `--timeout`, `--permissions approve-reads\|approve-all\|deny-all` (default approve-reads: reads allowed, everything else rejected), `--verbose`, `--json`; local, no gateway; reply on stdout, `Stats:` line on stderr; exit 1 on error/refusal, 130 cancelled), `sessions` (`--local`, `--limit`, `--json`; gateway, else `<state>/acp/sessions/`), `cancel KEY`, `close KEY [--discard]` (gateway only). `list`/`doctor`/`sessions` ask the gateway (`acp.agents`/`acp.doctor`/`acp.sessions`) and fall back to local data |
 | `projects` | `list` (`--agent`, `--json`), `create` (`--knowledge`/`--knowledge-file`, `--agent`, `--json`), `show`, `update`, `delete` (`-y`, `--json`), `move <session> <project\|none>` — group sessions across agents; the knowledge text is injected into every member session's prompt |
 | `wallet` | `status` (`unlockMode` is the mode in force; `storedUnlockMode`/`unlockKeyPresent` show a stored password a manual `trading.unlock_mode` is ignoring; `lockedByOperator` shows an operator lock), `setup [--mode auto\|manual]` (default: `trading.unlock_mode`; `manual` there refuses auto, `wallet.unlock_mode_policy`), `mode auto\|manual` (operator-only; `manual` deletes the stored password), `unlock`, `lock`, `list`, `create --label L`, `import --label L (--private-key-stdin \| --keystore FILE)`, `export ADDR (--keystore \| --private-key) [--out FILE]` (`--out` creates a new owner-only file and refuses an existing path, `FILE_EXISTS`), `rename ADDR LABEL`, `remove ADDR [--yes\|-y]`, `primary ADDR`, `balances [ADDR] [--chain base\|robinhood] [--refresh] [--hidden]` (the ledger's last sync; `--refresh` re-reads the chain first, throttled to once per 10 s per wallet; a `chains[].status` of `partial`/`failed` means the amounts on that chain are last-good, not fresh; junk airdrops — unlisted, no pool ≥ $1k, never traded by the wallet — are hidden and not counted, `hiddenCount` says how many, `--hidden` lists them) — the engine's wallet vault (`~/.agentos/wallets/`, a sensitive path the agent cannot read, like the trading ledger `<state dir>/state/trading.sqlite`); `lock` holds until `unlock` with the password, in auto mode and across restarts (nothing signs; due DCA buys and trading triggers wait); `remove` also stops the wallet's DCA mandates, triggers and brackets; passwords come from a hidden prompt or `AGENTOS_WALLET_PASSWORD` (`AGENTOS_KEYSTORE_PASSWORD` for an imported keystore), never argv. Everything but `status`, `list` and `balances` is operator-only: from an agent's connection it fails with `trading.operator_required` |
@@ -736,6 +736,13 @@ agentos sessions rename <id> "api-refactor"   # --clear drops the name
 agentos sessions list --search api-refactor
 # In chat, /rename does the same. The `session_rename` tool names the session
 # the agent is running in — use it when the user just asks in prose.
+# Pin a session to the Pinned section at the top of the session list (Web UI
+# and desktop app); <id> may be the key, a short id or the session's name.
+agentos sessions pin <id>
+agentos sessions unpin <id>
+# When the user asks in prose ("pin this chat", "unpin the research session"),
+# call the `session_pin` tool instead: no arguments pins the current session,
+# `session` names another one, `pinned=false` unpins.
 # Group related sessions into a project; its knowledge text is injected into
 # every member session. Delete keeps the sessions (they just detach).
 agentos projects create "Token research" --knowledge-file notes.md --agent main --json

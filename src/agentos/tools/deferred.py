@@ -79,8 +79,8 @@ LOADED_STATE_PROVIDER = "portable"
 #: and calling them directly once they were in the request.
 #:
 #: Deferred: tools a typical turn does not touch and whose absence the model
-#: can always repair with one ``tool_search`` call. 31 names, all visible on a
-#: stock gateway, whose request drops from 70 to 40 schemas.
+#: can always repair with one ``tool_search`` call. 32 names, all visible on a
+#: stock gateway, whose request drops from 71 to 40 schemas.
 #: ``test_deferred_tools`` pins these numbers.
 DEFERRED_BUILTIN_TOOLS: frozenset[str] = frozenset(
     {
@@ -123,6 +123,7 @@ DEFERRED_BUILTIN_TOOLS: frozenset[str] = frozenset(
         "flow_update",
         "http_request",
         "session_rename",
+        "session_pin",
         "x_search",
     }
 )

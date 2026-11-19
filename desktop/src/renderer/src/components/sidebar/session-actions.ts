@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
@@ -7,7 +7,7 @@ import { exportMarkdownDocument, type ExportMessage } from '@/views/chat/logic'
 import { t } from '~/i18n'
 import { errorText } from '~/stores/projects'
 import { useSessionMarks } from '~/stores/session-marks'
-import type { SessionRow } from '~/stores/sessions'
+import type { SessionRow, SessionsList } from '~/stores/sessions'
 
 interface HistoryMessage {
   role?: string
@@ -59,8 +59,8 @@ function showing(pathname: string, key: string): boolean {
 
 /**
  * What the row's menu can do to a session on the gateway: rename, export,
- * delete, copy its id. The local marks (pin, archive, unread) are the
- * store's own; the menu calls those directly.
+ * delete, copy its id (pinning is `usePinSessions`). The local marks
+ * (archive, unread) are the store's own; the menu calls those directly.
  */
 export function useSessionActions(row: SessionRow): {
   rename: (name: string) => Promise<void>
@@ -164,6 +164,82 @@ export function useSessionActions(row: SessionRow): {
   }, [rpc, key, forget, pathname, navigate, refresh])
 
   return { rename, copyId, exportMarkdown, remove }
+}
+
+/**
+ * Pin or unpin sessions on the gateway (`sessions.pin`), so the Pinned
+ * section is the same in the desktop app, the web console and for the agent.
+ * The list is patched first and refetched after: the row moves at once, and
+ * a call that fails puts it back with a toast.
+ */
+export function usePinSessions(): (keys: readonly string[], on: boolean) => Promise<void> {
+  const rpc = useRpc()
+  const queryClient = useQueryClient()
+
+  return useCallback(
+    async (keys, on) => {
+      if (keys.length === 0) return
+      // A refetch already in flight would land after the patch and undo it.
+      await queryClient.cancelQueries({ queryKey: ['sessions'], exact: true })
+      const which = new Set(keys)
+      queryClient.setQueryData<SessionsList>(['sessions'], (data) =>
+        data?.sessions
+          ? {
+              ...data,
+              sessions: data.sessions.map((s) =>
+                which.has(String(s.key || '')) ? { ...s, pinned: on } : s,
+              ),
+            }
+          : data,
+      )
+      const results = await Promise.allSettled(
+        keys.map((key) => rpc.call('sessions.pin', { key, pinned: on })),
+      )
+      const failed = results.find((r) => r.status === 'rejected')
+      if (failed) {
+        const title = on ? t('session.toast.pinFailed') : t('session.toast.unpinFailed')
+        toast.error(`${title}: ${errorText(failed.reason)}`, { id: 'session-pin-err' })
+      }
+      await queryClient.invalidateQueries({ queryKey: ['sessions'] })
+    },
+    [rpc, queryClient],
+  )
+}
+
+/**
+ * Pins used to live in this app's localStorage only. Hand any that are left
+ * to the gateway once, then forget them, so an upgrade does not empty the
+ * Pinned section. A pin whose session is gone is simply dropped; one the
+ * gateway refuses stays local for the next launch.
+ */
+export function useAdoptLocalPins(rows: readonly SessionRow[], ready: boolean): void {
+  const rpc = useRpc()
+  const queryClient = useQueryClient()
+  const started = useRef(false)
+
+  useEffect(() => {
+    if (!ready || started.current) return
+    const marks = useSessionMarks.getState()
+    if (marks.pinned.size === 0) return
+    started.current = true
+    const known = new Map(rows.map((r) => [r.key, r]))
+    void (async () => {
+      let moved = false
+      for (const key of marks.pinned) {
+        const row = known.get(key)
+        if (row && row.raw.pinned !== true) {
+          try {
+            await rpc.call('sessions.pin', { key, pinned: true })
+            moved = true
+          } catch {
+            continue
+          }
+        }
+        useSessionMarks.getState().setPinned(key, false)
+      }
+      if (moved) await queryClient.invalidateQueries({ queryKey: ['sessions'] })
+    })()
+  }, [rpc, queryClient, rows, ready])
 }
 
 /**

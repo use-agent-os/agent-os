@@ -8,8 +8,8 @@ import { t } from '~/i18n'
 import { useLive } from '~/stores/live'
 import { useSessionMarks } from '~/stores/session-marks'
 import { selectedRows, useSessionSelection } from '~/stores/session-selection'
-import type { SessionRow } from '~/stores/sessions'
-import { useRemoveSessions } from './session-actions'
+import { isPinned, type SessionRow } from '~/stores/sessions'
+import { usePinSessions, useRemoveSessions } from './session-actions'
 
 /** Titles the delete alert names before it says "and N more". */
 const NAMED = 3
@@ -28,7 +28,8 @@ export function SessionBulkMenuItems() {
   const askDelete = useSessionSelection((s) => s.askDelete)
   const rows = useMemo(() => selectedRows({ visible, keys: selected }), [visible, selected])
   const keys = rows.map((r) => r.key)
-  const allPinned = keys.every((k) => marks.pinned.has(k))
+  const pin = usePinSessions()
+  const allPinned = rows.every(isPinned)
   const allUnread = keys.every((k) => marks.unread.has(k))
   const allArchived = keys.every((k) => marks.archived.has(k))
 
@@ -37,7 +38,7 @@ export function SessionBulkMenuItems() {
       <MenuItem
         icon={allPinned ? PinOff : Pin}
         label={allPinned ? t('session.menu.unpin') : t('session.menu.pin')}
-        onSelect={() => keys.forEach((k) => marks.setPinned(k, !allPinned))}
+        onSelect={() => void pin(keys, !allPinned)}
       />
       <MenuItem
         icon={allUnread ? MailOpen : Mail}

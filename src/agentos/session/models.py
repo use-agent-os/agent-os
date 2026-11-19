@@ -149,6 +149,11 @@ class SessionNode(SQLModel, table=True):
     # Project grouping (nullable — legacy sessions stay project-less)
     project_id: str | None = Field(default=None, index=True)
 
+    # Pinned to the top of every client's session list: epoch ms of the pin,
+    # NULL when not pinned. Stored on the row (not in a client) so the Web UI,
+    # the desktop app, the CLI and the agent all see the same pins.
+    pinned_at: int | None = None
+
     # Origin metadata (JSON blob)
     origin: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
 

@@ -29,6 +29,7 @@ _TOOL_GROUPS: Mapping[str, frozenset[str]] = {
             "sessions_spawn",
             "session_status",
             "session_rename",
+            "session_pin",
             "projects_create",
             "projects_list",
             "projects_update",
@@ -57,6 +58,7 @@ _TOOL_GROUPS: Mapping[str, frozenset[str]] = {
             # A chat user asking "call this one X" is the main way a session
             # gets a name, so the rename tool belongs on the chat layer.
             "session_rename",
+            "session_pin",
         }
     ),
     "channel:media": frozenset(
@@ -141,6 +143,7 @@ _TOOL_PROFILES: Mapping[str, frozenset[str] | None] = {
             "sessions_send",
             "session_status",
             "session_rename",
+            "session_pin",
         }
     ),
 }

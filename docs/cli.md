@@ -29,7 +29,7 @@ available without `uv tool list` or `pip show`.
 | `agentos gateway` | Run and manage the gateway server. |
 | `agentos chat` | Start interactive terminal chat. |
 | `agentos agent` | Run a single automation-friendly agent turn. |
-| `agentos sessions` | List, inspect, rename, resume, abort, delete, or export sessions. |
+| `agentos sessions` | List, inspect, rename, pin, resume, abort, delete, or export sessions. |
 | `agentos acp` | Drive external coding harnesses (Claude Code, Codex, Gemini CLI, ...) over ACP: `list`, `doctor`, `run`, `sessions`, `cancel`, `close`. |
 | `agentos projects` | Group sessions into projects with shared knowledge injected into every member session. |
 | `agentos wallet` | Create, import, export and unlock wallets in the engine's vault; show balances. |
@@ -992,6 +992,8 @@ agentos sessions list --agent main --status done   # also --channel, --since
 agentos sessions show <session-key>
 agentos sessions rename <session-key> "api-refactor"
 agentos sessions rename <session-key> --clear  # drop the custom name
+agentos sessions pin <session-key>             # keep it in the Pinned section
+agentos sessions unpin <session-key>
 agentos sessions resume <session-key>
 agentos sessions abort <session-key>
 agentos sessions export <session-key> --format md --output notes.md
@@ -1014,6 +1016,14 @@ that `--search`, `resume`, and `show` all accept in place of the key. Inside a
 chat, `/rename <name>` does the same for the session you are in (no name
 clears it). Names are trimmed, collapsed to one line, and capped at 120
 characters.
+
+`pin` puts a session in the **Pinned** section at the top of the session list
+in the Web UI and the desktop app; `unpin` takes it out. Both accept the key, a
+short session id or the session's name, and `--json`. The pin is stored on the
+gateway, so every client shows the same Pinned section. Pinning does not count
+as activity: the session keeps its place in time. In chat, asking the agent
+("pin this session", "pin the session called api-refactor") does the same
+through the `session_pin` tool.
 
 ## ACP coding harnesses
 

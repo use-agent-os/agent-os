@@ -38,6 +38,8 @@ export const sessions = {
   'session.toast.exportFailed': 'Could not export the session',
   'session.toast.deleted': 'Session deleted',
   'session.toast.deleteFailed': 'Could not delete the session',
+  'session.toast.pinFailed': 'Could not pin the session',
+  'session.toast.unpinFailed': 'Could not unpin the session',
   'session.toast.archived': 'Session archived',
   'session.toast.unarchived': 'Session restored',
 
@@ -86,7 +88,6 @@ export const sessions = {
   'view.reset': 'Reset to defaults',
   'view.markAllRead': 'Mark all as read',
   'view.section.pinned': 'Pinned',
-  'view.section.others': 'Others',
   'view.section.noProject': 'No project',
   'view.hidden.one': 'session hidden by filters',
   'view.hidden.many': 'sessions hidden by filters',
