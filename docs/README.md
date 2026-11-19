@@ -34,6 +34,12 @@ root release README with task-oriented guides.
   Aerodrome),
   [`bridge.md`](bridge.md) (Base ⇄ Robinhood Chain through Relay)
   (Uniswap V4 cards and writes), [`dca.md`](dca.md) (DCA mandates).
+- [`triggers.md`](triggers.md) - price triggers: conditional orders
+  (`below`, `above`, `trail`) the trading engine watches and fires itself.
+- [`brackets.md`](brackets.md) - brackets: take-profit + stop-loss on one
+  position, one leg cancels the other (OCO).
+- [`markets.md`](markets.md) - every pool a Robinhood Chain Stock Token
+  trades in, including memecoins quoted in the stock.
 - [`features/agentos-router.md`](features/agentos-router.md) - model routing.
 - [`features/tool-compression.md`](features/tool-compression.md) - compact tool
   results and handles.
