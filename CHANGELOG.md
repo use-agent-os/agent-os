@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Desktop: in the BOOK beside the chat, opening an automation's history no
+  longer pushes the "Finished" filter chip onto a second line. The filter
+  row now stays put above the list, and only the list scrolls, so the
+  scrollbar no longer takes width from the chips.
+
 ## [2026.11.19.post1] - 2026-11-19
 
 ### Added

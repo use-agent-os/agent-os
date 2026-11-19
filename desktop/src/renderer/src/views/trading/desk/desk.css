@@ -3522,7 +3522,23 @@ button.trd-tool[data-tone='danger']:hover {
   display: flex;
   flex-direction: column;
   container: trd-auto / inline-size;
+}
+.trd-auto__scroll {
+  display: flex;
+  flex-direction: column;
   padding-bottom: 12px;
+}
+/* In the BOOK the filter row sits outside the scrolling list: when an opened
+   history makes the list scroll, the scrollbar takes its 12 px from the list
+   only, so the chips keep their width and "Finished" stays on the line. */
+.trd-book__body[data-tab='automations'] > .trd-auto {
+  overflow-y: hidden;
+}
+.trd-book__body[data-tab='automations'] .trd-auto__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .trd-auto__filters {
   position: sticky;
