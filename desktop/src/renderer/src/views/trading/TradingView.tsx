@@ -51,7 +51,8 @@ import type { MissionsApi } from './desk/missions'
 import { ToolsPanel } from './desk/ToolsPanel'
 import { PanelBoundary, Spinner } from './parts'
 import { PriceChart } from './PriceChart'
-import { SwapPanel, type SwapPrefill } from './SwapPanel'
+import type { SwapPrefill } from './SwapPanel'
+import { Ticket } from './Ticket'
 import {
   CHAINS,
   DEFAULT_PROVIDER,
@@ -742,7 +743,7 @@ function Desk({
           </div>
         </div>
 
-        <SwapPanel
+        <Ticket
           wallets={wallets}
           primary={primary}
           selectedWallet={selected}

@@ -28,8 +28,10 @@ import {
   sameToken,
   walletLabel,
 } from './logic'
+import { ChainBadge } from './ChainMark'
 import { useBalanceMask } from '~/stores/balance-privacy'
 import { TokenLogo } from './parts'
+import { TicketModes, type TicketMode } from './TicketModes'
 import { nativeToken, TokenPicker } from './TokenPicker'
 import {
   CHAINS,
@@ -96,6 +98,7 @@ export function SwapPanel({
   unlocked,
   prefill,
   onSent,
+  onMode,
 }: {
   wallets: Wallet[]
   primary: string | null
@@ -109,6 +112,8 @@ export function SwapPanel({
   unlocked: boolean
   prefill: SwapPrefill | null
   onSent: (orders: Order[]) => void
+  /** The full desk's ticket also bridges: its head then switches Swap | Bridge. */
+  onMode?: (mode: TicketMode) => void
 }) {
   const [chainId, setChainId] = useState<ChainId>(8453)
   const [tokenIn, setTokenIn] = useState<Token | null>(nativeToken(8453))
@@ -253,7 +258,11 @@ export function SwapPanel({
   return (
     <aside className="trd-ticket" aria-label={t('trading.swap.title')}>
       <div className="trd-ticket__head">
-        <span className="trd-ticket__title">{t('trading.swap.title')}</span>
+        {onMode ? (
+          <TicketModes mode="swap" onMode={onMode} />
+        ) : (
+          <span className="trd-ticket__title">{t('trading.swap.title')}</span>
+        )}
         <div role="radiogroup" aria-label={t('trading.overview.chains')} className="mac-segmented">
           {CHAINS.map((c) => (
             <button
@@ -524,10 +533,17 @@ export function SwapPanel({
   )
 }
 
-function Leg({
+/**
+ * One side of a ticket: label row, token + amount, the row under them. The
+ * swap's legs pick a token from the picker; a bridge names the leg's chain
+ * and brings its own token control (`tokenSlot`).
+ */
+export function Leg({
   label,
+  chainId,
   token,
   onPick,
+  tokenSlot,
   balance,
   onMax,
   onPct,
@@ -536,8 +552,12 @@ function Leg({
   children,
 }: {
   label: string
+  /** The chain this leg is on, when the two legs are on different ones. */
+  chainId?: number
   token: Token | null
-  onPick: () => void
+  onPick?: () => void
+  /** Stands in for the picker button. */
+  tokenSlot?: React.ReactNode
   balance: string | null
   onMax?: () => void
   onPct?: (pct: number) => void
@@ -550,7 +570,10 @@ function Leg({
   return (
     <div className="trd-leg">
       <div className="trd-leg__row">
-        <span className="trd-leg__label">{label}</span>
+        <span className="trd-leg__label">
+          {label}
+          {chainId !== undefined ? <ChainBadge chainId={chainId} /> : null}
+        </span>
         {balance !== null ? (
           <span className="trd-leg__balance">
             {t('trading.swap.balance')} {mask(formatAmount(balance))}
@@ -563,26 +586,28 @@ function Leg({
         ) : null}
       </div>
       <div className="trd-leg__main">
-        <button
-          type="button"
-          className="trd-tokenbtn app-no-drag"
-          data-empty={token ? undefined : 'true'}
-          onClick={onPick}
-          data-testid="token-button"
-        >
-          {token ? (
-            <>
-              <TokenLogo token={token} size={20} />
-              {token.symbol}
-            </>
-          ) : (
-            <>
-              <Zap className="size-3.5" strokeWidth={2} aria-hidden />
-              {t('trading.swap.pick')}
-            </>
-          )}
-          <ChevronDown className="size-3" strokeWidth={2} aria-hidden />
-        </button>
+        {tokenSlot ?? (
+          <button
+            type="button"
+            className="trd-tokenbtn app-no-drag"
+            data-empty={token ? undefined : 'true'}
+            onClick={onPick}
+            data-testid="token-button"
+          >
+            {token ? (
+              <>
+                <TokenLogo token={token} size={20} />
+                {token.symbol}
+              </>
+            ) : (
+              <>
+                <Zap className="size-3.5" strokeWidth={2} aria-hidden />
+                {t('trading.swap.pick')}
+              </>
+            )}
+            <ChevronDown className="size-3" strokeWidth={2} aria-hidden />
+          </button>
+        )}
         {children}
       </div>
       <div className="trd-leg__row">

@@ -86,6 +86,38 @@
   text-transform: uppercase;
   color: var(--dim);
 }
+/* The full desk's ticket head: Swap | Bridge in the title's own type, so the
+   band keeps its height. The chosen one is the title; the other is a way out. */
+.trd-ticket__modes {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: -6px;
+}
+.trd-ticket__modes button {
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--radius-control);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  transition:
+    color 80ms ease-out,
+    background-color 80ms ease-out;
+}
+.trd-ticket__modes button:hover {
+  color: var(--muted-foreground);
+}
+.trd-ticket__modes button[aria-checked='true'] {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+.trd-ticket__modes button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
 @container desk-viewport (max-width: 1179px) {
   .trd {
     --trd-rail: 200px;
@@ -1956,6 +1988,54 @@ tr:focus-within .trd-row__actions {
 }
 .trd-tokenbtn[data-empty='true'] svg {
   color: inherit;
+}
+/* A bridge's asset menu: the swap's token button, with the native select laid
+   invisibly over it so the two tickets look alike and the menu stays native. */
+.trd-tokenbtn--select {
+  position: relative;
+}
+.trd-tokenbtn--select select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  appearance: none;
+}
+.trd-tokenbtn--select:focus-within {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+/* The receive side of a bridge is decided by the pay side: a name, not a control. */
+.trd-tokenbtn--fixed {
+  padding-right: 10px;
+  cursor: default;
+}
+.trd-tokenbtn--fixed:hover {
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+/* A leg that names its chain (a bridge's two legs are on different ones). */
+.trd-leg__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.trd-leg__label .trd-chainbadge {
+  gap: 3px;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-size: 10.5px;
+  font-weight: 500;
+  /* The badge must not make a bridge's leg taller than a swap's. */
+  line-height: 1;
+  color: var(--muted-foreground);
+}
+.trd-confirm__leg small .trd-chainbadge {
+  margin-left: 4px;
+  vertical-align: -1px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 .trd-amount {
   width: 100%;

@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Desktop: bridge between Base and Robinhood Chain from the ticket, without
+  asking the agent. The full desk's ticket head now switches **Swap | Bridge**,
+  and the BOOK beside the chat (Chat → Trade) has a **Bridge** tab next to
+  Swap. The bridge form is the swap form's twin: wallet, the chain paid on,
+  amount with Max and the percent chips, a live Relay quote (what arrives, the
+  floor, fees, the fill estimate) and a confirm sheet as the only way out. It
+  moves ETH, or the USD stable (USDC on Base, USDG on Robinhood Chain); the
+  receive side is always the same asset on the other chain. A manual bridge
+  runs at once, behind Touch ID when that is on, and is followed on Orders.
 - Desktop: a **Hide balances** button (the eye in the wallet head) masks every
   wallet figure as `******` — the total, today's move, the Unrealized /
   Realized / Cost basis / Gas tiles, each wallet's total in the rail and the
