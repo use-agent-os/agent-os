@@ -4,6 +4,7 @@ import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { shortAge } from '~/lib/relative-time'
 import { allocationSegments, formatPct, formatUsd, pnlTone } from './logic'
+import { useBalanceMask, useBalancePrivacy } from '~/stores/balance-privacy'
 import { Money, Spinner, useCountUp } from './parts'
 import { ProviderMark, providerMark } from './ProviderMark'
 import { ProviderMenu } from './ProviderMenu'
@@ -62,11 +63,15 @@ export function Overview({
 }) {
   // The hero is coloured by the book's own result — banked plus open PnL —
   // never by the day's price move, which is only the chip's business.
-  const tone = pnlTone((totals.realizedUsd ?? 0) + (totals.unrealizedUsd ?? 0))
-  const deltaTone = pnlTone(totals.change24hUsd)
+  // Hidden balances take their colour with them: a green hero over six
+  // asterisks still says the book is up.
+  const hidden = useBalancePrivacy((s) => s.hidden)
+  const tone = hidden ? 'flat' : pnlTone((totals.realizedUsd ?? 0) + (totals.unrealizedUsd ?? 0))
+  const deltaTone = hidden ? 'flat' : pnlTone(totals.change24hUsd)
   const segments = allocationSegments(holdings)
   const Arrow = deltaTone === 'down' ? TrendingDown : TrendingUp
   const { counting, attach } = useCountUp(totals.valueUsd, Boolean(entering) && !loading)
+  const { title } = useBalanceMask()
 
   return (
     <section className="trd-hero" data-tone={tone} aria-label={t('trading.overview.value')}>
@@ -90,13 +95,17 @@ export function Overview({
             data-tone={deltaTone}
             data-testid="portfolio-delta"
             aria-label={t('trading.overview.move24h')}
-            title={`${t('trading.overview.move24h')}: ${formatUsd(totals.change24hUsd, { signed: true })} ${t('trading.overview.today')}`}
+            title={title(
+              `${t('trading.overview.move24h')}: ${formatUsd(totals.change24hUsd, { signed: true })} ${t('trading.overview.today')}`,
+            )}
           >
             {deltaTone !== 'flat' ? (
               <Arrow className="size-3.5" strokeWidth={2.25} aria-hidden />
             ) : null}
             <Money value={totals.change24hUsd} signed cell />
-            <em className="trd-num">{formatPct(totals.change24hPct, { signed: true })}</em>
+            {hidden ? null : (
+              <em className="trd-num">{formatPct(totals.change24hPct, { signed: true })}</em>
+            )}
             <small>{t('trading.overview.today')}</small>
           </span>
         ) : null}
@@ -214,12 +223,13 @@ function Stat({
   toned?: boolean
   pct?: number | null
 }) {
+  const { hidden, title } = useBalanceMask()
   return (
-    <div className="trd-stat" title={formatUsd(value, { signed })}>
+    <div className="trd-stat" title={title(formatUsd(value, { signed }))}>
       <span className="trd-stat__label">{label}</span>
       <span className="trd-stat__value">
         <Money value={value} signed={signed} toned={toned} cell />
-        {pct !== undefined && pct !== null && Number.isFinite(pct) ? (
+        {!hidden && pct !== undefined && pct !== null && Number.isFinite(pct) ? (
           <small className="trd-num" data-tone={pnlTone(pct)}>
             {formatPct(pct, { signed: true })}
           </small>

@@ -12,6 +12,7 @@ import { useState } from 'react'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { cn } from '~/lib/utils'
+import { BALANCE_MASK, useBalanceMask } from '~/stores/balance-privacy'
 import {
   DUST_USD,
   formatAmount,
@@ -91,6 +92,7 @@ export function Holdings({
   // Each holding exactly once, whatever is folded open: a row that appeared
   // twice would give React two children with one key, and React then leaves
   // stale rows behind on the next toggle.
+  const { hidden, mask, title } = useBalanceMask()
   const rows = sortHoldings([...kept, ...(showDust ? dust : []), ...junk], sort.key, sort.dir)
 
   function toggle(key: HoldingSort) {
@@ -251,8 +253,12 @@ export function Holdings({
                         }
                       />
                     </td>
-                    <td className="trd-col--amount" title={formatAmount(h.amount, 18)}>
-                      <Tick value={h.amount}>{formatAmountCompact(h.amount)}</Tick>
+                    <td className="trd-col--amount" title={title(formatAmount(h.amount, 18))}>
+                      {hidden ? (
+                        <span className="trd-num">{BALANCE_MASK}</span>
+                      ) : (
+                        <Tick value={h.amount}>{formatAmountCompact(h.amount)}</Tick>
+                      )}
                     </td>
                     <td
                       className={cn('trd-col--price', h.priceUsd === null && 'trd-cell--muted')}
@@ -267,12 +273,16 @@ export function Holdings({
                     <td className="trd-col--change" data-tone={pnlTone(h.change24hPct)}>
                       {formatPct(h.change24hPct, { signed: true })}
                     </td>
-                    <td className="trd-col--value" title={formatUsd(h.valueUsd)}>
+                    <td className="trd-col--value" title={title(formatUsd(h.valueUsd))}>
                       <span
                         className="trd-value"
                         style={{ ['--alloc' as string]: h.allocationPct }}
                       >
-                        <Tick value={h.valueUsd}>{formatUsdCell(h.valueUsd)}</Tick>
+                        {hidden ? (
+                          <span className="trd-num">{BALANCE_MASK}</span>
+                        ) : (
+                          <Tick value={h.valueUsd}>{formatUsdCell(h.valueUsd)}</Tick>
+                        )}
                       </span>
                     </td>
                     <td className="trd-col--cost trd-cell--muted" title={formatUsd(h.avgCostUsd)}>
@@ -280,11 +290,11 @@ export function Holdings({
                     </td>
                     <td
                       className="trd-col--pnl"
-                      data-tone={pnlTone(h.unrealizedUsd)}
-                      title={formatUsd(h.unrealizedUsd, { signed: true })}
+                      data-tone={hidden ? undefined : pnlTone(h.unrealizedUsd)}
+                      title={title(formatUsd(h.unrealizedUsd, { signed: true }))}
                     >
-                      {formatUsdCell(h.unrealizedUsd, { signed: true })}
-                      {h.unrealizedPct !== null ? (
+                      {mask(formatUsdCell(h.unrealizedUsd, { signed: true }))}
+                      {!hidden && h.unrealizedPct !== null ? (
                         <span className="ml-1 text-[10px] opacity-80">
                           {formatPct(h.unrealizedPct, { signed: true })}
                         </span>

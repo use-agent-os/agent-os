@@ -28,6 +28,7 @@ import {
   sameToken,
   walletLabel,
 } from './logic'
+import { useBalanceMask } from '~/stores/balance-privacy'
 import { TokenLogo } from './parts'
 import { nativeToken, TokenPicker } from './TokenPicker'
 import {
@@ -545,13 +546,14 @@ function Leg({
   reserve?: string | null
   children: React.ReactNode
 }) {
+  const { mask } = useBalanceMask()
   return (
     <div className="trd-leg">
       <div className="trd-leg__row">
         <span className="trd-leg__label">{label}</span>
         {balance !== null ? (
           <span className="trd-leg__balance">
-            {t('trading.swap.balance')} {formatAmount(balance)}
+            {t('trading.swap.balance')} {mask(formatAmount(balance))}
             {onMax ? (
               <button type="button" onClick={onMax}>
                 {t('trading.swap.max')}

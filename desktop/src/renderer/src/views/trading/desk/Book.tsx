@@ -51,6 +51,7 @@ import {
 } from '../logic'
 import { Orders } from '../Orders'
 import { Money, PanelBoundary, useCountUp } from '../parts'
+import { useBalanceMask } from '~/stores/balance-privacy'
 import { SwapPanel, type SwapPrefill } from '../SwapPanel'
 import type { Holding, Order, ProviderId, Totals, Wallet } from '../types'
 import { WalletHead } from '../WalletHead'
@@ -194,6 +195,7 @@ export function Book({
       if (h.token.logoUrl) m.set(h.token.address.toLowerCase(), h.token.logoUrl)
     return m
   }, [portfolio.data])
+  const { hidden: balancesHidden, title: maskTitle } = useBalanceMask()
   const { counting, attach: attachCount } = useCountUp(
     totals.valueUsd,
     entering && !portfolio.isPending,
@@ -208,8 +210,10 @@ export function Book({
   // The hero is coloured by the book's own result — what was banked plus
   // what is still open — never by the day's price move, which is only the
   // chip's business.
-  const tone = pnlTone((totals.realizedUsd ?? 0) + (totals.unrealizedUsd ?? 0))
-  const deltaTone = pnlTone(totals.change24hUsd)
+  const tone = balancesHidden
+    ? 'flat'
+    : pnlTone((totals.realizedUsd ?? 0) + (totals.unrealizedUsd ?? 0))
+  const deltaTone = balancesHidden ? 'flat' : pnlTone(totals.change24hUsd)
   const Arrow = deltaTone === 'down' ? TrendingDown : TrendingUp
   const unpriced = portfolio.data?.unpricedCount ?? 0
   const segments = allocationSegments(holdings)
@@ -430,15 +434,19 @@ export function Book({
                       data-tone={deltaTone}
                       data-testid="book-delta"
                       aria-label={t('trading.overview.move24h')}
-                      title={`${t('trading.overview.move24h')}: ${formatUsd(totals.change24hUsd, { signed: true })} ${t('trading.overview.today')}`}
+                      title={maskTitle(
+                        `${t('trading.overview.move24h')}: ${formatUsd(totals.change24hUsd, { signed: true })} ${t('trading.overview.today')}`,
+                      )}
                     >
                       {deltaTone !== 'flat' ? (
                         <Arrow className="size-3" strokeWidth={2.25} aria-hidden />
                       ) : null}
                       <Money value={totals.change24hUsd} signed cell />
-                      <em className="trd-num">
-                        {formatPct(totals.change24hPct, { signed: true })}
-                      </em>
+                      {balancesHidden ? null : (
+                        <em className="trd-num">
+                          {formatPct(totals.change24hPct, { signed: true })}
+                        </em>
+                      )}
                     </span>
                   ) : null}
                   {unpriced > 0 ? (
@@ -609,8 +617,9 @@ export function Book({
 }
 
 function Stat({ label, value, toned }: { label: string; value: number; toned?: boolean }) {
+  const { title } = useBalanceMask()
   return (
-    <div className="trd-stat" title={formatUsd(value, { signed: toned })}>
+    <div className="trd-stat" title={title(formatUsd(value, { signed: toned }))}>
       <span className="trd-stat__label">{label}</span>
       <span className="trd-stat__value">
         <Money value={value} signed={toned} toned={toned} cell />

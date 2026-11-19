@@ -24,6 +24,7 @@ import {
   shortAddress,
   walletLabel,
 } from './logic'
+import { BALANCE_MASK, useBalanceMask } from '~/stores/balance-privacy'
 import { Empty, ErrorState, Skeleton, Spinner, Tick, TokenLogo } from './parts'
 import type { LpBook, LpPosition, LpToken, Token, Wallet } from './types'
 import { copyAddress } from './WalletMenu'
@@ -77,6 +78,7 @@ export function Liquidity({
   const [protocol, setProtocol] = useState<string | null>(null)
   const positions = book?.positions ?? []
   // A filter whose protocol went away (the position was closed) falls back to All.
+  const { mask } = useBalanceMask()
   const active = protocol && book?.protocols.some((p) => p.key === protocol) ? protocol : null
   const rows = filterByProtocol(positions, active)
   const busy = refreshing || Boolean(book?.refreshing)
@@ -94,12 +96,16 @@ export function Liquidity({
 
   const summary = book ? (
     <div className="trd-lpbar" data-testid="lp-summary">
-      <Stat label={t('trading.liquidity.total')} value={formatUsd(book.totals.valueUsd)} strong />
-      <Stat label={t('trading.liquidity.fees')} value={formatUsdCell(book.totals.feesUsd)} />
+      <Stat
+        label={t('trading.liquidity.total')}
+        value={mask(formatUsd(book.totals.valueUsd))}
+        strong
+      />
+      <Stat label={t('trading.liquidity.fees')} value={mask(formatUsdCell(book.totals.feesUsd))} />
       {book.totals.rewardsUsd ? (
         <Stat
           label={t('trading.liquidity.rewards')}
-          value={formatUsdCell(book.totals.rewardsUsd)}
+          value={mask(formatUsdCell(book.totals.rewardsUsd))}
         />
       ) : null}
       <Stat
@@ -410,25 +416,27 @@ function PoolIdent({
 }
 
 function Deposited({ position }: { position: LpPosition }) {
+  const { mask } = useBalanceMask()
   return (
     <span className="trd-lpstack">
       <span>
-        {formatAmountCompact(position.principal.base.human)} {position.token.symbol}
+        {mask(formatAmountCompact(position.principal.base.human))} {position.token.symbol}
       </span>
       <span>
-        {formatAmountCompact(position.principal.quote.human)} {position.quote.symbol}
+        {mask(formatAmountCompact(position.principal.quote.human))} {position.quote.symbol}
       </span>
     </span>
   )
 }
 
 function Earned({ position }: { position: LpPosition }) {
+  const { mask } = useBalanceMask()
   return (
     <span className="trd-lpstack">
-      <span>{position.fees ? formatUsdCell(position.fees.usd) : '—'}</span>
+      <span>{position.fees ? mask(formatUsdCell(position.fees.usd)) : '—'}</span>
       {position.rewards ? (
         <span className="trd-lpstack__reward">
-          {formatAmountCompact(position.rewards.amount.human)} {position.rewards.token.symbol}
+          {mask(formatAmountCompact(position.rewards.amount.human))} {position.rewards.token.symbol}
         </span>
       ) : null}
     </span>
@@ -440,6 +448,8 @@ function earnedTitle(position: LpPosition): string | undefined {
 }
 
 function Value({ position }: { position: LpPosition }) {
+  const { hidden } = useBalanceMask()
+  if (hidden && position.valueUsd !== null) return <span className="trd-num">{BALANCE_MASK}</span>
   return (
     <Tick value={position.valueUsd}>
       {position.valueUsd === null
@@ -474,6 +484,7 @@ function Actions({ position, onAction, busy, locked }: RowProps) {
 
 function Row(props: RowProps) {
   const { position, onAction } = props
+  const { title } = useBalanceMask()
   return (
     <tr data-testid="lp-row" data-status={position.status}>
       <td className="trd-col--asset">
@@ -482,7 +493,7 @@ function Row(props: RowProps) {
       <td className="trd-col--range">
         <RangeCell position={position} share={formatShare(position.share)} />
       </td>
-      <td className="trd-col--amounts" title={formatUsd(position.principal.usd)}>
+      <td className="trd-col--amounts" title={title(formatUsd(position.principal.usd))}>
         <Deposited position={position} />
       </td>
       <td
@@ -491,7 +502,7 @@ function Row(props: RowProps) {
       >
         <Earned position={position} />
       </td>
-      <td className="trd-col--value" title={formatUsd(position.valueUsd)}>
+      <td className="trd-col--value" title={title(formatUsd(position.valueUsd))}>
         <Value position={position} />
       </td>
       {onAction ? (
@@ -509,18 +520,19 @@ function Row(props: RowProps) {
  */
 function Card(props: RowProps) {
   const { position, onAction } = props
+  const { title } = useBalanceMask()
   const hasActions = Boolean(onAction) && lpActions(position).length > 0
   return (
     <li className="trd-lpcard" data-testid="lp-row" data-status={position.status}>
       <div className="trd-lpcard__head">
         <PoolIdent {...props} />
-        <span className="trd-lpcard__value" title={formatUsd(position.valueUsd)}>
+        <span className="trd-lpcard__value" title={title(formatUsd(position.valueUsd))}>
           <Value position={position} />
         </span>
       </div>
       <RangeCell position={position} share={formatShare(position.share)} />
       <dl className="trd-lpcard__figs">
-        <div title={formatUsd(position.principal.usd)}>
+        <div title={title(formatUsd(position.principal.usd))}>
           <dt>{t('trading.liquidity.col.amounts')}</dt>
           <dd>
             <Deposited position={position} />
