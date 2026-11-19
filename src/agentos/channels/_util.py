@@ -133,6 +133,10 @@ class RateLimiter:
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
 
     def __post_init__(self) -> None:
+        if self.max_tokens < 1:
+            raise ValueError("max_tokens must be at least 1")
+        if not math.isfinite(self.refill_rate) or self.refill_rate <= 0:
+            raise ValueError("refill_rate must be a positive finite number")
         self._tokens = float(self.max_tokens)
         self._last_refill = time.monotonic()
 
