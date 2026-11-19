@@ -3,7 +3,7 @@ import { render } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { useConnection } from '@/stores/connection'
-import type { Holding, Order, Quote, Token, Wallet } from './types'
+import type { Holding, LpPosition, Order, Quote, Token, Wallet } from './types'
 
 /** Test doubles for the desk: a connected client and the shapes the RPC returns. */
 
@@ -172,4 +172,32 @@ export function order(extra: Partial<Order> = {}): Order {
     expiresAt: now + 600_000,
     ...extra,
   }
+}
+
+const LP_AMOUNT = { raw: '1', human: '1', usd: 1 }
+/** One concentrated LP position on Base, out of range above. */
+export const LP_ROW: LpPosition = {
+  id: '8453:uniswap_v3:77:0xabc',
+  chain: { id: 8453, key: 'base', name: 'Base', explorer: 'https://basescan.org' },
+  tokenId: '77',
+  owner: { address: WALLET.address, label: 'Main', inApp: true },
+  token: {
+    address: '0x4200000000000000000000000000000000000006',
+    symbol: 'WETH',
+    decimals: 18,
+    priceUsd: 2500,
+  },
+  quote: { address: USDC.address, symbol: 'USDC', decimals: 6, priceUsd: 1 },
+  pool: { poolId: '0xpool', feePct: '0.05%', tickSpacing: 10, tvlUsd: null, priceUsd: 2500 },
+  range: { priceLower: 2000, priceUpper: 2400 },
+  status: 'above-range',
+  principal: { base: LP_AMOUNT, quote: LP_AMOUNT, usd: 1300 },
+  fees: { base: LP_AMOUNT, quote: LP_AMOUNT, usd: 4 },
+  valueUsd: 1304,
+  distancePct: 4.2,
+  protocol: { key: 'uniswap_v3', name: 'Uniswap V3', kind: 'concentrated' },
+  staked: false,
+  gauge: null,
+  rewards: null,
+  share: null,
 }

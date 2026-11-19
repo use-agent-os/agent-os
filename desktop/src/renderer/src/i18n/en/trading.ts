@@ -835,6 +835,7 @@ export const trading = {
   'trading.book.tab.portfolio': 'Portfolio',
   'trading.book.tab.swap': 'Swap',
   'trading.book.tab.markets': 'Markets',
+  'trading.book.tab.liquidity': 'Liquidity',
   'trading.book.tab.orders': 'Orders',
   'trading.book.tab.history': 'History',
   'trading.book.tab.tools': 'Tools',
