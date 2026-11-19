@@ -7,6 +7,7 @@ import {
   Eye,
   EyeOff,
   Layers,
+  SendHorizontal,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '~/components/ui/button'
@@ -39,7 +40,7 @@ import { copyAddress } from './WalletMenu'
 /**
  * The ledger's table. Dense mono figures, a hairline per row, the
  * allocation rule under each value, and on hover the two things you do
- * with a holding: look at its chart, or swap it.
+ * with a holding: look at its chart, send it, or swap it.
  */
 export function Holdings({
   holdings,
@@ -47,6 +48,7 @@ export function Holdings({
   selected,
   onSelect,
   onSwap,
+  onSend,
   onMarkets,
   showChain,
   hiddenCount = 0,
@@ -68,6 +70,8 @@ export function Holdings({
   selected: Holding | null
   onSelect: (holding: Holding | null) => void
   onSwap: (holding: Holding) => void
+  /** Send this holding to an address; the row offers it only when given. */
+  onSend?: (holding: Holding) => void
   /** A Stock Token row's Markets action: every pool it trades in (docs/markets.md). */
   onMarkets?: (holding: Holding) => void
   showChain: boolean
@@ -369,6 +373,25 @@ export function Holdings({
                             }}
                           >
                             <Layers
+                              className="size-3.5 text-muted-foreground"
+                              strokeWidth={1.75}
+                              aria-hidden
+                            />
+                          </Button>
+                        ) : null}
+                        {onSend && !h.hidden ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`${t('trading.holdings.send')} ${h.token.symbol}`}
+                            title={t('trading.holdings.send')}
+                            data-testid="holding-send-open"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onSend(h)
+                            }}
+                          >
+                            <SendHorizontal
                               className="size-3.5 text-muted-foreground"
                               strokeWidth={1.75}
                               aria-hidden

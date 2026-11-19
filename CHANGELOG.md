@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Desktop: send a holding straight from its row. Trade → Holdings now shows a
+  **Send** button beside Swap on each row; it opens a dialog with the
+  recipient address (or one of your other wallets, one click), the amount with
+  **25% / 50% / 75% / Max** buttons, and **Send now**. The token, chain and
+  paying wallet are the row's. Max keeps a little back for gas on an ETH row,
+  a mangled checksum or the paying wallet itself is refused, and the second
+  click confirms the full address and amount, since a send cannot be undone.
 - Pinned sessions are shared. A session can be pinned from the Web UI or the
   desktop app (right-click → **Pin** / **Unpin**), from the CLI
   (`agentos sessions pin|unpin <id-or-name>`), or by asking the agent in chat
