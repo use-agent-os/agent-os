@@ -554,4 +554,25 @@ describe('SwapPanel · wallet picker', () => {
     const options = within(screen.getByLabelText('From wallet')).getAllByRole('option')
     expect(options.map((o) => o.textContent)).toEqual([`${WALLET.label} ✓`, second.label])
   })
+
+  it('clears the pay amount when another wallet is picked: it was sized to the old balance', async () => {
+    const second = {
+      ...WALLET,
+      address: '0x2222222222222222222222222222222222222222',
+      label: 'Second',
+      primary: false,
+    }
+    mount({ wallets: [WALLET, second] })
+    await screen.findByText(/Balance/)
+    fireEvent.click(screen.getByRole('button', { name: 'Max' }))
+    const amount = screen.getByRole('textbox', { name: 'Amount' })
+    expect(amount).toHaveValue('0.9997')
+    const select = screen.getByLabelText('From wallet')
+    // Picking the wallet already paying is not a change: the amount stays.
+    fireEvent.change(select, { target: { value: WALLET.address } })
+    expect(amount).toHaveValue('0.9997')
+    fireEvent.change(select, { target: { value: second.address } })
+    expect(select).toHaveValue(second.address)
+    expect(amount).toHaveValue('')
+  })
 })
