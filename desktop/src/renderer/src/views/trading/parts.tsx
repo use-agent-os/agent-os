@@ -12,6 +12,7 @@ import { ModalShell } from '@/components/ModalShell'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { cn } from '~/lib/utils'
+import { BALANCE_MASK, useBalancePrivacy } from '~/stores/balance-privacy'
 import { ChainMark } from './ChainMark'
 import {
   chainName,
@@ -238,13 +239,27 @@ export function Money({
   /** Collapse anything under a cent to "<$0.01" so a tile keeps its width;
    *  the caller is expected to carry the exact figure in a `title`. */
   cell,
+  /** Show the figure even while balances are hidden: a sheet about to remove
+   *  a wallet states what it holds, and that is not the place for a mask. */
+  plain,
 }: {
   value: number | null | undefined
   signed?: boolean
   toned?: boolean
   compact?: boolean
   cell?: boolean
+  plain?: boolean
 }) {
+  const hidden = useBalancePrivacy((s) => s.hidden) && !plain
+  if (hidden) {
+    // No tone and no tick: the colour says which way the figure went and the
+    // flash says when it moved, and both are the figure leaking.
+    return (
+      <span className="trd-num" data-masked="true">
+        {BALANCE_MASK}
+      </span>
+    )
+  }
   return (
     <Tick value={value ?? null} tone={toned ? pnlTone(value) : undefined}>
       {cell ? formatUsdCell(value, { signed }) : formatUsd(value, { signed, compact })}
@@ -272,15 +287,18 @@ export function useCountUp(
   const [node, attach] = useState<HTMLSpanElement | null>(null)
   const [counting, setCounting] = useState(false)
   const spent = useRef(false)
+  // Hidden balances do not count up: the frames are written straight into
+  // the node, past anything that could mask them.
+  const hidden = useBalancePrivacy((s) => s.hidden)
 
   useEffect(() => {
-    if (!active) {
+    if (!active || hidden) {
       spent.current = false
       setCounting(false)
       return
     }
     if (!spent.current) setCounting(true)
-  }, [active])
+  }, [active, hidden])
 
   useEffect(() => {
     if (!counting || !node) return

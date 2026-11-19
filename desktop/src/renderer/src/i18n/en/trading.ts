@@ -63,6 +63,8 @@ export const trading = {
   'trading.head.wallets': 'wallets',
   'trading.head.hideList': 'Hide wallet list',
   'trading.head.showList': 'Show wallet list',
+  'trading.head.hideBalances': 'Hide balances',
+  'trading.head.showBalances': 'Show balances',
 
   'trading.overview.value': 'Portfolio value',
   'trading.overview.today': 'today',

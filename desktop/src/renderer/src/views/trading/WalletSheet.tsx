@@ -33,6 +33,7 @@ import {
 } from '~/stores/trading'
 import { ChainBadge } from './ChainMark'
 import { activeFirst, errorText, formatPct, pnlTone, shortAddress, walletLabel } from './logic'
+import { useBalancePrivacy } from '~/stores/balance-privacy'
 import { Money, Sheet } from './parts'
 import type { ChainStatus, Totals, UnlockMode, Wallet } from './types'
 import {
@@ -386,6 +387,7 @@ function ManageRow({
   const write = useWalletMutation()
   const label = walletLabel(wallet)
   const delta = totals?.change24hUsd ?? null
+  const balancesHidden = useBalancePrivacy((s) => s.hidden)
 
   async function copyAddress() {
     try {
@@ -431,7 +433,7 @@ function ManageRow({
           ) : (
             <span className="trd-skel" style={{ width: 56 }} />
           )}
-          {totals ? (
+          {totals && !balancesHidden ? (
             <span className="trd-wman__delta trd-num" data-tone={pnlTone(delta)}>
               {formatPct(totals.change24hPct ?? null, { signed: true })}
             </span>
@@ -1620,7 +1622,7 @@ function RemoveSheet({ wallet, onClose }: { wallet: Wallet; onClose: () => void 
       <p className="trd-remove__worth" data-testid="remove-worth" data-funded={funded || undefined}>
         <span>{t('trading.sheet.remove.worth')}</span>
         <b>
-          <Money value={worth} />
+          <Money value={worth} plain />
         </b>
       </p>
       <Field id={id} label={t('trading.sheet.remove.password')}>
@@ -1729,7 +1731,7 @@ function RemoveManySheet({
             <li key={w.address} data-funded={(worth !== null && worth >= 0.01) || undefined}>
               <span className="trd-remove-many__name">{walletLabel(w)}</span>
               <span className="trd-mono trd-remove-many__addr">{shortAddress(w.address)}</span>
-              <Money value={known ? worth : null} />
+              <Money value={known ? worth : null} plain />
             </li>
           )
         })}
@@ -1741,7 +1743,7 @@ function RemoveManySheet({
       >
         <span>{t('trading.sheet.removeMany.worth')}</span>
         <b>
-          <Money value={total} />
+          <Money value={total} plain />
         </b>
       </p>
       <Field id={id} label={t('trading.sheet.remove.password')}>
