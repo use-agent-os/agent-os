@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- The periodic memory review saves far more of what the user tells the
+  agent. It now goes through every message the user sent, lists the durable
+  facts (including ones mentioned in passing while asking for something
+  else), checks each against `USER.md` and `MEMORY.md`, adds what is missing
+  and replaces values that changed, and leaves out small talk, passing moods
+  and events, one-off questions and the task itself. Before, it saved what
+  "stood out" and skipped anything tied to the current task, which is where
+  most such facts are said.
+- `USER.md` is now described to the model as a short profile (name, how to
+  address the user, language, role, how they like answers) and every other
+  durable fact goes to `MEMORY.md`, the larger store. The memory tool and
+  the system prompt used to disagree, and nearly every fact went to
+  `USER.md`, which filled up while `MEMORY.md` stayed mostly empty.
+- The model is told to save a durable fact in the turn it comes up, also
+  one mentioned in passing while asking for something else (the review only
+  runs every few turns, so the last turns of a session depend on this).
+- When a value changes, the model is told to replace the entry holding it
+  and keep that entry's other details, and the review keeps one topic per
+  entry. Before, a replace for a new value could rewrite a multi-fact entry
+  with only that value and delete the facts stored beside it.
+- The memory tool tells the model that a nearly full curated store is no
+  reason to skip a fact: merge related entries, shorten wordy ones or use the
+  other store, and do not drop a fact that is still true just to make room.
+- The `memory_nudge.review_done` log line reports the review turn's own
+  `input_tokens`, `output_tokens` and `iterations`.
+
 ### Fixed
 - Swaps through the AgentOS Aggregator signed again once the gateway quoted
   through the AgentOS Router (contract mode). The desk only trusted 0x's
