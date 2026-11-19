@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.20] - 2026-11-20
+
 ### Added
 - Desktop: send a holding straight from its row. Trade → Holdings now shows a
   **Send** button beside Swap on each row; it opens a dialog with the
