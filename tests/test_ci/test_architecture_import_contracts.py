@@ -150,6 +150,10 @@ APPROVED_PACKAGE_IMPORTS: frozenset[tuple[str, str]] = frozenset({
     ("memory", "session"),
     ("memory", "tools"),
     ("migration", "gateway"),
+    # Importers decide whether a MEMORY.md / USER.md holds anything the user
+    # wrote by asking the curated store's own template rules
+    # (memory.curated_template), instead of keeping a copy of them.
+    ("migration", "memory"),
     ("migration", "onboarding"),
     ("onboarding", "channels"),
     ("onboarding", "gateway"),

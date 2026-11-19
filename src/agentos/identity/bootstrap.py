@@ -24,6 +24,13 @@ CORE_BOOTSTRAP_TEMPLATE_FILENAMES = (
 )
 ONE_SHOT_BOOTSTRAP_FILENAME = "BOOTSTRAP.md"
 
+# The curated memory stores. They are not instructions: every entry in them is
+# injected into the system prompt as something the agent remembers and counts
+# against the store's char budget. They are created empty; what belongs in each
+# is in the system prompt's memory guidance. (Older workspaces were seeded with
+# instructional text here; ``agentos.memory.curated_template`` removes it.)
+CURATED_MEMORY_FILENAMES = frozenset({"USER.md", "MEMORY.md"})
+
 
 @dataclass(frozen=True)
 class AgentWorkspaceBootstrapResult:
@@ -69,6 +76,8 @@ def _write_state(path: Path, state: dict[str, Any]) -> None:
 
 
 def _template_text(filename: str) -> str:
+    if filename in CURATED_MEMORY_FILENAMES:
+        return ""
     template = files("agentos.identity").joinpath("templates", "bootstrap", filename)
     return template.read_text(encoding="utf-8")
 

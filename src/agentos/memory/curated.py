@@ -176,6 +176,18 @@ class CuratedMemoryStore:
         """
         self._memory_dir.mkdir(parents=True, exist_ok=True)
 
+        for target in ("memory", "user"):
+            try:
+                self._remove_bootstrap_template(target)
+            except OSError as exc:
+                # Not fatal: the file is loaded as it is and the next load
+                # tries again.
+                log.warning(
+                    "curated_memory_template_cleanup_failed",
+                    target=target,
+                    error_type=type(exc).__name__,
+                )
+
         # An unreadable file is not an empty one. Loading it as [] would put
         # the agent into a silent memory blackout for the whole session --
         # the file still holds every entry on disk, but the snapshot is empty
@@ -768,6 +780,51 @@ class CuratedMemoryStore:
 
         separator = "═" * 46
         return f"{separator}\n{header}\n{separator}\n{content}"
+
+    def _remove_bootstrap_template(self, target: str) -> None:
+        """Remove the text older workspaces were seeded with from *target*'s file.
+
+        See ``curated_template`` for exactly what counts. Runs on every load
+        and writes at most once per file: a file without template text costs
+        one read and takes no lock. When there is some, the file is re-read
+        under the lock and rewritten atomically like any other write.
+
+        A file that does not round-trip is left for the drift guard: this
+        never takes a ``.bak`` snapshot and never rewrites content the guard
+        would refuse to. Nothing is mirrored to an external provider and no
+        lineage is touched: the seeded text was never written through the
+        ``memory`` tool, so no provider holds a copy and no origin points at
+        it.
+        """
+        from agentos.memory.curated_template import without_bootstrap_template
+
+        path = self._path_for(target)
+        raw = self._read_raw_checked(path)
+        if not raw or not raw.strip():
+            return
+        entries = list(dict.fromkeys(self._parse_entries(raw)))
+        if without_bootstrap_template(target, entries) == entries:
+            return
+        with self._file_lock(path):
+            raw = self._read_raw_checked(path)
+            if raw is None or not raw.strip():
+                return
+            parsed = self._parse_entries(raw)
+            if raw.strip() != ENTRY_DELIMITER.join(parsed):
+                return
+            entries = list(dict.fromkeys(parsed))
+            kept = without_bootstrap_template(target, entries)
+            if kept == entries:
+                return
+            self._write_file(path, kept)
+        log.info(
+            "curated_memory_template_removed",
+            target=target,
+            entries_before=len(entries),
+            entries_after=len(kept),
+            chars_before=len(ENTRY_DELIMITER.join(entries)),
+            chars_after=len(ENTRY_DELIMITER.join(kept)),
+        )
 
     def _reload_target(self, target: str, skip_drift: bool = False) -> str | None:
         """Re-read entries from disk into in-memory state.

@@ -2,23 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agentos.identity.bootstrap import ensure_agent_workspace
 from agentos.identity.prompt import assemble_system_prompt
 from agentos.identity.types import AgentProfile
 
 
-def test_default_user_template_names_profile_fields() -> None:
-    template = Path("src/agentos/identity/templates/bootstrap/USER.md").read_text(
-        encoding="utf-8"
-    )
+def test_curated_memory_files_are_seeded_empty(tmp_path: Path) -> None:
+    # MEMORY.md and USER.md are curated stores: anything seeded into them is
+    # injected as remembered facts and counted against their char budgets.
+    # They used to be seeded with instructions and an unfilled profile form.
+    ensure_agent_workspace(tmp_path)
 
-    assert "Name:" in template
-    assert "What to call them:" in template
-    assert "Pronouns:" in template
-    assert "Timezone:" in template
-    assert "Notes:" in template
-    assert "## Context" in template
-    assert "Do not put secrets" in template
-    assert "one-off task notes" in template
+    assert (tmp_path / "MEMORY.md").read_text(encoding="utf-8") == ""
+    assert (tmp_path / "USER.md").read_text(encoding="utf-8") == ""
 
 
 def test_default_bootstrap_templates_define_distinct_file_roles() -> None:
@@ -28,7 +24,6 @@ def test_default_bootstrap_templates_define_distinct_file_roles() -> None:
     soul = (template_dir / "SOUL.md").read_text(encoding="utf-8")
     identity = (template_dir / "IDENTITY.md").read_text(encoding="utf-8")
     tools = (template_dir / "TOOLS.md").read_text(encoding="utf-8")
-    memory = (template_dir / "MEMORY.md").read_text(encoding="utf-8")
 
     assert "operating rules" in agents
     assert "Do not store user profile facts here" in agents
@@ -38,8 +33,28 @@ def test_default_bootstrap_templates_define_distinct_file_roles() -> None:
     assert "If the user asks to rename the assistant" in identity
     assert "local tool conventions" in tools
     assert "does not register tools, grant permissions, or change tool policy" in tools
-    assert "durable non-profile facts" in memory
-    assert "Agent name, tone, and persona belong in IDENTITY.md or SOUL.md" in memory
+    # No template ships for the curated stores any more.
+    assert not (template_dir / "MEMORY.md").exists()
+    assert not (template_dir / "USER.md").exists()
+
+
+def test_system_prompt_carries_the_old_curated_template_guidance() -> None:
+    # What the old MEMORY.md / USER.md templates told the model must still
+    # reach it, from the system prompt rather than from memory entries.
+    prompt = assemble_system_prompt(
+        AgentProfile(agent_id="main", prompt_mode="full"),
+        tools=["memory_search", "memory_get", "memory", "memory_save", "write_file"],
+    )
+
+    # What belongs in MEMORY.md, and what does not.
+    assert "durable non-profile facts, preferences, decisions, and constraints" in prompt
+    assert "Do not put assistant rename/persona requests into `MEMORY.md`" in prompt
+    assert "`memory/YYYY-MM-DD.md` and `memory/**/*.md`" in prompt
+    assert "ordinary task deliverables" in prompt
+    # What belongs in USER.md.
+    assert "name, preferred address, pronouns, and durable profile notes" in prompt
+    # No secrets in memory.
+    assert "never paste their values into replies, code, or memory files" in prompt
 
 
 def test_system_prompt_routes_profile_to_user_md() -> None:
