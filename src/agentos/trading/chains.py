@@ -18,6 +18,17 @@ NATIVE_ADDRESS = "0x0000000000000000000000000000000000000000"
 # Multicall3's canonical address. Same bytecode, with ``aggregate3``, on Base and
 # Robinhood Chain (eth_getCode on both public nodes, 2026-11-07).
 MULTICALL3 = "0xca11bde05977b3631167028862be2a173976ca11"
+#: The wrapped-native (WETH9) contract per chain id, pinned for the swap
+#: safety check: a wrap or unwrap is the one swap whose transaction is sent
+#: straight to the token rather than to a router, so the address it may go
+#: to cannot come from a token list or the provider's response. Base's is
+#: the OP-stack predeploy; Robinhood Chain's answers ``symbol() == "WETH"``
+#: on the public node and is what 0x routes WETH through (2026-11-19).
+#: ``ChainSpec.weth`` stays the token-registry hint and may be ``None``.
+WRAPPED_NATIVE: Mapping[int, str] = {
+    8453: "0x4200000000000000000000000000000000000006",
+    4663: "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+}
 
 
 @dataclass(frozen=True)

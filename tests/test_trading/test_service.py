@@ -1424,6 +1424,7 @@ class TestSafetyRails:
                 chain=BASE,
                 record=record,
                 meta_in=meta_in,
+                meta_out=eth if not meta_in.native else usdc,
                 amount_raw=amount_raw,
                 provider="uniswap",
                 targets=targets,
@@ -1446,6 +1447,158 @@ class TestSafetyRails:
         with pytest.raises(TradingError, match="no swap contract is pinned"):
             check(base, targets=frozenset())
         check({**base, "to": ROUTER.upper().replace("0X", "0x")})
+
+    def test_wrap_and_unwrap_go_straight_to_the_pinned_weth(
+        self, funded_service: TradingService
+    ) -> None:
+        """ETH <-> WETH is sent to WETH9 itself, not a router (no fee on a wrap).
+
+        Accepted only for the pinned WETH, only as exactly ``deposit()`` /
+        ``withdraw(amount)``, and re-encoded so 0x's tracking suffix and any
+        other provider bytes never reach the signer.
+        """
+        service = funded_service
+        wallet = service.test_wallet  # type: ignore[attr-defined]
+        record = service.vault.get(wallet)
+        from agentos.trading.prices import TokenMeta
+
+        eth = TokenMeta(8453, NATIVE_ADDRESS, "ETH", "Ether", 18, native=True)
+        weth = TokenMeta(8453, WETH, "WETH", "Wrapped Ether", 18)
+        usdc = TokenMeta(8453, USDC, "USDC", "USD Coin", 6)
+        amount = 10**15
+        suffix = "56a993cd0bd88aa4ec463c2e8bb09804" + "00" * 20
+        withdraw = "0x2e1a7d4d" + format(amount, "064x")
+
+        def check(tx: dict, *, meta_in, meta_out, chain=BASE) -> dict:
+            tx = {"from": wallet, "chainId": chain.chain_id, **tx}
+            service._check_swap_tx(
+                tx,
+                chain=chain,
+                record=record,
+                meta_in=meta_in,
+                meta_out=meta_out,
+                amount_raw=amount,
+                provider="aggregator",
+                targets=frozenset({ROUTER}),
+            )
+            return tx
+
+        wrap = check(
+            {"to": WETH, "data": "0xd0e30db0" + suffix, "value": str(amount)},
+            meta_in=eth,
+            meta_out=weth,
+        )
+        assert wrap["data"] == "0xd0e30db0"
+        unwrap = check(
+            {"to": WETH.upper().replace("0X", "0x"), "data": withdraw + suffix, "value": "0"},
+            meta_in=weth,
+            meta_out=eth,
+        )
+        assert unwrap["data"] == withdraw
+        # Wrong selector, wrong amount, ETH attached to an unwrap, ETH short on a wrap.
+        with pytest.raises(TradingError, match="deposit"):
+            check({"to": WETH, "data": withdraw, "value": str(amount)}, meta_in=eth, meta_out=weth)
+        with pytest.raises(TradingError, match="deposit"):
+            check(
+                {"to": WETH, "data": "0x2e1a7d4d" + format(amount + 1, "064x"), "value": "0"},
+                meta_in=weth,
+                meta_out=eth,
+            )
+        with pytest.raises(TradingError, match="wei"):
+            check({"to": WETH, "data": withdraw, "value": "1"}, meta_in=weth, meta_out=eth)
+        with pytest.raises(TradingError, match="wei"):
+            check({"to": WETH, "data": "0xd0e30db0", "value": "1"}, meta_in=eth, meta_out=weth)
+        # WETH is a target only for the wrap pair: selling WETH for USDC to
+        # WETH, or buying USDC with ETH sent to WETH, is still refused.
+        with pytest.raises(TradingError, match="implausible"):
+            check({"to": WETH, "data": withdraw, "value": "0"}, meta_in=weth, meta_out=usdc)
+        with pytest.raises(TradingError, match="not a contract this desk trusts"):
+            check(
+                {"to": WETH, "data": "0xd0e30db0", "value": str(amount)}, meta_in=eth, meta_out=usdc
+            )
+        # The pin is per chain: Base's WETH is not Robinhood's.
+        rh_eth = TokenMeta(4663, NATIVE_ADDRESS, "ETH", "Ether", 18, native=True)
+        rh_weth = TokenMeta(4663, WETH, "WETH", "Wrapped Ether", 18)
+        with pytest.raises(TradingError, match="not a contract this desk trusts"):
+            check(
+                {"to": WETH, "data": "0xd0e30db0", "value": str(amount)},
+                meta_in=rh_eth,
+                meta_out=rh_weth,
+                chain=ROBINHOOD,
+            )
+        rh = "0x0bd7d308f8e1639fab988df18a8011f41eacad73"
+        assert (
+            check(
+                {"to": rh, "data": "0xd0e30db0" + suffix, "value": str(amount)},
+                meta_in=rh_eth,
+                meta_out=TokenMeta(4663, rh, "WETH", "Wrapped Ether", 18),
+                chain=ROBINHOOD,
+            )["data"]
+            == "0xd0e30db0"
+        )
+
+    @pytest.mark.parametrize("direction", ["wrap", "unwrap"])
+    async def test_wrap_and_unwrap_swaps_confirm_through_the_aggregator(
+        self,
+        direction: str,
+        funded_service: TradingService,
+        base_chain: FakeChain,
+        fake_aggregator: FakeAggregator,
+    ) -> None:
+        """The live gateway's shape: ``to`` = WETH9, no approval, no fee."""
+        service = funded_service
+        wallet = service.test_wallet  # type: ignore[attr-defined]
+        key = wallet.lower()
+        amount = 10**15
+        base_chain.set_erc20(WETH, wallet, 10**16)
+        wrapping = direction == "wrap"
+        fake_aggregator.tx_to = WETH
+        fake_aggregator.fee_bps = None
+        fake_aggregator.amount_out = amount
+        fake_aggregator.min_out = amount
+        fake_aggregator.route_source = "Wrapped_Native"
+        suffix = "56a993cd0bd88aa4ec463c2e8bb09804" + "00" * 20
+        if wrapping:
+            fake_aggregator.tx_value = str(amount)
+            fake_aggregator.tx_data = "0xd0e30db0" + suffix
+        else:
+            fake_aggregator.tx_data = "0x2e1a7d4d" + format(amount, "064x") + suffix
+
+        def on_send(raw: str) -> str:
+            # WETH9: emits Deposit/Withdrawal, never a Transfer.
+            tx = decode_fake_raw(raw)
+            base_chain._seq += 1
+            tx_hash = "0x" + format(0xFEED00 + base_chain._seq, "x").rjust(64, "0")
+            base_chain.nonces[key] = tx.get("nonce", 0) + 1
+            assert tx["to"].lower() == WETH
+            gas_wei = 50_000 * 10**8
+            delta = amount if wrapping else -amount
+            base_chain.native[key] -= delta + gas_wei
+            base_chain.set_erc20(WETH, wallet, base_chain.get_erc20(WETH, wallet) + delta)
+            base_chain.receipt(tx_hash, status=1, gas_used=50_000, gas_price=10**8, logs=[])
+            return tx_hash
+
+        base_chain.on_send = on_send
+        orders = await service.swap(
+            chain=BASE,
+            wallets=None,
+            token_in="ETH" if wrapping else "WETH",
+            token_out="WETH" if wrapping else "ETH",
+            amount_in="0.001",
+            amount_pct=None,
+            slippage_pct=None,
+            initiator="manual",
+            session_key=None,
+            note=None,
+            wait=True,
+        )
+        assert orders[0]["status"] == "confirmed", orders[0].get("reason")
+        assert orders[0]["receivedOut"] == "0.001"
+        tx = decode_fake_raw(base_chain.sent[-1])
+        assert tx["to"].lower() == WETH
+        expected = "0xd0e30db0" if wrapping else "0x2e1a7d4d" + format(amount, "064x")
+        assert tx["data"].lower() == expected
+        assert tx["value"] == (amount if wrapping else 0)
 
     async def test_submitted_order_is_recovered_after_a_restart(
         self, funded_service: TradingService, base_chain: FakeChain
