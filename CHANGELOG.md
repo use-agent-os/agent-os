@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Curated memory no longer starts out holding its own instructions. A new
+  workspace was seeded with a `MEMORY.md` and a `USER.md` explaining what each
+  file is for, and those are curated stores: the text took 630 of the
+  4,000-char `MEMORY.md` budget (as eight entries after the free-form
+  migration) and 325 of the 2,000-char `USER.md` budget, was injected into
+  every prompt as if the agent remembered it, and was never what a full store
+  gave up. When memory filled, real facts were removed instead. New
+  workspaces, including `workspace/agents/<id>/`, now get both files empty;
+  the guidance was already in the system prompt. In existing workspaces that
+  text is left out from now on: entries that are exactly the old template (or
+  its migrated pieces) are dropped, a template you only filled in or added to
+  keeps what you typed, and anything edited or merely similar is left alone.
+  Read-only commands (`agentos memory status`, `memory curated get`, `memory
+  forget --dry-run`) show it gone without writing anything; the next turn or
+  the first write removes it from the file, without a `.bak` file.
+  `agentos memory status --json` counts drop by the removed untracked entries.
+
 ## [2026.11.19.post1] - 2026-11-19
 
 ### Added
@@ -60,22 +78,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   both spender and swap target; an approval must still name the same
   contract the swap is sent to, and allowance lists label it
   "AgentOS Aggregator (AgentOS Router)".
-- Curated memory no longer starts out holding its own instructions. A new
-  workspace was seeded with a `MEMORY.md` and a `USER.md` explaining what each
-  file is for, and those are curated stores: the text took 630 of the
-  4,000-char `MEMORY.md` budget (as eight entries after the free-form
-  migration) and 325 of the 2,000-char `USER.md` budget, was injected into
-  every prompt as if the agent remembered it, and was never what a full store
-  gave up. When memory filled, real facts were removed instead. New
-  workspaces, including `workspace/agents/<id>/`, now get both files empty;
-  the guidance was already in the system prompt. In existing workspaces that
-  text is left out from now on: entries that are exactly the old template (or
-  its migrated pieces) are dropped, a template you only filled in or added to
-  keeps what you typed, and anything edited or merely similar is left alone.
-  Read-only commands (`agentos memory status`, `memory curated get`, `memory
-  forget --dry-run`) show it gone without writing anything; the next turn or
-  the first write removes it from the file, without a `.bak` file.
-  `agentos memory status --json` counts drop by the removed untracked entries.
 
 ## [2026.11.18.post2] - 2026-11-18
 
