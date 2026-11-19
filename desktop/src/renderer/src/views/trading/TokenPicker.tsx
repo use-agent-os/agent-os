@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import { t } from '~/i18n'
 import { useTokenSearch } from '~/stores/trading'
 import { chainName, formatAmount, formatUsd, sameToken } from './logic'
+import { useBalanceMask } from '~/stores/balance-privacy'
 import { AssetCell, Sheet, Spinner } from './parts'
 import { NATIVE_ADDRESS, type Balance, type SearchToken, type Token } from './types'
 
@@ -109,6 +110,7 @@ export function TokenPicker({
       )
       .sort((a, b) => rank(b) - rank(a) || (b.valueUsd ?? -1) - (a.valueUsd ?? -1))
   }, [balances, chainId, exclude, query])
+  const { mask } = useBalanceMask()
 
   const popular: Token[] = useMemo(() => {
     if (query.trim()) return []
@@ -169,8 +171,8 @@ export function TokenPicker({
           >
             <AssetCell token={r.token} />
             <span className="trd-pick__right">
-              {r.amount !== null ? <span>{formatAmount(r.amount)}</span> : null}
-              {r.valueUsd !== null ? <small>{formatUsd(r.valueUsd)}</small> : null}
+              {r.amount !== null ? <span>{mask(formatAmount(r.amount))}</span> : null}
+              {r.valueUsd !== null ? <small>{mask(formatUsd(r.valueUsd))}</small> : null}
             </span>
           </button>
         ))}
@@ -210,8 +212,8 @@ export function TokenPicker({
           >
             <AssetCell token={r.token} />
             <span className="trd-pick__right">
-              {r.amount !== null ? <span>{formatAmount(r.amount)}</span> : null}
-              {r.valueUsd !== null ? <small>{formatUsd(r.valueUsd)}</small> : null}
+              {r.amount !== null ? <span>{mask(formatAmount(r.amount))}</span> : null}
+              {r.valueUsd !== null ? <small>{mask(formatUsd(r.valueUsd))}</small> : null}
             </span>
           </button>
         ))}

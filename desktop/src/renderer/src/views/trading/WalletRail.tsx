@@ -15,6 +15,7 @@ import {
   shortAddress,
   walletLabel,
 } from './logic'
+import { useBalanceMask, useBalancePrivacy } from '~/stores/balance-privacy'
 import { Money } from './parts'
 import type { ChainStatus, Limits, Totals, Wallet } from './types'
 import { usePopUp, WalletMenuItems } from './WalletMenu'
@@ -78,6 +79,7 @@ export function WalletRail({
     allBase > 0 && all.change24hUsd !== null ? (all.change24hUsd / allBase) * 100 : null
 
   const ordered = activeFirst(wallets)
+  const { hidden, title } = useBalanceMask()
 
   // Activating a wallet moves its row to the top of a list that may be scrolled
   // down to it: follow it, or a different wallet is suddenly under the pointer.
@@ -128,10 +130,10 @@ export function WalletRail({
               <Money value={all.valueUsd} compact />
               <span
                 className="trd-wallet__delta trd-num"
-                data-tone={pnlTone(allPct)}
-                title={formatUsd(all.change24hUsd, { signed: true })}
+                data-tone={hidden ? undefined : pnlTone(allPct)}
+                title={title(formatUsd(all.change24hUsd, { signed: true }))}
               >
-                {formatPct(allPct, { signed: true })}
+                {hidden ? '' : formatPct(allPct, { signed: true })}
               </span>
             </span>
           </button>
@@ -247,6 +249,7 @@ function WalletRow({
   const label = walletLabel(wallet)
   const delta = totals?.change24hUsd ?? null
   const pct = totals?.change24hPct ?? null
+  const hidden = useBalancePrivacy((s) => s.hidden)
 
   return (
     <div
@@ -281,8 +284,8 @@ function WalletRow({
         ) : (
           <span className="trd-skel" style={{ width: 48 }} />
         )}
-        <span className="trd-wallet__delta trd-num" data-tone={pnlTone(delta)}>
-          {totals ? formatPct(pct, { signed: true }) : ''}
+        <span className="trd-wallet__delta trd-num" data-tone={hidden ? undefined : pnlTone(delta)}>
+          {totals && !hidden ? formatPct(pct, { signed: true }) : ''}
         </span>
       </span>
       <span className="trd-wallet__menu">
