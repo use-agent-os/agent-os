@@ -127,3 +127,36 @@ def test_every_placement_rule_sends_non_profile_facts_to_memory(tmp_path: Path) 
     assert "'memory' for everything else" in review
     for text in (tool, guidance):
         assert "people in their life" in text
+
+
+def test_a_nearly_full_store_is_no_reason_to_skip_or_drop_a_fact(tmp_path: Path) -> None:
+    # At the limit the model stopped saving, or made room by overwriting an
+    # entry that was still true. The tool now says what to do instead.
+    tool = _memory_tool_description(tmp_path)
+
+    assert "no reason to skip a durable fact" in tool
+    assert "other target if that one has room" in tool
+    assert "Never remove or overwrite a fact that is still true" in tool
+
+
+def test_a_replace_keeps_the_entrys_other_details(tmp_path: Path) -> None:
+    # Most facts lost in the eval were not squeezed out by the limit: a
+    # replace for one changed detail rewrote the entry with only the new
+    # value, deleting the unrelated facts stored beside it.
+    tool = _memory_tool_description(tmp_path)
+
+    assert "keep every other detail of that entry" in tool
+    assert "outdated entry, keeping its other details" in _MEMORY_REVIEW_PROMPT
+    # Entries that mix unrelated facts are what a later replace tears apart.
+    assert "one topic per entry" in _MEMORY_REVIEW_PROMPT
+
+
+def test_a_fact_mentioned_in_passing_is_saved_in_that_turn(tmp_path: Path) -> None:
+    # The review runs every few turns; the turns after the last one in a
+    # session are only covered by saving in the turn itself.
+    tool = _memory_tool_description(tmp_path)
+    guidance = _write_guidance()
+
+    assert "in passing while asking for something else" in tool
+    assert "in passing while asking for something else" in guidance
+    assert "Save it in the turn it comes up" in tool
