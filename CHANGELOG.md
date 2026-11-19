@@ -25,12 +25,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   every prompt as if the agent remembered it, and was never what a full store
   gave up. When memory filled, real facts were removed instead. New
   workspaces, including `workspace/agents/<id>/`, now get both files empty;
-  the guidance was already in the system prompt. Existing workspaces lose that
-  text once, the first time the store loads: entries that are exactly the old
-  template (or its migrated pieces) are removed, a template you only filled in
-  or added to keeps what you typed, and anything edited or merely similar is
-  left alone. No `.bak` file is written and `agentos memory status --json`
-  counts drop by the removed untracked entries.
+  the guidance was already in the system prompt. In existing workspaces that
+  text is left out from now on: entries that are exactly the old template (or
+  its migrated pieces) are dropped, a template you only filled in or added to
+  keeps what you typed, and anything edited or merely similar is left alone.
+  Read-only commands (`agentos memory status`, `memory curated get`, `memory
+  forget --dry-run`) show it gone without writing anything; the next turn or
+  the first write removes it from the file, without a `.bak` file.
+  `agentos memory status --json` counts drop by the removed untracked entries.
 
 ## [2026.11.18.post2] - 2026-11-18
 

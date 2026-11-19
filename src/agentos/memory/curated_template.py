@@ -10,9 +10,10 @@ store filled up, real facts were removed to make room while these stayed.
 
 New workspaces start with both files empty; what belongs in each is in the
 system prompt. For existing workspaces :func:`without_bootstrap_template`
-recognises the old text so ``CuratedMemoryStore`` can remove it once. An
-entry, as the store holds it (line endings as ``\\n``, trimmed), is template
-text in exactly two cases:
+recognises the old text. ``CuratedMemoryStore`` leaves it out of every load
+(read-only callers write nothing) and the turn path, or the first write,
+removes it from the file. An entry, as the store holds it (line endings as
+``\\n``, trimmed), is template text in exactly two cases:
 
 1. It equals a whole shipped template (a ``MEMORY.md`` the migration never
    touched, or a ``USER.md``, which it never touches), or one of the entries

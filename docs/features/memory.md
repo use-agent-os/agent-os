@@ -590,10 +590,13 @@ Workspaces created by earlier releases were seeded with instructions in both
 files ("Use this file for…", an empty `- Name:` / `- Pronouns:` form, "Do not
 store secrets…"), which the migration above split into eight `MEMORY.md`
 entries. That text took about 16% of each budget and was injected as if it
-were remembered. The first time a store loads (a turn, the `memory` tool,
-`agentos memory status`, `agentos memory curated get`) it removes that text
-once, with the same lock and atomic write as any other write and without a
-`.bak` file:
+were remembered. That text is now always left out: it is never listed,
+counted, matched or injected. Reading never writes, so `agentos memory
+status`, `agentos memory curated get` and `agentos memory forget --dry-run`
+show a workspace that still holds it exactly as if it were gone, and leave
+every file byte for byte as it was. The next turn removes it from the files
+once (as does the first write to a file, whatever makes it), with the same
+lock and atomic write as any other write and without a `.bak` file:
 
 - An entry that is exactly the old template, or exactly one of the entries
   the migration made from it, is removed.

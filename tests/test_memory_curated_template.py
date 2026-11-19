@@ -58,10 +58,18 @@ def _write(path: Path, entries: list[str]) -> None:
     path.write_text(ENTRY_DELIMITER.join(entries), encoding="utf-8")
 
 
-def _load(root: Path) -> CuratedMemoryStore:
+def _load(root: Path, *, clean: bool = False) -> CuratedMemoryStore:
+    """Load as a read-only caller does, or as the turn path does (*clean*)."""
     store = CuratedMemoryStore(memory_dir=root)
-    store.load_from_disk()
+    store.load_from_disk(remove_bootstrap_template=clean)
     return store
+
+
+def _files(root: Path) -> dict[str, bytes]:
+    """Every file under *root* (lock files included) and its bytes."""
+    return {
+        str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()
+    }
 
 
 def _baks(root: Path) -> list[Path]:
@@ -164,59 +172,110 @@ def test_a_per_agent_workspace_is_seeded_empty_and_cleaned(tmp_path: Path) -> No
 # -- existing installs -------------------------------------------------------------
 
 
-def test_migrated_template_entries_go_and_real_entries_stay(tmp_path: Path) -> None:
-    real_memory = ["Dog is called Rex", "Blood type is O+"]
+def _old_install(root: Path) -> list[str]:
+    """Template entries around real ones, as an upgraded workspace holds them."""
+    real = ["Dog is called Rex", "Blood type is O+"]
     _write(
-        tmp_path / "MEMORY.md",
-        [
-            *MIGRATED_MEMORY_TEMPLATE[:3],
-            real_memory[0],
-            *MIGRATED_MEMORY_TEMPLATE[3:],
-            real_memory[1],
-        ],
+        root / "MEMORY.md",
+        [*MIGRATED_MEMORY_TEMPLATE[:3], real[0], *MIGRATED_MEMORY_TEMPLATE[3:], real[1]],
     )
-    _write(tmp_path / "USER.md", [USER_TEMPLATE.strip(), "Prefers tea"])
+    _write(root / "USER.md", [USER_TEMPLATE.strip(), "Prefers tea"])
+    return real
+
+
+def test_a_read_only_load_leaves_the_template_out_and_writes_nothing(tmp_path: Path) -> None:
+    real = _old_install(tmp_path)
+    before = _files(tmp_path)
 
     store = _load(tmp_path)
 
-    assert store.entries_for("memory") == real_memory
+    assert store.entries_for("memory") == real
     assert store.entries_for("user") == ["Prefers tea"]
-    joined = ENTRY_DELIMITER.join(real_memory)
+    joined = ENTRY_DELIMITER.join(real)
+    assert store.char_count("memory") == len(joined)
     assert store.usage_for("memory") == f"{len(joined)}/4,000"
     assert store.usage_for("user") == "11/2,000"
-    assert (tmp_path / "MEMORY.md").read_text(encoding="utf-8") == joined
-    assert (tmp_path / "USER.md").read_text(encoding="utf-8") == "Prefers tea"
     snapshot = store.snapshot_block("memory") or ""
     assert f"{len(joined)}/4,000 chars]" in snapshot
     _assert_no_template_text(snapshot + (store.snapshot_block("user") or ""))
+    assert store.write_blocked_reason("memory") is None
+    # Byte-identical, and no lock or backup file appeared.
+    assert _files(tmp_path) == before
+
+
+def test_the_first_write_cleans_the_file(tmp_path: Path) -> None:
+    real = _old_install(tmp_path)
+    store = _load(tmp_path)
+
+    assert store.add("memory", "Works night shifts")["success"] is True
+    assert store.remove("user", "Prefers tea")["success"] is True
+
+    assert (tmp_path / "MEMORY.md").read_text(encoding="utf-8") == ENTRY_DELIMITER.join(
+        [*real, "Works night shifts"]
+    )
+    assert (tmp_path / "USER.md").read_bytes() == b""
+    assert _baks(tmp_path) == []
+
+
+def test_a_write_that_changes_nothing_writes_nothing(tmp_path: Path) -> None:
+    _old_install(tmp_path)
+    store = _load(tmp_path)
+    before = _files(tmp_path)
+
+    # A duplicate add and an exact removal of a missing entry commit nothing.
+    assert store.add("memory", "Dog is called Rex")["success"] is True
+    assert store.remove_exact("user", ["Not there"])["removed"] == []
+
+    assert {k: v for k, v in _files(tmp_path).items() if not k.endswith(".lock")} == {
+        k: v for k, v in before.items() if not k.endswith(".lock")
+    }
+
+
+def test_the_turn_path_removes_the_template_once(tmp_path: Path) -> None:
+    real = _old_install(tmp_path)
+
+    memory = _runner(tmp_path)._load_memory_md(tmp_path)
+
+    assert memory is not None
+    joined = ENTRY_DELIMITER.join(real)
+    assert f"{len(joined)}/4,000 chars]" in memory
+    _assert_no_template_text(memory)
+    assert (tmp_path / "MEMORY.md").read_text(encoding="utf-8") == joined
+    assert (tmp_path / "USER.md").read_text(encoding="utf-8") == "Prefers tea"
     assert _baks(tmp_path) == []
     # The next write is not refused as drift.
-    assert store.add("memory", "Works night shifts")["success"] is True
+    assert _load(tmp_path).add("memory", "Works night shifts")["success"] is True
     assert _baks(tmp_path) == []
 
 
-def test_the_second_load_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_second_cleaning_load_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _write(tmp_path / "MEMORY.md", [*MIGRATED_MEMORY_TEMPLATE, "Dog is called Rex"])
     (tmp_path / "USER.md").write_text(USER_TEMPLATE, encoding="utf-8")
-    _load(tmp_path)
-    before = {p.name: p.read_bytes() for p in tmp_path.iterdir() if p.is_file()}
+    _load(tmp_path, clean=True)
+    before = _files(tmp_path)
 
     def no_write(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("a clean file was rewritten")
 
     monkeypatch.setattr(CuratedMemoryStore, "_write_file", staticmethod(no_write))
-    store = _load(tmp_path)
+    store = _load(tmp_path, clean=True)
 
     assert store.entries_for("memory") == ["Dog is called Rex"]
     assert store.entries_for("user") == []
-    assert {p.name: p.read_bytes() for p in tmp_path.iterdir() if p.is_file()} == before
+    assert _files(tmp_path) == before
 
 
 def test_an_unmigrated_template_file_is_emptied(tmp_path: Path) -> None:
     (tmp_path / "MEMORY.md").write_text(MEMORY_TEMPLATE, encoding="utf-8")
     (tmp_path / "USER.md").write_text(USER_TEMPLATE, encoding="utf-8")
+    view = _load(tmp_path)
+    assert view.entries_for("memory") == []
+    assert view.entries_for("user") == []
+    assert (tmp_path / "USER.md").read_text(encoding="utf-8") == USER_TEMPLATE
 
-    store = _load(tmp_path)
+    store = _load(tmp_path, clean=True)
 
     assert store.entries_for("memory") == []
     assert store.entries_for("user") == []
@@ -283,15 +342,38 @@ def test_a_hand_filled_user_template_keeps_the_filled_values(tmp_path: Path) -> 
     )
     _write(tmp_path / "USER.md", [filled.strip(), "Prefers tea"])
 
-    store = _load(tmp_path)
-
-    assert store.entries_for("user") == [
+    expected = [
         "- Name: Ada Lovelace\n- What to call them: Ada\n\nWorks on the analytical engine.",
         "Prefers tea",
     ]
+    assert _load(tmp_path).entries_for("user") == expected
+
+    store = _load(tmp_path, clean=True)
+
+    assert store.entries_for("user") == expected
+    assert (tmp_path / "USER.md").read_text(encoding="utf-8") == ENTRY_DELIMITER.join(expected)
     assert _baks(tmp_path) == []
     # Idempotent: the kept entry is not template text any more.
-    assert _load(tmp_path).entries_for("user") == store.entries_for("user")
+    assert _load(tmp_path, clean=True).entries_for("user") == expected
+
+
+def test_a_rewritten_entry_over_the_limit_is_not_drift(tmp_path: Path) -> None:
+    # On disk the hand-filled template is over the 2,000-char limit; without
+    # the template it is not. Until a write, the file holds the long form,
+    # which the store has read itself and must not take for external drift.
+    notes = "Works on the analytical engine. " * 55
+    filled = USER_TEMPLATE.replace("## Context\n", f"## Context\n\n{notes.strip()}\n").strip()
+    assert len(filled) > 2000
+    (tmp_path / "USER.md").write_text(filled, encoding="utf-8")
+    store = _load(tmp_path)
+    assert store.char_count("user") < 2000
+
+    assert store.add("user", "Prefers tea")["success"] is True
+
+    assert (tmp_path / "USER.md").read_text(encoding="utf-8") == ENTRY_DELIMITER.join(
+        [notes.strip(), "Prefers tea"]
+    )
+    assert _baks(tmp_path) == []
 
 
 def test_an_edited_template_is_left_whole(tmp_path: Path) -> None:
@@ -333,8 +415,9 @@ def test_a_file_that_does_not_round_trip_is_left_to_the_drift_guard(tmp_path: Pa
     raw = USER_TEMPLATE.strip() + "\n\n§\nPrefers tea"
     (tmp_path / "USER.md").write_text(raw, encoding="utf-8")
 
-    _load(tmp_path)
+    store = _load(tmp_path, clean=True)
 
+    assert store.entries_for("user") == ["Prefers tea"]
     assert (tmp_path / "USER.md").read_text(encoding="utf-8") == raw
     assert _baks(tmp_path) == []
 
@@ -348,11 +431,30 @@ def test_a_failed_cleanup_does_not_break_the_load(
         raise PermissionError("read-only")
 
     monkeypatch.setattr(CuratedMemoryStore, "_write_file", staticmethod(refuse))
-    store = _load(tmp_path)
+    store = _load(tmp_path, clean=True)
 
     assert store.load_failed == {}
-    assert store.entries_for("user") == [USER_TEMPLATE.strip()]
+    assert store.entries_for("user") == []
     assert (tmp_path / "USER.md").read_text(encoding="utf-8") == USER_TEMPLATE
+
+
+def test_a_failed_cleanup_still_injects_no_template(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The store leaves the text out; the raw-file fallback used when the
+    # store has nothing to inject must not put it back.
+    _write(tmp_path / "MEMORY.md", MIGRATED_MEMORY_TEMPLATE)
+    (tmp_path / "USER.md").write_text(USER_TEMPLATE, encoding="utf-8")
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise PermissionError("read-only")
+
+    monkeypatch.setattr(CuratedMemoryStore, "_write_file", staticmethod(refuse))
+
+    assert _runner(tmp_path)._load_memory_md(tmp_path) is None
+    prompt = _prompt(tmp_path)
+    _assert_no_template_text(prompt)
+    assert "MEMORY (your personal notes)" not in prompt
 
 
 # -- the free-form migration ------------------------------------------------------
@@ -431,7 +533,10 @@ async def test_lineage_counts_drop_only_the_untracked_template_entries(tmp_path:
             session=SessionRef(session_key="agent:main:webchat:direct:s1", session_id="s1"),
         )
 
-        # `agentos memory curated get` is the first reader here.
+        before = _files(workspace)
+
+        # `agentos memory curated get` and `agentos memory status` read an
+        # uncleaned workspace: same answers as a clean one, nothing written.
         ctx = RpcContext(conn_id="test", config=GatewayConfig(workspace_dir=str(workspace)))
         ctx.memory_managers = {"main": manager}
         got = await get_dispatcher().dispatch(
@@ -441,8 +546,13 @@ async def test_lineage_counts_drop_only_the_untracked_template_entries(tmp_path:
         assert got.payload["entries"] == ["Prefers tea"]
         assert got.payload["charCount"] == len("Prefers tea")
         assert got.payload["usage"] == "11/2,000"
+        got = await get_dispatcher().dispatch(
+            "r", "memory.curated.get", {"agentId": "main", "target": "memory"}, ctx
+        )
+        assert got.payload["entries"] == real
 
         status = (await manager.status())["curated"]
+        assert _files(workspace) == before
 
         assert status["memory"] == {
             "entries": 2,
@@ -462,6 +572,19 @@ async def test_lineage_counts_drop_only_the_untracked_template_entries(tmp_path:
         assert await evidence.tracked_item_hashes("curated", "user") == set()
         # Nothing was mirrored: no provider ever held a copy of the template.
         assert writes == []
+
+        # The first write (here an operator's) leaves a clean file.
+        added = await get_dispatcher().dispatch(
+            "r",
+            "memory.curated.add",
+            {"agentId": "main", "target": "user", "content": "Name is Ada"},
+            ctx,
+        )
+        assert added.ok, added.error
+        assert (workspace / "USER.md").read_text(encoding="utf-8") == ENTRY_DELIMITER.join(
+            ["Prefers tea", "Name is Ada"]
+        )
+        assert _baks(workspace) == []
     finally:
         await evidence.close()
         await store.close()

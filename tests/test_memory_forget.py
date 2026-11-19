@@ -242,6 +242,50 @@ async def test_dry_run_reports_and_changes_nothing(agent: _Agent) -> None:
     assert report["notCovered"] == FORGET_NOT_COVERED
 
 
+async def test_dry_run_on_a_workspace_with_the_old_template_changes_nothing(
+    agent: _Agent,
+) -> None:
+    # An upgraded workspace still carries the instructions older releases
+    # seeded MEMORY.md / USER.md with. A preview must not be what removes
+    # them: every byte stays put, and the report never lists or counts them.
+    from agentos.memory.curated_migration import _split_freeform
+    from agentos.memory.curated_template import SHIPPED_TEMPLATES
+
+    template = _split_freeform(SHIPPED_TEMPLATES["memory"][0])
+    user_template = SHIPPED_TEMPLATES["user"][0].strip()
+    s1 = await agent.session("s1")
+    s2 = await agent.session("s2")
+    await agent.remember(s1, "Deploy window is Friday")
+    (agent.workspace / "MEMORY.md").write_text(
+        ENTRY_DELIMITER.join([*template[:4], "Deploy window is Friday", *template[4:], "Legacy"]),
+        encoding="utf-8",
+    )
+    (agent.workspace / "USER.md").write_text(
+        ENTRY_DELIMITER.join([user_template, "Prefers tea"]), encoding="utf-8"
+    )
+    before = agent.snapshot_state()
+
+    report = await agent.forget_ok(s1.session_id, dry_run=True)
+
+    assert agent.snapshot_state() == before
+    assert report["curated"] == [
+        {"target": "memory", "entry": "Deploy window is Friday", "mixed": False}
+    ]
+    assert report["untracked"] == {"memory": 1, "user": 1}
+    assert report["errors"] == []
+    wire = json.dumps(report)
+    for fragment in ("Use this file for", "What to call them", "Examples:"):
+        assert fragment not in wire
+
+    # The first real write leaves clean files.
+    await agent.remember(s2, "Prod region is eu-west-1")
+    await agent.remember(s2, "Name is Ada", target="user")
+
+    assert agent.curated() == ["Deploy window is Friday", "Legacy", "Prod region is eu-west-1"]
+    assert agent.curated("user") == ["Prefers tea", "Name is Ada"]
+    assert list(agent.workspace.glob("*.bak*")) == []
+
+
 # -- apply -------------------------------------------------------------------
 
 
