@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Desktop: the BOOK beside the chat (Chat → Trade) has a **Liquidity** tab,
+  the same LP positions table as the full desk's Liquidity tab — every
+  wallet's positions across chains, with refresh, Collect and Remove. A
+  Collect or Remove parks its order and opens the Orders tab to approve it.
+
 ## [2026.11.19.post1] - 2026-11-19
 
 ### Added

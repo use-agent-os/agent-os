@@ -4,6 +4,7 @@ import {
   Bot,
   ChevronsLeft,
   ChevronsRight,
+  Droplets,
   History as HistoryIcon,
   Layers,
   ListChecks,
@@ -22,6 +23,9 @@ import { useNow } from '~/lib/use-now'
 import { useTradingUi, type BookTab } from '~/stores/trading-ui'
 import {
   useHistory,
+  useLpBook,
+  useLpRefresh,
+  useLpWrite,
   useOrderDecision,
   useOrders,
   usePortfolio,
@@ -32,6 +36,7 @@ import {
 import { DecodeSheet } from '../DecodeSheet'
 import { History } from '../History'
 import { Holdings } from '../Holdings'
+import { Liquidity } from '../Liquidity'
 import { Markets } from '../Markets'
 import { NetworkPips } from '../NetworkPips'
 import {
@@ -60,6 +65,7 @@ const TABS: readonly { id: BookTab; icon: typeof BookOpen }[] = [
   { id: 'portfolio', icon: BookOpen },
   { id: 'swap', icon: ArrowLeftRight },
   { id: 'markets', icon: Layers },
+  { id: 'liquidity', icon: Droplets },
   { id: 'orders', icon: ListChecks },
   { id: 'history', icon: HistoryIcon },
   { id: 'automations', icon: Bot },
@@ -174,8 +180,20 @@ export function Book({
   const tokenVisibility = useTokenVisibility()
   const orders = useOrders(undefined, !collapsed && tab === 'orders', 50, walletAddress)
   const history = useHistory(walletAddress, undefined, !collapsed && tab === 'history')
+  // The engine reads LP positions only while someone asks: off this tab, nothing is asked.
+  const lpBook = useLpBook(walletAddress, undefined, !collapsed && tab === 'liquidity')
+  const lpRefresh = useLpRefresh()
+  const lpWrite = useLpWrite()
+  const [lpActing, setLpActing] = useState<string | null>(null)
   const totals = portfolio.data?.totals ?? EMPTY_TOTALS
   const holdings = portfolio.data?.holdings ?? []
+  // Token art for the LP pairs, from what the wallets hold.
+  const logos = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const h of portfolio.data?.holdings ?? [])
+      if (h.token.logoUrl) m.set(h.token.address.toLowerCase(), h.token.logoUrl)
+    return m
+  }, [portfolio.data])
   const { counting, attach: attachCount } = useCountUp(
     totals.valueUsd,
     entering && !portfolio.isPending,
@@ -499,6 +517,43 @@ export function Book({
             />
           ) : tab === 'markets' ? (
             <Markets />
+          ) : tab === 'liquidity' ? (
+            <Liquidity
+              book={lpBook.data}
+              loading={lpBook.isPending}
+              error={lpBook.isError ? lpBook.error : undefined}
+              onRetry={() => void lpBook.refetch()}
+              onRefresh={() =>
+                lpRefresh.mutate(
+                  { wallet: walletAddress },
+                  {
+                    onError: (err) => toast.error(`${t('trading.error.title')}: ${errorText(err)}`),
+                  },
+                )
+              }
+              refreshing={lpRefresh.isPending}
+              wallets={wallets}
+              showChain
+              logos={logos}
+              now={now}
+              acting={lpWrite.isPending ? lpActing : null}
+              onAction={(position, action) => {
+                if (!position.tokenId) return
+                setLpActing(position.id)
+                lpWrite.mutate(
+                  { action, chainId: position.chain.id, tokenId: position.tokenId },
+                  {
+                    // The order's own card says what moves; approving it is on Orders.
+                    onSuccess: () => {
+                      toast.success(t('trading.liquidity.parked'))
+                      setTab('orders')
+                    },
+                    onError: (err) =>
+                      toast.error(`${t('trading.liquidity.actionFailed')}: ${errorText(err)}`),
+                  },
+                )
+              }}
+            />
           ) : tab === 'orders' ? (
             <>
               <Orders

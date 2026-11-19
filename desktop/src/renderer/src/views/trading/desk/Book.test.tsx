@@ -2,8 +2,8 @@ import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTradingUi } from '~/stores/trading-ui'
-import { holding, order, renderDesk, USDC, WALLET } from '../test-utils'
-import type { MarketsPayload, Token, Totals, Wallet } from '../types'
+import { holding, LP_ROW, order, renderDesk, USDC, WALLET } from '../test-utils'
+import type { LpBook, MarketsPayload, Token, Totals, Wallet } from '../types'
 import { Book } from './Book'
 
 const rpcCall = vi.fn()
@@ -179,6 +179,43 @@ describe('Book · the desk beside the chat', () => {
   })
 })
 
+describe('Book · Liquidity', () => {
+  const BOOK: LpBook = {
+    version: 1,
+    kind: 'book',
+    ready: true,
+    refreshing: false,
+    readAt: Date.now() / 1000 - 30,
+    partialScan: false,
+    warnings: [],
+    wallets: [{ address: WALLET.address, label: 'Main' }],
+    chains: [],
+    protocols: [{ key: 'uniswap_v3', name: 'Uniswap V3', count: 1, valueUsd: 1304 }],
+    positions: [LP_ROW],
+    totals: { valueUsd: 1304, feesUsd: 4, rewardsUsd: 0, count: 1, outOfRange: 1, unpriced: 0 },
+  }
+
+  afterEach(() => useTradingUi.setState({ bookTab: 'portfolio' }))
+
+  it('reads LP positions only on its tab, then lists them', async () => {
+    const base = rpcCall.getMockImplementation()!
+    rpcCall.mockImplementation(async (method: string, params?: unknown) =>
+      method === 'trading.lp.book' ? BOOK : base(method, params),
+    )
+    render()
+    await screen.findByTestId('wallet-head-address')
+    expect(rpcCall.mock.calls.some(([method]) => method === 'trading.lp.book')).toBe(false)
+    fireEvent.click(screen.getByTestId('book-tab-liquidity'))
+    const rows = await screen.findAllByTestId('lp-row')
+    expect(rpcCall).toHaveBeenCalledWith('trading.lp.book', {})
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toHaveTextContent('WETH / USDC')
+    // The refresh asks the engine to read the chain now.
+    fireEvent.click(screen.getByTestId('lp-refresh'))
+    await waitFor(() => expect(rpcCall).toHaveBeenCalledWith('trading.lp.book', { refresh: true }))
+  })
+})
+
 describe('Book · the spine', () => {
   // The spine is what is left of the BOOK on a narrow frame, and on a frame too
   // narrow to split, every button on it did nothing: `onToggle` flipped a
@@ -330,6 +367,7 @@ describe('Book · Markets and swaps asked for from anywhere', () => {
       'book-tab-portfolio',
       'book-tab-swap',
       'book-tab-markets',
+      'book-tab-liquidity',
       'book-tab-orders',
       'book-tab-history',
       'book-tab-automations',
