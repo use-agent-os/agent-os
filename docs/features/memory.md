@@ -482,8 +482,11 @@ always has the highest-signal facts on hand without a retrieval round-trip:
   style).
 
 Both stores live at the workspace root and are §-delimited lists of small
-entries, not free-form prose. Each store is char-budgeted rather than
-line- or entry-limited:
+entries, not free-form prose. A new workspace (the main one and each
+`workspace/agents/<id>/`) gets both files empty: everything in them is
+injected as something the agent remembers, so they hold only what the agent
+or you put there. What belongs in each is part of the system prompt's memory
+guidance. Each store is char-budgeted rather than line- or entry-limited:
 
 - `memory.curated_memory_char_limit` (default `4000`) bounds `MEMORY.md`.
 - `memory.curated_user_char_limit` (default `2000`) bounds `USER.md`.
@@ -578,10 +581,37 @@ to what an add, replace or batch would leave behind.
 
 Agents that had a free-form `MEMORY.md` (headings, bullet lists, paragraphs)
 from before curated memory existed are migrated automatically, once, the
-first time the curated store loads: the text is split into entries and kept
+first time memory is loaded for a turn: the text is split into entries and kept
 up to 80% of the char budget, with any remainder archived to
 `memory/archive/memory-overflow.md` (still indexed and searchable — nothing
 is lost). `MEMORY.md` is rewritten in place as a clean §-delimited list.
+
+Workspaces created by earlier releases were seeded with instructions in both
+files ("Use this file for…", an empty `- Name:` / `- Pronouns:` form, "Do not
+store secrets…"), which the migration above split into eight `MEMORY.md`
+entries. That text took about 16% of each budget and was injected as if it
+were remembered. That text is now always left out: it is never listed,
+counted, matched or injected. Reading never writes, so `agentos memory
+status`, `agentos memory curated get` and `agentos memory forget --dry-run`
+show a workspace that still holds it exactly as if it were gone, and leave
+every file byte for byte as it was. The next turn removes it from the files
+once (as does the first write to a file, whatever makes it), with the same
+lock and atomic write as any other write and without a `.bak` file:
+
+- An entry that is exactly the old template, or exactly one of the entries
+  the migration made from it, is removed.
+- A template you only added to (every template line still there, unchanged
+  and in order, with values typed after `- Name:` and the like, or lines
+  added) keeps what you added: the filled-in lines and the added lines stay,
+  as one entry; the untouched template lines go.
+- Anything else stays as it is, including an entry that quotes or rewords
+  the template text, and a template with any line edited or deleted. Remove
+  that by hand with `agentos memory curated remove` if you want it gone.
+
+A file that would trip the drift guard is left for it. The removed text was
+never written by the `memory` tool, so it had no lineage origin (the
+`untracked` count in `agentos memory status --json` drops by the entries
+removed) and nothing is sent to an external memory provider.
 
 ### `memory_save` scope
 

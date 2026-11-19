@@ -11,7 +11,8 @@ pre-curated free-form file would therefore trip that guard on the first write.
   * If MEMORY.md is missing/empty, or already round-trips as curated entries,
     it is a no-op (returns ``False``).
   * Otherwise the free-form text is split into entries (blank-line blocks;
-    bullet blocks split per bullet; heading-only blocks dropped), kept in file
+    bullet blocks split per bullet; heading-only blocks dropped; the text the
+    workspace was once seeded with dropped, see ``curated_template``), kept in file
     order up to 80% of the char budget, with the remainder archived to
     ``memory/archive/memory-overflow.md`` (still picked up by the memory sync
     scanner, so nothing is lost — it stays searchable). MEMORY.md is rewritten
@@ -27,6 +28,7 @@ import structlog
 
 from agentos.memory.atomic_write import atomic_write_text
 from agentos.memory.curated import ENTRY_DELIMITER
+from agentos.memory.curated_template import without_bootstrap_template
 
 log = structlog.get_logger(__name__)
 
@@ -148,11 +150,23 @@ def migrate_freeform_memory_md(
     if _round_trips_as_curated(raw, memory_char_limit):
         return False
 
-    entries = _split_freeform(raw)
+    # The instructions a workspace used to be seeded with are not memory: drop
+    # them before anything is kept or archived, so they neither take budget
+    # from the user's notes nor push them into the overflow archive. Whole
+    # file first (the template plus the user's additions), then per entry.
+    body = without_bootstrap_template("memory", [raw.strip()])
+    candidates = _split_freeform(body[0]) if body else []
+    entries = without_bootstrap_template("memory", candidates)
     if not entries:
-        # Nothing salvageable (e.g. headings only). Leave the file untouched so
-        # a human can decide -- rewriting to empty would silently drop content.
-        return False
+        if body and entries == candidates:
+            # Nothing salvageable (e.g. headings only). Leave the file
+            # untouched so a human can decide -- rewriting to empty would
+            # silently drop content.
+            return False
+        # Nothing but the old seeded template.
+        atomic_write_text(memory_path, "")
+        log.info("memory_md_migrated", kept=0, overflow=0, char_limit=memory_char_limit)
+        return True
 
     budget = int(memory_char_limit * _KEEP_BUDGET_FRACTION)
     kept, overflow = _partition_by_budget(entries, budget)

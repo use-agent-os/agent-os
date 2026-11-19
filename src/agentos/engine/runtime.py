@@ -5581,6 +5581,12 @@ class TurnRunner:
             return None
         if not content:
             return None
+        from agentos.memory.curated_template import holds_only_bootstrap_template
+
+        if holds_only_bootstrap_template("memory", content):
+            # The seeded instructions, still on disk because removing them
+            # failed: the curated store leaves them out, so must this.
+            return None
         if len(content) > max_chars:
             return content[:max_chars] + "\n..."
         return content
@@ -5622,7 +5628,10 @@ class TurnRunner:
             memory_char_limit=memory_limit,
             user_char_limit=user_limit,
         )
-        store.load_from_disk()
+        # The turn path is where the instructions older workspaces were
+        # seeded with leave the files (like the migration above); read-only
+        # callers only ever see them left out.
+        store.load_from_disk(remove_bootstrap_template=True)
         if store.load_failed:
             # The file exists but could not be read. Returning None here would
             # be indistinguishable from "no memory yet", and the caller freezes

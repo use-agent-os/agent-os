@@ -13,6 +13,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Collect or Remove parks its order and opens the Orders tab to approve it.
 
 ### Fixed
+- Curated memory no longer starts out holding its own instructions. A new
+  workspace was seeded with a `MEMORY.md` and a `USER.md` explaining what each
+  file is for, and those are curated stores: the text took 630 of the
+  4,000-char `MEMORY.md` budget (as eight entries after the free-form
+  migration) and 325 of the 2,000-char `USER.md` budget, was injected into
+  every prompt as if the agent remembered it, and was never what a full store
+  gave up. When memory filled, real facts were removed instead. New
+  workspaces, including `workspace/agents/<id>/`, now get both files empty;
+  the guidance was already in the system prompt. In existing workspaces that
+  text is left out from now on: entries that are exactly the old template (or
+  its migrated pieces) are dropped, a template you only filled in or added to
+  keeps what you typed, and anything edited or merely similar is left alone.
+  Read-only commands (`agentos memory status`, `memory curated get`, `memory
+  forget --dry-run`) show it gone without writing anything; the next turn or
+  the first write removes it from the file, without a `.bak` file.
+  `agentos memory status --json` counts drop by the removed untracked entries.
 - Wrapping ETH into WETH, or unwrapping WETH back to ETH, with a swap through
   the AgentOS DEX no longer fails with "swap target … is not a contract this
   desk trusts" or "swap transaction has an implausible 'to'". The DEX sends
