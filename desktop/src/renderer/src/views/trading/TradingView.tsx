@@ -51,6 +51,7 @@ import type { MissionsApi } from './desk/missions'
 import { ToolsPanel } from './desk/ToolsPanel'
 import { PanelBoundary, Spinner } from './parts'
 import { PriceChart } from './PriceChart'
+import { SendHolding } from './SendHolding'
 import type { SwapPrefill } from './SwapPanel'
 import { Ticket } from './Ticket'
 import {
@@ -275,6 +276,8 @@ function Desk({
   const [chain, setChain] = useState<ChainId | null>(null)
   const [tab, setTab] = useState<Tab>('holdings')
   const [picked, setPicked] = useState<Holding | null>(null)
+  // The holding whose row asked for a send; its dialog is open while set.
+  const [sending, setSending] = useState<Holding | null>(null)
   const requestSwap = useTradingUi((s) => s.requestSwap)
   const openMarkets = useTradingUi((s) => s.openMarkets)
   const swapRequest = useTradingUi((s) => s.swapRequest)
@@ -641,6 +644,7 @@ function Desk({
                           wallet: h.wallet ?? (selected === 'all' ? undefined : selected),
                         })
                       }
+                      onSend={setSending}
                       onMarkets={(h) => {
                         openMarkets({
                           chainId: h.chainId,
@@ -756,6 +760,15 @@ function Desk({
         />
 
         {sheet ? <WalletSheet mode={sheet} onClose={() => setSheet(null)} /> : null}
+        {sending ? (
+          <SendHolding
+            holding={sending}
+            wallets={wallets}
+            fallbackWallet={walletAddress ?? primary ?? null}
+            onClose={() => setSending(null)}
+            onSent={() => setTab('orders')}
+          />
+        ) : null}
         {inspecting ? (
           <DecodeSheet chainId={inspectChain} onClose={() => setInspecting(false)} />
         ) : null}

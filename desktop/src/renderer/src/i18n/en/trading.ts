@@ -104,6 +104,7 @@ export const trading = {
   'trading.holdings.col.cost': 'Avg cost',
   'trading.holdings.col.pnl': 'Unrealized',
   'trading.holdings.swap': 'Swap',
+  'trading.holdings.send': 'Send',
   'trading.holdings.chart': 'Chart',
   'trading.holdings.markets': 'Markets',
   'trading.holdings.unverified': 'Unverified token',
@@ -644,6 +645,16 @@ export const trading = {
   'trading.send.error.duplicate': 'That address is listed twice',
   'trading.send.error.amount': 'Give every recipient an amount, or a shared one',
   'trading.send.irreversible': 'A send cannot be undone. Check every address.',
+  // Send one holding, from its row
+  'trading.send.to': 'To',
+  'trading.send.mine': 'My wallets',
+  'trading.send.one.irreversible': 'A send cannot be undone. Check the address.',
+  'trading.send.one.error.address': 'That is not an address',
+  'trading.send.one.error.checksum': 'Checksum does not match — re-copy the address',
+  'trading.send.one.error.self': 'That is the wallet you are sending from',
+  'trading.send.one.error.amount': 'Enter an amount',
+  'trading.send.one.error.insufficient': 'More than this wallet holds',
+  'trading.send.one.error.gas': 'Leave some for gas',
 
   // Allowances
   'trading.allowances.title': 'Allowances',
