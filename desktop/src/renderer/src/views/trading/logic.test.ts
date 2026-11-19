@@ -3,6 +3,7 @@ import {
   DUST_USD,
   activeFirst,
   SYMBOL_MAX,
+  amountFontSize,
   checksumAddress,
   checksumMismatch,
   clampSymbol,
@@ -154,6 +155,18 @@ describe('formatting', () => {
     // A rate on a near-zero cost basis stops being a number worth printing.
     expect(formatPct(1.1902164029823605e22, { signed: true })).toBe('+>9,999%')
     expect(formatPct(-45_000)).toBe('−>9,999%')
+  })
+  it('shrinks a long amount to the room beside the token button', () => {
+    // Fits at rest, or nothing measured yet: the stylesheet's size stands.
+    expect(amountFontSize(5, 150)).toBeUndefined()
+    expect(amountFontSize(18, 0)).toBeUndefined()
+    expect(amountFontSize(0, 150)).toBeUndefined()
+    // "104,356,182.822803" beside AGENTOS in the 316 px ticket.
+    const size = amountFontSize(18, 136)
+    expect(size).toBe(12)
+    expect(18 * 0.6 * (size ?? 0)).toBeLessThanOrEqual(136)
+    // Longer still stops at the floor, where the leg clips instead.
+    expect(amountFontSize(42, 89)).toBe(11)
   })
   it('formats token amounts from decimal strings', () => {
     expect(formatAmount('1234.5')).toBe('1,234.5')

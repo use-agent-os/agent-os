@@ -6,7 +6,7 @@ import {
   TriangleAlert,
   Zap,
 } from 'lucide-react'
-import { useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { t, type MessageKey } from '~/i18n'
 import { useNow } from '~/lib/use-now'
 import { useBalances, useQuote, type QuoteParams } from '~/stores/trading'
@@ -15,6 +15,7 @@ import {
   activeFirst,
   amountFromPct,
   compareAmounts,
+  amountFontSize,
   formatAmount,
   formatPct,
   formatUsd,
@@ -255,6 +256,10 @@ export function SwapPanel({
 
   const selectedWalletObj = wallets.find((w) => sameAddress(w.address, wallet)) ?? null
 
+  const [inRef, inStyle] = useAmountFit<HTMLInputElement>(amount)
+  const outText = fresh && ready ? formatAmount(fresh.amountOut) : quote.isFetching ? '…' : '0'
+  const [outRef, outStyle] = useAmountFit<HTMLOutputElement>(outText)
+
   return (
     <aside className="trd-ticket" aria-label={t('trading.swap.title')}>
       <div className="trd-ticket__head">
@@ -317,6 +322,8 @@ export function SwapPanel({
         >
           <input
             className="trd-amount"
+            ref={inRef}
+            style={inStyle}
             inputMode="decimal"
             autoComplete="off"
             spellCheck={false}
@@ -349,11 +356,14 @@ export function SwapPanel({
         >
           <output
             className="trd-amount trd-amount--out"
+            ref={outRef}
+            style={outStyle}
+            title={outText}
             data-pending={quote.isFetching && !fresh ? 'true' : undefined}
             aria-label={t('trading.swap.to')}
             data-testid="quote-out"
           >
-            {fresh && ready ? formatAmount(fresh.amountOut) : quote.isFetching ? '…' : '0'}
+            {outText}
           </output>
         </Leg>
 
@@ -531,6 +541,26 @@ export function SwapPanel({
       ) : null}
     </aside>
   )
+}
+
+/**
+ * Sizes a leg's amount to the room it has: the figure shrinks as it grows
+ * (down to a floor) rather than pushing the ticket into a sideways scroll.
+ * The room is the cell beside the token button, which the type size does not
+ * change, so one measurement per resize is enough.
+ */
+export function useAmountFit<T extends HTMLElement>(
+  text: string,
+): [ref: (el: T | null) => void, style: CSSProperties] {
+  const [el, setEl] = useState<T | null>(null)
+  const [width, setWidth] = useState(0)
+  useEffect(() => {
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => setWidth(el.clientWidth))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [el])
+  return [setEl, { fontSize: amountFontSize(text.length, width) }]
 }
 
 /**
