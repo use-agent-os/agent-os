@@ -50,9 +50,9 @@ MIN_SCHEMAS_SAVED = 19
 #: cannot drift from the code: 30 builtins are marked deferred, all of them
 #: visible on a stock gateway (builtins + skill + memory tools), whose request
 #: goes from 69 to 40 tool schemas.
-FLAGGED_BUILTINS = 31
-STOCK_DEFERRED = 31
-STOCK_FULL_SCHEMAS = 70
+FLAGGED_BUILTINS = 32
+STOCK_DEFERRED = 32
+STOCK_FULL_SCHEMAS = 71
 STOCK_REQUEST_SCHEMAS = 40
 
 

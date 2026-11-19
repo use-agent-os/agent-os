@@ -17,8 +17,8 @@ import { t } from '~/i18n'
 import { toast } from 'sonner'
 import { useMoveSession, useProjects } from '~/stores/projects'
 import { useSessionMarks } from '~/stores/session-marks'
-import type { SessionRow } from '~/stores/sessions'
-import type { useSessionActions } from './session-actions'
+import { isPinned, type SessionRow } from '~/stores/sessions'
+import { usePinSessions, type useSessionActions } from './session-actions'
 
 /**
  * The rows of a session's context menu. Rendered inside a PopMenu; the
@@ -39,7 +39,8 @@ export function SessionMenuItems({
   const marks = useSessionMarks()
   const { projects, byId } = useProjects()
   const { move } = useMoveSession()
-  const pinned = marks.pinned.has(row.key)
+  const pin = usePinSessions()
+  const pinned = isPinned(row)
   const archived = marks.archived.has(row.key)
   const unread = marks.unread.has(row.key)
   const currentProject = sessionProjectId(row.raw)
@@ -51,7 +52,7 @@ export function SessionMenuItems({
       <MenuItem
         icon={pinned ? PinOff : Pin}
         label={pinned ? t('session.menu.unpin') : t('session.menu.pin')}
-        onSelect={() => marks.setPinned(row.key, !pinned)}
+        onSelect={() => void pin([row.key], !pinned)}
       />
       <MenuItem
         icon={unread ? MailOpen : Mail}

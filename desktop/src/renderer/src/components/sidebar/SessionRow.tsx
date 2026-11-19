@@ -10,7 +10,7 @@ import { useLive } from '~/stores/live'
 import { useSessionMarks } from '~/stores/session-marks'
 import { useSessionSelection } from '~/stores/session-selection'
 import { useSessionView } from '~/stores/session-view'
-import type { SessionRow } from '~/stores/sessions'
+import { isPinned, type SessionRow } from '~/stores/sessions'
 import { SESSION_DRAG_TYPE } from '~/views/projects/logic'
 import { useSessionActions } from './session-actions'
 import { SessionBulkMenuItems } from './SessionBulk'
@@ -32,7 +32,7 @@ export function sessionPath(key: string): string {
 export function SessionRowLink({ row, nested = false }: { row: SessionRow; nested?: boolean }) {
   const liveLocally = useLive((s) => s.ids.has(row.key))
   const live = row.live || liveLocally
-  const pinned = useSessionMarks((s) => s.pinned.has(row.key))
+  const pinned = isPinned(row)
   const archived = useSessionMarks((s) => s.archived.has(row.key))
   const unread = useSessionMarks((s) => s.unread.has(row.key))
   const showAge = useSessionView((s) => s.view.ages)

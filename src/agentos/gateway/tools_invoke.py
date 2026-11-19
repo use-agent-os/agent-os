@@ -116,6 +116,7 @@ HARD_DENY_TOOLS: frozenset[str] = frozenset(
         "projects_update",
         "projects_move_session",
         "session_rename",
+        "session_pin",
         "router_control",
         "browser",
         "dubbing_download",

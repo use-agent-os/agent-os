@@ -24,7 +24,12 @@ interface SessionsListResponse {
 
 export async function fetchSessions(rpc: WsRpcClient): Promise<SessionRow[]> {
   await rpc.waitForConnection()
-  const data = await rpc.call<SessionsListResponse>('sessions.list', { limit: SESSIONS_LIST_LIMIT })
+  // includePinned: a pinned session stays listed however far it has fallen
+  // behind the newest `limit` rows, so the Pinned section never loses one.
+  const data = await rpc.call<SessionsListResponse>('sessions.list', {
+    limit: SESSIONS_LIST_LIMIT,
+    includePinned: true,
+  })
   return (data?.sessions ?? []).filter((row): row is SessionRow => typeof row?.key === 'string')
 }
 

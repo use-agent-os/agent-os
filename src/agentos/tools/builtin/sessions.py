@@ -1267,3 +1267,119 @@ async def session_rename(name: str) -> str:
         raise
     except (ImportError, AttributeError, NotImplementedError) as exc:
         raise _manager_unavailable(exc) from exc
+
+
+# ---------------------------------------------------------------------------
+# session_pin
+# ---------------------------------------------------------------------------
+
+
+async def _find_session_to_pin(mgr: Any, target: str) -> Any:
+    """Resolve ``target`` (key, session id, name, or a unique prefix) to a session.
+
+    Same targeting ``sessions.rename`` and ``agentos sessions pin`` accept, so
+    "pin the session called X" works with whatever the user can see in the
+    list. An exact hit wins over prefix hits; an ambiguous prefix is an error
+    that names the candidates instead of pinning an arbitrary one.
+    """
+    direct = await mgr.get_session(target)
+    if direct is not None:
+        return direct
+    # ``SessionManager.list_sessions`` returns plain row dicts, not nodes.
+    rows = await mgr.list_sessions(limit=500)
+    exact: list[str] = []
+    partial: list[str] = []
+    needle = target.casefold()
+    for row in rows:
+        key = str(row.get("session_key") or "")
+        if not key:
+            continue
+        values = [
+            str(row.get(name) or "").casefold()
+            for name in ("session_key", "session_id", "display_name", "label")
+        ]
+        present = [value for value in values if value]
+        if needle in present:
+            exact.append(key)
+        elif any(value.startswith(needle) for value in present):
+            partial.append(key)
+    matches = exact if exact else partial
+    if not matches:
+        raise ToolError(f"No session matches {target!r}")
+    if len(matches) > 1:
+        raise ToolError(f"{target!r} matches more than one session: {', '.join(matches[:5])}")
+    node = await mgr.get_session(matches[0])
+    if node is None:
+        raise ToolError(f"No session matches {target!r}")
+    return node
+
+
+@tool(
+    name="session_pin",
+    description=(
+        "Pin a session to the Pinned section at the top of the user's session "
+        "list (Web UI and desktop app), or unpin it. Pins the current session "
+        "unless another one is named."
+    ),
+    params={
+        "pinned": {
+            "type": "boolean",
+            "description": "true to pin (default), false to unpin.",
+        },
+        "session": {
+            "type": "string",
+            "description": (
+                "Which session: its key, session id or name (a unique prefix "
+                "works). Omit for the current session."
+            ),
+        },
+    },
+    required=[],
+    defer_loading=True,
+)
+async def session_pin(pinned: bool = True, session: str | None = None) -> str:
+    """Set or clear a session's pin through ``SessionManager.set_session_pinned``.
+
+    The pin is stored on the session row, so the user's Pinned section in
+    every client reflects it. Unlike :func:`session_rename` another session
+    may be targeted: a pin only arranges the user's own list, and "pin the
+    research chat" from a different conversation is the natural request.
+    """
+    try:
+        mgr = _get_session_manager()
+        if not isinstance(pinned, bool):
+            raise ToolError("pinned must be true or false")
+        target = (session or "").strip()
+        if target:
+            node = await _find_session_to_pin(mgr, target)
+        else:
+            ctx = current_tool_context.get()
+            session_key = ctx.session_key if ctx is not None else None
+            node = await mgr.get_session(session_key) if session_key else None
+            if node is None:
+                raise ToolError("No active session")
+        key = str(getattr(node, "session_key", "") or "")
+        was_pinned = getattr(node, "pinned_at", None) is not None
+
+        set_pinned = getattr(mgr, "set_session_pinned", None)
+        if set_pinned is None:
+            # Report it instead of returning a success the user's session list
+            # would immediately contradict.
+            raise ToolError("Session storage cannot persist a pin")
+        try:
+            await set_pinned(key, pinned)
+        except KeyError as exc:
+            raise ToolError(f"Session not found: {key}") from exc
+
+        return json.dumps(
+            {
+                "session_key": key,
+                "name": getattr(node, "derived_title", None),
+                "pinned": pinned,
+                "changed": was_pinned != pinned,
+            }
+        )
+    except ToolError:
+        raise
+    except (ImportError, AttributeError, NotImplementedError) as exc:
+        raise _manager_unavailable(exc) from exc

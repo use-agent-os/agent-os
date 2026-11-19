@@ -181,13 +181,62 @@ describe('SessionRowLink: the menu for a selection', () => {
     expect(screen.getByRole('menuitem', { name: 'Delete 2 sessions…' })).toBeInTheDocument()
   })
 
-  it('bulk Pin pins every selected row', () => {
+  const pinCalls = () => rpcCall.mock.calls.filter(([method]) => method === 'sessions.pin')
+
+  it('bulk Pin pins every selected row on the gateway', async () => {
     mount()
     fireEvent.click(link(A), { metaKey: true })
     fireEvent.click(link(B), { metaKey: true })
     fireEvent.contextMenu(link(A))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Pin' }))
-    expect([...useSessionMarks.getState().pinned].sort()).toEqual([A.key, B.key])
+    await waitFor(() =>
+      expect(pinCalls()).toEqual([
+        ['sessions.pin', { key: A.key, pinned: true }],
+        ['sessions.pin', { key: B.key, pinned: true }],
+      ]),
+    )
+    // Nothing is kept on this Mac any more.
+    expect(useSessionMarks.getState().pinned.size).toBe(0)
+  })
+
+  it('bulk offers Unpin only when every selected row is pinned, and pins the rest otherwise', async () => {
+    const pinnedA = { ...A, raw: { key: A.key, pinned: true } }
+    const pinnedB = { ...B, raw: { key: B.key, pinned: true } }
+    mount({ rows: [pinnedA, pinnedB, C] })
+    fireEvent.click(link(pinnedA), { metaKey: true })
+    fireEvent.click(link(C), { metaKey: true })
+    fireEvent.contextMenu(link(C))
+    expect(screen.queryByRole('menuitem', { name: 'Unpin' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Pin' }))
+    await waitFor(() => expect(pinCalls()).toHaveLength(2))
+    expect(pinCalls().every(([, p]) => (p as { pinned: boolean }).pinned)).toBe(true)
+
+    rpcCall.mockClear()
+    fireEvent.click(link(C), { metaKey: true })
+    fireEvent.click(link(pinnedB), { metaKey: true })
+    fireEvent.contextMenu(link(pinnedB))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Unpin' }))
+    await waitFor(() =>
+      expect(pinCalls()).toEqual([
+        ['sessions.pin', { key: A.key, pinned: false }],
+        ['sessions.pin', { key: B.key, pinned: false }],
+      ]),
+    )
+  })
+
+  it('reports a pin the gateway refused', async () => {
+    rpcCall.mockImplementation((method: string) =>
+      method === 'sessions.pin' ? Promise.reject(new Error('offline')) : Promise.resolve({}),
+    )
+    mount()
+    fireEvent.contextMenu(link(A))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Pin' }))
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        'Could not pin the session: offline',
+        expect.anything(),
+      ),
+    )
   })
 })
 

@@ -31,6 +31,10 @@ export interface RawSession {
   projectId?: string | null
   derived_title?: string
   derivedTitle?: string
+  /** Pinned to the top of the session lists (stored on the gateway). */
+  pinned?: boolean
+  pinned_at?: number | null
+  pinnedAt?: number | null
   active_task?: RunTask | null
   activeTask?: RunTask | null
   last_task?: RunTask | null

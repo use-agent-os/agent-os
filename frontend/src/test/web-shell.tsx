@@ -21,6 +21,15 @@ export function shellRpc(sessions: Record<string, unknown>[] = []): FakeRpc {
   return (
     new FakeRpc()
       .handle('sessions.list', () => ({ sessions: structuredClone(sessions) }))
+      // As the gateway does: the pin lands on the row the next list returns.
+      .handle('sessions.pin', (params: { key?: string; pinned?: boolean }) => {
+        const row = sessions.find((s) => s.key === params.key)
+        if (!row) throw new Error(`Session not found: ${params.key}`)
+        const pinned = params.pinned !== false
+        row.pinned = pinned
+        row.pinned_at = pinned ? Date.now() : null
+        return { key: params.key, pinned, changed: true }
+      })
       .handle('agents.list', {
         agents: [
           { id: 'main', name: 'main' },

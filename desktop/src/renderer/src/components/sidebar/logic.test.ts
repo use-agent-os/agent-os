@@ -36,8 +36,6 @@ const labels: SectionLabels = {
   today: 'Today',
   yesterday: 'Yesterday',
   week: 'This week',
-  pinned: 'Pinned',
-  others: 'Others',
   noProject: 'No project',
   agent: (id) => id,
 }
@@ -143,14 +141,7 @@ describe('sectionRows', () => {
   const lastMonth = row('m', { updatedAt: NOW - 40 * DAY })
 
   it('groups by date with an unlabelled Today section on top', () => {
-    const s = sectionRows(
-      [today, yesterday, lastMonth],
-      { grouping: 'date' },
-      none,
-      labels,
-      [],
-      NOW,
-    )
+    const s = sectionRows([today, yesterday, lastMonth], { grouping: 'date' }, labels, [], NOW)
     expect(s.map((x) => [x.label, x.items.length])).toEqual([
       ['', 1],
       ['Yesterday', 1],
@@ -158,19 +149,10 @@ describe('sectionRows', () => {
     ])
   })
 
-  it('puts pinned rows in their own first section and captions Today after it', () => {
-    const marks = { pinned: new Set(['y']) }
-    const s = sectionRows([today, yesterday], { grouping: 'date' }, marks, labels, [], NOW)
-    expect(s.map((x) => [x.key, x.label])).toEqual([
-      ['pinned', 'Pinned'],
-      ['today', 'Today'],
-    ])
-  })
-
   it('groups by agent alphabetically and flat with "none"', () => {
     const rows = [row('agent:zed:x:1'), row('agent:amy:x:2'), row('agent:zed:x:3')]
     expect(
-      sectionRows(rows, { grouping: 'agent' }, none, labels, [], NOW).map((x) => [
+      sectionRows(rows, { grouping: 'agent' }, labels, [], NOW).map((x) => [
         x.label,
         x.items.length,
       ]),
@@ -178,18 +160,9 @@ describe('sectionRows', () => {
       ['amy', 1],
       ['zed', 2],
     ])
-    const flat = sectionRows(rows, { grouping: 'none' }, none, labels, [], NOW)
+    const flat = sectionRows(rows, { grouping: 'none' }, labels, [], NOW)
     expect(flat).toHaveLength(1)
     expect(flat[0]!.label).toBe('')
-    const withPin = sectionRows(
-      rows,
-      { grouping: 'none' },
-      { pinned: new Set(['agent:amy:x:2']) },
-      labels,
-      [],
-      NOW,
-    )
-    expect(withPin.map((x) => x.label)).toEqual(['Pinned', 'Others'])
   })
 
   it('groups by project in sidebar order, loose rows last, unknown projects loose', () => {
@@ -203,7 +176,7 @@ describe('sectionRows', () => {
       row('c', { raw: { project_id: 'p2' } }),
       row('d', { raw: { project_id: 'gone' } }),
     ]
-    const s = sectionRows(rows, { grouping: 'project' }, none, labels, projects, NOW)
+    const s = sectionRows(rows, { grouping: 'project' }, labels, projects, NOW)
     expect(s.map((x) => [x.label, x.items.map((r) => r.key)])).toEqual([
       ['Two', ['c']],
       ['One', ['a']],
@@ -231,8 +204,8 @@ describe('visibleSlots', () => {
     ])
   })
 
-  it('lists both copies of a pinned filed chat, each where it is drawn', () => {
-    const out = visibleSlots([[row('p'), row('f')]], [{ items: [row('p'), row('a')] }])
-    expect(slots(out)).toEqual(['folder:p', 'folder:f', 'list:p', 'list:a'])
+  it('lists the pinned block first, and both copies of a pinned filed chat', () => {
+    const out = visibleSlots([[row('p'), row('f')]], [{ items: [row('a')] }], [row('p')])
+    expect(slots(out)).toEqual(['list:p', 'folder:p', 'folder:f', 'list:a'])
   })
 })

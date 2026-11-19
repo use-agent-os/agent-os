@@ -161,7 +161,10 @@ by agent, channel or project; **Clear filters** resets them all. A row's ⋯ men
 Pin/Unpin (and Move up/down for pinned rows, which can also be dragged), Move to
 project, Reset and Delete (both confirmed first), Export as Markdown and Copy
 session key. The list refreshes on `sessions.changed` and every 5 seconds while the
-tab is visible. Pins and the grouping choice are stored in the browser.
+tab is visible. Pins are stored on the gateway (`sessions.pin`), so the desktop
+app, `agentos sessions pin` and the agent's `session_pin` tool share one Pinned
+section; a session pinned elsewhere appears after the ones arranged here. The
+order of the Pinned section and the grouping choice are stored in the browser.
 
 Picking an agent in the rail's switcher makes it the default for New session
 and filters the Sessions list to it until the filter is cleared.

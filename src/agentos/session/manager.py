@@ -864,6 +864,27 @@ class SessionManager:
             await self._require_project(project_id)
         return await self.update(session_key, project_id=project_id)
 
+    async def set_session_pinned(self, session_key: str, pinned: bool) -> SessionNode:
+        """Pin a session to the top of the session lists, or unpin it.
+
+        Single choke point for the RPC, the CLI and the ``session_pin`` tool.
+        Re-pinning a pinned session keeps its original ``pinned_at`` so the
+        Pinned section's order does not shuffle on a repeated request.
+        """
+        session_key = canonicalize_session_key(session_key)
+        node = await self._storage.get_session(session_key)
+        if node is None:
+            raise KeyError(f"Session not found: {session_key}")
+        if pinned and node.pinned_at is not None:
+            return node
+        if not pinned and node.pinned_at is None:
+            return node
+        pinned_at = _now_ms() if pinned else None
+        if not await self._storage.set_session_pinned_at(session_key, pinned_at):
+            raise KeyError(f"Session not found: {session_key}")
+        node.pinned_at = pinned_at
+        return node
+
     async def get_project_knowledge_for_session(self, session_key: str) -> str | None:
         """Return the project knowledge text for a session, or None.
 

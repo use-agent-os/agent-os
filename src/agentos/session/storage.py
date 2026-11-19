@@ -58,7 +58,8 @@ class StaleEpochError(Exception):
 # Version 6 added portable/provider context state records.
 # Version 7 added archived transcript rows for canonical recovery after compaction.
 # Version 8 added the projects table and sessions.project_id.
-SCHEMA_VERSION = 8
+# Version 9 added sessions.pinned_at.
+SCHEMA_VERSION = 9
 
 # SQLite CREATE statements derived from SQLModel metadata
 _CREATE_SESSIONS = """
@@ -114,6 +115,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     group_id TEXT,
     subject TEXT,
     project_id TEXT,
+    pinned_at INTEGER,
     origin TEXT,
     agent_id TEXT NOT NULL DEFAULT 'main',
     schema_version INTEGER NOT NULL DEFAULT 1,
@@ -642,6 +644,7 @@ class SessionStorage:
         await self._migrate_summary_metadata_columns()
         await self._migrate_memory_durable_receipt_coverage_columns()
         await self._migrate_session_project_id_column()
+        await self._migrate_session_pinned_at_column()
         await self._conn.execute(_CREATE_IDX_SESSIONS_PROJECT)
         await self._conn.execute(_CREATE_IDX_MEMORY_DURABLE_RECEIPTS_COVERAGE)
         await self._conn.commit()
@@ -825,6 +828,15 @@ class SessionStorage:
             await self._conn.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT")
             await self._conn.commit()
 
+    async def _migrate_session_pinned_at_column(self) -> None:
+        """Idempotently add the pin timestamp column to sessions."""
+        assert self._conn is not None
+        async with self._conn.execute("PRAGMA table_info(sessions)") as cur:
+            columns = [row[1] for row in await cur.fetchall()]
+        if "pinned_at" not in columns:
+            await self._conn.execute("ALTER TABLE sessions ADD COLUMN pinned_at INTEGER")
+            await self._conn.commit()
+
     async def _ensure_projects_name_index(self) -> None:
         """Create the unique project-name index; legacy duplicates skip it.
 
@@ -859,6 +871,12 @@ class SessionStorage:
         for c in cols:
             if c == "session_key":
                 continue
+            if c == "pinned_at":
+                # Owned by ``set_session_pinned_at``. A turn that read the row
+                # before a pin and upserts it afterwards must not undo the pin
+                # (the ``session_pin`` tool pins the very session whose turn
+                # is running), so an existing row keeps its own value.
+                continue
             if c == "epoch":
                 # Hard guarantee: epoch can only increase, never roll back.
                 update_columns.append("epoch = MAX(sessions.epoch, excluded.epoch)")
@@ -872,6 +890,23 @@ class SessionStorage:
         )
         await self.conn.execute(sql, values)
         await self.conn.commit()
+
+    @_serialized_write
+    async def set_session_pinned_at(self, session_key: str, pinned_at: int | None) -> bool:
+        """Write only the pin column; ``False`` when no such session exists.
+
+        A targeted UPDATE rather than :meth:`upsert_session`: pinning is a
+        list-arrangement mark, so it must not bump ``updated_at`` (the row
+        would jump to "just now") nor rewrite the rest of the row from a
+        snapshot a running turn may have changed since it was read.
+        """
+        session_key = canonicalize_session_key(session_key)
+        cur = await self.conn.execute(
+            "UPDATE sessions SET pinned_at = ? WHERE session_key = ?",
+            (pinned_at, session_key),
+        )
+        await self.conn.commit()
+        return bool(cur.rowcount)
 
     async def get_session(self, session_key: str) -> SessionNode | None:
         session_key = canonicalize_session_key(session_key)
@@ -921,6 +956,21 @@ class SessionStorage:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params += [limit, offset]
         sql = f"SELECT * FROM sessions {where} ORDER BY updated_at DESC LIMIT ? OFFSET ?"
+        async with self.conn.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+        return [SessionNode(**_deserialize_row(dict(r))) for r in rows]
+
+    async def list_pinned_sessions(self, project_id: str | None = None) -> list[SessionNode]:
+        """Every pinned session, oldest pin first (the order they were pinned)."""
+        clauses = ["pinned_at IS NOT NULL"]
+        params: list[Any] = []
+        if project_id is not None:
+            clauses.append("project_id = ?")
+            params.append(project_id)
+        sql = (
+            f"SELECT * FROM sessions WHERE {' AND '.join(clauses)} "
+            "ORDER BY pinned_at ASC, session_key ASC"
+        )
         async with self.conn.execute(sql, params) as cur:
             rows = await cur.fetchall()
         return [SessionNode(**_deserialize_row(dict(r))) for r in rows]

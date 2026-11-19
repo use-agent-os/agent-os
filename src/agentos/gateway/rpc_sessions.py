@@ -807,6 +807,10 @@ async def _handle_sessions_list(params: dict | None, ctx: RpcContext) -> dict:
         # No kwarg on the unfiltered path: storage stand-ins with a narrower
         # list_sessions() signature keep working when no filter is requested.
         sessions = await storage.list_sessions(limit=limit)
+    # Opt-in, so ``limit`` stays an exact ceiling for callers that page or
+    # budget on it (the MCP bridge, ``agentos sessions list``).
+    if (params or {}).get("includePinned") is True:
+        sessions = await _with_pinned_sessions(storage, sessions, project_filter)
     task_rows_by_session = await _list_task_rows_by_session(
         ctx,
         storage,
@@ -861,6 +865,9 @@ async def _handle_sessions_list(params: dict | None, ctx: RpcContext) -> dict:
             "subject": getattr(s, "subject", None),
             "project_id": getattr(s, "project_id", None),
             "projectId": getattr(s, "project_id", None),
+            "pinned": getattr(s, "pinned_at", None) is not None,
+            "pinned_at": getattr(s, "pinned_at", None),
+            "pinnedAt": getattr(s, "pinned_at", None),
             "last_channel": getattr(s, "last_channel", None),
             "lastChannel": getattr(s, "last_channel", None),
             "last_to": getattr(s, "last_to", None),
@@ -887,6 +894,31 @@ async def _handle_sessions_list(params: dict | None, ctx: RpcContext) -> dict:
 
     total = await _sessions_total(storage, limit, len(result), project_filter)
     return {"sessions": result, "count": len(result), "total": total, "ts": now_ms}
+
+
+async def _with_pinned_sessions(
+    storage: Any, sessions: list[Any], project_filter: Any
+) -> list[Any]:
+    """Append the pinned sessions the page left out (``includePinned``).
+
+    The page is the newest ``limit`` rows, and a pin is exactly what a user
+    puts on a session they want to keep at hand while it goes quiet. Without
+    this a pinned session would drop out of every client's Pinned section the
+    moment enough newer sessions pushed it past the page.
+    """
+    list_pinned = getattr(storage, "list_pinned_sessions", None)
+    if not callable(list_pinned):
+        return sessions
+    try:
+        if project_filter:
+            pinned = await list_pinned(project_id=str(project_filter))
+        else:
+            pinned = await list_pinned()
+    except Exception:
+        log.warning("sessions.list.pinned_failed", exc_info=True)
+        return sessions
+    listed = {s.session_key for s in sessions}
+    return [*sessions, *(s for s in pinned if s.session_key not in listed)]
 
 
 async def _sessions_total(storage: Any, limit: Any, listed: int, project_filter: Any) -> int:
@@ -2302,6 +2334,62 @@ async def _increment_and_emit_epoch(
     return new_epoch
 
 
+@_d.method("sessions.pin")
+async def _handle_sessions_pin(params: dict | None, ctx: RpcContext) -> dict:
+    """Pin a session to the top of the session lists, or unpin it.
+
+    ``pinned`` defaults to ``true``; pass ``false`` to unpin. Like
+    ``sessions.rename`` the key is resolved through
+    :func:`_resolve_session_node`, so a short session id or the session's
+    current name works as well as the full key. The pin is stored on the
+    session row, so every client shows the same Pinned section.
+    """
+    key = _require_key(params)
+    params = require_params_dict(params)
+    pinned = params.get("pinned", True)
+    if not isinstance(pinned, bool):
+        raise ValueError("params.pinned must be a boolean")
+
+    if ctx.session_manager is None:
+        raise RpcUnavailableError("No session manager available")
+    storage = get_session_storage(ctx.session_manager)
+    if storage is None:
+        raise RpcUnavailableError("No session storage available")
+
+    session = await _resolve_session_node(storage, key)
+    resolved_key = str(getattr(session, "session_key", "") or key)
+    was_pinned = getattr(session, "pinned_at", None) is not None
+
+    set_pinned = getattr(ctx.session_manager, "set_session_pinned", None)
+    if set_pinned is None:
+        # Report it instead of returning a success the caller's list view
+        # will immediately contradict.
+        raise RpcHandlerError(
+            "sessions.pin_unsupported",
+            "Session storage cannot persist a pin",
+        )
+    node = await set_pinned(resolved_key, pinned)
+    pinned_at = getattr(node, "pinned_at", None)
+
+    if was_pinned != pinned:
+        await _emit_to_subscribers(
+            ctx,
+            resolved_key,
+            "sessions.changed",
+            build_sessions_changed_payload(
+                resolved_key, "pinned" if pinned else "unpinned", pinned=pinned
+            ),
+        )
+
+    return {
+        "key": resolved_key,
+        "pinned": pinned,
+        "pinnedAt": pinned_at,
+        "pinned_at": pinned_at,
+        "changed": was_pinned != pinned,
+    }
+
+
 @_d.method("sessions.delete")
 async def _handle_sessions_delete(params: dict | None, ctx: RpcContext) -> dict:
     """Delete one or more sessions. Accepts {key} for single or {keys} for bulk."""
@@ -3014,6 +3102,7 @@ async def _handle_sessions_resolve(params: dict | None, ctx: RpcContext) -> dict
         "displayName": getattr(session, "display_name", None),
         "project_id": getattr(session, "project_id", None),
         "projectId": getattr(session, "project_id", None),
+        "pinned": getattr(session, "pinned_at", None) is not None,
         "router_hold_tier": _router_hold_tier_for_session(ctx, session.session_key),
         "created_at": session.created_at,
         "updated_at": session.updated_at,

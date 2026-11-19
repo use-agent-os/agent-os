@@ -6,7 +6,7 @@ import { useConnection } from '@/stores/connection'
 import { t } from '~/i18n'
 import { shownSessionName } from '~/lib/session-name'
 
-interface SessionsList {
+export interface SessionsList {
   sessions?: RawSession[]
   count?: number
 }
@@ -48,6 +48,11 @@ function toEpochMs(value: unknown): number {
   return 0
 }
 
+/** The gateway has this session pinned (the Pinned section, on every client). */
+export function isPinned(row: SessionRow): boolean {
+  return row.raw.pinned === true
+}
+
 export function toSessionRow(raw: RawSession): SessionRow {
   const key = String(raw.key || '')
   const status = sessionRunStatus(raw)
@@ -82,7 +87,8 @@ export function useSessions(): {
     enabled: connected,
     queryFn: async () => {
       await rpc.waitForConnection()
-      return rpc.call<SessionsList>('sessions.list', { limit: 200 })
+      // includePinned: a pinned session stays listed however old it is.
+      return rpc.call<SessionsList>('sessions.list', { limit: 200, includePinned: true })
     },
     refetchInterval: 30_000,
     refetchOnWindowFocus: true,

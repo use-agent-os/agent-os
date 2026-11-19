@@ -64,6 +64,7 @@ HTTP_RPC_METHODS: frozenset[str] = frozenset(
         "sessions.resolve",
         "sessions.create",
         "sessions.rename",
+        "sessions.pin",
         "sessions.send",
         "sessions.abort",
         "chat.history",

@@ -20,7 +20,7 @@ For a focused permissions guide, see
 | Web | `web_search`, `web_fetch`, `http_request`, `x_search` (X/Twitter via xAI — see [x-search.md](x-search.md); hidden without an xAI key). |
 | Browser | `browser` — drive a real Chromium (navigate, snapshot, click, type, fill, wait, eval, dialog, screenshot) via the `agent-browser` engine. Hidden until the binary is installed. **Runs outside the sandbox** (Chromium can't run inside bubblewrap/seatbelt). See [features/browser.md](features/browser.md). |
 | Memory | `memory_search`, `memory_save`, `memory_get`, `memory_delete`, `memory`. |
-| Sessions | `sessions_send`, `sessions_spawn`, `sessions_list`, `sessions_history`, `session_status`, `session_rename`. `sessions_spawn` with `runtime="acp"` delegates to an external coding harness (Claude Code, Codex, ...); see [acp-agents.md](acp-agents.md). |
+| Sessions | `sessions_send`, `sessions_spawn`, `sessions_list`, `sessions_history`, `session_status`, `session_rename`, `session_pin`. `sessions_spawn` with `runtime="acp"` delegates to an external coding harness (Claude Code, Codex, ...); see [acp-agents.md](acp-agents.md). |
 | ACP harnesses | `acp` — operator tool (not exposed by default) for harness sessions: `agents`, `sessions`, `status`, `cancel`, `close`, `set_mode`, `set_model`, `doctor`. Harnesses run as the gateway user, **outside the AgentOS sandbox**, with their own tools; their permission prompts follow `[acp] permission_mode`. |
 | Artifacts | `publish_artifact`. The mime decides the rendering: some draw inline in chat rather than as a download chip — see [artifacts-and-media.md](artifacts-and-media.md#inline-charts). |
 | Media | image generation, PDF, TTS, and media helpers. |

@@ -236,7 +236,7 @@ Only an allowlist is reachable: reads (`health`, `status`, `config.get`,
 `usage.*`, `agents.list`, `projects.list`/`get`, `skills.list`, `cron.list`,
 `channels.status`, `doctor.status`, `acp.*` status, ...) and mutations that
 create, rename or send without deleting anything (`chat.send`,
-`sessions.send`, `sessions.create`, `sessions.rename`,
+`sessions.send`, `sessions.create`, `sessions.rename`, `sessions.pin`,
 `projects.create`/`update`, `*.abort`, `plan.mode.set`; turning plan mode
 off is refused for a caller the gateway recognizes as an agent's: its token,
 a process the gateway spawned, or an open agent shell). `chat.send` and

@@ -732,6 +732,13 @@ class GatewayClient:
             await self._call("sessions.rename", {"key": key, "name": name}),
         )
 
+    async def pin_session(self, key: str, pinned: bool = True) -> dict[str, Any]:
+        """Pin a session to the top of the session lists (``pinned=False`` unpins)."""
+        return cast(
+            dict[str, Any],
+            await self._call("sessions.pin", {"key": key, "pinned": pinned}),
+        )
+
     async def patch_session(self, key: str, **fields: Any) -> dict[str, Any]:
         params: dict[str, Any] = {"key": key, **fields}
         return cast(dict[str, Any], await self._call("sessions.patch", params))
