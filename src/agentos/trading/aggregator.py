@@ -548,6 +548,9 @@ class AggregatorProvider:
         # is the entry point for every route the aggregator builds, ERC-20 and
         # native sells alike; the swap is sent there or not at all. A contract
         # the operator added to trading.aggregator_trusted_spenders is too.
+        # The one exception, ETH <-> WETH sent straight to WETH9, is not a
+        # target here: the service accepts it only for the chain's pinned
+        # WETH and exact deposit()/withdraw() calldata (_check_swap_tx).
         return self.client.trusted_spenders
 
     async def build(
