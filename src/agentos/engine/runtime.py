@@ -3836,6 +3836,10 @@ class TurnRunner:
             writes: list[str] = []
             failures: list[str] = []
             turn_error: str | None = None
+            # The review is an internal turn: its usage reaches neither the
+            # transcript nor the per-session spend, so the log line is the
+            # only place its cost shows up.
+            usage = {"input_tokens": 0, "output_tokens": 0, "iterations": 0}
             async for event in self.run(
                 message=variant.prompt,
                 session_key=session_key,
@@ -3850,6 +3854,11 @@ class TurnRunner:
             ):
                 if getattr(event, "kind", "") == "error":
                     turn_error = str(getattr(event, "message", "") or "error")
+                    continue
+                if getattr(event, "kind", "") == "done":
+                    for field_name in usage:
+                        value = getattr(event, field_name, 0)
+                        usage[field_name] += value if isinstance(value, int) else 0
                     continue
                 if (
                     getattr(event, "kind", "") != "tool_result"
@@ -3876,6 +3885,7 @@ class TurnRunner:
                 entries=writes[:_MEMORY_REVIEW_LOG_MAX_ENTRIES],
                 errors=failures[:_MEMORY_REVIEW_LOG_MAX_ENTRIES],
                 turn_error=turn_error,
+                **usage,
             )
             return turn_error
 
