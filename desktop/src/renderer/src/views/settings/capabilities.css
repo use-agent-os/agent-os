@@ -1,1 +1,91 @@
 /* Settings › capabilities. Shared vocabulary (.stg-*) lives in settings.css. */
+
+.cap-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+}
+
+/* The card a jump lands on: clear the sheet's top edge, and say "here". */
+.cap-anchor {
+  scroll-margin-top: 20px;
+  border-radius: var(--radius-surface);
+  transition: box-shadow 300ms ease-out;
+}
+.cap-anchor[data-flash='true'] {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+/* The capability's mark, left of the card title. */
+.cap-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--primary) 25%, transparent);
+}
+.cap-icon svg {
+  width: 18px;
+  height: 18px;
+}
+.cap-head-action {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Service choices: the brand mark is its own tile, not one inside another. */
+.cap-choices .stg-choice__icon {
+  width: auto;
+  height: auto;
+  background: none;
+}
+.cap-choices .stg-choice[aria-checked='true'] .stg-choice__icon {
+  background: none;
+}
+.cap-choices .stg-choices {
+  padding-bottom: 12px;
+}
+
+/* Switched off: one quiet line in place of the form. */
+.cap-off {
+  padding: 2px 18px 16px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+
+.cap-notice {
+  padding: 0 18px 10px;
+}
+
+.cap-key {
+  width: 260px;
+}
+.stg-row .mac-input[data-wide='true'] {
+  width: 340px;
+}
+.cap-getkey {
+  white-space: nowrap;
+}
+.cap-missing {
+  color: var(--warn);
+}
+.cap-problem {
+  color: var(--warn);
+}
+.cap-hint {
+  color: var(--dim);
+}
+.cap-hint code {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
