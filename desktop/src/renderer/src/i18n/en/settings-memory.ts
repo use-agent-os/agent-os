@@ -17,8 +17,26 @@ export const memory = {
   'settings.memory.view': 'View',
   'settings.memory.viewNamed': 'View {name}',
   'settings.memory.unit.chars': 'characters',
+  'settings.memory.unit.second': 'second',
   'settings.memory.unit.seconds': 'seconds',
+  'settings.memory.unit.message': 'message',
   'settings.memory.unit.messages': 'messages',
+  'settings.memory.n.char.one': '{n} character',
+  'settings.memory.n.char.many': '{n} characters',
+  'settings.memory.n.line.one': '{n} line',
+  'settings.memory.n.line.many': '{n} lines',
+  'settings.memory.n.passage.one': '{n} passage',
+  'settings.memory.n.passage.many': '{n} passages',
+  'settings.memory.n.file.one': '{n} file',
+  'settings.memory.n.file.many': '{n} files',
+  'settings.memory.n.fact.one': '{n} fact',
+  'settings.memory.n.fact.many': '{n} facts',
+  'settings.memory.n.notePassage.one': '{n} note passage',
+  'settings.memory.n.notePassage.many': '{n} note passages',
+  'settings.memory.n.part.one': '{n} indexed part of the conversation',
+  'settings.memory.n.part.many': '{n} indexed parts of the conversation',
+  'settings.memory.n.doc.one': '{n} document',
+  'settings.memory.n.doc.many': '{n} documents',
 
   // Head and summary
   'settings.memory.pill.meaning': 'Finds by meaning',
@@ -61,7 +79,9 @@ export const memory = {
   'settings.memory.nearFull':
     'Almost full. To keep saving, the agent merges or shortens entries, so check now and then that nothing still true was dropped.',
   'settings.memory.full':
-    'Full. A new fact is refused until an entry is shortened or removed. You can also raise the limit under Setup.',
+    'Full: there is no room for another fact. Edit or remove one to make room, or raise the limit under Setup.',
+  'settings.memory.full.raise': 'Raise the limit',
+  'settings.memory.full.add': 'This list is full. Edit or remove a fact to make room.',
   'settings.memory.loadFailed':
     '{file} could not be read, so it cannot be changed here and the agent is not using it. Check the file’s permissions; nothing in it was deleted.',
   'settings.memory.curatedFailed': 'Could not load what the agent remembers.',
@@ -77,8 +97,26 @@ export const memory = {
     'e.g. The quarterly report is due on the first Monday of each quarter.',
   'settings.memory.editor.placeholder.you': 'e.g. Prefers short answers, in English.',
   'settings.memory.editor.hint': '⌘↩ to save, Esc to cancel',
-  'settings.memory.editor.left': '{left} characters left in this list',
-  'settings.memory.editor.over': '{over} characters over the limit of this list',
+  'settings.memory.editor.room': 'Room for {room} in this list. ⌘↩ to save, Esc to cancel',
+  'settings.memory.editor.left': '{left} left in this list',
+  'settings.memory.editor.over': 'Too long by {over}. This list has room for {room}.',
+  'settings.memory.editor.over.break':
+    'Too long by {over}. This list has room for {room}; the break before a new fact takes 3.',
+  'settings.memory.editor.split':
+    'A line with only “§” would split this into two facts. Remove that line or add words to it.',
+  'settings.memory.editor.gone':
+    'This fact changed since you started editing, and the list has been refreshed. Your text is kept: save it as a new fact, or cancel.',
+  'settings.memory.saveAsNew': 'Save as new fact',
+  'settings.memory.fact.stale':
+    'This fact changed since the list was loaded. The list has been refreshed.',
+  'settings.memory.fact.ambiguous':
+    'Another fact contains this same text, so this one cannot be changed on its own here. Change the longer fact first.',
+  'settings.memory.fact.full':
+    'There is not enough room in this list any more. The list has been refreshed.',
+  'settings.memory.fact.damaged':
+    '{file} was edited outside the app and no longer reads as a list of facts, so changes are refused to keep its text safe. A backup was saved next to it.',
+  'settings.memory.fact.unreadable': '{file} could not be read, so nothing was changed.',
+  'settings.memory.fact.failed': 'Could not change this list: {error}',
   'settings.memory.saveFact': 'Save',
   'settings.memory.confirmRemove.title': 'Remove this fact?',
   'settings.memory.confirmRemove.confirm': 'Remove',
@@ -97,13 +135,31 @@ export const memory = {
   'settings.memory.docs.uploading': 'Adding {name}…',
   'settings.memory.docs.added.one': 'Document added. The agent can search it now.',
   'settings.memory.docs.added.many': '{count} documents added. The agent can search them now.',
+  'settings.memory.docs.replaced.one': 'Document replaced. The agent searches the new version now.',
+  'settings.memory.docs.replaced.many':
+    '{count} documents replaced. The agent searches the new versions now.',
+  'settings.memory.docs.addedReplaced':
+    '{added} added and {replaced} replaced. The agent can search them now.',
+  'settings.memory.docs.replace.title.one': 'Replace {name}?',
+  'settings.memory.docs.replace.title.many': 'Replace {count} documents?',
+  'settings.memory.docs.replace.body.one':
+    'The knowledge base already has a document named {name}. The new file takes its place, and the agent only finds the new version.',
+  'settings.memory.docs.replace.body.many':
+    'The knowledge base already has documents with these names. The new files take their place, and the agent only finds the new versions.',
+  'settings.memory.docs.replace.alsoNew': 'The other {files} in this batch are new.',
+  'settings.memory.docs.replace.alsoNew.one': 'The other file in this batch is new.',
+  'settings.memory.docs.replace.confirm': 'Replace',
+  'settings.memory.docs.replace.folder.title': 'Add to the {name} folder?',
+  'settings.memory.docs.replace.folder.body':
+    'The knowledge base already has a {name} folder. Files in it with the same names as the new ones are replaced.',
+  'settings.memory.docs.replace.folder.confirm': 'Add and replace',
   'settings.memory.docs.failed': 'Could not add {name}: {error}',
   'settings.memory.docs.binary':
     '{name}: PDF, Word and PowerPoint files are read on the gateway. Put the file in the agent’s workspace and add it under “Add from the workspace”.',
   'settings.memory.docs.unsupported': '{name}: this kind of file cannot be searched.',
   'settings.memory.docs.tooBig': '{name} is larger than 10 MB.',
   'settings.memory.docs.nothingFound': 'Nothing to add in {path}.',
-  'settings.memory.docs.meta': '{lines} lines · {size} · {date}',
+  'settings.memory.docs.meta': '{lines} · {size} · {date}',
   'settings.memory.docs.remove': 'Remove {name}',
   'settings.memory.docs.removed': 'Removed {name}',
   'settings.memory.docs.confirmRemove.title': 'Remove {name}?',
@@ -141,6 +197,8 @@ export const memory = {
   'settings.memory.try.source.knowledge': 'Knowledge',
   'settings.memory.try.source.sessions': 'Sessions',
   'settings.memory.try.weak': 'Include weak matches',
+  'settings.memory.try.userNote':
+    'Facts in “About you” are not searched: the agent has them in mind in every chat.',
   'settings.memory.try.idle.title': 'Type to search',
   'settings.memory.try.idle.body':
     'Use the words you would use with the agent. Matches appear as you type.',
@@ -167,7 +225,7 @@ export const memory = {
     'Nothing yet. After you chat, each reply’s lookup shows up here (kept until the gateway restarts).',
   'settings.memory.recall.off': 'Recall before each reply is off. Turn it on under Setup.',
   'settings.memory.recall.failed': 'Could not read recent recall.',
-  'settings.memory.recall.status.injected': 'Added {chars} characters',
+  'settings.memory.recall.status.injected': 'Added {chars}',
   'settings.memory.recall.status.none': 'Nothing relevant',
   'settings.memory.recall.status.skipped': 'Skipped',
   'settings.memory.recall.status.unavailable': 'Unavailable',
@@ -223,8 +281,22 @@ export const memory = {
     'A folder with your own ONNX embedding model. Empty uses the built-in one.',
   'settings.memory.embed.onnxDir.placeholder': 'Built-in model',
   'settings.memory.embed.fallback': 'Cloud fallback',
-  'settings.memory.embed.fallback.hint': 'Optional, only if the model on this Mac cannot run',
+  'settings.memory.embed.fallback.on': 'On · key from {name}',
+  'settings.memory.embed.fallback.onStored': 'On · with its own key',
+  'settings.memory.embed.fallback.off': 'Off · only used if the model on this Mac cannot run',
+  'settings.memory.embed.fallback.onBody':
+    'Used only when the model on this Mac cannot run. Memory text is then sent to {url}.',
+  'settings.memory.embed.fallback.offBody':
+    'Off. If the model on this Mac cannot run, search finds exact words only. Nothing is sent to a cloud service.',
+  'settings.memory.embed.fallback.removed':
+    'The cloud fallback is removed when you save. If the model on this Mac cannot run, search then finds exact words only.',
+  'settings.memory.embed.fallback.add': 'Add a cloud fallback',
+  'settings.memory.embed.fallback.remove': 'Remove cloud fallback',
   'settings.memory.embed.needsKey': 'Paste an API key or name the variable that holds it.',
+  'settings.memory.embed.envUnset':
+    '{name} is not set on the gateway, so search would fail. Paste a key, or set {name} under Environment.',
+  'settings.memory.embed.envUnset.short': 'The key’s variable is not set on the gateway.',
+  'settings.memory.embed.openEnv': 'Open Environment',
   'settings.memory.embed.needsUrl': 'Enter the service’s address.',
   'settings.memory.embed.foot.restart': 'Takes effect when the gateway restarts.',
   'settings.memory.embed.saved': 'Saved',
@@ -308,6 +380,9 @@ export const memory = {
   'settings.memory.limits.tooSmall':
     'Too small for both lists: once they fill up, one would be left out of every message. Raise it to at least {needed}.',
   'settings.memory.limits.use': 'Use {needed}',
+  'settings.memory.limits.belowUse':
+    '{list} already holds {used}, more than a limit of {limit}. Remove or shorten facts under Remembered first, or keep the limit at {min} or more.',
+  'settings.memory.limits.belowUse.short': 'A limit is below what its list holds now.',
   'settings.memory.limits.invalid': 'Use whole numbers of 100 or more.',
 
   // Setup: maintenance
@@ -318,7 +393,7 @@ export const memory = {
     'Reads notes and documents again after you edit them outside the app.',
   'settings.memory.maint.reindex.button': 'Reindex',
   'settings.memory.maint.reindexing': 'Reindexing…',
-  'settings.memory.maint.reindexed': 'Index up to date: {chunks} passages from {files} files.',
+  'settings.memory.maint.reindexed': 'Index up to date: {chunks} from {files}.',
   'settings.memory.maint.rebuild': 'Rebuild the index',
   'settings.memory.maint.rebuild.help':
     'Starts over from the files. Use it after changing how memory is searched.',
@@ -327,7 +402,7 @@ export const memory = {
   'settings.memory.maint.rebuild.confirm.title': 'Rebuild the index?',
   'settings.memory.maint.rebuild.confirm.body':
     'Every note and document is read and indexed again. Searches may miss things until it finishes.',
-  'settings.memory.maint.rebuilt': 'Index rebuilt: {chunks} passages from {files} files.',
+  'settings.memory.maint.rebuilt': 'Index rebuilt: {chunks} from {files}.',
   'settings.memory.maint.forget': 'Forget a conversation',
   'settings.memory.maint.forget.help':
     'Removes what the agent learned from one chat. You see what goes before anything is removed.',
@@ -350,18 +425,15 @@ export const memory = {
   'settings.memory.forget.back': 'Back',
   'settings.memory.forget.confirm': 'Forget',
   'settings.memory.forget.forgetting': 'Forgetting…',
-  'settings.memory.forget.summary':
-    'Forgetting this chat removes {facts} facts, {notes} note passages and {passages} indexed parts of the conversation.',
-  'settings.memory.forget.summary.done':
-    'Removed {facts} facts, {notes} note passages and {passages} indexed parts of the conversation.',
+  'settings.memory.forget.summary': 'Forgetting this chat removes {facts}, {notes} and {passages}.',
+  'settings.memory.forget.summary.done': 'Removed {facts}, {notes} and {passages}.',
   'settings.memory.forget.nothing': 'Nothing the agent remembers came from this conversation.',
   'settings.memory.forget.nothingLeft': 'Done. Nothing from this conversation is left in memory.',
   'settings.memory.forget.already': 'This conversation was forgotten before.',
   'settings.memory.forget.facts': 'Facts',
   'settings.memory.forget.notes': 'Note passages',
   'settings.memory.forget.mixed': 'Also learned in another chat',
-  'settings.memory.forget.noteChars': '{chars} characters',
   'settings.memory.forget.notFound':
     'No conversation of this agent has that id or key. Nothing was changed.',
-  'settings.memory.forget.done': 'Forgot {facts} facts and {notes} note passages.',
+  'settings.memory.forget.done': 'Forgot {facts} and {notes}.',
 } as const

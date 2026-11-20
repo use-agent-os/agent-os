@@ -19,7 +19,7 @@ import {
   type RecallRecordWire,
   type SearchKind,
 } from './logic'
-import { Spinner, count, fill } from './ui'
+import { Spinner, counted, fill } from './ui'
 
 /** The engine's own default: the agent's `memory_search` drops weaker matches. */
 const MIN_SCORE = 0.35
@@ -149,6 +149,9 @@ function SearchCard({
             {t('settings.memory.try.weak')}
           </label>
         </div>
+        {source === 'all' || source === 'memory' ? (
+          <p className="mem-fine">{t('settings.memory.try.userNote')}</p>
+        ) : null}
         {source === 'sessions' && !sessionsIndexed ? (
           <Notice tone="info">
             {t('settings.memory.try.sessionsOff')}{' '}
@@ -293,7 +296,9 @@ function RecentRecallCard() {
                 <li key={`${r.sessionKey}:${r.at}`} className="mem-recall__row">
                   <Pill tone={recallTone(r.status)}>
                     {STATUS_KEY[r.status]
-                      ? fill(STATUS_KEY[r.status]!, { chars: count(r.injectedChars ?? 0) })
+                      ? fill(STATUS_KEY[r.status]!, {
+                          chars: counted(r.injectedChars ?? 0, 'char'),
+                        })
                       : r.status}
                   </Pill>
                   <span className="mem-recall__session" title={r.sessionKey}>

@@ -1,5 +1,5 @@
-import { act, renderHook } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { act, render, renderHook, screen } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useDraft, useDraftStore } from './drafts'
 
 beforeEach(() => useDraftStore.setState({ drafts: {} }))
@@ -44,5 +44,36 @@ describe('useDraft', () => {
     rerender({ saved: { t: '9' } })
     expect(result.current.draft).toEqual({ t: '9' })
     expect(useDraftStore.getState().drafts).toEqual({})
+  })
+})
+
+describe('useDraft and the parked copy', () => {
+  it('parks an edit from the event, never while another component renders', () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // A second subscriber, like the pane's "unsaved" dot on the Setup tab.
+    function Dot() {
+      const unsaved = useDraftStore((s) => Object.keys(s.drafts).length > 0)
+      return <span>{unsaved ? 'unsaved' : 'clean'}</span>
+    }
+    let api: ReturnType<typeof useDraft<{ n: number }>> | undefined
+    function Card() {
+      api = useDraft('card', { n: 1 })
+      return <span>{api.draft.n}</span>
+    }
+    render(
+      <>
+        <Dot />
+        <Card />
+      </>,
+    )
+    act(() => api!.setDraft((d) => ({ n: d.n + 1 })))
+    act(() => api!.setDraft((d) => ({ n: d.n + 1 })))
+    expect(screen.getByText('unsaved')).toBeInTheDocument()
+    expect(screen.getByText('3')).toBeInTheDocument()
+    expect(useDraftStore.getState().drafts).toEqual({ card: { n: 3 } })
+    act(() => api!.setDraft({ n: 1 }))
+    expect(screen.getByText('clean')).toBeInTheDocument()
+    expect(errors).not.toHaveBeenCalled()
+    errors.mockRestore()
   })
 })

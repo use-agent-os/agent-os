@@ -88,6 +88,11 @@ export interface EmbeddingDraft {
   apiKey: string
   apiKeyEnv: string
   onnxDir: string
+  /**
+   * Automatic only: use a cloud service when the model on this Mac cannot
+   * run. Off means search falls back to keywords instead.
+   */
+  fallback: boolean
 }
 
 /** The engines the gateway accepts, in the order the choices show them. */
@@ -122,7 +127,23 @@ export function hasStoredEmbeddingKey(snapshot: SettingsSnapshot | undefined): b
   return [remote.api_key, embedding.api_key].some((v) => typeof v === 'string' && v.trim() !== '')
 }
 
-/** What a field starts at for an engine: what is saved, else blank. */
+/** The env name the gateway reads a cloud key from, kept when the field is blank. */
+export function savedEmbeddingKeyEnv(snapshot: SettingsSnapshot | undefined): string {
+  return str(rec(rec(memoryConfig(snapshot?.config).embedding).remote).api_key_env).trim()
+}
+
+/** Automatic is saved with a cloud service to fall back on (a key or a key's variable). */
+export function hasCloudFallback(snapshot: SettingsSnapshot | undefined): boolean {
+  if (savedEmbeddingProvider(snapshot) !== 'auto') return false
+  return hasStoredEmbeddingKey(snapshot) || savedEmbeddingKeyEnv(snapshot) !== ''
+}
+
+/**
+ * What a field starts at for an engine: what is saved, else blank. Automatic
+ * shows a cloud fallback only when Automatic itself was saved with one: the
+ * settings of a cloud engine it replaces are not carried over as a fallback
+ * nobody chose.
+ */
 export function seedEmbedding(
   snapshot: SettingsSnapshot | undefined,
   provider: EmbeddingProvider,
@@ -130,55 +151,142 @@ export function seedEmbedding(
 ): EmbeddingDraft {
   const embedding = rec(memoryConfig(snapshot?.config).embedding)
   const remote = rec(embedding.remote)
-  const conn = provider === 'ollama' ? rec(embedding.ollama) : remote
   const local = rec(embedding.local)
-  return {
+  const blank: EmbeddingDraft = {
     provider,
-    model: provider === 'local' || provider === 'none' ? '' : str(conn.model),
-    baseUrl: provider === 'local' || provider === 'none' ? '' : str(conn.base_url),
+    model: '',
+    baseUrl: '',
     apiKey: '',
-    apiKeyEnv: str(remote.api_key_env) || (spec?.requiresApiKey === true ? str(spec.envKey) : ''),
-    onnxDir: provider === 'local' ? str(local.onnx_dir) : '',
+    apiKeyEnv: '',
+    onnxDir: '',
+    fallback: false,
   }
+  switch (provider) {
+    case 'auto': {
+      if (!hasCloudFallback(snapshot)) return blank
+      return {
+        ...blank,
+        model: str(remote.model),
+        baseUrl: str(remote.base_url),
+        apiKeyEnv: str(remote.api_key_env),
+        fallback: true,
+      }
+    }
+    case 'local':
+      return { ...blank, onnxDir: str(local.onnx_dir) }
+    case 'none':
+      return blank
+    case 'ollama': {
+      const ollama = rec(embedding.ollama)
+      return { ...blank, model: str(ollama.model), baseUrl: str(ollama.base_url) }
+    }
+    default: {
+      // A stored literal key is used while no variable is named: offering the
+      // catalog's variable here would swap a working key for an unset name.
+      const env =
+        str(remote.api_key_env) ||
+        (hasStoredEmbeddingKey(snapshot) || spec?.requiresApiKey !== true ? '' : str(spec.envKey))
+      return { ...blank, model: str(remote.model), baseUrl: str(remote.base_url), apiKeyEnv: env }
+    }
+  }
+}
+
+/** The fields a draft actually sends: Automatic without a fallback sends none. */
+function liveFields(draft: EmbeddingDraft): EmbeddingField[] {
+  const { main, advanced } = embeddingFields(draft.provider)
+  if (draft.provider === 'auto' && !draft.fallback) return []
+  return [...main, ...advanced]
 }
 
 export function embeddingDirty(saved: EmbeddingDraft, draft: EmbeddingDraft): boolean {
   if (saved.provider !== draft.provider) return true
-  if (draft.apiKey.trim()) return true
-  const { main, advanced } = embeddingFields(draft.provider)
-  return [...main, ...advanced].some((f) => f !== 'apiKey' && saved[f].trim() !== draft[f].trim())
+  if (draft.provider === 'auto' && saved.fallback !== draft.fallback) return true
+  if (draft.apiKey.trim() && liveFields(draft).includes('apiKey')) return true
+  return liveFields(draft).some((f) => f !== 'apiKey' && saved[f].trim() !== draft[f].trim())
 }
 
-export type EmbeddingProblem = 'needsKey' | 'needsUrl' | null
+export type EmbeddingProblem =
+  | { kind: 'needsUrl' }
+  | { kind: 'needsKey' }
+  /** The key would come from a variable that is not set on the gateway. */
+  | { kind: 'envUnset'; name: string }
+  | null
 
-/** What stops a save before the gateway would refuse it. */
-export function embeddingProblem(draft: EmbeddingDraft, storedKey: boolean): EmbeddingProblem {
-  if (draft.provider === 'openai-compatible' && !draft.baseUrl.trim()) return 'needsUrl'
-  if (draft.provider === 'openai' || draft.provider === 'openai-compatible') {
-    if (!draft.apiKey.trim() && !draft.apiKeyEnv.trim() && !storedKey) return 'needsKey'
-  }
-  return null
+export interface EmbeddingKeyContext {
+  /** A literal key is saved (published redacted). */
+  storedKey: boolean
+  /** The variable the gateway keeps reading when the field is left blank. */
+  savedEnv: string
+  /** Whether a variable is set on the gateway, per `env.list`; undefined while unknown. */
+  envSet: (name: string) => boolean | undefined
+}
+
+/** Does this draft send memory text to a cloud service, so need a key? */
+export function needsCloudKey(draft: EmbeddingDraft): boolean {
+  return (
+    draft.provider === 'openai' ||
+    draft.provider === 'openai-compatible' ||
+    (draft.provider === 'auto' && draft.fallback)
+  )
+}
+
+/**
+ * What stops a save before it would leave search broken. The gateway accepts
+ * any variable name for the key and only fails at the first search, so a
+ * named variable must be set on the gateway; while the variables are not
+ * known yet, nothing is blocked on a guess.
+ */
+export function embeddingProblem(
+  draft: EmbeddingDraft,
+  ctx: EmbeddingKeyContext,
+): EmbeddingProblem {
+  if (draft.provider === 'openai-compatible' && !draft.baseUrl.trim()) return { kind: 'needsUrl' }
+  if (!needsCloudKey(draft) || draft.apiKey.trim()) return null
+  // A blank field keeps the variable already saved, else a stored key.
+  const env = draft.apiKeyEnv.trim() || ctx.savedEnv.trim()
+  if (!env) return ctx.storedKey ? null : { kind: 'needsKey' }
+  return ctx.envSet(env) === false ? { kind: 'envUnset', name: env } : null
 }
 
 /**
  * The `onboarding.memory_embedding.configure` params: every field the engine
  * shows, trimmed. A blank field keeps what is saved (the gateway falls back
  * to it), a blank key is left out, and a pasted key drops the env reference
- * because the gateway refuses both at once.
+ * because the gateway refuses both at once. Automatic's fallback says what a
+ * blank model or address means, so nothing of an engine it replaced is kept.
  */
 export function embeddingParams(draft: EmbeddingDraft): Record<string, unknown> {
   const params: Record<string, unknown> = { providerId: draft.provider }
-  const { main, advanced } = embeddingFields(draft.provider)
-  for (const field of [...main, ...advanced]) {
+  for (const field of liveFields(draft)) {
     const value = draft[field].trim()
     if (field === 'apiKey') {
       if (value) params.apiKey = value
       continue
     }
-    params[field] = value
+    params[field] =
+      value || (draft.provider === 'auto' ? (EMBEDDING_DEFAULTS.auto[field] ?? '') : '')
   }
   if (params.apiKey) delete params.apiKeyEnv
   return params
+}
+
+/**
+ * How a draft is written. The guided write keeps every blank fallback field
+ * at its saved value, so it cannot take a fallback away: Automatic without
+ * one is written whole, which leaves no cloud key, variable or address.
+ */
+export type EmbeddingWrite =
+  | { method: 'onboarding.memory_embedding.configure'; params: Record<string, unknown> }
+  | { method: 'config.patch'; params: { patches: Record<string, unknown> } }
+
+export function embeddingWrite(draft: EmbeddingDraft): EmbeddingWrite {
+  if (draft.provider === 'auto' && !draft.fallback) {
+    return {
+      method: 'config.patch',
+      params: { patches: { 'memory.embedding': { provider: 'auto' } } },
+    }
+  }
+  return { method: 'onboarding.memory_embedding.configure', params: embeddingParams(draft) }
 }
 
 /** An address on this Mac, where the app itself can look for Ollama. */
@@ -330,10 +438,45 @@ export function reviewPatches(config: SetupConfig | undefined, draft: ReviewDraf
   return out
 }
 
-/** Dot-path patches for the limits card; null while invalid or too small. */
-export function limitsPatches(config: SetupConfig | undefined, draft: LimitsDraft): Patches | null {
+/** How many characters each list holds now, when known. */
+export interface ListUse {
+  work?: number
+  you?: number
+}
+
+/**
+ * Lists whose limit the draft lowers below what they already hold. The
+ * gateway would take it, but the list would then refuse every new fact, and
+ * an entry longer than the new limit reads as damaged after a restart.
+ */
+export function limitsBelowUse(
+  config: SetupConfig | undefined,
+  draft: LimitsDraft,
+  used: ListUse,
+): { list: 'work' | 'you'; used: number; limit: number }[] {
+  const saved = limitsDraft(config)
+  const out: { list: 'work' | 'you'; used: number; limit: number }[] = []
+  const check = (list: 'work' | 'you', raw: string, savedRaw: string, n: number | undefined) => {
+    const limit = parseWhole(raw, 100, 1_000_000)
+    if (limit === null || n === undefined || limit >= n) return
+    // A limit already saved below the use is not this edit's doing: do not block other fields.
+    if (limit === Number(savedRaw)) return
+    out.push({ list, used: n, limit })
+  }
+  check('work', draft.workChars, saved.workChars, used.work)
+  check('you', draft.youChars, saved.youChars, used.you)
+  return out
+}
+
+/** Dot-path patches for the limits card; null while invalid, too small, or below use. */
+export function limitsPatches(
+  config: SetupConfig | undefined,
+  draft: LimitsDraft,
+  used: ListUse = {},
+): Patches | null {
   const { ok, work, you, inject } = limitsCheck(draft)
   if (!ok || work === null || you === null || inject === null) return null
+  if (limitsBelowUse(config, draft, used).length > 0) return null
   const saved = limitsDraft(config)
   const out: Patches = {}
   if (work !== Number(saved.workChars)) out['memory.curated_memory_char_limit'] = work
@@ -395,6 +538,45 @@ export function factsTotalAfter(entries: readonly string[], text: string, replac
   return next.join(ENTRY_DELIMITER).length
 }
 
+/**
+ * How long a new (or the edited) fact may be: the limit, less the other facts
+ * and the three characters ("\n§\n") between each two of them.
+ */
+export function factRoom(entries: readonly string[], limit: number, replacing?: string): number {
+  return limit - factsTotalAfter(entries, '', replacing)
+}
+
+/**
+ * Would the file store `text` as more than one fact? A line that is only "§"
+ * splits it, and a fact ending in a "§" line takes the next fact's start.
+ * Asked the gateway's way: put it between two facts and read the file back.
+ */
+export function splitsIntoFacts(text: string): boolean {
+  const content = text.replace(/\r\n?/g, '\n').trim()
+  const head = '\u0000head'
+  const tail = '\u0000tail'
+  const parsed = [head, content, tail]
+    .join(ENTRY_DELIMITER)
+    .split(ENTRY_DELIMITER)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  return parsed.length !== 3 || parsed[1] !== content
+}
+
+/** Why the gateway refused a fact write, from its message. */
+export type FactFailure =
+  'stale' | 'ambiguous' | 'full' | 'damaged' | 'unreadable' | 'split' | 'other'
+
+export function factFailure(message: string): FactFailure {
+  if (/^No entry matched/i.test(message)) return 'stale'
+  if (/^Multiple entries matched/i.test(message)) return 'ambiguous'
+  if (/would exceed the limit|would put memory at|over the limit/i.test(message)) return 'full'
+  if (/wouldn't round-trip|would not round-trip/i.test(message)) return 'damaged'
+  if (/could not be\s+read/i.test(message)) return 'unreadable'
+  if (/line that is just '§'/.test(message)) return 'split'
+  return 'other'
+}
+
 // ── Knowledge base ──────────────────────────────────────────────────────────
 
 /** Files the gateway reads as text; PDF, Word and PowerPoint need a path. */
@@ -433,6 +615,39 @@ export function uploadVerdict(name: string, size: number): UploadVerdict {
   if (ext && !(TEXT_EXTENSIONS as readonly string[]).includes(ext)) return 'unsupported'
   if (size > MAX_DOCUMENT_BYTES) return 'tooBig'
   return 'ok'
+}
+
+/**
+ * Uploaded files land at `knowledge_base/<name>` and overwrite a document of
+ * that name: the names (in upload order) that would replace one.
+ */
+export function replacedByUpload(
+  names: readonly string[],
+  documents: readonly { path: string }[],
+): string[] {
+  const have = new Set(documents.map((d) => d.path))
+  return names.filter((name) => have.has(`knowledge_base/${name}`))
+}
+
+/**
+ * What adding a workspace path would overwrite. A file outside the knowledge
+ * base is copied to `knowledge_base/<name>`; a folder is merged into
+ * `knowledge_base/<name>/`, same-named files replaced. A path already inside
+ * the knowledge base is read in place and replaces nothing.
+ */
+export function replacedByPath(
+  path: string,
+  documents: readonly { path: string }[],
+): { kind: 'file' | 'folder'; name: string } | null {
+  const clean = path.trim().replace(/\\/g, '/').replace(/\/+$/, '')
+  if (!clean || /^(\.\/)?knowledge_base(\/|$)/.test(clean)) return null
+  const name = clean.split('/').pop() ?? ''
+  if (!name || name === '.' || name === '..') return null
+  if (documents.some((d) => d.path === `knowledge_base/${name}`)) return { kind: 'file', name }
+  if (documents.some((d) => d.path.startsWith(`knowledge_base/${name}/`))) {
+    return { kind: 'folder', name }
+  }
+  return null
 }
 
 /** `knowledge_base/a/b.md` → `a/b.md`: the folder is implied by the list. */

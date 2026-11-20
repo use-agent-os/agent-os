@@ -32,8 +32,16 @@ function same(a: unknown, b: unknown): boolean {
 export function useDraft<T>(id: string, saved: T) {
   const parked = useDraftStore((s) => s.drafts[id]) as T | undefined
   const [draft, setDraftState] = useState<T>(() => parked ?? saved)
+  // The form as last set, so an update is computed outside React's updater:
+  // the parked copy is written from the event, never while rendering.
+  const draftRef = useRef(draft)
   const savedRef = useRef(saved)
   const adoptRef = useRef(false)
+
+  const show = useCallback((next: T) => {
+    draftRef.current = next
+    setDraftState(next)
+  }, [])
 
   useEffect(() => {
     if (same(saved, savedRef.current)) return
@@ -41,27 +49,25 @@ export function useDraft<T>(id: string, saved: T) {
     savedRef.current = saved
     if (adoptRef.current || wasClean || same(draft, saved)) {
       adoptRef.current = false
-      setDraftState(saved)
+      show(saved)
       useDraftStore.getState().drop(id)
     }
-  }, [id, saved, draft])
+  }, [id, saved, draft, show])
 
   const setDraft = useCallback(
     (update: T | ((prev: T) => T)) => {
-      setDraftState((prev) => {
-        const next = typeof update === 'function' ? (update as (p: T) => T)(prev) : update
-        if (same(next, savedRef.current)) useDraftStore.getState().drop(id)
-        else useDraftStore.getState().put(id, next)
-        return next
-      })
+      const next = typeof update === 'function' ? (update as (p: T) => T)(draftRef.current) : update
+      show(next)
+      if (same(next, savedRef.current)) useDraftStore.getState().drop(id)
+      else useDraftStore.getState().put(id, next)
     },
-    [id],
+    [id, show],
   )
 
   const revert = useCallback(() => {
     useDraftStore.getState().drop(id)
-    setDraftState(savedRef.current)
-  }, [id])
+    show(savedRef.current)
+  }, [id, show])
 
   /** The draft was written: take the next saved value as the form, whatever it holds. */
   const settle = useCallback(() => {

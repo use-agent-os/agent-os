@@ -24,6 +24,7 @@ vi.mock('~/lib/desktop-api', () => ({
 interface Gateway {
   work: string[]
   you: string[]
+  env: { name: string; isSet: boolean }[]
   docs: { path: string; source: string; sizeBytes: number; lineCount: number }[]
   recall: Record<string, unknown>
   nudge: Record<string, unknown>
@@ -126,6 +127,8 @@ function fakeGateway(method: string, params: Record<string, unknown> = {}): unkn
       return { changed: true, restartRequired: true, warnings: [] }
     case 'sessions.list':
       return { sessions: [] }
+    case 'env.list':
+      return { vars: gw.env }
     default:
       return {}
   }
@@ -149,6 +152,7 @@ beforeEach(() => {
   gw = {
     work: ['The Q4 review is every second Thursday.'],
     you: [],
+    env: [{ name: 'OPENAI_API_KEY', isSet: false }],
     docs: [],
     recall: { enabled: true, mode: 'escalate', max_injected_chars: 1800, deep_timeout_seconds: 8 },
     nudge: { enabled: true, interval: 10, before_compaction: true, timeout_seconds: 90 },
@@ -269,7 +273,12 @@ describe('MemoryPane · Remembered', () => {
     fireEvent.change(within(you).getByRole('textbox', { name: 'Fact' }), {
       target: { value: 'twelve chars' },
     })
-    expect(within(you).getByText(/characters over the limit/)).toBeInTheDocument()
+    // 2,000 less 1,990 less the 3-character break: room for 7.
+    expect(
+      within(you).getByText(
+        'Too long by 5 characters. This list has room for 7 characters; the break before a new fact takes 3.',
+      ),
+    ).toBeInTheDocument()
     expect(within(you).getByRole('button', { name: 'Save' })).toBeDisabled()
     // Nearly full lists say what happens when they fill up.
     expect(within(you).getByText(/Almost full/)).toBeInTheDocument()
@@ -453,6 +462,204 @@ describe('MemoryPane · Setup', () => {
         agentId: 'main',
         sessions: ['agent:main:desk:1'],
         dryRun: false,
+      }),
+    )
+  })
+})
+
+describe('MemoryPane · fixes from testing', () => {
+  const curatedReads = () =>
+    rpcCall.mock.calls.filter(([m, p]) => m === 'memory.curated.get' && p.target === 'memory')
+      .length
+
+  it('reads the lists again when Remembered is shown and when the window comes back', async () => {
+    mount()
+    expect(await screen.findByText('The Q4 review is every second Thursday.')).toBeInTheDocument()
+    gw.work = ['The weekly sync is on Tuesdays.']
+    fireEvent.click(screen.getByRole('tab', { name: /Knowledge/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /Remembered/ }))
+    expect(await screen.findByText('The weekly sync is on Tuesdays.')).toBeInTheDocument()
+    gw.work = ['The weekly sync moved to Wednesdays.']
+    const before = curatedReads()
+    act(() => {
+      window.dispatchEvent(new Event('focus'))
+    })
+    expect(await screen.findByText('The weekly sync moved to Wednesdays.')).toBeInTheDocument()
+    expect(curatedReads()).toBeGreaterThan(before)
+  })
+
+  it('a stale edit says so in plain words, refreshes the list, and keeps the text', async () => {
+    mount()
+    const work = card('About your work')
+    fireEvent.click(await within(work).findByRole('button', { name: /^Edit “The Q4/ }))
+    fireEvent.change(within(work).getByRole('textbox', { name: 'Fact' }), {
+      target: { value: 'The Q4 review is every second Thursday at 10:00.' },
+    })
+    // Meanwhile the agent's review rewrote the fact.
+    gw.work = ['The Q4 review moved to Fridays.']
+    rpcCall.mockImplementation(async (method: string, params?: Record<string, unknown>) => {
+      if (method === 'memory.curated.replace') {
+        throw new Error(
+          "No entry matched 'The Q4 review is every second Thursday.'. Check current_entries and retry with the exact text of the entry you want to replace.",
+        )
+      }
+      return fakeGateway(method, params)
+    })
+    fireEvent.click(within(work).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        'This fact changed since the list was loaded. The list has been refreshed.',
+        expect.anything(),
+      ),
+    )
+    expect(await within(work).findByText('The Q4 review moved to Fridays.')).toBeInTheDocument()
+    expect(within(work).getByRole('textbox', { name: 'Fact' })).toHaveValue(
+      'The Q4 review is every second Thursday at 10:00.',
+    )
+    expect(within(work).getByText(/changed since you started editing/)).toBeInTheDocument()
+    fireEvent.click(within(work).getByRole('button', { name: 'Save as new fact' }))
+    await waitFor(() =>
+      expect(rpcCall).toHaveBeenCalledWith('memory.curated.add', {
+        agentId: 'main',
+        target: 'memory',
+        content: 'The Q4 review is every second Thursday at 10:00.',
+      }),
+    )
+  })
+
+  it('a full list says so and offers no editor that cannot succeed', async () => {
+    gw.you = ['x'.repeat(2000)]
+    mount()
+    const you = card('About you')
+    expect(
+      await within(you).findByText(/Full: there is no room for another fact/),
+    ).toBeInTheDocument()
+    expect(within(you).getByRole('button', { name: /Add a fact to About you/ })).toBeDisabled()
+    fireEvent.click(within(you).getByRole('button', { name: 'Raise the limit' }))
+    expect(screen.getByRole('tab', { name: /Setup/ })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('counts one character in the singular', async () => {
+    gw.you = ['x'.repeat(1990)]
+    mount()
+    const you = card('About you')
+    fireEvent.click(await within(you).findByRole('button', { name: /Add a fact to About you/ }))
+    expect(within(you).getByText(/^Room for 7 characters in this list/)).toBeInTheDocument()
+    fireEvent.change(within(you).getByRole('textbox', { name: 'Fact' }), {
+      target: { value: 'sixsix' },
+    })
+    expect(within(you).getByText('1 character left in this list')).toBeInTheDocument()
+  })
+
+  it('refuses a fact with a line that is only §, before asking the gateway', async () => {
+    mount()
+    const you = card('About you')
+    fireEvent.click(await within(you).findByRole('button', { name: /Add a fact/ }))
+    const box = within(you).getByRole('textbox', { name: 'Fact' })
+    fireEvent.change(box, { target: { value: 'Likes tea.\n§\nHates coffee.' } })
+    expect(within(you).getByText(/A line with only “§” would split this/)).toBeInTheDocument()
+    expect(within(you).getByRole('button', { name: 'Save' })).toBeDisabled()
+    fireEvent.keyDown(box, { key: 'Enter', metaKey: true })
+    expect(rpcCall).not.toHaveBeenCalledWith('memory.curated.add', expect.anything())
+  })
+
+  it('asks before an upload replaces a document of the same name', async () => {
+    gw.docs = [
+      { path: 'knowledge_base/aurora.md', source: 'knowledge_base', sizeBytes: 9, lineCount: 1 },
+    ]
+    useMemoryTab.setState({ tab: 'knowledge' })
+    mount()
+    const docs = card('Documents')
+    await within(docs).findByText('aurora.md')
+    const input = within(docs).getByLabelText('Choose files', {
+      selector: 'input',
+    }) as HTMLInputElement
+    const file = () => new File(['New text.'], 'aurora.md', { type: 'text/markdown' })
+    fireEvent.change(input, { target: { files: [file()] } })
+    let dialog = await screen.findByRole('alertdialog', { name: 'Replace aurora.md?' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(rpcCall).not.toHaveBeenCalledWith('memory.knowledge_base.ingest', expect.anything())
+    fireEvent.change(input, { target: { files: [file()] } })
+    dialog = await screen.findByRole('alertdialog', { name: 'Replace aurora.md?' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Replace' }))
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        'Document replaced. The agent searches the new version now.',
+        expect.anything(),
+      ),
+    )
+  })
+
+  it('will not lower a limit below what its list holds', async () => {
+    gw.you = ['y'.repeat(129)]
+    useMemoryTab.setState({ tab: 'setup' })
+    mount()
+    const limits = await screen.findByRole('region', { name: 'Limits' })
+    await within(limits).findByText(/129 used now/)
+    fireEvent.change(within(limits).getByRole('spinbutton', { name: 'About you' }), {
+      target: { value: '100' },
+    })
+    expect(
+      within(limits).getByText(/About you already holds 129 characters, more than a limit of 100/),
+    ).toBeInTheDocument()
+    expect(within(limits).getByRole('button', { name: 'Save' })).toBeDisabled()
+    fireEvent.click(within(limits).getByRole('button', { name: 'Use 129' }))
+    expect(within(limits).getByRole('button', { name: 'Save' })).toBeEnabled()
+  })
+
+  it('will not save OpenAI with a key variable the gateway does not have', async () => {
+    useMemoryTab.setState({ tab: 'setup' })
+    mount()
+    const embed = await screen.findByRole('region', { name: 'How memory is searched' })
+    await waitFor(() => expect(rpcCall).toHaveBeenCalledWith('env.list', {}))
+    fireEvent.click(within(embed).getByRole('radio', { name: /^OpenAI/ }))
+    expect(
+      await within(embed).findByText(/OPENAI_API_KEY is not set on the gateway/),
+    ).toBeInTheDocument()
+    expect(within(embed).getByRole('button', { name: 'Save' })).toBeDisabled()
+    // A pasted key is enough.
+    fireEvent.change(within(embed).getByLabelText('API key'), { target: { value: 'sk-test' } })
+    expect(within(embed).getByRole('button', { name: 'Save' })).toBeEnabled()
+  })
+
+  it('switching from a cloud engine to Automatic leaves no fallback behind', async () => {
+    gw.embedding = {
+      provider: 'openai',
+      remote: { api_key_env: 'OPENAI_API_KEY', base_url: 'https://api.openai.com/v1' },
+    }
+    useMemoryTab.setState({ tab: 'setup' })
+    mount()
+    const embed = await screen.findByRole('region', { name: 'How memory is searched' })
+    fireEvent.click(within(embed).getByRole('radio', { name: /^Automatic/ }))
+    expect(within(embed).getByText(/^Off · only used if/)).toBeInTheDocument()
+    fireEvent.click(within(embed).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(rpcCall).toHaveBeenCalledWith('config.patch', {
+        patches: { 'memory.embedding': { provider: 'auto' } },
+        expectedRevision: 'r1',
+      }),
+    )
+    expect(rpcCall).not.toHaveBeenCalledWith(
+      'onboarding.memory_embedding.configure',
+      expect.anything(),
+    )
+  })
+
+  it('shows a saved cloud fallback and removes it on request', async () => {
+    gw.env = [{ name: 'EMBED_KEY', isSet: true }]
+    gw.embedding = { provider: 'auto', remote: { api_key_env: 'EMBED_KEY' } }
+    useMemoryTab.setState({ tab: 'setup' })
+    mount()
+    const embed = await screen.findByRole('region', { name: 'How memory is searched' })
+    expect(within(embed).getByText('On · key from EMBED_KEY')).toBeInTheDocument()
+    fireEvent.click(within(embed).getByRole('button', { name: /Cloud fallback/ }))
+    fireEvent.click(within(embed).getByRole('button', { name: 'Remove cloud fallback' }))
+    expect(within(embed).getByText(/removed when you save/)).toBeInTheDocument()
+    fireEvent.click(within(embed).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(rpcCall).toHaveBeenCalledWith('config.patch', {
+        patches: { 'memory.embedding': { provider: 'auto' } },
+        expectedRevision: 'r1',
       }),
     )
   })

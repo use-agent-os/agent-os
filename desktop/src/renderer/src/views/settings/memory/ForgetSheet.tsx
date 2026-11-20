@@ -8,7 +8,7 @@ import { useSessions, type SessionRow } from '~/stores/sessions'
 import { Notice, Pill } from '../parts'
 import { MEMORY_KEY, errorText } from './api'
 import { AGENT_ID, documentName, forgetCounts, type ForgetReport } from './logic'
-import { Sheet, Spinner, count, fill } from './ui'
+import { Sheet, Spinner, counted, fill } from './ui'
 
 const MANUAL = '__manual__'
 
@@ -65,9 +65,15 @@ export function ForgetSheet({ onClose }: { onClose: () => void }) {
       }
       setDone(report)
       const n = forgetCounts(report)
-      toast.success(fill('settings.memory.forget.done', { facts: n.facts, notes: n.notes }), {
-        id: 'stg-memory-forget',
-      })
+      toast.success(
+        fill('settings.memory.forget.done', {
+          facts: counted(n.facts, 'fact'),
+          notes: counted(n.notes, 'notePassage'),
+        }),
+        {
+          id: 'stg-memory-forget',
+        },
+      )
       await queryClient.invalidateQueries({ queryKey: MEMORY_KEY })
     },
   })
@@ -209,9 +215,9 @@ function ForgetReportView({
           {fill(
             applied ? 'settings.memory.forget.summary.done' : 'settings.memory.forget.summary',
             {
-              facts: count(n.facts),
-              notes: count(n.notes),
-              passages: count(n.passages),
+              facts: counted(n.facts, 'fact'),
+              notes: counted(n.notes, 'notePassage'),
+              passages: counted(n.passages, 'part'),
             },
           )}
         </Notice>
@@ -246,9 +252,7 @@ function ForgetReportView({
             {report.notes.map((note, i) => (
               <li key={`${note.path}:${i}`} className="mem-forget__item">
                 <span className="mem-forget__path">{documentName(note.path)}</span>
-                <span className="mem-quiet">
-                  {fill('settings.memory.forget.noteChars', { chars: count(note.chars ?? 0) })}
-                </span>
+                <span className="mem-quiet">{counted(note.chars ?? 0, 'char')}</span>
               </li>
             ))}
           </ul>

@@ -1,4 +1,4 @@
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { DatabaseZap, Eraser, RefreshCw } from 'lucide-react'
 import { useEffect, useId, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
@@ -11,13 +11,14 @@ import { t, type MessageKey } from '~/i18n'
 import { Card, Choices, Disclosure, Notice, Row, Segmented, type ChoiceOption } from '../parts'
 import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
-import { reportSaveError, useConnected, useFacts, useMemoryAction } from './api'
+import { MEMORY_KEY, reportSaveError, useConnected, useFacts, useMemoryAction } from './api'
 import { useDraft } from './drafts'
 import { EmbeddingCard } from './EmbeddingCard'
 import { ForgetSheet } from './ForgetSheet'
 import {
   AGENT_ID,
   REVIEW_INTERVALS,
+  limitsBelowUse,
   limitsCheck,
   limitsDraft,
   limitsPatches,
@@ -33,7 +34,7 @@ import {
   type RecallMode,
   type ReviewDraft,
 } from './logic'
-import { Confirm, Spinner, count, fill } from './ui'
+import { Confirm, Spinner, count, counted, fill, unitFor } from './ui'
 
 /**
  * Setup: how memory is searched, recall before each reply, learning from
@@ -43,11 +44,15 @@ import { Confirm, Spinner, count, fill } from './ui'
  */
 export function SetupTab({ active }: { active: boolean }) {
   const { connected, query, snapshot, reload } = useConfigSnapshot()
+  const queryClient = useQueryClient()
   const [rebuilding, setRebuilding] = useState(false)
-  // Others write the same config: read it again each time Setup is opened.
+  // Others write the same config, and the agent fills the lists the limits
+  // are checked against: read both again each time Setup is opened.
   useEffect(() => {
-    if (active && connected) void reload()
-  }, [active, connected, reload])
+    if (!active || !connected) return
+    void reload()
+    void queryClient.invalidateQueries({ queryKey: [...MEMORY_KEY, 'curated'] })
+  }, [active, connected, reload, queryClient])
   return (
     <>
       {!connected ? (
@@ -279,7 +284,11 @@ function RecallCard({
           <UnitInput
             id={ids.timeout}
             value={draft.deepTimeoutSeconds}
-            unit={t('settings.memory.unit.seconds')}
+            unit={unitFor(
+              draft.deepTimeoutSeconds,
+              'settings.memory.unit.second',
+              'settings.memory.unit.seconds',
+            )}
             step="0.5"
             invalid={timeoutBad}
             disabled={blocked || !draft.enabled}
@@ -406,7 +415,11 @@ function ReviewCard({
             <UnitInput
               id={ids.interval}
               value={draft.interval}
-              unit={t('settings.memory.unit.messages')}
+              unit={unitFor(
+                draft.interval,
+                'settings.memory.unit.message',
+                'settings.memory.unit.messages',
+              )}
               disabled={off}
               invalid={intervalBad}
               onChange={(interval) => setDraft((d) => ({ ...d, interval }))}
@@ -439,7 +452,11 @@ function ReviewCard({
           <UnitInput
             id={ids.timeout}
             value={draft.timeoutSeconds}
-            unit={t('settings.memory.unit.seconds')}
+            unit={unitFor(
+              draft.timeoutSeconds,
+              'settings.memory.unit.second',
+              'settings.memory.unit.seconds',
+            )}
             invalid={timeoutBad}
             disabled={off}
             onChange={(timeoutSeconds) => setDraft((d) => ({ ...d, timeoutSeconds }))}
@@ -460,12 +477,14 @@ function LimitsCard({
   const saved = limitsDraft(snapshot.config)
   const { draft, setDraft, revert, settle } = useDraft<LimitsDraft>('limits', saved)
   const save = usePatch(snapshot, reload, settle, 'stg-memory-limits')
-  const check = limitsCheck(draft)
-  const patches = limitsPatches(snapshot.config, draft)
-  const dirty = JSON.stringify(draft) !== JSON.stringify(saved)
-  const blocked = Boolean(snapshot.writeBlocked) || save.isPending
   const work = useFacts('memory').data
   const you = useFacts('user').data
+  const used = { work: work?.charCount, you: you?.charCount }
+  const check = limitsCheck(draft)
+  const below = limitsBelowUse(snapshot.config, draft, used)
+  const patches = limitsPatches(snapshot.config, draft, used)
+  const dirty = JSON.stringify(draft) !== JSON.stringify(saved)
+  const blocked = Boolean(snapshot.writeBlocked) || save.isPending
   const ids = { work: useId(), you: useId(), inject: useId() }
   const tooSmall = check.inject !== null && check.needed !== null && check.inject < check.needed
   const invalid = check.work === null || check.you === null || check.inject === null
@@ -484,7 +503,16 @@ function LimitsCard({
       title={t('settings.memory.limits.title')}
       blurb={t('settings.memory.limits.blurb')}
       footNote={
-        <FootNote problem={invalid ? t('settings.memory.limits.invalid') : null} dirty={dirty} />
+        <FootNote
+          problem={
+            invalid
+              ? t('settings.memory.limits.invalid')
+              : below.length > 0
+                ? t('settings.memory.limits.belowUse.short')
+                : null
+          }
+          dirty={dirty}
+        />
       }
       foot={
         <SaveFoot
@@ -505,7 +533,7 @@ function LimitsCard({
           id={ids.work}
           value={draft.workChars}
           unit={t('settings.memory.unit.chars')}
-          invalid={check.work === null}
+          invalid={check.work === null || below.some((b) => b.list === 'work')}
           disabled={blocked}
           onChange={(workChars) => setDraft((d) => ({ ...d, workChars }))}
         />
@@ -519,7 +547,7 @@ function LimitsCard({
           id={ids.you}
           value={draft.youChars}
           unit={t('settings.memory.unit.chars')}
-          invalid={check.you === null}
+          invalid={check.you === null || below.some((b) => b.list === 'you')}
           disabled={blocked}
           onChange={(youChars) => setDraft((d) => ({ ...d, youChars }))}
         />
@@ -538,6 +566,36 @@ function LimitsCard({
           onChange={(injectLimit) => setDraft((d) => ({ ...d, injectLimit }))}
         />
       </Row>
+      {below.map((b) => (
+        <div className="mem-card-notice" key={b.list}>
+          <Notice
+            tone="warn"
+            action={
+              <Button
+                disabled={blocked}
+                onClick={() =>
+                  setDraft((d) =>
+                    b.list === 'work'
+                      ? { ...d, workChars: String(b.used) }
+                      : { ...d, youChars: String(b.used) },
+                  )
+                }
+              >
+                {fill('settings.memory.limits.use', { needed: count(b.used) })}
+              </Button>
+            }
+          >
+            {fill('settings.memory.limits.belowUse', {
+              list: t(
+                b.list === 'work' ? 'settings.memory.work.title' : 'settings.memory.you.title',
+              ),
+              used: counted(b.used, 'char'),
+              limit: count(b.limit),
+              min: count(b.used),
+            })}
+          </Notice>
+        </div>
+      ))}
       {tooSmall && check.needed !== null ? (
         <div className="mem-card-notice">
           <Notice
@@ -578,8 +636,8 @@ function MaintenanceCard({
     if (!res) return
     toast.success(
       fill(force ? 'settings.memory.maint.rebuilt' : 'settings.memory.maint.reindexed', {
-        chunks: count(res.chunkCount ?? 0),
-        files: count(res.fileCount ?? 0),
+        chunks: counted(res.chunkCount ?? 0, 'passage'),
+        files: counted(res.fileCount ?? 0, 'file'),
       }),
       { id: 'stg-memory-index' },
     )

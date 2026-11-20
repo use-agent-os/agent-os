@@ -16,6 +16,28 @@ export function count(n: number | undefined): string {
   return n === undefined ? t('settings.memory.dash') : n.toLocaleString('en-US')
 }
 
+const NOUNS = {
+  char: ['settings.memory.n.char.one', 'settings.memory.n.char.many'],
+  line: ['settings.memory.n.line.one', 'settings.memory.n.line.many'],
+  passage: ['settings.memory.n.passage.one', 'settings.memory.n.passage.many'],
+  file: ['settings.memory.n.file.one', 'settings.memory.n.file.many'],
+  fact: ['settings.memory.n.fact.one', 'settings.memory.n.fact.many'],
+  notePassage: ['settings.memory.n.notePassage.one', 'settings.memory.n.notePassage.many'],
+  part: ['settings.memory.n.part.one', 'settings.memory.n.part.many'],
+  doc: ['settings.memory.n.doc.one', 'settings.memory.n.doc.many'],
+} as const satisfies Record<string, readonly [MessageKey, MessageKey]>
+
+/** "1 character", "4,000 characters": a count with its noun in the right number. */
+export function counted(n: number, noun: keyof typeof NOUNS): string {
+  const [one, many] = NOUNS[noun]
+  return fill(n === 1 ? one : many, { n: count(n) })
+}
+
+/** The unit after a number field: singular while the field reads exactly 1. */
+export function unitFor(value: string, one: MessageKey, many: MessageKey): string {
+  return Number(value.trim()) === 1 ? t(one) : t(many)
+}
+
 export function Spinner({ label }: { label?: string }) {
   return (
     <span className="mem-loading">

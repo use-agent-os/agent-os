@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { useConnection } from '@/stores/connection'
 import { t } from '~/i18n'
+import { ENV_QUERY_KEY, type EnvListResponse } from '@/views/env/logic'
 import type { CuratedMemoryData, MemoryFileRow, MemoryStatusWire } from '@/views/memory/logic'
 import { AGENT_ID, type RecallStatusWire } from './logic'
 
@@ -118,22 +119,84 @@ export function useRecallStatus() {
 }
 
 /**
+ * Read a tab's lists again when the tab is shown and when the window comes
+ * back to the front: the agent changes memory in the background (its review
+ * after a chat), so a list read earlier goes stale. The first showing is
+ * left to the queries themselves, which read on mount.
+ */
+export function useRefreshWhenShown(active: boolean, keys: readonly (readonly unknown[])[]): void {
+  const queryClient = useQueryClient()
+  const signature = JSON.stringify(keys)
+  const refresh = useCallback(() => {
+    for (const queryKey of JSON.parse(signature) as unknown[][]) {
+      void queryClient.invalidateQueries({ queryKey })
+    }
+  }, [queryClient, signature])
+  const shown = useRef(active)
+  useEffect(() => {
+    if (active && !shown.current) refresh()
+    shown.current = active
+  }, [active, refresh])
+  useEffect(() => {
+    if (!active) return
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [active, refresh])
+}
+
+/**
+ * Whether a variable is set on the gateway, per `env.list` (the Environment
+ * section's cache). Undefined while the list is unknown, so nothing is
+ * blocked on a guess; a name the list does not hold is not set.
+ */
+export function useEnvSet(): (name: string) => boolean | undefined {
+  const rpc = useRpc()
+  const connected = useConnected()
+  const env = useQuery({
+    queryKey: ENV_QUERY_KEY,
+    enabled: connected,
+    refetchOnWindowFocus: false,
+    queryFn: () => rpc.call<EnvListResponse>('env.list', {}),
+  })
+  const rows = env.data?.vars
+  return useMemo(() => {
+    const byName = new Map((rows ?? []).map((r) => [r.name, r]))
+    return (name: string) => (rows ? Boolean(byName.get(name)?.isSet) : undefined)
+  }, [rows])
+}
+
+/**
  * Runs one memory write at a time: `busy` names it for the button that
- * started it, a failure becomes a toast, success refreshes every memory read.
+ * started it, a failure becomes a toast (`describe` turns the gateway's
+ * message into plain words), and every memory read is refreshed after it
+ * either way, so a write refused because the list moved shows the list as
+ * it is now.
  */
 export function useMemoryAction() {
   const rpc = useRpc()
   const queryClient = useQueryClient()
   const [busy, setBusy] = useState<string | null>(null)
   const run = useCallback(
-    async <T>(key: string, work: () => Promise<T>): Promise<T | undefined> => {
+    async <T>(
+      key: string,
+      work: () => Promise<T>,
+      describe?: (error: unknown) => string,
+    ): Promise<T | undefined> => {
       setBusy(key)
       try {
         const result = await work()
         await queryClient.invalidateQueries({ queryKey: MEMORY_KEY })
         return result
       } catch (error) {
-        toast.error(errorText(error), { id: `stg-memory-${key}` })
+        await queryClient.invalidateQueries({ queryKey: MEMORY_KEY })
+        toast.error(describe ? describe(error) : errorText(error), { id: `stg-memory-${key}` })
         return undefined
       } finally {
         setBusy(null)

@@ -141,7 +141,7 @@ export function MemoryPane() {
         aria-label={t('settings.memory.tab.remembered')}
         hidden={tab !== 'remembered'}
       >
-        <RememberedTab />
+        <RememberedTab active={tab === 'remembered'} />
       </div>
       <div
         role="tabpanel"
@@ -149,7 +149,7 @@ export function MemoryPane() {
         aria-label={t('settings.memory.tab.knowledge')}
         hidden={tab !== 'knowledge'}
       >
-        <KnowledgeTab />
+        <KnowledgeTab active={tab === 'knowledge'} />
       </div>
       <div
         role="tabpanel"

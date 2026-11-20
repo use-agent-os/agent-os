@@ -5,9 +5,17 @@ import { filterCuratedEntries, isNearBudget } from '@/views/memory/logic'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { Card, Empty, Meter, Notice } from '../parts'
-import { errorText, useConnected, useFacts, useMemoryAction } from './api'
-import { AGENT_ID, factsTotalAfter } from './logic'
-import { Confirm, Spinner, count, fill } from './ui'
+import {
+  MEMORY_KEY,
+  errorText,
+  useConnected,
+  useFacts,
+  useMemoryAction,
+  useRefreshWhenShown,
+} from './api'
+import { AGENT_ID, factFailure, factRoom, splitsIntoFacts } from './logic'
+import { useMemoryTab } from './tab-store'
+import { Confirm, Spinner, count, counted, fill } from './ui'
 
 type Target = 'memory' | 'user'
 
@@ -32,7 +40,8 @@ const COPY = {
 } as const
 
 /** The two lists the agent always has in mind: about your work, about you. */
-export function RememberedTab() {
+export function RememberedTab({ active }: { active: boolean }) {
+  useRefreshWhenShown(active, [[...MEMORY_KEY, 'curated']])
   return (
     <>
       <FactsCard target="memory" />
@@ -41,13 +50,35 @@ export function RememberedTab() {
   )
 }
 
-type Editing = { mode: 'add' } | { mode: 'edit'; entry: string } | null
+/** What the editor is for; `text` lives here so a refreshed list never drops it. */
+type Editing = { mode: 'add'; text: string } | { mode: 'edit'; entry: string; text: string } | null
+
+function failureText(error: unknown, file: string): string {
+  const message = errorText(error)
+  switch (factFailure(message)) {
+    case 'stale':
+      return t('settings.memory.fact.stale')
+    case 'ambiguous':
+      return t('settings.memory.fact.ambiguous')
+    case 'full':
+      return t('settings.memory.fact.full')
+    case 'damaged':
+      return fill('settings.memory.fact.damaged', { file })
+    case 'unreadable':
+      return fill('settings.memory.fact.unreadable', { file })
+    case 'split':
+      return t('settings.memory.editor.split')
+    default:
+      return fill('settings.memory.fact.failed', { error: message })
+  }
+}
 
 function FactsCard({ target }: { target: Target }) {
   const copy = COPY[target]
   const connected = useConnected()
   const query = useFacts(target)
   const action = useMemoryAction()
+  const setTab = useMemoryTab((s) => s.setTab)
   const [editing, setEditing] = useState<Editing>(null)
   const [removing, setRemoving] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -56,23 +87,33 @@ function FactsCard({ target }: { target: Target }) {
   const entries = data?.entries ?? []
   const blocked = !connected || Boolean(data?.loadFailed)
   const shown = entries.length > FILTER_AT ? filterCuratedEntries(entries, filter) : entries
+  // The fact being edited is no longer in the list (the agent changed it):
+  // keep the text, offer it as a new fact instead.
+  const gone = editing?.mode === 'edit' && data !== undefined && !entries.includes(editing.entry)
+  const adding = editing?.mode === 'add' || gone
+  const describe = (error: unknown) => failureText(error, copy.file)
 
-  async function save(text: string) {
-    const content = text.trim()
-    if (!content || !editing) return
-    const done = await action.run('save', async () => {
-      if (editing.mode === 'edit') {
-        await action.rpc.call('memory.curated.replace', {
-          agentId: AGENT_ID,
-          target,
-          oldText: editing.entry,
-          newContent: content,
-        })
-      } else {
-        await action.rpc.call('memory.curated.add', { agentId: AGENT_ID, target, content })
-      }
-      return true
-    })
+  async function save() {
+    if (!editing) return
+    const content = editing.text.trim()
+    if (!content) return
+    const done = await action.run(
+      'save',
+      async () => {
+        if (editing.mode === 'edit' && !gone) {
+          await action.rpc.call('memory.curated.replace', {
+            agentId: AGENT_ID,
+            target,
+            oldText: editing.entry,
+            newContent: content,
+          })
+        } else {
+          await action.rpc.call('memory.curated.add', { agentId: AGENT_ID, target, content })
+        }
+        return true
+      },
+      describe,
+    )
     if (done) {
       toast.success(t('settings.memory.saved'), { id: `stg-memory-fact-${target}` })
       setEditing(null)
@@ -80,18 +121,45 @@ function FactsCard({ target }: { target: Target }) {
   }
 
   async function remove(entry: string) {
-    const done = await action.run('remove', async () => {
-      await action.rpc.call('memory.curated.remove', { agentId: AGENT_ID, target, oldText: entry })
-      return true
-    })
+    const done = await action.run(
+      'remove',
+      async () => {
+        await action.rpc.call('memory.curated.remove', {
+          agentId: AGENT_ID,
+          target,
+          oldText: entry,
+        })
+        return true
+      },
+      describe,
+    )
     if (done) toast.success(t('settings.memory.removed'), { id: `stg-memory-fact-${target}` })
     setRemoving(null)
   }
 
   const used = data?.charCount ?? 0
   const limit = data?.charLimit ?? 0
-  const full = limit > 0 && used >= limit
+  // Full means not even a one-character fact fits after the break before it.
+  const full = limit > 0 && entries.length > 0 && factRoom(entries, limit) < 1
   const near = !full && isNearBudget(used, limit)
+  const setText = (text: string) => setEditing((e) => (e ? { ...e, text } : e))
+
+  const editor = (initial: string, replacing?: string) =>
+    editing ? (
+      <FactEditor
+        placeholder={t(copy.placeholder)}
+        text={editing.text}
+        initial={initial}
+        room={limit > 0 ? factRoom(entries, limit, replacing) : null}
+        breakCounted={replacing === undefined ? entries.length > 0 : entries.length > 1}
+        notice={gone ? t('settings.memory.editor.gone') : undefined}
+        saveLabel={gone ? t('settings.memory.saveAsNew') : undefined}
+        busy={action.busy === 'save'}
+        onText={setText}
+        onCancel={() => setEditing(null)}
+        onSave={() => void save()}
+      />
+    ) : null
 
   return (
     <Card
@@ -109,9 +177,10 @@ function FactsCard({ target }: { target: Target }) {
       action={
         entries.length > 0 || editing ? (
           <Button
-            disabled={blocked || editing !== null}
+            disabled={blocked || editing !== null || full}
             aria-label={fill('settings.memory.addTo', { list: t(copy.title) })}
-            onClick={() => setEditing({ mode: 'add' })}
+            title={full ? t('settings.memory.full.add') : undefined}
+            onClick={() => setEditing({ mode: 'add', text: '' })}
           >
             <Plus className="size-3.5" strokeWidth={2} aria-hidden />
             {t('settings.memory.add')}
@@ -151,7 +220,14 @@ function FactsCard({ target }: { target: Target }) {
                 {fill('settings.memory.loadFailed', { file: copy.file })}
               </Notice>
             ) : full ? (
-              <Notice tone="danger">{t('settings.memory.full')}</Notice>
+              <Notice
+                tone="danger"
+                action={
+                  <Button onClick={() => setTab('setup')}>{t('settings.memory.full.raise')}</Button>
+                }
+              >
+                {t('settings.memory.full')}
+              </Notice>
             ) : near ? (
               <Notice>{t('settings.memory.nearFull')}</Notice>
             ) : null}
@@ -179,17 +255,7 @@ function FactsCard({ target }: { target: Target }) {
               </label>
             ) : null}
 
-            {editing?.mode === 'add' ? (
-              <FactEditor
-                placeholder={t(copy.placeholder)}
-                initial=""
-                entries={entries}
-                limit={limit}
-                busy={action.busy === 'save'}
-                onCancel={() => setEditing(null)}
-                onSave={(text) => void save(text)}
-              />
-            ) : null}
+            {adding && editing ? editor(editing.mode === 'edit' ? editing.entry : '') : null}
 
             {entries.length === 0 && editing === null ? (
               <Empty
@@ -200,7 +266,7 @@ function FactsCard({ target }: { target: Target }) {
                   <Button
                     variant="primary"
                     disabled={blocked}
-                    onClick={() => setEditing({ mode: 'add' })}
+                    onClick={() => setEditing({ mode: 'add', text: '' })}
                   >
                     <Plus className="size-3.5" strokeWidth={2} aria-hidden />
                     {t('settings.memory.addFact')}
@@ -212,18 +278,9 @@ function FactsCard({ target }: { target: Target }) {
             ) : shown.length > 0 ? (
               <ul className="mem-fact-list" aria-label={t(copy.title)}>
                 {shown.map((entry, i) =>
-                  editing?.mode === 'edit' && editing.entry === entry ? (
+                  editing?.mode === 'edit' && !gone && editing.entry === entry ? (
                     <li key={`${i}:${entry}`} className="mem-fact" data-editing="true">
-                      <FactEditor
-                        placeholder={t(copy.placeholder)}
-                        initial={entry}
-                        replacing={entry}
-                        entries={entries}
-                        limit={limit}
-                        busy={action.busy === 'save'}
-                        onCancel={() => setEditing(null)}
-                        onSave={(text) => void save(text)}
-                      />
+                      {editor(entry, entry)}
                     </li>
                   ) : (
                     <li key={`${i}:${entry}`} className="mem-fact">
@@ -235,7 +292,7 @@ function FactsCard({ target }: { target: Target }) {
                           disabled={blocked || editing !== null}
                           aria-label={fill('settings.memory.editNamed', { fact: clip(entry) })}
                           title={t('settings.memory.edit')}
-                          onClick={() => setEditing({ mode: 'edit', entry })}
+                          onClick={() => setEditing({ mode: 'edit', entry, text: entry })}
                         >
                           <Pencil className="size-3.5" strokeWidth={1.75} aria-hidden />
                         </Button>
@@ -281,25 +338,32 @@ function clip(text: string): string {
 
 /** Add or edit one fact in place: a textarea with its own budget line. */
 function FactEditor({
+  text,
   initial,
   placeholder,
-  replacing,
-  entries,
-  limit,
+  room,
+  breakCounted,
+  notice,
+  saveLabel,
   busy,
+  onText,
   onCancel,
   onSave,
 }: {
+  text: string
   initial: string
   placeholder: string
-  replacing?: string
-  entries: readonly string[]
-  limit: number
+  /** Characters this fact may take, or null when the limit is unknown. */
+  room: number | null
+  /** The list has other facts, so a break of three characters goes before this one. */
+  breakCounted: boolean
+  notice?: string
+  saveLabel?: string
   busy: boolean
+  onText: (text: string) => void
   onCancel: () => void
-  onSave: (text: string) => void
+  onSave: () => void
 }) {
-  const [text, setText] = useState(initial)
   const ref = useRef<HTMLTextAreaElement>(null)
   const id = useId()
   const hintId = useId()
@@ -311,13 +375,31 @@ function FactEditor({
     el.setSelectionRange(el.value.length, el.value.length)
   }, [])
 
-  const total = text.trim() ? factsTotalAfter(entries, text, replacing) : 0
-  const over = limit > 0 ? total - limit : 0
-  const unchanged = text.trim() === initial.trim()
-  const canSave = !busy && text.trim() !== '' && !unchanged && over <= 0
+  const content = text.trim()
+  const split = content !== '' && splitsIntoFacts(content)
+  const over = room !== null && content ? content.length - room : 0
+  const unchanged = content === initial.trim()
+  const canSave = !busy && content !== '' && !unchanged && over <= 0 && !split
+
+  let hint: string
+  if (split) hint = t('settings.memory.editor.split')
+  else if (over > 0)
+    hint = fill(
+      breakCounted ? 'settings.memory.editor.over.break' : 'settings.memory.editor.over',
+      {
+        over: counted(over, 'char'),
+        room: counted(Math.max(0, room ?? 0), 'char'),
+      },
+    )
+  else if (room !== null && content)
+    hint = fill('settings.memory.editor.left', { left: counted(room - content.length, 'char') })
+  else if (room !== null)
+    hint = fill('settings.memory.editor.room', { room: counted(room, 'char') })
+  else hint = t('settings.memory.editor.hint')
 
   return (
     <div className="mem-editor">
+      {notice ? <Notice tone="warn">{notice}</Notice> : null}
       <label htmlFor={id} className="sr-only">
         {t('settings.memory.editor.label')}
       </label>
@@ -329,8 +411,9 @@ function FactEditor({
         value={text}
         placeholder={placeholder}
         aria-describedby={hintId}
+        aria-invalid={split || over > 0 || undefined}
         disabled={busy}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => onText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
             e.preventDefault()
@@ -338,23 +421,23 @@ function FactEditor({
             onCancel()
           } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
             e.preventDefault()
-            if (canSave) onSave(text)
+            if (canSave) onSave()
           }
         }}
       />
       <div className="mem-editor__foot">
-        <span id={hintId} className="mem-editor__hint" data-tone={over > 0 ? 'danger' : undefined}>
-          {over > 0
-            ? fill('settings.memory.editor.over', { over: count(over) })
-            : limit > 0 && text.trim()
-              ? fill('settings.memory.editor.left', { left: count(limit - total) })
-              : t('settings.memory.editor.hint')}
+        <span
+          id={hintId}
+          className="mem-editor__hint"
+          data-tone={split || over > 0 ? 'danger' : undefined}
+        >
+          {hint}
         </span>
         <Button disabled={busy} onClick={onCancel}>
           {t('settings.memory.cancel')}
         </Button>
-        <Button variant="primary" disabled={!canSave} onClick={() => onSave(text)}>
-          {t('settings.memory.saveFact')}
+        <Button variant="primary" disabled={!canSave} onClick={onSave}>
+          {saveLabel ?? t('settings.memory.saveFact')}
         </Button>
       </div>
     </div>

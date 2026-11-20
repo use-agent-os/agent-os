@@ -18,28 +18,32 @@ import type { ProviderSpec } from '@/views/setup/logic'
 import { Button } from '~/components/ui/button'
 import { t, type MessageKey } from '~/i18n'
 import { useSettings } from '~/stores/settings'
+import { jumpTo } from '../overview/jumps'
 import { Card, Choices, Disclosure, Notice, Row, type ChoiceOption, type Tone } from '../parts'
 import { withRevision } from '../use-snapshot'
-import { reportSaveError } from './api'
+import { reportSaveError, useEnvSet } from './api'
 import { useDraft } from './drafts'
 import {
   EMBEDDING_DEFAULTS,
   EMBEDDING_PROVIDERS,
   embeddingDirty,
   embeddingFields,
-  embeddingParams,
   embeddingProblem,
   embeddingSpecs,
+  embeddingWrite,
   hasStoredEmbeddingKey,
   isLoopbackHost,
   ollamaHasModel,
   retrievalIsKeywordOnly,
+  savedEmbeddingKeyEnv,
   savedEmbeddingProvider,
   seedEmbedding,
   urlHost,
   type EmbeddingDraft,
   type EmbeddingField,
+  type EmbeddingProblem,
   type EmbeddingProvider,
+  type EmbeddingWrite,
 } from './logic'
 import { Spinner, fill } from './ui'
 
@@ -136,6 +140,7 @@ export function EmbeddingCard({
   const saved = seedEmbedding(snapshot, savedProvider, specFor(savedProvider))
   const { draft, setDraft, revert, settle } = useDraft<EmbeddingDraft>('embedding', saved)
   const storedKey = hasStoredEmbeddingKey(snapshot)
+  const envSet = useEnvSet()
   const [justSaved, setJustSaved] = useState(false)
   const blocked = Boolean(snapshot.writeBlocked)
 
@@ -152,11 +157,8 @@ export function EmbeddingCard({
   }))
 
   const save = useMutation({
-    mutationFn: (params: Record<string, unknown>) =>
-      rpc.call<ConfigureResult>(
-        'onboarding.memory_embedding.configure',
-        withRevision(snapshot, params),
-      ),
+    mutationFn: (write: EmbeddingWrite) =>
+      rpc.call<ConfigureResult>(write.method, withRevision(snapshot, write.params)),
     onSuccess: async (res) => {
       for (const w of res?.warnings ?? []) toast.warning(w)
       if (res?.changed === false) {
@@ -178,9 +180,23 @@ export function EmbeddingCard({
   })
 
   const dirty = embeddingDirty(saved, draft)
-  const problem = embeddingProblem(draft, storedKey)
+  const problem = embeddingProblem(draft, {
+    storedKey,
+    savedEnv: savedEmbeddingKeyEnv(snapshot),
+    envSet,
+  })
   const canSave = dirty && !problem && !save.isPending && !blocked
   const { main, advanced } = embeddingFields(draft.provider)
+  const auto = draft.provider === 'auto'
+  const fallbackUrl = draft.baseUrl.trim() || EMBEDDING_DEFAULTS.auto.baseUrl!
+  const fallbackEnv = draft.apiKey.trim()
+    ? ''
+    : draft.apiKeyEnv.trim() || (storedKey ? '' : savedEmbeddingKeyEnv(snapshot))
+  const fallbackHint = !draft.fallback
+    ? t('settings.memory.embed.fallback.off')
+    : fallbackEnv
+      ? fill('settings.memory.embed.fallback.on', { name: fallbackEnv })
+      : t('settings.memory.embed.fallback.onStored')
 
   function choose(provider: EmbeddingProvider) {
     setJustSaved(false)
@@ -206,11 +222,7 @@ export function EmbeddingCard({
       blurb={t('settings.memory.embed.blurb')}
       footNote={
         problem ? (
-          <span className="mem-problem">
-            {problem === 'needsKey'
-              ? t('settings.memory.embed.needsKey')
-              : t('settings.memory.embed.needsUrl')}
-          </span>
+          <span className="mem-problem">{problemText(problem)}</span>
         ) : dirty ? (
           t('settings.memory.embed.foot.restart')
         ) : undefined
@@ -223,7 +235,7 @@ export function EmbeddingCard({
           <Button
             variant="primary"
             disabled={!canSave}
-            onClick={() => save.mutate(embeddingParams(draft))}
+            onClick={() => save.mutate(embeddingWrite(draft))}
           >
             {save.isPending ? t('settings.memory.saving') : t('settings.save')}
           </Button>
@@ -247,21 +259,73 @@ export function EmbeddingCard({
         <OllamaCheck baseUrl={draft.baseUrl} model={draft.model} />
       ) : null}
       {main.map(field)}
-      {advanced.length > 0 ? (
+      {auto ? (
+        <Disclosure title={t('settings.memory.embed.fallback')} hint={fallbackHint}>
+          <div className="mem-card-notice">
+            {draft.fallback ? (
+              <Notice
+                tone="info"
+                action={
+                  <Button
+                    disabled={blocked || save.isPending}
+                    onClick={() =>
+                      setDraft((d) => ({
+                        ...d,
+                        model: '',
+                        baseUrl: '',
+                        apiKey: '',
+                        apiKeyEnv: '',
+                        fallback: false,
+                      }))
+                    }
+                  >
+                    {t('settings.memory.embed.fallback.remove')}
+                  </Button>
+                }
+              >
+                {fill('settings.memory.embed.fallback.onBody', { url: fallbackUrl })}
+              </Notice>
+            ) : (
+              <Notice
+                tone="info"
+                action={
+                  <Button
+                    disabled={blocked || save.isPending}
+                    onClick={() => setDraft((d) => ({ ...d, fallback: true }))}
+                  >
+                    {t('settings.memory.embed.fallback.add')}
+                  </Button>
+                }
+              >
+                {saved.fallback
+                  ? t('settings.memory.embed.fallback.removed')
+                  : t('settings.memory.embed.fallback.offBody')}
+              </Notice>
+            )}
+          </div>
+          {draft.fallback ? advanced.map(field) : null}
+        </Disclosure>
+      ) : advanced.length > 0 ? (
         <Disclosure
-          title={
-            draft.provider === 'auto'
-              ? t('settings.memory.embed.fallback')
-              : t('settings.memory.advanced')
-          }
-          hint={
-            draft.provider === 'auto'
-              ? t('settings.memory.embed.fallback.hint')
-              : advanced.map((f) => t(FIELD_LABEL[f])).join(', ')
-          }
+          title={t('settings.memory.advanced')}
+          hint={advanced.map((f) => t(FIELD_LABEL[f])).join(', ')}
         >
           {advanced.map(field)}
         </Disclosure>
+      ) : null}
+      {problem?.kind === 'envUnset' ? (
+        <div className="mem-card-notice">
+          <Notice
+            tone="warn"
+            action={
+              <Button onClick={() => jumpTo('environment')}>
+                {t('settings.memory.embed.openEnv')}
+              </Button>
+            }
+          >
+            {fill('settings.memory.embed.envUnset', { name: problem.name })}
+          </Notice>
+        </div>
       ) : null}
       {justSaved && !dirty ? (
         <div className="mem-card-notice">
@@ -277,6 +341,17 @@ export function EmbeddingCard({
       ) : null}
     </Card>
   )
+}
+
+function problemText(problem: NonNullable<EmbeddingProblem>): string {
+  switch (problem.kind) {
+    case 'needsKey':
+      return t('settings.memory.embed.needsKey')
+    case 'needsUrl':
+      return t('settings.memory.embed.needsUrl')
+    case 'envUnset':
+      return t('settings.memory.embed.envUnset.short')
+  }
 }
 
 function EmbeddingFieldRow({

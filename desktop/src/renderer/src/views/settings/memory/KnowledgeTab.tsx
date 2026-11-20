@@ -7,16 +7,26 @@ import { formatBytes, type MemoryFileRow } from '@/views/memory/logic'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { Card, Disclosure, Empty, Notice, Row } from '../parts'
-import { errorText, useConnected, useDocuments, useMemoryAction, useSourceFiles } from './api'
+import {
+  MEMORY_KEY,
+  errorText,
+  useConnected,
+  useDocuments,
+  useMemoryAction,
+  useRefreshWhenShown,
+  useSourceFiles,
+} from './api'
 import {
   AGENT_ID,
   TEXT_EXTENSIONS,
   documentName,
   isOtherSource,
+  replacedByPath,
+  replacedByUpload,
   uploadVerdict,
   type UploadVerdict,
 } from './logic'
-import { Confirm, Sheet, Spinner, count, fill } from './ui'
+import { Confirm, Sheet, Spinner, counted, fill } from './ui'
 
 interface IngestResult {
   path?: string
@@ -46,15 +56,20 @@ function formatDate(iso?: string): string {
 
 function fileMeta(file: MemoryFileRow): string {
   return fill('settings.memory.docs.meta', {
-    lines: count(file.lineCount ?? 0),
+    lines: counted(file.lineCount ?? 0, 'line'),
     size: formatBytes(file.sizeBytes),
     date: formatDate(file.modifiedAt),
   })
 }
 
 /** Documents the agent can look things up in, and the notes it keeps itself. */
-export function KnowledgeTab() {
+export function KnowledgeTab({ active }: { active: boolean }) {
   const [viewing, setViewing] = useState<string | null>(null)
+  // The agent writes its own notes in the background: read both lists again on return.
+  useRefreshWhenShown(active, [
+    [...MEMORY_KEY, 'documents'],
+    [...MEMORY_KEY, 'files'],
+  ])
   return (
     <>
       <DocumentsCard onView={setViewing} />
@@ -78,15 +93,36 @@ function DocumentsCard({ onView }: { onView: (path: string) => void }) {
   const disabled = !connected || busy
   const list = docs.data ?? []
 
-  async function addFiles(files: File[]) {
+  /** Files waiting for a yes before they replace documents of the same name. */
+  const [replacing, setReplacing] = useState<
+    | { kind: 'upload'; files: File[]; names: string[] }
+    | { kind: 'path'; path: string; replaces: { kind: 'file' | 'folder'; name: string } }
+    | null
+  >(null)
+
+  /** Check each file, then ask before any of them replaces a document. */
+  function chooseFiles(files: File[]) {
     if (files.length === 0 || !connected) return
-    let added = 0
+    const ok: File[] = []
     for (const file of files) {
       const verdict = uploadVerdict(file.name, file.size)
-      if (verdict !== 'ok') {
-        toast.error(fill(VERDICT_KEY[verdict], { name: file.name }))
-        continue
-      }
+      if (verdict === 'ok') ok.push(file)
+      else toast.error(fill(VERDICT_KEY[verdict], { name: file.name }))
+    }
+    if (input.current) input.current.value = ''
+    if (ok.length === 0) return
+    const names = replacedByUpload(
+      ok.map((f) => f.name),
+      list,
+    )
+    if (names.length > 0) setReplacing({ kind: 'upload', files: ok, names })
+    else void upload(ok, new Set())
+  }
+
+  async function upload(files: File[], replaced: ReadonlySet<string>) {
+    let added = 0
+    let swapped = 0
+    for (const file of files) {
       setUploading(file.name)
       const res = await action.run('ingest', async () =>
         action.rpc.call<{ results?: IngestResult[] }>('memory.knowledge_base.ingest', {
@@ -101,24 +137,24 @@ function DocumentsCard({ onView }: { onView: (path: string) => void }) {
           fill('settings.memory.docs.failed', { name: file.name, error: failed.error ?? '' }),
         )
       } else if (res) {
-        added += 1
+        if (replaced.has(file.name)) swapped += 1
+        else added += 1
       }
     }
     setUploading(null)
-    if (input.current) input.current.value = ''
-    if (added > 0) {
-      toast.success(
-        added === 1
-          ? t('settings.memory.docs.added.one')
-          : fill('settings.memory.docs.added.many', { count: added }),
-        { id: 'stg-memory-docs' },
-      )
-    }
+    const done = addedToast(added, swapped)
+    if (done) toast.success(done, { id: 'stg-memory-docs' })
   }
 
-  async function addPath() {
+  function startPath() {
     const target = path.trim()
     if (!target) return
+    const replaces = replacedByPath(target, list)
+    if (replaces) setReplacing({ kind: 'path', path: target, replaces })
+    else void addPath(target, false)
+  }
+
+  async function addPath(target: string, replaces: boolean) {
     const res = await action.run('path', () =>
       action.rpc.call<{ results?: IngestResult[] }>('memory.knowledge_base.ingest', {
         agentId: AGENT_ID,
@@ -139,15 +175,20 @@ function DocumentsCard({ onView }: { onView: (path: string) => void }) {
     }
     if (ok > 0) {
       setPath('')
-      toast.success(
-        ok === 1
-          ? t('settings.memory.docs.added.one')
-          : fill('settings.memory.docs.added.many', { count: ok }),
-        { id: 'stg-memory-docs' },
-      )
+      // One file over one document is a replacement; a folder merge is told as added.
+      const single = replaces && ok === 1 && results.length === 1
+      toast.success(addedToast(single ? 0 : ok, single ? 1 : 0)!, { id: 'stg-memory-docs' })
     } else if (results.length === 0) {
       toast.error(fill('settings.memory.docs.nothingFound', { path: target }))
     }
+  }
+
+  function confirmReplace() {
+    const pending = replacing
+    setReplacing(null)
+    if (!pending) return
+    if (pending.kind === 'upload') void upload(pending.files, new Set(pending.names))
+    else void addPath(pending.path, pending.replaces.kind === 'file')
   }
 
   async function remove(doc: string) {
@@ -179,7 +220,7 @@ function DocumentsCard({ onView }: { onView: (path: string) => void }) {
     if (!e.dataTransfer.types.includes('Files')) return
     e.preventDefault()
     setDragging(false)
-    if (!disabled) void addFiles(Array.from(e.dataTransfer.files))
+    if (!disabled) chooseFiles(Array.from(e.dataTransfer.files))
   }
 
   const choose = (
@@ -215,7 +256,7 @@ function DocumentsCard({ onView }: { onView: (path: string) => void }) {
           hidden
           accept={TEXT_EXTENSIONS.join(',')}
           aria-label={t('settings.memory.docs.choose')}
-          onChange={(e) => void addFiles(Array.from(e.target.files ?? []))}
+          onChange={(e) => chooseFiles(Array.from(e.target.files ?? []))}
         />
         <div className="mem-docs">
           {!connected ? (
@@ -319,11 +360,11 @@ function DocumentsCard({ onView }: { onView: (path: string) => void }) {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault()
-                    void addPath()
+                    startPath()
                   }
                 }}
               />
-              <Button disabled={!connected || busy || !path.trim()} onClick={() => void addPath()}>
+              <Button disabled={!connected || busy || !path.trim()} onClick={startPath}>
                 <FolderInput className="size-3.5" strokeWidth={1.75} aria-hidden />
                 {action.busy === 'path'
                   ? t('settings.memory.docs.path.adding')
@@ -334,6 +375,13 @@ function DocumentsCard({ onView }: { onView: (path: string) => void }) {
         </Disclosure>
       </Card>
 
+      {replacing !== null ? (
+        <ConfirmReplace
+          pending={replacing}
+          onCancel={() => setReplacing(null)}
+          onConfirm={confirmReplace}
+        />
+      ) : null}
       {removing !== null ? (
         <ConfirmRemoveDoc
           path={removing}
@@ -343,6 +391,84 @@ function DocumentsCard({ onView }: { onView: (path: string) => void }) {
         />
       ) : null}
     </div>
+  )
+}
+
+/** "Document added.", "Document replaced.", "2 documents added and 1 replaced.", or null. */
+function addedToast(added: number, replaced: number): string | null {
+  if (added > 0 && replaced > 0) {
+    return fill('settings.memory.docs.addedReplaced', {
+      added: counted(added, 'doc'),
+      replaced: replaced.toLocaleString('en-US'),
+    })
+  }
+  if (replaced === 1) return t('settings.memory.docs.replaced.one')
+  if (replaced > 1) return fill('settings.memory.docs.replaced.many', { count: replaced })
+  if (added === 1) return t('settings.memory.docs.added.one')
+  if (added > 1) return fill('settings.memory.docs.added.many', { count: added })
+  return null
+}
+
+/** Asks before an upload or a workspace path overwrites what is already there. */
+function ConfirmReplace({
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  pending:
+    | { kind: 'upload'; files: File[]; names: string[] }
+    | { kind: 'path'; path: string; replaces: { kind: 'file' | 'folder'; name: string } }
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  if (pending.kind === 'path' && pending.replaces.kind === 'folder') {
+    return (
+      <Confirm
+        title={fill('settings.memory.docs.replace.folder.title', { name: pending.replaces.name })}
+        body={fill('settings.memory.docs.replace.folder.body', { name: pending.replaces.name })}
+        confirm={t('settings.memory.docs.replace.folder.confirm')}
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+      />
+    )
+  }
+  const names = pending.kind === 'upload' ? pending.names : [pending.replaces.name]
+  const others = pending.kind === 'upload' ? pending.files.length - names.length : 0
+  const one = names.length === 1
+  return (
+    <Confirm
+      title={
+        one
+          ? fill('settings.memory.docs.replace.title.one', { name: names[0]! })
+          : fill('settings.memory.docs.replace.title.many', { count: names.length })
+      }
+      body={
+        <>
+          <p>
+            {one
+              ? fill('settings.memory.docs.replace.body.one', { name: names[0]! })
+              : t('settings.memory.docs.replace.body.many')}
+          </p>
+          {one ? null : (
+            <ul className="mem-confirm__list">
+              {names.map((name) => (
+                <li key={name}>{name}</li>
+              ))}
+            </ul>
+          )}
+          {others > 0 ? (
+            <p>
+              {others === 1
+                ? t('settings.memory.docs.replace.alsoNew.one')
+                : fill('settings.memory.docs.replace.alsoNew', { files: counted(others, 'file') })}
+            </p>
+          ) : null}
+        </>
+      }
+      confirm={t('settings.memory.docs.replace.confirm')}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   )
 }
 
