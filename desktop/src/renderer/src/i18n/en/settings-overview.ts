@@ -1,8 +1,10 @@
 export const overview = {
   'settings.overview.blurb': 'Is your agent set up, and what is the next thing to do.',
   'settings.overview.pill.allSet': 'All set',
-  'settings.overview.pill.one': '1 thing to finish',
-  'settings.overview.pill.many': '{n} things to finish',
+  'settings.overview.pill.requiredOne': '1 required step left',
+  'settings.overview.pill.requiredMany': '{n} required steps left',
+  'settings.overview.pill.toFix': 'Required setup done · {n} to fix',
+  'settings.overview.pill.optional': 'Required setup done · {n} optional',
   'settings.overview.pill.offline': 'Gateway offline',
   'settings.overview.pill.checking': 'Checking',
 
@@ -59,6 +61,7 @@ export const overview = {
   'settings.overview.item.search': 'Web search',
   'settings.overview.item.image': 'Image generation',
   'settings.overview.item.voice': 'Voice',
+  'settings.overview.item.x': 'Search on X',
   'settings.overview.item.channels': 'Channels',
   'settings.overview.item.skills': 'Skills',
   'settings.overview.item.env': 'Environment variables',
@@ -99,6 +102,10 @@ export const overview = {
 
   'settings.overview.detail.image.sameKey': '{label} · uses your provider key',
 
+  'settings.overview.detail.x.noKey': 'On, but {key} is not set and there is no SuperGrok login',
+  'settings.overview.detail.x.key': '{model} · xAI key',
+  'settings.overview.detail.x.login': '{model} · SuperGrok login',
+
   'settings.overview.detail.channels.none': 'No channels yet',
 
   'settings.overview.detail.skills.needsOne': '1 skill needs a key or a tool',
@@ -127,6 +134,7 @@ export const overview = {
   'settings.overview.next.search': 'Turn on web search',
   'settings.overview.next.image': 'Set up image generation',
   'settings.overview.next.voice': 'Set up voice',
+  'settings.overview.next.x': 'Set up search on X',
   'settings.overview.next.channels': 'Add a channel',
   'settings.overview.next.skills': 'Finish skill setup',
   'settings.overview.next.env': 'Set the missing variables',
@@ -142,6 +150,7 @@ export const overview = {
   'settings.overview.suggest.image':
     'Next, set up image generation so the agent can draw from a description.',
   'settings.overview.suggest.voice': 'Next, set up voice so the agent can speak and transcribe.',
+  'settings.overview.suggest.x': 'Next, let the agent search posts on X through Grok.',
   'settings.overview.suggest.channels':
     'Next, add a channel to reach the agent from Telegram, Slack or Discord.',
   'settings.overview.suggest.skills': 'Next, finish setting up the skills that are waiting.',

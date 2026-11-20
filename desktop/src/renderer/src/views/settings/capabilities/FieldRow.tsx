@@ -68,6 +68,7 @@ export function FieldRow({
   placeholder,
   suggestions,
   after,
+  error,
 }: {
   field: FieldSpec
   value: unknown
@@ -75,6 +76,8 @@ export function FieldRow({
   disabled?: boolean
   /** Replaces the catalog help (the key row says where the key comes from). */
   help?: ReactNode
+  /** What is wrong with the value, said in place of the help. */
+  error?: string
   placeholder?: string
   /** Offered in the input's list (image models). */
   suggestions?: readonly string[]
@@ -84,8 +87,18 @@ export function FieldRow({
   const id = useId()
   const [shown, setShown] = useState(false)
   const label = fieldLabel(field)
-  const helpText =
-    help ?? (HELP[field.name] ? t(HELP[field.name]!) : field.description || field.help || undefined)
+  const errorId = `${id}-error`
+  const helpText = error ? (
+    <span className="cap-field-error" id={errorId} role="alert">
+      {error}
+    </span>
+  ) : (
+    (help ??
+    (HELP[field.name] ? t(HELP[field.name]!) : field.description || field.help || undefined))
+  )
+  const invalid = error
+    ? ({ 'aria-invalid': true, 'aria-describedby': errorId } as const)
+    : undefined
   const text = str(value)
 
   if (field.type === 'bool') {
@@ -165,6 +178,7 @@ export function FieldRow({
     <Row label={label} help={helpText} htmlFor={id}>
       <input
         id={id}
+        {...invalid}
         className="mac-input"
         data-mono={MONO.has(field.name) ? 'true' : undefined}
         data-short={numeric ? 'true' : undefined}

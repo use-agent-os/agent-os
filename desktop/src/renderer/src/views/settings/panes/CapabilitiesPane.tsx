@@ -1,14 +1,11 @@
 import '../capabilities.css'
-import { useQuery } from '@tanstack/react-query'
 import { AudioLines, Globe, ImageIcon, LoaderCircle, AtSign } from 'lucide-react'
-import { useEffect, useMemo, type ReactNode } from 'react'
-import { useRpc } from '@/app/providers'
-import { ENV_QUERY_KEY, type EnvListResponse } from '@/views/env/logic'
-import { xSearchSignedIn, type AuthStatus } from '@/views/setup/logic'
+import { useEffect, type ReactNode } from 'react'
 import type { SettingsSnapshot } from '@/views/settings/snapshot'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { CapabilityCard, STATE_TONE } from '../capabilities/CapabilityCard'
+import { useKeyFacts } from '../capabilities/key-context'
 import {
   capabilityStatus,
   imageDef,
@@ -18,7 +15,6 @@ import {
   xSearchDef,
   type CapabilityDef,
   type CapStatus,
-  type KeyContext,
 } from '../capabilities/logic'
 import { takeFocus } from '../overview/jumps'
 import { Head, Notice, Stat, Stats } from '../parts'
@@ -32,11 +28,25 @@ const ANCHOR: Record<string, string> = {
   voice: 'cap-voice',
 }
 
-/** Smooth within the page (the stats strip); instant when arriving from elsewhere. */
-function scrollToCard(id: string, behavior: ScrollBehavior = 'smooth') {
+/**
+ * Smooth, unless the Mac asks for reduced motion. Also at once while the
+ * window is hidden (covered, on another Space): a smooth scroll runs on
+ * animation frames, which a hidden window does not get, so it would never
+ * arrive.
+ */
+export function scrollBehavior(): ScrollBehavior {
+  if (document.visibilityState === 'hidden') return 'instant'
+  const reduce =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  return reduce ? 'instant' : 'smooth'
+}
+
+/** Bring a card into view and say "here" (the stats strip, a jump from elsewhere). */
+function scrollToCard(id: string) {
   const el = document.getElementById(ANCHOR[id] ?? id)
   if (!el) return
-  el.scrollIntoView({ block: 'start', behavior })
+  el.scrollIntoView({ block: 'start', behavior: scrollBehavior() })
   el.dataset.flash = 'true'
   window.setTimeout(() => delete el.dataset.flash, 1200)
 }
@@ -87,29 +97,7 @@ function CapabilitiesBody({
   snapshot: SettingsSnapshot
   reload: () => Promise<void>
 }) {
-  const rpc = useRpc()
-  const env = useQuery({
-    queryKey: ENV_QUERY_KEY,
-    refetchOnWindowFocus: false,
-    queryFn: () => rpc.call<EnvListResponse>('env.list', {}),
-  })
-  const auth = useQuery({
-    queryKey: ['settings', 'auth', 'status'],
-    refetchOnWindowFocus: false,
-    retry: false,
-    queryFn: () => rpc.call<AuthStatus>('auth.status', {}),
-  })
-
-  const rows = env.data?.vars
-  const ctx: KeyContext = useMemo(() => {
-    const byName = new Map((rows ?? []).map((r) => [r.name, r]))
-    return {
-      // Unknown until the listing lands (or when it failed): never block on a guess.
-      envSet: (name: string) => (rows ? Boolean(byName.get(name)?.isSet) : undefined),
-      xaiLogin: auth.data ? xSearchSignedIn(auth.data) : false,
-    }
-  }, [rows, auth.data])
-  const envUrl = (name: string) => rows?.find((r) => r.name === name)?.url || undefined
+  const { ctx, envUrl } = useKeyFacts(true)
 
   // Arrived from the Overview's "Set up image generation": land on that card.
   useEffect(() => {
@@ -117,7 +105,7 @@ function CapabilitiesBody({
     if (!id) return
     // After the sheet's own scroll-to-top for the new section. A timer, not
     // a frame: frames pause while the window is covered.
-    const timer = window.setTimeout(() => scrollToCard(id, 'instant'), 30)
+    const timer = window.setTimeout(() => scrollToCard(id), 30)
     return () => window.clearTimeout(timer)
   }, [])
 
@@ -127,6 +115,7 @@ function CapabilitiesBody({
     image: capabilityStatus(imageDef, snapshot, ctx),
     voice: capabilityStatus(voiceDef, snapshot, ctx),
   }
+  const hasX = xSearchDef.specs(snapshot).length > 0
   const blocked = Boolean(snapshot.writeBlocked)
   const revision = snapshot.revision ?? ''
 
@@ -184,6 +173,15 @@ function CapabilitiesBody({
           icon={<AudioLines aria-hidden />}
           onClick={() => scrollToCard('voice')}
         />
+        {hasX ? (
+          <CapStat
+            label={t('settings.capabilities.stat.x')}
+            status={status.x}
+            name={t('settings.capabilities.stat.x.value')}
+            icon={<AtSign aria-hidden />}
+            onClick={() => scrollToCard('x')}
+          />
+        ) : null}
       </Stats>
 
       {card(
@@ -206,7 +204,7 @@ function CapabilitiesBody({
         t('settings.capabilities.voice.blurb'),
         t('settings.capabilities.voice.off'),
       )}
-      {xSearchDef.specs(snapshot).length > 0
+      {hasX
         ? card(
             xSearchDef,
             <AtSign strokeWidth={1.75} aria-hidden />,
@@ -227,16 +225,21 @@ function CapabilitiesBody({
 function CapStat({
   label,
   status,
+  name,
   icon,
   onClick,
 }: {
   label: string
   status: CapStatus
+  /** The figure when on, instead of the service's short name. */
+  name?: string
   icon: ReactNode
   onClick: () => void
 }) {
   const value =
-    status.state === 'off' ? t('settings.capabilities.stat.off') : shortLabel(status.providerLabel)
+    status.state === 'off'
+      ? t('settings.capabilities.stat.off')
+      : (name ?? shortLabel(status.providerLabel))
   const hint =
     status.state === 'off'
       ? t('settings.capabilities.stat.offHint')
@@ -244,7 +247,9 @@ function CapStat({
         ? t('settings.capabilities.stat.keyMissing')
         : status.source === 'none'
           ? t('settings.capabilities.stat.noKey')
-          : t('settings.capabilities.stat.keyReady')
+          : status.source === 'login'
+            ? t('settings.capabilities.stat.login')
+            : t('settings.capabilities.stat.keyReady')
   return (
     <Stat
       label={label}

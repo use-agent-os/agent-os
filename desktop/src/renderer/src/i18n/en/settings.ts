@@ -33,31 +33,46 @@ export const settings = {
 
   'settings.section.overview': 'Overview',
   'settings.section.overview.blurb': 'What is set up, and what is still missing.',
-  'settings.section.overview.keywords': 'setup checklist status start onboarding ready',
+  'settings.section.overview.keywords':
+    'setup checklist status getting started onboarding ready progress next step todo',
   'settings.section.memory': 'Memory',
   'settings.section.memory.blurb':
     'What the agent remembers about you and your work, and how it finds it again.',
   'settings.section.memory.keywords':
-    'remember facts recall embedding knowledge base documents search index forget MEMORY.md USER.md',
+    'remember remembered facts memories recall forget embedding embeddings meaning semantic knowledge base documents files index MEMORY.md USER.md profile search local ollama openai',
   'settings.section.capabilities': 'Capabilities',
   'settings.section.capabilities.blurb':
-    'Web search, image generation and voice: the services the agent reaches for.',
+    'Web search, search on X, image generation and voice: the services the agent reaches for.',
   'settings.section.capabilities.keywords':
-    'web search image generation voice audio speech tts stt brave tavily',
-  'settings.section.providers.keywords': 'model llm api key openai anthropic ollama endpoint',
-  'settings.section.router.keywords': 'pilot router tier model thinking routing cost',
-  'settings.section.skills.keywords': 'skills catalog install library',
-  'settings.section.channels.keywords': 'telegram discord slack bot messaging pairing',
-  'settings.section.environment.keywords': 'env variable secret credential api key .env',
-  'settings.section.trading.keywords': 'wallet swap rpc chain guardrail aggregator',
-  'settings.section.gateway.keywords': 'gateway port host token managed external process',
-  'settings.section.appearance.keywords': 'theme palette dark light scale pet transparency',
-  'settings.section.notifications.keywords': 'notification sound badge banner mute',
-  'settings.section.security.keywords': 'touch id fingerprint approval confirm',
-  'settings.section.behaviour.keywords': 'login launch quick ask enter send menu bar sidebar',
-  'settings.section.shortcuts.keywords': 'keyboard shortcut hotkey keys',
-  'settings.section.advanced.keywords': 'logs diagnostics config file reset reinstall uninstall',
-  'settings.section.about.keywords': 'version update engine release',
+    'web search internet browse look up brave duckduckgo tavily exa perplexity results per search proxy x search on x twitter tweets posts grok xai supergrok image images generation picture draw gpt-image openai openrouter gemini voice audio speech tts stt text to speech transcribe transcription elevenlabs',
+  'settings.section.providers.keywords':
+    'model models llm ai provider api key test key openai gpt chatgpt anthropic claude ollama local gemini google openrouter deepseek moonshot kimi dashscope qwen qianfan baidu zhipu glm z.ai volcengine opencap surplus bankr custom endpoint openai-compatible base url proxy credential',
+  'settings.section.router.keywords':
+    'pilot router routing tiers tier fast balanced strong frontier vision thinking reasoning cheap cost judge jev safety net translation default model',
+  'settings.section.skills.keywords':
+    'skills skill tools abilities catalog catalogs install library hub community partner plugins extensions',
+  'settings.section.channels.keywords':
+    'telegram discord slack email mail bot bots messaging adapter pairing pair chat apps',
+  'settings.section.environment.keywords':
+    'env environment variables variable secrets secret .env dotenv credentials credential api key keys import tokens',
+  'settings.section.trading.keywords':
+    'trading trade swap swaps wallet wallets uniswap aggregator agentos dex vault unlock limits daily cap per swap guardrails networks network chains chain rpc base robinhood crypto tokens kyber kyberswap',
+  'settings.section.gateway.keywords':
+    'gateway port host token auth address url server managed external remote process start stop restart https tls tailscale command-line cli executable web console engine',
+  'settings.section.appearance.keywords':
+    'theme dark mode light mode night colour color palette ui scale zoom text size font size bigger smaller accent colours colors transparency translucent pet mascot petdex',
+  'settings.section.notifications.keywords':
+    'notifications notification notify alerts alert sound sounds chime badge dock bounce banner mute do not disturb quiet permission',
+  'settings.section.security.keywords':
+    'touch id touchid fingerprint biometrics lock unlock confirm approvals approval approve money spending keys export protect',
+  'settings.section.behaviour.keywords':
+    'behavior login open at login startup launch quit stop gateway on quit quick ask menu bar tray return enter send composer sidebar width',
+  'settings.section.shortcuts.keywords':
+    'keyboard shortcuts shortcut hotkeys hotkey keys keybindings key bindings commands zoom',
+  'settings.section.advanced.keywords':
+    'logs log diagnostics debug troubleshooting config configuration config.toml settings file files folder reset start over reinstall uninstall',
+  'settings.section.about.keywords':
+    'version versions update updates upgrade release changelog engine electron build check for updates',
   'settings.section.providers': 'Providers',
   'settings.section.providers.blurb':
     'Who answers your messages, with which credentials, and the model it falls back to.',

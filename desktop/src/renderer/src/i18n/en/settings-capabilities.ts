@@ -3,6 +3,9 @@ export const capabilities = {
   'settings.capabilities.stat.search': 'Web search',
   'settings.capabilities.stat.image': 'Images',
   'settings.capabilities.stat.voice': 'Voice',
+  'settings.capabilities.stat.x': 'Search on X',
+  'settings.capabilities.stat.x.value': 'Grok',
+  'settings.capabilities.stat.login': 'SuperGrok login',
   'settings.capabilities.stat.off': 'Off',
   'settings.capabilities.stat.noKey': 'No key needed',
   'settings.capabilities.stat.keyReady': 'Key in place',
@@ -94,9 +97,11 @@ export const capabilities = {
   'settings.capabilities.advanced.hint': '{n} settings',
 
   'settings.capabilities.problem.key': 'Add a key above before saving.',
-  'settings.capabilities.problem.min': '{field} must be at least {min}.',
+  'settings.capabilities.problem.range': '{field} must be between {min} and {max}.',
+  'settings.capabilities.problem.rangeSeconds': '{field} must be between {min} and {max} seconds.',
   'settings.capabilities.problem.modelPrefix': 'The model must start with {prefix}',
   'settings.capabilities.problem.number': '{field} must be a number.',
+  'settings.capabilities.problem.whole': '{field} must be a whole number.',
   'settings.capabilities.problem.required': '{field} is required.',
 
   'settings.capabilities.saved.search': 'Web search saved',

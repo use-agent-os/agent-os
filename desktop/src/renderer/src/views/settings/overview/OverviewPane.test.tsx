@@ -8,6 +8,7 @@ import { useGateway } from '~/stores/gateway'
 import { useSettings } from '~/stores/settings'
 import { useUi } from '~/stores/ui'
 import { OverviewPane } from '../panes/OverviewPane'
+import { takeFocus } from './jumps'
 
 const rpcCall = vi.fn()
 vi.mock('@/app/providers', () => ({
@@ -77,7 +78,22 @@ function fresh(): SettingsSnapshot {
   return s
 }
 
+/** X search on, as the gateway ships it, reading XAI_API_KEY. */
+function withX(s: SettingsSnapshot): SettingsSnapshot {
+  s.catalog!.xSearch = [
+    {
+      providerId: 'x_search',
+      label: 'X (Twitter) Search',
+      requiresApiKey: true,
+      envKey: 'XAI_API_KEY',
+    },
+  ]
+  s.config!.x_search = { enabled: true, model: 'grok-4.5', api_key: '', api_key_env: 'XAI_API_KEY' }
+  return s
+}
+
 let snapshot: SettingsSnapshot | Error = ready()
+let login = false
 
 function mount() {
   return render(
@@ -93,6 +109,7 @@ beforeEach(() => {
   rpcCall.mockReset()
   gatewayStart.mockClear()
   snapshot = ready()
+  login = false
   useConnection.setState({ state: 'connected' })
   useGateway.setState({
     status: { state: 'running', pid: 1, url: 'http://127.0.0.1:18791', error: null },
@@ -106,7 +123,15 @@ beforeEach(() => {
       return snapshot
     }
     if (method === 'skills.list') return { skills: [] }
-    if (method === 'env.list') return { vars: [], setCount: 0, totalCount: 0, shadowedCount: 0 }
+    if (method === 'env.list') {
+      return {
+        vars: [{ name: 'XAI_API_KEY', isSet: false, missing: false }],
+        setCount: 0,
+        totalCount: 1,
+        shadowedCount: 0,
+      }
+    }
+    if (method === 'auth.status') return { xai: { logged_in: login } }
     return {}
   })
 })
@@ -115,7 +140,9 @@ describe('OverviewPane', () => {
   it('ready: says so, suggests the next optional step, and every row jumps', async () => {
     mount()
     expect(await screen.findByText('Your agent is ready')).toBeInTheDocument()
-    expect(screen.getByText('All set')).toBeInTheDocument()
+    // Not "All set": image, voice and channels are still open, and skippable.
+    expect(screen.getByText('Required setup done · 3 optional')).toBeInTheDocument()
+    expect(screen.queryByText('All set')).toBeNull()
     const provider = await screen.findByTestId('setup-item-provider')
     expect(within(provider).getByText('Surplus Intelligence · gpt-6-luna')).toBeInTheDocument()
     expect(
@@ -133,9 +160,38 @@ describe('OverviewPane', () => {
     snapshot = fresh()
     mount()
     expect(await screen.findByText('Your agent cannot answer yet')).toBeInTheDocument()
-    expect(screen.getByText('1 thing to finish')).toBeInTheDocument()
+    expect(screen.getByText('1 required step left')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Add a provider key/ }))
     expect(useUi.getState().settingsSection).toBe('providers')
+  })
+
+  it('search on X switched on without a key is one thing to fix, not "All set"', async () => {
+    snapshot = withX(ready())
+    mount()
+    expect(await screen.findByText('Search on X needs attention')).toBeInTheDocument()
+    expect(screen.getByText('Required setup done · 1 to fix')).toBeInTheDocument()
+    const row = screen.getByTestId('setup-item-x')
+    expect(
+      within(row).getByText('On, but XAI_API_KEY is not set and there is no SuperGrok login'),
+    ).toBeInTheDocument()
+    // Recommended, not required.
+    expect(
+      within(screen.getByRole('region', { name: 'Recommended' })).getByTestId('setup-item-x'),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Fix search on X/ }))
+    expect(useUi.getState().settingsSection).toBe('capabilities')
+    expect(takeFocus('capabilities')).toBe('x')
+  })
+
+  it('search on X with a SuperGrok login is done', async () => {
+    snapshot = withX(ready())
+    login = true
+    mount()
+    const row = await screen.findByTestId('setup-item-x')
+    await waitFor(() =>
+      expect(within(row).getByText('grok-4.5 · SuperGrok login')).toBeInTheDocument(),
+    )
+    expect(screen.getByText('Your agent is ready')).toBeInTheDocument()
   })
 
   it('offline with a managed gateway: the hero starts it', async () => {
