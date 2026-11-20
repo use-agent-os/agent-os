@@ -74,9 +74,9 @@ export function useDeskFrame(input: {
   const locked = Boolean(v && v.initialized && !v.unlocked)
   const ready = active && !disabled && vaultReady
   const provider: ProviderId = status.data?.provider ?? DEFAULT_PROVIDER
-  // Only Uniswap needs a key; the aggregator is ready as soon as it answers.
-  const providerReady = provider !== 'uniswap' || Boolean(status.data?.apiKeyConfigured)
-  const needsKey = provider === 'uniswap' && !status.data?.apiKeyConfigured
+  // The desk swaps through the AgentOS DEX only: a gateway configured for
+  // another provider is told so, and quotes nothing until it is put back.
+  const providerReady = provider === DEFAULT_PROVIDER
   const chains = useMemo(
     () => (status.data?.chains ?? []).map((c) => c.chainId),
     [status.data?.chains],
@@ -286,7 +286,7 @@ export function useDeskFrame(input: {
     wallets,
     primary,
     limits: limits.data ?? null,
-    gate: { needsKey, provider },
+    gate: { offDex: !providerReady },
     missions,
     onFirstSend: session.ensureFiled,
     onStartFresh: startFresh,
@@ -330,7 +330,6 @@ export function useDeskFrame(input: {
         onResize={setBookWidth}
         onToggle={toggleBook}
         onOpenDesk={() => setDeskMode(true)}
-        onOpenSettings={() => openSettings('trading')}
         highlightOrder={null}
         entering={entering}
         onReject={rejectFromBook}

@@ -6,15 +6,7 @@ import { shortAge } from '~/lib/relative-time'
 import { allocationSegments, formatPct, formatUsd, pnlTone } from './logic'
 import { useBalanceMask, useBalancePrivacy } from '~/stores/balance-privacy'
 import { Money, Spinner, useCountUp } from './parts'
-import { ProviderMark, providerMark } from './ProviderMark'
-import { ProviderMenu } from './ProviderMenu'
-import {
-  providerLabel,
-  type Holding,
-  type ProviderId,
-  type ProviderStatus,
-  type Totals,
-} from './types'
+import { type Holding, type Totals } from './types'
 
 /**
  * The instrument head of the desk: one panel carrying whose wallet this is,
@@ -30,11 +22,6 @@ export function Overview({
   now,
   onSync,
   loading,
-  provider,
-  providers,
-  switchingProvider,
-  onSwitchProvider,
-  onOpenSettings,
   entering,
   head,
   unpricedCount = 0,
@@ -46,14 +33,6 @@ export function Overview({
   now: number
   onSync: () => void
   loading: boolean
-  /** Who routes swaps right now, as a pill beside the sync state that switches it. */
-  provider?: ProviderId
-  /** Per-provider facts from trading.status; the pill's menu explains each choice. */
-  providers?: readonly ProviderStatus[]
-  switchingProvider?: boolean
-  onSwitchProvider?: (id: ProviderId) => void
-  /** Settings › Trading, where a Uniswap key is added. */
-  onOpenSettings: () => void
   /** The mode switch is playing: the value counts up on the same clock. */
   entering?: boolean
   /** Whose value this is: the wallet head, above the figure. */
@@ -116,29 +95,10 @@ export function Overview({
           </span>
         ) : null}
 
-        {/* Where orders route and how fresh the figures are: facts about the
-            desk, not about the wallet, so they sit with the value rather than
-            in the identity line above it. The route is also switched here,
-            through the same menu as the desk chat's route seat. */}
+        {/* How fresh the figures are: a fact about the desk, not about the
+            wallet, so it sits with the value rather than in the identity line
+            above it. */}
         <div className="trd-hero__tools">
-          {provider ? (
-            <ProviderMenu
-              className="trd-venue app-no-drag"
-              testId="provider-pill"
-              provider={provider}
-              providers={providers ?? []}
-              switching={Boolean(switchingProvider)}
-              onSwitch={onSwitchProvider}
-              onOpenSettings={onOpenSettings}
-            >
-              {providerMark(provider) ? (
-                <ProviderMark id={provider} size={13} />
-              ) : (
-                <i aria-hidden />
-              )}
-              {providerLabel(provider)}
-            </ProviderMenu>
-          ) : null}
           <span className="trd-hero__sync" data-live={syncing ? 'true' : undefined}>
             {syncing ? (
               <>

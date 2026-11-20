@@ -59,7 +59,6 @@ function desk() {
         now={Date.now()}
         onSync={noop}
         loading={false}
-        onOpenSettings={noop}
       />
       <WalletRail
         wallets={[WALLET, SECOND]}

@@ -291,8 +291,8 @@ class TradingError(RuntimeError):
 #: route it directly. Clients show it verbatim (``docs/markets.md``).
 STOCK_TOKEN_UNISWAP_HINT = (
     "The AgentOS DEX's Uniswap source could not take this pair. Retry later, "
-    "or add a Uniswap API key (`agentos config set trading.uniswap_api_key <key>`, "
-    "or Settings › Trading in the desktop app) to route through Uniswap directly"
+    "or add a Uniswap API key (`agentos config set trading.uniswap_api_key <key>`) "
+    "to route through Uniswap directly"
 )
 
 

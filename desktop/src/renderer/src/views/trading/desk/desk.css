@@ -401,10 +401,6 @@
   color: var(--foreground);
   background: color-mix(in srgb, var(--foreground) 9%, transparent);
 }
-.trd-seat__anchor {
-  position: relative;
-  display: inline-flex;
-}
 .trd-seat[aria-disabled='true'] {
   opacity: 0.6;
 }
@@ -470,11 +466,6 @@
 }
 @container (max-width: 600px) {
   .trd-seat[data-testid='wallet-seat'] .trd-seat__text {
-    display: none;
-  }
-}
-@container (max-width: 545px) {
-  .trd-seat[data-testid='provider-seat'] .trd-seat__text {
     display: none;
   }
 }

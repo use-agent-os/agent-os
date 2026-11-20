@@ -7,7 +7,7 @@ export const trading = {
   'trading.mode.stamp': 'TRADING DESK',
   'settings.section.trading': 'Trading',
   'settings.section.trading.blurb':
-    'The Uniswap key that quotes your swaps, how the vault unlocks, and the limits the agent trades within.',
+    'The route your swaps take, how the vault unlocks, and the limits the agent trades within.',
 
   // Page
   'trading.title': 'Trading',
@@ -28,10 +28,6 @@ export const trading = {
   'trading.noWallets.body': 'Create a wallet to receive funds, or import one you already use.',
   'trading.noWallets.create': 'Create wallet',
   'trading.noWallets.import': 'Import wallet',
-  'trading.noKey.title': 'Add your Uniswap API key',
-  'trading.noKey.body':
-    'Balances and history work without it. Quotes and swaps need a key from the Uniswap developer dashboard.',
-  'trading.noKey.cta': 'Add key',
   'trading.sync': 'Resync from chain',
   'trading.syncing': 'Syncing',
   'trading.lastSync': 'Last sync',
@@ -254,7 +250,6 @@ export const trading = {
   'trading.swap.cta.noAmount': 'Enter an amount',
   'trading.swap.cta.noWallet': 'Choose a wallet',
   'trading.swap.cta.insufficient': 'Not enough',
-  'trading.swap.cta.noKey': 'Add a Uniswap key',
   'trading.swap.cta.locked': 'Unlock the vault',
   'trading.swap.guard.allow': 'Within your limits',
   'trading.swap.guard.needs_approval': 'Above the agent threshold; you are confirming it yourself',
@@ -437,11 +432,14 @@ export const trading = {
   'trading.settings.enabled.help':
     'Off hides the desk and refuses every swap, including the agent’s.',
   'trading.provider.via': 'via',
-  'trading.provider.switch': 'Switch provider',
+  'trading.provider.switch': 'Use AgentOS DEX',
+  'trading.provider.saved': 'Swaps now route through',
+  'trading.offDex.title': 'Swaps are set to another provider.',
+  'trading.offDex.body':
+    'This gateway was configured to swap through a provider other than the AgentOS DEX, which is the only route this app uses. Balances and history still work; switch back to quote and swap.',
   'trading.settings.provider': 'Swap provider',
   'trading.settings.provider.help':
-    'Who finds the route and builds the transaction. The AgentOS DEX is the default and needs no key; Uniswap is the fallback and needs an API key.',
-  'trading.settings.provider.saved': 'Provider saved',
+    'Who finds the route and builds the transaction. Swaps go through the AgentOS DEX, which needs no key.',
   'trading.settings.aggregator': 'AgentOS DEX',
   'trading.settings.aggregator.blurb':
     'No key. Routes and unsigned calldata come from the AgentOS DEX; your wallet still does every signature.',
@@ -449,20 +447,6 @@ export const trading = {
   'trading.settings.aggregator.testing': 'Testing…',
   'trading.settings.aggregator.works': 'Reachable.',
   'trading.settings.aggregator.failed': 'Not reachable:',
-  'trading.settings.key.idle': 'Only used while Uniswap is the swap provider.',
-  'trading.settings.uniswap': 'Uniswap',
-  'trading.settings.uniswap.blurb': 'Quotes and swap calldata come from the Uniswap Trading API.',
-  'trading.settings.key': 'API key',
-  'trading.settings.key.help': 'Create one at the Uniswap developer dashboard.',
-  'trading.settings.key.get': 'Get an API key',
-  'trading.settings.key.saved': 'Saved. Paste a new key to replace it.',
-  'trading.settings.key.placeholder': 'Paste a key',
-  'trading.settings.key.test': 'Test key',
-  'trading.settings.key.testing': 'Testing…',
-  'trading.settings.key.works': 'Key works.',
-  'trading.settings.key.failed': 'Key rejected:',
-  'trading.settings.key.show': 'Show key',
-  'trading.settings.key.hide': 'Hide key',
   'trading.settings.vault': 'Vault',
   'trading.settings.vault.blurb': 'Where keys live and how they unlock.',
   'trading.settings.vault.state': 'State',
@@ -484,7 +468,7 @@ export const trading = {
   'trading.settings.ttl': 'Approval timeout',
   'trading.settings.ttl.help': 'Minutes an approval waits before it lapses.',
   'trading.settings.slippage': 'Default slippage',
-  'trading.settings.slippage.help': 'Percent. Empty lets Uniswap pick per pair.',
+  'trading.settings.slippage.help': 'Percent. Empty uses the AgentOS DEX default, 0.5%.',
   'trading.settings.chains': 'Networks',
   'trading.settings.chains.blurb':
     'Public RPC endpoints by default. Paste your own to skip their rate limits.',
@@ -502,8 +486,6 @@ export const trading = {
   'trading.chat.empty.body':
     'Ask for a quote, a swap, or a mission that runs on its own clock. Anything that moves money above your limit waits for you here.',
   'trading.composer.steering': 'Steer the running turn, or queue this for next.',
-  'trading.noKey.chatBody':
-    'Balances and history work without it. Quotes and swaps need a key from the Uniswap developer dashboard.',
 
   // Never rendered — the strip shows no word while idle — but statusWord()
   // still has 'idle' in its type, so the lookup must resolve.
@@ -515,12 +497,6 @@ export const trading = {
 
   'trading.seat.permission.title': 'What the agent may do (Settings › Trading)',
   'trading.seat.permission.unknown': 'Agent limits',
-  'trading.seat.provider.title': 'Swap provider',
-  'trading.seat.provider.settings': 'Provider settings…',
-  'trading.seat.provider.needsKey': 'needs an API key',
-  'trading.seat.provider.keyOk': 'key configured',
-  'trading.seat.provider.noKey': 'no key',
-  'trading.seat.provider.saved': 'Swap provider switched',
   'trading.seat.asksAbove': 'Asks above',
   'trading.seat.perDay': '/day',
   'trading.seat.wallet.title': 'Active wallet',

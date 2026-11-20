@@ -77,7 +77,7 @@ Swap button would be decoration. Two engine changes land with the feature:
      `SOURCE_UNAVAILABLE`, or a gateway that predates the source) and a
      Uniswap key is configured, the quote is retried through the Uniswap
      provider and the row records `provider: "uniswap"`. Without a key the
-     error is raised with its message extended: *"The AgentOS DEX's Uniswap source could not take this pair. Retry later, or add a Uniswap API key (`agentos config set trading.uniswap_api_key <key>`, or Settings › Trading in the desktop app) to route through Uniswap directly"* — the exact
+     error is raised with its message extended: *"The AgentOS DEX's Uniswap source could not take this pair. Retry later, or add a Uniswap API key (`agentos config set trading.uniswap_api_key <key>`) to route through Uniswap directly"* — the exact
      wording lives in the engine, the desktop shows it verbatim.
    - A configured `trading.provider = "uniswap"` is left alone.
 

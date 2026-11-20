@@ -19,9 +19,8 @@ function mount(extra: Partial<Parameters<typeof SwapPanel>[0]> = {}) {
       wallets={[WALLET]}
       primary={WALLET.address}
       selectedWallet="all"
-      provider="uniswap"
+      provider="aggregator"
       providerReady
-      onOpenSettings={vi.fn()}
       unlocked
       prefill={{ chainId: 8453, tokenIn: ETH, tokenOut: USDC, seq: 1 }}
       onSent={vi.fn()}
@@ -125,9 +124,8 @@ describe('SwapPanel', () => {
         wallets={[WALLET]}
         primary={WALLET.address}
         selectedWallet="all"
-        provider="uniswap"
+        provider="aggregator"
         providerReady
-        onOpenSettings={vi.fn()}
         unlocked
         prefill={prefill}
         onSent={vi.fn()}
@@ -245,20 +243,24 @@ describe('SwapPanel', () => {
     })
   })
 
-  it('cannot review without a Uniswap key or an unlocked vault', () => {
-    mount({ providerReady: false })
-    expect(screen.getByTestId('swap-review')).toHaveTextContent('Add a Uniswap key')
+  it('cannot review off the AgentOS DEX or with a locked vault', () => {
+    mount({ provider: 'uniswap', providerReady: false })
+    expect(screen.getByTestId('swap-review')).toHaveTextContent('Use AgentOS DEX')
     expect(rpcCall.mock.calls.some((c) => c[0] === 'trading.quote')).toBe(false)
   })
 
-  it('opens Settings from the no-key button', () => {
-    const onOpenSettings = vi.fn()
-    mount({ provider: 'uniswap', providerReady: false, onOpenSettings })
+  it('puts the gateway back on the AgentOS DEX from the ticket button', async () => {
+    // A gateway whose config names another provider: the ticket quotes
+    // nothing, and its button is the way back rather than a dead end.
+    mount({ provider: 'uniswap', providerReady: false })
     const cta = screen.getByTestId('swap-review')
-    expect(cta).toHaveTextContent('Add a Uniswap key')
+    expect(cta).toHaveTextContent('Use AgentOS DEX')
     expect(cta).not.toBeDisabled()
     fireEvent.click(cta)
-    expect(onOpenSettings).toHaveBeenCalledTimes(1)
+    await waitFor(() =>
+      expect(rpcCall).toHaveBeenCalledWith('trading.setProvider', { provider: 'aggregator' }),
+    )
+    expect(rpcCall.mock.calls.some((c) => c[0] === 'trading.quote')).toBe(false)
   })
 
   it('keeps the vault gate closed: a locked vault is not something the ticket can open', () => {
@@ -385,9 +387,8 @@ describe('SwapPanel', () => {
         wallets={wallets}
         primary={WALLET.address}
         selectedWallet="all"
-        provider="uniswap"
+        provider="aggregator"
         providerReady
-        onOpenSettings={vi.fn()}
         unlocked
         prefill={null}
         onSent={vi.fn()}
