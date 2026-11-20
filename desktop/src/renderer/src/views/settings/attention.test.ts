@@ -39,6 +39,24 @@ describe('sectionAttention', () => {
     expect(out.overview).toBe('danger')
   })
 
+  it('search on X on without a key or login warns on Capabilities; off, logged in or unknown does not', () => {
+    const x = (enabled: boolean): SettingsSnapshot => ({
+      catalog: {
+        xSearch: [{ providerId: 'x_search', requiresApiKey: true, envKey: 'XAI_API_KEY' }],
+      },
+      config: { x_search: { enabled, api_key: '', api_key_env: 'XAI_API_KEY' } },
+      status: { sectionDetails: {} },
+    })
+    const unset = { envSet: () => false, xaiLogin: false }
+    expect(sectionAttention(x(true), unset)).toEqual({ capabilities: 'warn', overview: 'warn' })
+    expect(sectionAttention(x(false), unset)).toEqual({})
+    expect(sectionAttention(x(true), { ...unset, xaiLogin: true })).toEqual({})
+    expect(sectionAttention(x(true), { envSet: (n) => n === 'XAI_API_KEY' })).toEqual({})
+    // The environment not read yet: no dot on a guess.
+    expect(sectionAttention(x(true), { envSet: () => undefined })).toEqual({})
+    expect(sectionAttention(x(true))).toEqual({})
+  })
+
   it('falls back to the readiness details and ignores sections it does not own', () => {
     const out = sectionAttention({
       readiness: {

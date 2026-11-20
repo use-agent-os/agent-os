@@ -475,19 +475,44 @@ const CAPABILITY_KEY_URLS: Readonly<Record<string, string>> = {
 
 // ── what stops a save ──────────────────────────────────────────────────────
 
-/** Lower bounds the gateway enforces, checked here so the message is ours. */
-const MIN_VALUE: Readonly<Record<string, number>> = {
-  max_results: 1,
-  timeout_seconds: 1,
-  total_timeout_seconds: 1,
+/**
+ * What the engine and the services accept, checked here so the message is
+ * ours and comes before the round trip. Results per search: the gateway's
+ * own `search.query` takes 1 to 20, and Brave and Tavily return at most 20
+ * whatever is asked. X search: the bounds of `XSearchConfig` in the engine.
+ */
+export const NUMBER_BOUNDS: Readonly<Record<string, { min: number; max: number }>> = {
+  max_results: { min: 1, max: 20 },
+  timeout_seconds: { min: 30, max: 300 },
+  total_timeout_seconds: { min: 30, max: 600 },
+  retries: { min: 0, max: 5 },
 }
 
-export type SaveProblem =
-  | { kind: 'key'; envKey: string }
-  | { kind: 'model-prefix'; prefix: string }
+export type FieldProblem =
   | { kind: 'number'; field: string }
-  | { kind: 'min'; field: string; min: number }
+  | { kind: 'range'; field: string; min: number; max: number }
   | { kind: 'required'; field: string }
+
+export type SaveProblem =
+  { kind: 'key'; envKey: string } | { kind: 'model-prefix'; prefix: string } | FieldProblem
+
+/** What is wrong with one field's value as typed, or null. A blank number keeps the saved one. */
+export function fieldProblem(field: FieldSpec, value: unknown): FieldProblem | null {
+  const raw = str(value).trim()
+  if ((field.type === 'int' || field.type === 'float') && raw !== '') {
+    const ok = field.type === 'int' ? /^-?\d+$/.test(raw) : Number.isFinite(Number(raw))
+    if (!ok) return { kind: 'number', field: field.name }
+    const bounds = NUMBER_BOUNDS[field.name]
+    const n = Number(raw)
+    if (bounds && (n < bounds.min || n > bounds.max)) {
+      return { kind: 'range', field: field.name, ...bounds }
+    }
+  }
+  if (field.required && !isSecretField(field) && field.type !== 'bool' && raw === '') {
+    return { kind: 'required', field: field.name }
+  }
+  return null
+}
 
 /**
  * The first reason the draft cannot be saved, or null. The gateway would
@@ -508,16 +533,8 @@ export function saveProblem(
   }
   const fields = visibleFields(def.fields(spec), draft.values)
   for (const field of fields) {
-    const raw = str(draft.values[field.name]).trim()
-    if ((field.type === 'int' || field.type === 'float') && raw !== '') {
-      const ok = field.type === 'int' ? /^\d+$/.test(raw) : Number.isFinite(Number(raw))
-      if (!ok) return { kind: 'number', field: field.name }
-      const min = MIN_VALUE[field.name]
-      if (min !== undefined && Number(raw) < min) return { kind: 'min', field: field.name, min }
-    }
-    if (field.required && !isSecretField(field) && field.type !== 'bool' && raw === '') {
-      return { kind: 'required', field: field.name }
-    }
+    const problem = fieldProblem(field, draft.values[field.name])
+    if (problem) return problem
   }
   if (def.id === 'image') {
     const primary = str(draft.values.primary).trim()

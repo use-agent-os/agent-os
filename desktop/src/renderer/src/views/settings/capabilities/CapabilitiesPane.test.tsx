@@ -3,7 +3,10 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useConnection } from '@/stores/connection'
 import type { SettingsSnapshot } from '@/views/settings/snapshot'
-import { CapabilitiesPane } from '../panes/CapabilitiesPane'
+import { useUi } from '~/stores/ui'
+import { sectionAttention } from '../attention'
+import { takeFocus } from '../overview/jumps'
+import { CapabilitiesPane, scrollBehavior } from '../panes/CapabilitiesPane'
 
 const rpcCall = vi.fn()
 vi.mock('@/app/providers', () => ({
@@ -86,6 +89,25 @@ function snapshot(): SettingsSnapshot {
       audioEnabled: false,
     },
   }
+}
+
+/** X search as the gateway ships it: on, reading XAI_API_KEY. */
+function withX(s: SettingsSnapshot): SettingsSnapshot {
+  s.catalog!.xSearch = [
+    {
+      providerId: 'x_search',
+      label: 'X (Twitter) Search',
+      requiresApiKey: true,
+      envKey: 'XAI_API_KEY',
+      fields: [
+        { name: 'api_key', label: 'API key', type: 'password', secret: true, required: true },
+        { name: 'model', label: 'Model', type: 'text', default: 'grok-4.5' },
+        { name: 'timeout_seconds', label: 'Timeout', type: 'int', default: 180 },
+      ],
+    },
+  ]
+  s.config!.x_search = { enabled: true, model: 'grok-4.5', api_key: '', api_key_env: 'XAI_API_KEY' }
+  return s
 }
 
 function mount() {
@@ -217,6 +239,95 @@ describe('CapabilitiesPane', () => {
     })
     fireEvent.click(within(search).getByRole('button', { name: 'Save' }))
     expect(await within(search).findByText('max_results must be >= 1')).toBeInTheDocument()
+  })
+
+  it('search on X on without a key: the strip, the card and the rail tell one story', async () => {
+    rpcCall.mockImplementation(async (method: string) => {
+      if (method === 'config.snapshot') return withX(snapshot())
+      if (method === 'env.list') return { vars: [{ name: 'XAI_API_KEY', isSet: false }] }
+      if (method === 'auth.status') return { xai: { logged_in: false } }
+      return {}
+    })
+    mount()
+    const stats = await screen.findByRole('group', { name: 'Capabilities at a glance' })
+    await envLoaded()
+    const x = within(stats).getByRole('button', { name: /Search on X/ })
+    await waitFor(() => expect(within(x).getByText('Key missing')).toBeInTheDocument())
+    expect(within(x).getByText('Grok')).toBeInTheDocument()
+    expect(within(card('Search on X')).getByText('Needs a key')).toBeInTheDocument()
+    expect(sectionAttention(withX(snapshot()), { envSet: () => false, xaiLogin: false })).toEqual({
+      capabilities: 'warn',
+      overview: 'warn',
+    })
+  })
+
+  it('results per search outside 1 to 20 is refused at the field', async () => {
+    mount()
+    await screen.findByRole('region', { name: 'Web search' })
+    const search = card('Web search')
+    const input = within(search).getByLabelText('Results per search')
+    fireEvent.change(input, { target: { value: '500' } })
+    expect(
+      within(search).getByText('Results per search must be between 1 and 20.'),
+    ).toBeInTheDocument()
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(within(search).getByRole('button', { name: 'Save' })).toBeDisabled()
+    fireEvent.change(input, { target: { value: '20' } })
+    expect(within(search).queryByText(/must be between/)).toBeNull()
+    expect(within(search).getByRole('button', { name: 'Save' })).toBeEnabled()
+  })
+
+  it('X timeouts outside the engine bounds are said at the field, in seconds', async () => {
+    rpcCall.mockImplementation(async (method: string) => {
+      if (method === 'config.snapshot') return withX(snapshot())
+      if (method === 'env.list') return { vars: [{ name: 'XAI_API_KEY', isSet: true }] }
+      if (method === 'auth.status') return { xai: {} }
+      return {}
+    })
+    mount()
+    const x = await screen.findByRole('region', { name: 'Search on X' })
+    await envLoaded()
+    fireEvent.click(within(x).getByRole('button', { name: /Advanced/ }))
+    fireEvent.change(within(x).getByLabelText('Time per attempt (seconds)'), {
+      target: { value: '10' },
+    })
+    // Under Advanced, so the foot says it too.
+    expect(
+      within(x).getAllByText('Time per attempt must be between 30 and 300 seconds.'),
+    ).toHaveLength(2)
+    expect(within(x).getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+
+  it('Open Environment lands on the variable the key is read from', async () => {
+    useUi.setState({ settingsSection: 'capabilities' })
+    mount()
+    await screen.findByRole('region', { name: 'Web search' })
+    await envLoaded()
+    const search = card('Web search')
+    fireEvent.click(within(search).getByRole('radio', { name: /Brave Search/ }))
+    fireEvent.click(within(search).getByRole('button', { name: 'Open Environment' }))
+    expect(useUi.getState().settingsSection).toBe('environment')
+    expect(takeFocus('environment')).toBe('BRAVE_SEARCH_API_KEY')
+  })
+
+  it('a jump scrolls smoothly, or at once for reduced motion or a hidden window', () => {
+    const original = window.matchMedia
+    const visibility = vi.spyOn(document, 'visibilityState', 'get')
+    const media = (matches: boolean) =>
+      vi.fn(() => ({ matches }) as unknown as MediaQueryList) as unknown as typeof window.matchMedia
+    try {
+      window.matchMedia = media(false)
+      expect(scrollBehavior()).toBe('smooth')
+      window.matchMedia = media(true)
+      expect(scrollBehavior()).toBe('instant')
+      // A hidden window gets no animation frames: a smooth scroll would never land.
+      window.matchMedia = media(false)
+      visibility.mockReturnValue('hidden')
+      expect(scrollBehavior()).toBe('instant')
+    } finally {
+      window.matchMedia = original
+      visibility.mockRestore()
+    }
   })
 
   it('offline: says so and reads nothing', () => {

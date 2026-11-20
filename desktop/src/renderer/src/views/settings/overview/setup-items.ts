@@ -8,6 +8,7 @@ import {
 } from '@/views/setup/logic'
 import type { SettingsSnapshot } from '@/views/settings/snapshot'
 import { t, type MessageKey } from '~/i18n'
+import { capabilityStatus, xSearchDef, type KeyContext } from '../capabilities/logic'
 import type { SettingsSection } from '../sections'
 
 /**
@@ -24,6 +25,7 @@ export type SetupItemId =
   | 'search'
   | 'image'
   | 'voice'
+  | 'x'
   | 'channels'
   | 'skills'
   | 'env'
@@ -69,6 +71,11 @@ export interface SetupInput {
   skills?: { total: number; needs: number } | null
   /** Names of variables a skill or service requires and that are unset. */
   env?: { missing: string[] } | null
+  /**
+   * Whether the keys capabilities read are there (env.list and the xAI
+   * login); undefined while loading, null when the environment is unreadable.
+   */
+  keys?: KeyContext | null
   /** wallet.status; undefined while loading, null when unreadable. */
   wallet?: { initialized: boolean; walletCount: number } | null
   /** The updates store; omitted until it has checked once. */
@@ -349,9 +356,13 @@ function imageItem(snapshot: SettingsSnapshot): SetupItem {
         jump,
       )
     }
-    const model = primary.startsWith(`${providerId}/`)
-      ? primary.slice(providerId.length + 1)
-      : primary
+    // The default primary names a provider with no key; the gateway then uses
+    // the default model of the provider that has one, so name that model.
+    const spec = snapshot.catalog?.imageGenerationProviders?.find(
+      (p) => p.providerId === providerId,
+    )
+    const ref = primary.startsWith(`${providerId}/`) ? primary : String(spec?.defaultModel ?? '')
+    const model = ref.startsWith(`${providerId}/`) ? ref.slice(providerId.length + 1) : ''
     return item('image', 'recommended', 'done', model ? `${label} · ${model}` : label, jump)
   }
   return item(
@@ -375,6 +386,47 @@ function voiceItem(snapshot: SettingsSnapshot): SetupItem {
     return item('voice', 'recommended', 'done', label, jump)
   }
   return item('voice', 'recommended', 'attention', keyProblem(label, status.audioEnvKey), jump)
+}
+
+/**
+ * X search has no onboarding section of its own, and the gateway's default
+ * is on: on with no xAI key and no SuperGrok login, the agent never sees the
+ * tool, and that is worth saying.
+ */
+function xItem(snapshot: SettingsSnapshot, keys: SetupInput['keys']): SetupItem | null {
+  if (xSearchDef.specs(snapshot).length === 0) return null
+  const jump = section('capabilities', 'x')
+  if (!xSearchDef.enabled(snapshot)) {
+    return item('x', 'recommended', 'todo', t('settings.overview.detail.off'), jump)
+  }
+  if (keys === null) return null
+  if (keys === undefined) {
+    return item('x', 'recommended', 'checking', t('settings.overview.detail.checking'), jump)
+  }
+  const status = capabilityStatus(xSearchDef, snapshot, keys)
+  const envKey = String(snapshot.config?.x_search?.api_key_env || '').trim() || 'XAI_API_KEY'
+  if (status.state === 'key') {
+    return item(
+      'x',
+      'recommended',
+      'attention',
+      fill('settings.overview.detail.x.noKey', { key: envKey }),
+      jump,
+    )
+  }
+  const model = String(snapshot.config?.x_search?.model ?? '').trim() || 'Grok'
+  return item(
+    'x',
+    'recommended',
+    'done',
+    fill(
+      status.source === 'login'
+        ? 'settings.overview.detail.x.login'
+        : 'settings.overview.detail.x.key',
+      { model },
+    ),
+    jump,
+  )
 }
 
 function channelsItem(snapshot: SettingsSnapshot): SetupItem {
@@ -551,6 +603,7 @@ export function setupItems(input: SetupInput): SetupItem[] {
     searchItem(snapshot),
     imageItem(snapshot),
     voiceItem(snapshot),
+    xItem(snapshot, input.keys),
     channelsItem(snapshot),
     skillsItem(input.skills),
     envItem(input.env),
@@ -574,8 +627,14 @@ export interface SetupSummary {
   /** Items that count (not still checking). */
   total: number
   done: number
-  /** Required items not done plus broken ones: what the head pill counts. */
+  /** Required items not done plus broken ones. */
   toFinish: number
+  /** Required items not done. */
+  requiredLeft: number
+  /** Recommended items set up but broken (on, with a key missing). */
+  toFix: number
+  /** Recommended items simply not set up: fine to skip. */
+  optional: number
   /** The one step the hero offers, or null when nothing is left. */
   next: SetupItem | null
 }
@@ -591,6 +650,7 @@ export const SUGGEST_ORDER: readonly SetupItemId[] = [
   'updates',
   'image',
   'voice',
+  'x',
   'wallet',
 ]
 
@@ -601,7 +661,15 @@ export function summarizeSetup(items: readonly SetupItem[]): SetupSummary {
   const requiredOpen = counted.filter((i) => i.group === 'required' && i.state !== 'done')
   const broken = counted.filter((i) => i.group === 'recommended' && i.state === 'attention')
   const toFinish = requiredOpen.length + broken.length
-  const base = { total: counted.length, done, toFinish }
+  const optional = counted.filter((i) => i.group === 'recommended' && i.state === 'todo').length
+  const base = {
+    total: counted.length,
+    done,
+    toFinish,
+    requiredLeft: requiredOpen.length,
+    toFix: broken.length,
+    optional,
+  }
   if (gateway && gateway.state !== 'done') {
     return { ...base, phase: 'offline', next: gateway }
   }

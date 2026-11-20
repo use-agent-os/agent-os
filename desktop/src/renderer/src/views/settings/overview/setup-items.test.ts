@@ -361,6 +361,95 @@ describe('setupItems', () => {
   })
 })
 
+describe('search on X', () => {
+  const X_SPEC = {
+    providerId: 'x_search',
+    label: 'X (Twitter) Search',
+    requiresApiKey: true,
+    envKey: 'XAI_API_KEY',
+  }
+  function withX(s: SettingsSnapshot, enabled = true): SettingsSnapshot {
+    s.catalog = { ...s.catalog, xSearch: [X_SPEC] }
+    s.config = {
+      ...s.config,
+      x_search: { enabled, model: 'grok-4.5', api_key: '', api_key_env: 'XAI_API_KEY' },
+    }
+    return s
+  }
+  const keys = (set: boolean, login = false) => ({
+    envSet: (name: string) => (name === 'XAI_API_KEY' ? set : false),
+    xaiLogin: login,
+  })
+
+  it('on without a key or login: a recommended row to fix, and the summary says so', () => {
+    const items = setupItems(input(withX(everything()), { keys: keys(false) }))
+    const x = byId(items).x
+    expect(x).toMatchObject({
+      group: 'recommended',
+      state: 'attention',
+      action: 'Fix',
+      detail: 'On, but XAI_API_KEY is not set and there is no SuperGrok login',
+      jump: { kind: 'section', section: 'capabilities', focus: 'x' },
+    })
+    const summary = summarizeSetup(items)
+    expect(summary).toMatchObject({ phase: 'attention', requiredLeft: 0, toFix: 1, optional: 0 })
+    expect(summary.next?.id).toBe('x')
+  })
+
+  it('a key in the environment or a SuperGrok login makes it done', () => {
+    expect(byId(setupItems(input(withX(everything()), { keys: keys(true) }))).x).toMatchObject({
+      state: 'done',
+      detail: 'grok-4.5 · xAI key',
+    })
+    expect(
+      byId(setupItems(input(withX(everything()), { keys: keys(false, true) }))).x,
+    ).toMatchObject({ state: 'done', detail: 'grok-4.5 · SuperGrok login' })
+  })
+
+  it('off is an optional row; unknown keys are checking; no X in the catalog, no row', () => {
+    expect(
+      byId(setupItems(input(withX(everything(), false), { keys: keys(false) }))).x,
+    ).toMatchObject({ state: 'todo', detail: 'Off' })
+    expect(byId(setupItems(input(withX(everything())))).x.state).toBe('checking')
+    expect(byId(setupItems(input(withX(everything()), { keys: null }))).x).toBeUndefined()
+    expect(byId(setupItems(input(everything(), { keys: keys(false) }))).x).toBeUndefined()
+  })
+})
+
+describe('image generation through another provider', () => {
+  it('names the model that provider will use, not the default primary it cannot serve', () => {
+    const s = everything()
+    s.catalog = {
+      ...s.catalog,
+      imageGenerationProviders: [
+        {
+          providerId: 'openrouter',
+          label: 'OpenRouter Images',
+          defaultModel: 'openrouter/google/gemini-image',
+        },
+      ],
+    }
+    s.config!.image_generation = { enabled: true, primary: 'openai/gpt-image-1' }
+    s.status = {
+      ...s.status,
+      imageGenerationPrimary: 'openai/gpt-image-1',
+      imageGenerationProvider: 'openrouter',
+    }
+    expect(byId(setupItems(input(s))).image.detail).toBe('OpenRouter Images · google/gemini-image')
+  })
+})
+
+describe('summary counts', () => {
+  it('splits what is left into required, to fix and optional', () => {
+    const summary = summarizeSetup(setupItems(input(providerOnly())))
+    expect(summary.requiredLeft).toBe(0)
+    expect(summary.toFix).toBe(0)
+    // Search, memory, image, voice and channels are off: each one skippable.
+    expect(summary.optional).toBe(5)
+    expect(summary.done + summary.optional).toBe(summary.total)
+  })
+})
+
 describe('hostOf', () => {
   it('drops the scheme and a trailing slash', () => {
     expect(hostOf('http://127.0.0.1:18799/')).toBe('127.0.0.1:18799')

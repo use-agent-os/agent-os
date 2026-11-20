@@ -10,6 +10,7 @@ import { useGateway } from '~/stores/gateway'
 import { useSettings } from '~/stores/settings'
 import { useWalletStatus } from '~/stores/trading'
 import { useUpdates } from '~/stores/updates'
+import { useKeyFacts } from '../capabilities/key-context'
 import { Checklist } from '../overview/Checklist'
 import { Hero } from '../overview/Hero'
 import { jumpTo } from '../overview/jumps'
@@ -21,7 +22,7 @@ import {
   type SetupItem,
   type SetupSummary,
 } from '../overview/setup-items'
-import { Head, Notice, Pill } from '../parts'
+import { Head, Notice, Pill, type Tone } from '../parts'
 import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot } from '../use-snapshot'
 
@@ -92,18 +93,36 @@ function useUpdateFacts(external: boolean): SetupInput['updates'] {
   }
 }
 
-function summaryPill(summary: SetupSummary) {
+/**
+ * The head pill says the same thing as the hero, in words that cannot be
+ * read as "everything is done" while optional items are open: required steps
+ * left, else what is broken, else how many optional items remain.
+ */
+function summaryPillText(summary: SetupSummary): { text: string; tone: Tone } {
   if (summary.phase === 'offline') {
-    return <Pill tone="danger">{t('settings.overview.pill.offline')}</Pill>
+    return { text: t('settings.overview.pill.offline'), tone: 'danger' }
   }
-  if (summary.toFinish === 0) return <Pill tone="ok">{t('settings.overview.pill.allSet')}</Pill>
-  return (
-    <Pill tone="warn">
-      {summary.toFinish === 1
-        ? t('settings.overview.pill.one')
-        : fill('settings.overview.pill.many', { n: summary.toFinish })}
-    </Pill>
-  )
+  if (summary.requiredLeft > 0) {
+    return {
+      text:
+        summary.requiredLeft === 1
+          ? t('settings.overview.pill.requiredOne')
+          : fill('settings.overview.pill.requiredMany', { n: summary.requiredLeft }),
+      tone: 'warn',
+    }
+  }
+  if (summary.toFix > 0) {
+    return { text: fill('settings.overview.pill.toFix', { n: summary.toFix }), tone: 'warn' }
+  }
+  if (summary.optional > 0) {
+    return { text: fill('settings.overview.pill.optional', { n: summary.optional }), tone: 'ok' }
+  }
+  return { text: t('settings.overview.pill.allSet'), tone: 'ok' }
+}
+
+function summaryPill(summary: SetupSummary) {
+  const { text, tone } = summaryPillText(summary)
+  return <Pill tone={tone}>{text}</Pill>
 }
 
 /**
@@ -124,6 +143,8 @@ export function OverviewPane() {
     { enabled?: boolean } | undefined
   const tradingOn = Boolean(trading) && trading?.enabled !== false
   const facts = useSideFacts(connected, tradingOn)
+  const keyFacts = useKeyFacts(connected)
+  const keys = keyFacts.failed ? null : keyFacts.ready ? keyFacts.ctx : undefined
   const updates = useUpdateFacts(external)
 
   const url = gatewayStatus.url ?? (savedGateway.host ? gatewayUrl(savedGateway) : null)
@@ -137,6 +158,7 @@ export function OverviewPane() {
     },
     snapshot,
     ...facts,
+    keys,
     updates,
   })
   const summary = summarizeSetup(items)

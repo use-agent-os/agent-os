@@ -7,10 +7,12 @@ import {
   collectParams,
   draftDirty,
   enableDraft,
+  fieldProblem,
   imageDef,
   keyReady,
   keySource,
   keyUrl,
+  NUMBER_BOUNDS,
   saveProblem,
   searchDef,
   seedDraft,
@@ -206,27 +208,22 @@ describe('search', () => {
     expect(buildParams(searchDef, BRAVE, draft)).not.toHaveProperty('apiKey')
   })
 
-  it('rejects numbers the gateway would refuse, before the round trip', () => {
+  it('results per search stay within what the engine and the services take (1 to 20)', () => {
     const s = snapshot()
     const draft = seedDraft(searchDef, s)
-    expect(
-      saveProblem(
-        searchDef,
-        DDG,
-        { ...draft, values: { ...draft.values, max_results: '0' } },
-        s,
-        ctx,
-      ),
-    ).toEqual({ kind: 'min', field: 'max_results', min: 1 })
-    expect(
-      saveProblem(
-        searchDef,
-        DDG,
-        { ...draft, values: { ...draft.values, max_results: 'x' } },
-        s,
-        ctx,
-      ),
-    ).toEqual({ kind: 'number', field: 'max_results' })
+    const problem = (max_results: string) =>
+      saveProblem(searchDef, DDG, { ...draft, values: { ...draft.values, max_results } }, s, ctx)
+    const range = { kind: 'range', field: 'max_results', min: 1, max: 20 }
+    expect(problem('0')).toEqual(range)
+    expect(problem('500')).toEqual(range)
+    expect(problem('21')).toEqual(range)
+    expect(problem('-3')).toEqual(range)
+    expect(problem('1')).toBeNull()
+    expect(problem('20')).toBeNull()
+    expect(problem('x')).toEqual({ kind: 'number', field: 'max_results' })
+    expect(problem('2.5')).toEqual({ kind: 'number', field: 'max_results' })
+    // Cleared: the gateway keeps its own value.
+    expect(problem('')).toBeNull()
   })
 
   it('status: on with no key needed', () => {
@@ -334,6 +331,26 @@ describe('X search', () => {
     const params = buildParams(xSearchDef, XSEARCH, { ...draft, enabled: false })
     expect(params).not.toHaveProperty('providerId')
     expect(params).toMatchObject({ enabled: false, model: 'grok-4.5', timeoutSeconds: 180 })
+  })
+
+  it("timeouts and retries stay within the engine's XSearchConfig bounds", () => {
+    const field = (name: string) => ({ name, type: 'int' as const })
+    expect(fieldProblem(field('timeout_seconds'), '29')).toEqual({
+      kind: 'range',
+      field: 'timeout_seconds',
+      min: 30,
+      max: 300,
+    })
+    expect(fieldProblem(field('timeout_seconds'), '300')).toBeNull()
+    expect(fieldProblem(field('total_timeout_seconds'), '601')).toMatchObject({ max: 600 })
+    expect(fieldProblem(field('retries'), '0')).toBeNull()
+    expect(fieldProblem(field('retries'), '6')).toMatchObject({ kind: 'range', min: 0, max: 5 })
+    expect(Object.keys(NUMBER_BOUNDS).sort()).toEqual([
+      'max_results',
+      'retries',
+      'timeout_seconds',
+      'total_timeout_seconds',
+    ])
   })
 
   it('a SuperGrok login stands in for the key', () => {

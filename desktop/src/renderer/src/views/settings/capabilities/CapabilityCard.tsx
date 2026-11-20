@@ -18,6 +18,7 @@ import {
   buildParams,
   draftDirty,
   enableDraft,
+  fieldProblem,
   initialProvider,
   keyReady,
   keySource,
@@ -80,13 +81,26 @@ function problemText(problem: SaveProblem, def: CapabilityDef, spec: ProviderSpe
   }
   const field = def.fields(spec).find((f) => f.name === problem.field)
   const label = field ? fieldLabel(field) : problem.field
-  if (problem.kind === 'min') {
-    return fill('settings.capabilities.problem.min', { field: label, min: problem.min })
+  if (problem.kind === 'range') {
+    // "Time per attempt must be between 30 and 300 seconds", not "… (seconds) must …".
+    const seconds = problem.field.endsWith('_seconds')
+    return fill(
+      seconds
+        ? 'settings.capabilities.problem.rangeSeconds'
+        : 'settings.capabilities.problem.range',
+      {
+        field: seconds ? label.replace(/\s*\(seconds\)$/, '') : label,
+        min: problem.min,
+        max: problem.max,
+      },
+    )
   }
   return fill(
-    problem.kind === 'number'
-      ? 'settings.capabilities.problem.number'
-      : 'settings.capabilities.problem.required',
+    problem.kind === 'required'
+      ? 'settings.capabilities.problem.required'
+      : field?.type === 'int'
+        ? 'settings.capabilities.problem.whole'
+        : 'settings.capabilities.problem.number',
     { field: label },
   )
 }
@@ -208,7 +222,11 @@ export function CapabilityCard({
           <span className="cap-missing">
             {fill('settings.capabilities.key.missing', { key: envKey })}
           </span>
-          <button type="button" className="prov-keylink" onClick={() => jumpTo('environment')}>
+          <button
+            type="button"
+            className="prov-keylink"
+            onClick={() => jumpTo('environment', envKey || undefined)}
+          >
             {t('settings.capabilities.key.openEnv')}
           </button>
         </>
@@ -251,6 +269,7 @@ export function CapabilityCard({
 
   function renderField(field: (typeof fields)[number]) {
     if (field.name === 'api_key') return renderKeyRow(field)
+    const wrong = spec ? fieldProblem(field, draft.values[field.name]) : null
     return (
       <FieldRow
         key={field.name}
@@ -258,6 +277,13 @@ export function CapabilityCard({
         value={draft.values[field.name]}
         disabled={disabled || save.isPending}
         onChange={(v) => setValue(field.name, v)}
+        // Said at the field as soon as the value is wrong; "required" waits
+        // for an edit, so an untouched card does not nag.
+        error={
+          wrong && spec && (wrong.kind !== 'required' || dirty)
+            ? problemText(wrong, def, spec)
+            : undefined
+        }
         suggestions={
           field.name === 'primary' && Array.isArray(spec?.suggestedModels)
             ? (spec.suggestedModels as string[])
@@ -267,9 +293,14 @@ export function CapabilityCard({
     )
   }
 
+  // A field's own problem is said at the field; the foot repeats it only when
+  // the field may be folded away under Advanced.
+  const problemField =
+    problem && 'field' in problem ? fields.find((f) => f.name === problem.field) : undefined
+  const footProblem = Boolean(problem) && (!problemField || def.advanced(problemField))
   const footNote = error ? (
     <span className="stg-error">{error}</span>
-  ) : dirty && problem && spec ? (
+  ) : dirty && problem && spec && footProblem ? (
     <span className="cap-problem">{problemText(problem, def, spec)}</span>
   ) : undefined
 
