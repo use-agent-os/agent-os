@@ -661,7 +661,6 @@ describe('trade status from history', () => {
       version: '2026.9.27',
       provider: 'aggregator',
       providers: [{ id: 'aggregator', label: 'AgentOS DEX', active: true }],
-      apiKeyConfigured: true,
       chains: Array.from({ length: 30 }, (_, i) => ({ chainId: i, name: `chain ${i}` })),
       unlocked: true,
     }

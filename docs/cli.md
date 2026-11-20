@@ -1149,10 +1149,8 @@ agentos wallet export <addr> --private-key   # prints the raw key; always asks t
 agentos wallet list / rename <addr> <label> / primary <addr> / remove <addr> --yes|-y   # remove also stops the wallet's DCA mandates, triggers and brackets (re-importing the key revives none)
 agentos wallet balances [<addr>] [--chain base|robinhood] [--refresh] [--hidden] [--json]   # ledger view; --refresh re-reads the chain first (throttled to once per 10 s per wallet); --hidden lists junk tokens too
 
-agentos trade status                        # provider, API key, chains, limits, vault state; --json adds syncKind (why a sync runs: background, requested, initial) and ledgerRepair ("full sync required") after a ledger repair migration
-agentos trade provider                      # show the swap provider (aggregator | uniswap)
-agentos trade provider uniswap              # switch it (= config set trading.provider uniswap)
-agentos trade probe [--provider aggregator|uniswap] [--api-key <key>]   # reachable? key valid? (--json exits 1 when not ok; --api-key is operator-only)
+agentos trade status                        # swap route, chains, limits, vault state; --json adds syncKind (why a sync runs: background, requested, initial) and ledgerRepair ("full sync required") after a ledger repair migration
+agentos trade probe                         # is the swap route (the AgentOS DEX) reachable? (--json exits 1 when not ok)
 agentos trade tokens --chain robinhood AAPL # search; verified Stock Tokens are marked ✓
 agentos trade quote --chain base --in ETH --out USDC (--amount 0.01 | --usd 5) [--wallet <addr>] [--slippage <pct>]
 agentos trade swap  --chain base --in ETH --out USDC --amount 0.01 --wait [--wait-seconds 1..900] [--slippage <pct>]
@@ -1225,28 +1223,23 @@ always asks the vault password. Passwords are read from a hidden prompt or
 `AGENTOS_WALLET_PASSWORD` (`AGENTOS_KEYSTORE_PASSWORD` for an imported
 keystore) — never from the command line.
 
-Swaps run on Base (8453) and Robinhood Chain (4663) through one of two
-providers. The **AgentOS DEX** (the default,
-`trading.provider = "aggregator"`, served at `https://agg.useagentos.dev`)
-needs no key and no account: one GET returns the price *and* the unsigned
-calldata, including the ERC-20 approval when one is needed. It never signs
-and never broadcasts — your wallet does both — and it charges 20 bps on the
-swap, reported back in the quote. **Uniswap** (`agentos trade provider
-uniswap`) is the fallback and needs a key:
-`agentos config set trading.uniswap_api_key <key>`. The desktop app swaps
-through the AgentOS DEX only and has no setting for either.
+Swaps run on Base (8453) and Robinhood Chain (4663) through the
+**AgentOS DEX** (served at `https://agg.useagentos.dev`), the only swap
+provider. It needs no key and no account: one GET returns the price *and* the
+unsigned calldata, including the ERC-20 approval when one is needed. It never
+signs and never broadcasts — your wallet does both — and it charges 20 bps on
+the swap, reported back in the quote. It quotes two liquidity sources, 0x and
+Uniswap, and the engine picks between them per pair; there is no provider to
+choose and no API key to configure.
 
 0x refuses the tokenised stocks (AAPL, TSLA, NVDA, SPY and the rest on
 Robinhood Chain, AAPLc and the rest on Base) for legal reasons
 (`trading.token_not_tradeable`), so when either side of a pair is one the
 engine asks the AgentOS DEX for its **Uniswap** source instead
 (`source=uniswap`) — `quote`, `swap`, DCA runs, trigger fires and bracket
-legs alike. No Uniswap API key is needed, and the quote and the order keep
-`provider: "aggregator"`. Only when that source cannot take the pair does
-the engine fall back to the Uniswap provider, if a key is configured;
-without one the error says how to route through Uniswap directly
-(`agentos config set trading.uniswap_api_key <key>`). ETH, WETH and USDG
-trade normally there.
+legs alike. No Uniswap API key is needed. If that source cannot take the
+pair, the DEX's own error is returned. ETH, WETH and USDG trade normally
+there.
 Robinhood Chain has no native USD price feed yet, so `--usd` may be refused
 with `trading.unpriced` (size with `--amount`), and the bare symbol `USDC`
 resolves to unverified lookalikes there (`TOKEN_UNVERIFIED`): use an
@@ -1604,8 +1597,7 @@ addresses, default empty: contracts an aggregator quote may name as the
 approval spender and swap target on top of the built-in AgentOS Router and
 0x AllowanceHolder; added, never replacing them; mixed case must pass its
 EIP-55 checksum; set it as a JSON list of the verified addresses, e.g.
-`'["0x…"]'`), `uniswap_api_key`, `uniswap_api_key_env`
-(default `UNISWAP_API_KEY`), `rpc_urls` (chain id → JSON-RPC URL; the wallet sync's bulk ERC-20
+`'["0x…"]'`), `rpc_urls` (chain id → JSON-RPC URL; the wallet sync's bulk ERC-20
 balance read still tries the chain's public node first),
 `approval_threshold_usd`, `daily_cap_usd` (0 = agent swaps off),
 `approval_ttl_seconds`, `agent_max_price_impact_pct`,

@@ -36,9 +36,9 @@ from tests.test_trading.fakes import (
     SWAP_TARGETS,
     USDC,
     WETH,
+    FakeAggregator,
     FakeChain,
     FakePrices,
-    FakeUniswap,
     decode_fake_raw,
     transfer_log,
 )
@@ -58,6 +58,9 @@ HOUR = 3_600
 DAY = 86_400
 # A fixed key so the wallet (and so every payload) is the same on every run.
 KEY = "0x" + "4c" * 32
+
+#: The AgentOS DEX's "no route right now": a 200 with every money field nulled.
+NO_ROUTE = (200, {"liquidityAvailable": False, "explanation": "No quotes available"})
 
 
 class Clock:
@@ -93,14 +96,14 @@ class World:
         self,
         service: TradingService,
         chain: FakeChain,
-        uniswap: FakeUniswap,
+        aggregator: FakeAggregator,
         prices: FakePrices,
         clock: Clock,
         wallet: str,
     ) -> None:
         self.service = service
         self.chain = chain
-        self.uniswap = uniswap
+        self.aggregator = aggregator
         self.prices = prices
         self.clock = clock
         self.wallet = wallet
@@ -122,29 +125,29 @@ class World:
         return self.chain.get_erc20(USDC, self.wallet)
 
     def _wire(self) -> None:
-        uniswap, chain, world = self.uniswap, self.chain, self
-        original = uniswap.handle
+        aggregator, chain, world = self.aggregator, self.chain, self
+        original = aggregator.handle
 
         def handle(request: httpx.Request) -> httpx.Response:
-            if request.url.path.endswith("/quote"):
-                body = json.loads(request.content)
-                amount = int(body["amount"])
-                token_in = str(body["tokenIn"]).lower()
+            if request.url.path == "/v1/quote":
+                params = dict(request.url.params)
+                amount = int(params["sellAmountRaw"])
+                token_in = str(params["sell"]).lower()
                 price = world.prices.spot.get(("base", WETH)) or 2000.0
                 if token_in == WETH:  # 18 decimals of WETH → 6 of USDC
                     out = int(amount * price) // 10**12
                 else:
                     out = int(amount * 10**12 / price)
-                uniswap.amount_out = out
+                aggregator.amount_out = out
                 world.last_quote = {
                     "in": token_in,
-                    "out": str(body["tokenOut"]).lower(),
+                    "out": str(params["buy"]).lower(),
                     "amount": amount,
                     "received": out,
                 }
             return original(request)
 
-        uniswap.handle = handle  # type: ignore[method-assign]
+        aggregator.handle = handle  # type: ignore[method-assign]
 
         def on_send(raw: str) -> str:
             tx = decode_fake_raw(raw)
@@ -222,7 +225,7 @@ def ids(monkeypatch: pytest.MonkeyPatch) -> None:
 async def world(
     service: TradingService,
     base_chain: FakeChain,
-    fake_uniswap: FakeUniswap,
+    fake_aggregator: FakeAggregator,
     fake_prices: FakePrices,
     monkeypatch: pytest.MonkeyPatch,
     ids: None,
@@ -230,13 +233,12 @@ async def world(
     monkeypatch.setattr(service_module, "CHAIN_CATCHUP_POLL_S", 0.0)
     clock = Clock()
     service._now = clock
-    service.config.provider = "uniswap"
     service.vault.setup(PASSWORD, "auto")
     wallet = (await service.import_wallet("Key main", private_key=KEY))["address"]
     base_chain.set_native(wallet, 10**18)
     base_chain.set_erc20(USDC, wallet, 1_000 * 10**6)
     base_chain.set_erc20(WETH, wallet, 10**17)  # 0.1 WETH
-    return World(service, base_chain, fake_uniswap, fake_prices, clock, wallet)
+    return World(service, base_chain, fake_aggregator, fake_prices, clock, wallet)
 
 
 # ── pure helpers ───────────────────────────────────────────────────────────
@@ -657,7 +659,7 @@ async def test_result_gas_counts_the_approval_and_the_card_shows_what_moved(
     world: World,
 ) -> None:
     # The sell needs an ERC-20 approve first: its gas is the order's too.
-    world.uniswap.approval_needed = True
+    world.aggregator.approval_needed = True
     world.chain.set_erc20(WETH, world.wallet, 5 * 10**16)  # 0.05 WETH: under the threshold
     trigger_id = (await world.create(amount_pct=100))["trigger"]["id"]
     await world.check(1890)
@@ -748,7 +750,7 @@ async def test_insufficient_balance_pauses_at_once(world: World) -> None:
 
 
 async def test_failed_fire_re_arms_and_three_pause(world: World) -> None:
-    world.uniswap.quote_error = (404, {"errorCode": "NO_ROUTE", "detail": "No quotes available"})
+    world.aggregator.quote_error = NO_ROUTE
     trigger_id = (await world.create())["trigger"]["id"]
     for attempt in (1, 2):
         await world.check(1890)
@@ -771,7 +773,7 @@ async def test_failed_fire_re_arms_and_three_pause(world: World) -> None:
 
 
 async def test_resume_resets_hits_streak_and_peak(world: World) -> None:
-    world.uniswap.quote_error = (404, {"errorCode": "NO_ROUTE", "detail": "No quotes available"})
+    world.aggregator.quote_error = NO_ROUTE
     trigger_id = (await world.create(direction="trail", price=None, trail_pct=10, amount_pct=100))[
         "trigger"
     ]["id"]
@@ -782,7 +784,7 @@ async def test_resume_resets_hits_streak_and_peak(world: World) -> None:
     row = world.row(trigger_id)
     assert row["status"] == "paused" and row["peak_price_usd"] == 2500.0
     # Paused through a rally and back: the old peak would fire at once.
-    world.uniswap.quote_error = None
+    world.aggregator.quote_error = None
     world.set_price(2300.0)
     resumed = (await world.service.trigger_resume(trigger_id))["trigger"]
     assert resumed["status"] == "armed" and resumed["statusReason"] is None
@@ -924,7 +926,7 @@ async def test_fire_now(world: World) -> None:
 async def test_a_failed_manual_fire_of_a_paused_trigger_stays_paused(world: World) -> None:
     trigger_id = (await world.create())["trigger"]["id"]
     await world.service.trigger_pause(trigger_id)
-    world.uniswap.quote_error = (404, {"errorCode": "NO_ROUTE", "detail": "No quotes available"})
+    world.aggregator.quote_error = NO_ROUTE
     answer = await world.service.trigger_fire_now(trigger_id)
     assert answer["fire"]["status"] == "failed"
     assert answer["trigger"]["status"] == "paused"

@@ -517,7 +517,8 @@ describe('tradingAgentFiles · markets (v25)', () => {
     expect(agents).not.toMatch(/the venue refuses them for legal reasons/)
     expect(agents).toMatch(/asks its Uniswap source for them by itself, with\s+no key/)
     expect(agents).not.toMatch(/when a Uniswap\s+key is configured/)
-    expect(tools).toMatch(/the message says how to route through Uniswap directly/)
+    expect(tools).not.toMatch(/Uniswap key|route through Uniswap directly/)
+    expect(tools).toMatch(/never\s+suggest another provider or an API key/)
   })
 
   it('stays English only', () => {

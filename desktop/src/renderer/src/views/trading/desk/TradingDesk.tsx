@@ -74,9 +74,6 @@ export function useDeskFrame(input: {
   const locked = Boolean(v && v.initialized && !v.unlocked)
   const ready = active && !disabled && vaultReady
   const provider: ProviderId = status.data?.provider ?? DEFAULT_PROVIDER
-  // The desk swaps through the AgentOS DEX only: a gateway configured for
-  // another provider is told so, and quotes nothing until it is put back.
-  const providerReady = provider === DEFAULT_PROVIDER
   const chains = useMemo(
     () => (status.data?.chains ?? []).map((c) => c.chainId),
     [status.data?.chains],
@@ -286,7 +283,6 @@ export function useDeskFrame(input: {
     wallets,
     primary,
     limits: limits.data ?? null,
-    gate: { offDex: !providerReady },
     missions,
     onFirstSend: session.ensureFiled,
     onStartFresh: startFresh,
@@ -322,7 +318,6 @@ export function useDeskFrame(input: {
         wallets={wallets}
         primary={primary}
         provider={provider}
-        providerReady={providerReady}
         unlocked={Boolean(vault.data?.unlocked)}
         collapsed={concession.collapsed}
         cramped={concession.cramped}

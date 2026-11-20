@@ -317,11 +317,9 @@ RUNTIME_STEERING_NAMES: frozenset[str] = frozenset(
 )
 
 #: Names the gateway reads for its own wallet: the RPC endpoints the signer
-#: falls back to (``trading.chains.RPC_ENV_VARS``) and the default Uniswap key
-#: variable. ``trading.rpc_urls`` is operator-only; so are these spellings.
-GATEWAY_RESERVED_NAMES: frozenset[str] = frozenset(
-    {"RPC_BASE_URL", "RPC_ROBINHOOD_URL", "UNISWAP_API_KEY"}
-)
+#: falls back to (``trading.chains.RPC_ENV_VARS``). ``trading.rpc_urls`` is
+#: operator-only; so are these spellings.
+GATEWAY_RESERVED_NAMES: frozenset[str] = frozenset({"RPC_BASE_URL", "RPC_ROBINHOOD_URL"})
 
 
 def is_runtime_steering_name(key: str) -> bool:

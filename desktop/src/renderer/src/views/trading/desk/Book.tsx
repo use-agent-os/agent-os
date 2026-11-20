@@ -85,7 +85,6 @@ export function Book({
   wallets,
   primary,
   provider,
-  providerReady,
   unlocked,
   collapsed,
   cramped = false,
@@ -103,7 +102,6 @@ export function Book({
   wallets: Wallet[]
   primary: string | null
   provider: ProviderId
-  providerReady: boolean
   unlocked: boolean
   collapsed: boolean
   /**
@@ -518,7 +516,6 @@ export function Book({
               primary={primary}
               selectedWallet={selected}
               provider={provider}
-              providerReady={providerReady}
               unlocked={unlocked}
               prefill={prefill}
               onSent={() => setTab('orders')}

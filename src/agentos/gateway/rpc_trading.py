@@ -27,7 +27,6 @@ from agentos.trading.chains import (
     resolve_chain,
     scrub_rpc_urls,
 )
-from agentos.trading.providers import PROVIDER_IDS
 from agentos.trading.service import (
     DEFAULT_CHART_RANGE,
     TradingError,
@@ -604,48 +603,12 @@ async def _trading_status(params: dict | None, ctx: RpcContext) -> dict[str, Any
 
 @_d.method("trading.probe")
 async def _trading_probe(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
-    """Is the provider reachable? With ``apiKey`` it also tests a key that is not
-    in config, which turns the gateway into a key oracle — so that form is the
-    operator's only."""
-    p = _params(params)
-    api_key = _str(p, "apiKey")
-    if api_key is not None:
-        _require_operator(ctx, "trading.probe(apiKey)")
+    """Is the swap route (the AgentOS DEX) reachable from the gateway?"""
     service = _service(ctx)
     try:
-        return await service.probe(api_key, provider_id=_str(p, "provider"))
+        return await service.probe()
     except Exception as exc:
         raise _raise(exc) from exc
-
-
-@_d.method("trading.setProvider")
-async def _trading_set_provider(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
-    """Persist ``trading.provider`` through the same path as ``config.set``.
-
-    Convenience for the CLI; the desktop may equally call
-    ``config.patch {trading: {provider}}``. Both take effect on the next
-    trading call without a gateway restart.
-    """
-    p = _params(params)
-    provider = (_str(p, "provider", required=True) or "").lower()
-    if provider not in PROVIDER_IDS:
-        raise ValueError(
-            "params.provider must be one of: " + ", ".join(repr(p) for p in PROVIDER_IDS)
-        )
-    result = await get_dispatcher().dispatch(
-        "trading.setProvider",
-        "config.set",
-        {"path": "trading.provider", "value": provider},
-        ctx,
-    )
-    if not result.ok:
-        message = result.error.message if result.error else "config write failed"
-        code = result.error.code if result.error else "trading.error"
-        raise RpcHandlerError(str(code), str(message))
-    service = _service(ctx)
-    await service._emit("trading.changed", {"reason": "config", "provider": provider})
-    payload = result.payload if isinstance(result.payload, dict) else {}
-    return {"provider": provider, "restartRequired": bool(payload.get("restartRequired"))}
 
 
 @_d.method("trading.tokens.search")

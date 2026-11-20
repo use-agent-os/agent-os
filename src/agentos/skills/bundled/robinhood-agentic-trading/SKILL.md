@@ -53,9 +53,7 @@ Recheck these primary sources when product behavior or permissions may have chan
 This skill is the brokerage account, not the chain. On **Robinhood Chain**
 (the on-chain venue the `wallet-trading` skill swaps on) 0x refuses the
 Stock Tokens (AAPL, TSLA, NVDA …), but the desk routes any pair with one
-through the AgentOS DEX's Uniswap source automatically, with no key; only if
-that source cannot take the pair does the error say how to route through
-Uniswap directly (`agentos config set trading.uniswap_api_key <key>`), and
+through the AgentOS DEX's Uniswap source automatically, with no key, and
 `agentos trade markets <stock> --chain robinhood --json` lists every pool a
 stock trades in. That is a token swap on the chain; a user who wants to
 trade the stock itself trades it here, through the Robinhood Agentic

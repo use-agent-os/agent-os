@@ -32,7 +32,6 @@ beforeEach(() => {
     if (method === 'trading.status') {
       return {
         enabled: true,
-        apiKeyConfigured: false,
         chains: [
           {
             chainId: 8453,
@@ -101,7 +100,6 @@ describe('TradingPane · Swap provider', () => {
       if (method === 'trading.status')
         return {
           enabled: true,
-          apiKeyConfigured: true,
           provider: 'uniswap',
           providers: [],
           chains: [],
@@ -135,14 +133,13 @@ describe('TradingPane · Swap provider', () => {
   })
 
   it('tests the aggregator connection and says what it answered', async () => {
-    rpcCall.mockImplementation(async (method: string, params?: { provider?: string }) => {
-      if (method === 'trading.probe' && params?.provider === 'aggregator')
+    rpcCall.mockImplementation(async (method: string) => {
+      if (method === 'trading.probe')
         return { ok: false, latencyMs: 120, error: 'Aggregator is misconfigured' }
       if (method === 'config.snapshot') return { config: { trading: {} }, revision: 'r1' }
       if (method === 'trading.status')
         return {
           enabled: true,
-          apiKeyConfigured: true,
           provider: 'uniswap',
           providers: [],
           chains: [],
@@ -169,6 +166,6 @@ describe('TradingPane · Swap provider', () => {
     expect(probe).toHaveAttribute('data-verdict', 'bad')
     expect(probe).toHaveTextContent('Not reachable:')
     expect(probe).toHaveTextContent('Aggregator is misconfigured')
-    expect(rpcCall).toHaveBeenCalledWith('trading.probe', { provider: 'aggregator' })
+    expect(rpcCall).toHaveBeenCalledWith('trading.probe', {})
   })
 })

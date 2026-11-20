@@ -770,9 +770,8 @@ skill only repeats it. Do not open it or run \`--help\` to find a flag.
   once after 30 s with the SAME --client-id, then report.
   \`trading.unpriced\` — the engine has no USD price for --in; size with
   \`--amount\` instead of \`--usd\`.
-  \`trading.token_not_tradeable\` — the venue refuses this token (when
-  the message says how to route through Uniswap directly, pass that on);
-  final, no retry, not by address either.
+  \`trading.token_not_tradeable\` — the venue refuses this token; final,
+  no retry, not by address either.
   \`trading.quote_expired\` / \`trading.price_moved\` — quote again; send
   once more with the SAME --client-id only if the user's instruction
   still holds at the new price.

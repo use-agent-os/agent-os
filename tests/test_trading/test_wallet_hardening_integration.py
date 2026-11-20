@@ -227,37 +227,6 @@ async def test_a_batch_with_one_edited_leg_signs_no_leg(
     assert [a["id"] for a in alerts] == [orders[1]["orderId"]]
 
 
-async def test_the_permit_signature_is_held_to_the_seal_and_the_approval(
-    funded_service: TradingService,
-) -> None:
-    """``_presign_order_check``: the last look before a permit is signed."""
-    service = funded_service
-    orders = await service.send(
-        chain=BASE,
-        wallet=service.test_wallet,  # type: ignore[attr-defined]
-        token="ETH",
-        recipients=[{"to": BENIGN, "amount": "0.001"}],
-        initiator="agent",
-        session_key=None,
-        note=None,
-    )
-    order_id = str(orders[0]["orderId"])
-    service._presign_order_check(order_id)  # noqa: SLF001 - a parked, sealed row passes
-
-    # ``approved`` is engine state, not a sealed term, so the seal still holds;
-    # with no approval held for it, it is not signed.
-    _raw_update(service, "UPDATE orders SET status = 'approved' WHERE order_id = ?", (order_id,))
-    with pytest.raises(TradingError) as info:
-        service._presign_order_check(order_id)  # noqa: SLF001
-    assert info.value.code == "trading.approval_changed"
-
-    # A rewritten term fails the seal first, whatever the approval says.
-    _raw_update(service, "UPDATE orders SET recipient = ? WHERE order_id = ?", (ATTACKER, order_id))
-    with pytest.raises(TradingError) as info:
-        service._presign_order_check(order_id)  # noqa: SLF001
-    assert info.value.code == "trading.integrity"
-
-
 async def test_trading_switched_off_refuses_the_approval_before_any_check(
     funded_service: TradingService, base_chain: FakeChain
 ) -> None:

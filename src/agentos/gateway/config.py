@@ -2619,10 +2619,9 @@ class TradingConfig(BaseSettings):
 
     The wallet vault, ledger and swap execution live in the engine
     (``agentos.trading``); the desktop app and the ``wallet-trading`` skill
-    are clients of the same RPC surface. ``uniswap_api_key`` is redacted in
-    every public snapshot like any other ``*_api_key``; when empty the key is
-    read from the environment variable named by ``uniswap_api_key_env``.
-    Money limits are US dollars and apply to agent-initiated swaps only.
+    are clients of the same RPC surface. Swaps go through the AgentOS DEX,
+    which needs no API key. Money limits are US dollars and apply to
+    agent-initiated swaps only.
     """
 
     model_config = SettingsConfigDict(
@@ -2631,11 +2630,8 @@ class TradingConfig(BaseSettings):
     )
 
     enabled: bool = True
-    # Swap provider: the AgentOS DEX (default, no key) or Uniswap's
-    # Trading API (fallback, needs an API key).
-    provider: Literal["aggregator", "uniswap"] = "aggregator"
-    # Where the aggregator is served. Only change this to point at another
-    # deployment of the same API.
+    # Where the aggregator (the AgentOS DEX, the swap route) is served. Only
+    # change this to point at another deployment of the same API.
     aggregator_base_url: str = "https://agg.useagentos.dev"
     # Extra contracts an aggregator quote may name as the approval spender
     # (and send the swap to), on top of the built-in pins: the AgentOS Router
@@ -2646,8 +2642,6 @@ class TradingConfig(BaseSettings):
     # Where Relay (the Base ⇄ Robinhood Chain bridge) is served; public and
     # keyless. Only change this to point at another deployment of its API.
     relay_base_url: str = "https://api.relay.link"
-    uniswap_api_key: str = ""
-    uniswap_api_key_env: str = "UNISWAP_API_KEY"
     # Chain id (as a string, TOML keys are strings) -> JSON-RPC URL override.
     # When a chain has no entry, RPC_BASE_URL / RPC_ROBINHOOD_URL are tried
     # before the public default.
@@ -2660,7 +2654,7 @@ class TradingConfig(BaseSettings):
     # USD threshold; an agent asking for more slippage than this is refused.
     agent_max_price_impact_pct: float = Field(default=5.0, ge=0, le=100)
     agent_max_slippage_pct: float = Field(default=5.0, ge=0, le=50)
-    # None = let the Uniswap API pick (``autoSlippage: DEFAULT``).
+    # None = the AgentOS DEX default (0.5%).
     default_slippage_pct: float | None = Field(default=None, ge=0, le=50)
     unlock_mode: Literal["auto", "manual"] = "auto"
     sync_interval_seconds: int = Field(default=60, ge=5)
@@ -2711,16 +2705,6 @@ class TradingConfig(BaseSettings):
             if address not in out:
                 out.append(address)
         return out
-
-    def resolved_uniswap_api_key(self) -> str:
-        """The API key to send: explicit config value, else the named env var."""
-        explicit = (self.uniswap_api_key or "").strip()
-        if explicit:
-            return explicit
-        env_name = (self.uniswap_api_key_env or "").strip()
-        if env_name:
-            return os.environ.get(env_name, "").strip()
-        return ""
 
 
 class BudgetsConfig(BaseModel):

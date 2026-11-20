@@ -9,8 +9,8 @@ from agentos.trading import evm as evm_mod
 from agentos.trading.chains import BASE, NATIVE_ADDRESS, ROBINHOOD
 from agentos.trading.evm import EvmClient, EvmRpcError, EvmTransportError
 from agentos.trading.prices import PriceService
+from agentos.trading.providers import ProviderError, validate_transaction
 from agentos.trading.token_lists import RETRY_DELAYS_S, REVALIDATE_TTL_S
-from agentos.trading.uniswap import UniswapAuthError, UniswapClient, UniswapError
 from tests.test_trading.fakes import (
     AAPL,
     OTHER,
@@ -19,7 +19,6 @@ from tests.test_trading.fakes import (
     WETH,
     FakeChain,
     FakePrices,
-    FakeUniswap,
     transfer_log,
 )
 
@@ -270,179 +269,22 @@ class TestEvmClient:
         assert logs and "re-read failed" in logs[-1]["reason"]
 
 
-class TestUniswapClient:
-    @pytest.fixture
-    def fake(self) -> FakeUniswap:
-        return FakeUniswap()
-
-    @pytest.fixture
-    async def http(self, fake: FakeUniswap):
-        async with httpx.AsyncClient(transport=httpx.MockTransport(fake.handle)) as client:
-            yield client
-
-    async def test_quote_headers_and_shape(
-        self, fake: FakeUniswap, http: httpx.AsyncClient
-    ) -> None:
-        client = UniswapClient("test-key", http=http)
-        quote = await client.quote(
-            chain_id=8453,
-            swapper=WALLET,
-            token_in=USDC,
-            token_out=WETH,
-            amount_raw=10 * 10**6,
-        )
-        request = fake.requests[-1]
-        assert request.headers["x-permit2-disabled"] == "true"
-        assert request.headers["x-api-key"] == "test-key"
-        assert "x-universal-router-version" not in request.headers
-        body = json.loads(request.content)
-        assert body["autoSlippage"] == "DEFAULT" and "slippageTolerance" not in body
-        assert body["protocols"] == ["V2", "V3", "V4"]
-        assert body["type"] == "EXACT_INPUT" and body["amount"] == str(10 * 10**6)
-        assert json.loads(request.headers["x-agent-info"])["decision_origin"] == "human_mediated"
-        assert quote.routing == "CLASSIC"
-        assert quote.amount_out_raw == fake.amount_out
-        assert quote.min_out_raw == fake.amount_out * 995 // 1000
-        assert quote.price_impact_pct == pytest.approx(0.12)
-        assert quote.gas_fee_usd == pytest.approx(0.05)
-        assert quote.fresh and quote.permit_data is None
-
-    async def test_explicit_slippage(self, fake: FakeUniswap, http: httpx.AsyncClient) -> None:
-        client = UniswapClient("test-key", http=http)
-        await client.quote(
-            chain_id=8453,
-            swapper=WALLET,
-            token_in=USDC,
-            token_out=WETH,
-            amount_raw=1,
-            slippage_pct=1.25,
-        )
-        body = json.loads(fake.requests[-1].content)
-        assert body["slippageTolerance"] == 1.25 and "autoSlippage" not in body
-
-    async def test_bad_key(self, fake: FakeUniswap, http: httpx.AsyncClient) -> None:
-        client = UniswapClient("wrong", http=http, max_retries=0)
-        with pytest.raises(UniswapAuthError):
-            await client.quote(
-                chain_id=8453, swapper=WALLET, token_in=USDC, token_out=WETH, amount_raw=1
-            )
-        ok, _, error = await client.probe()
-        assert ok is False and error
-
-    async def test_probe_ok_on_404(self, fake: FakeUniswap, http: httpx.AsyncClient) -> None:
-        fake.quote_error = (
-            404,
-            {"errorCode": "NoRouteFoundError", "detail": "No quotes available"},
-        )
-        ok, latency, error = await UniswapClient("test-key", http=http).probe()
-        assert ok is True and error is None and latency is not None
-
-    async def test_error_mapping(self, fake: FakeUniswap, http: httpx.AsyncClient) -> None:
-        client = UniswapClient("test-key", http=http, max_retries=0)
-        fake.quote_error = (404, {"errorCode": "UnsupportedTokenError"})
-        with pytest.raises(UniswapError) as info:
-            await client.quote(
-                chain_id=8453, swapper=WALLET, token_in=USDC, token_out=WETH, amount_raw=1
-            )
-        assert info.value.code == "trading.no_route"
-        assert "does not route" in str(info.value)
-        fake.quote_error = (404, {"errorCode": "UpstreamTimeoutError"})
-        with pytest.raises(UniswapError) as info:
-            await client.quote(
-                chain_id=8453, swapper=WALLET, token_in=USDC, token_out=WETH, amount_raw=1
-            )
-        assert info.value.retryable is True
-
-    async def test_unsupported_routing_rejected(
-        self, fake: FakeUniswap, http: httpx.AsyncClient
-    ) -> None:
-        fake.routing = "DUTCH_V2"
-        with pytest.raises(UniswapError, match="Unsupported routing"):
-            await UniswapClient("test-key", http=http).quote(
-                chain_id=8453, swapper=WALLET, token_in=USDC, token_out=WETH, amount_raw=1
-            )
-
-    async def test_check_approval_and_swap(
-        self, fake: FakeUniswap, http: httpx.AsyncClient
-    ) -> None:
-        client = UniswapClient("test-key", http=http)
-        assert (
-            await client.check_approval(chain_id=8453, wallet=WALLET, token=USDC, amount_raw=5)
-            is None
-        )
-        fake.approval_needed = True
-        approval = await client.check_approval(
-            chain_id=8453, wallet=WALLET, token=USDC, amount_raw=5
-        )
-        assert approval is not None and approval["to"] == USDC
-        quote = await client.quote(
-            chain_id=8453, swapper=WALLET, token_in=USDC, token_out=WETH, amount_raw=5
-        )
-        tx = await client.swap(quote, deadline=123, decision_origin="autonomous")
-        request = fake.requests[-1]
-        body = json.loads(request.content)
-        # Whole quote response spread into the body; null permit fields stripped.
-        assert body["quote"] == quote.raw_quote and body["deadline"] == 123
-        assert body["routing"] == "CLASSIC" and body["requestId"] == quote.request_id
-        assert body["simulateTransaction"] is True and body["refreshGasPrice"] is True
-        assert "permitData" not in body and "signature" not in body
-        info = json.loads(request.headers["x-agent-info"])
-        assert info == {
-            "integration_name": "agentos",
-            "decision_origin": "autonomous",
-            "version": info["version"],
-        }
-        assert (
-            request.headers["x-agent-info"].isascii() and " " not in request.headers["x-agent-info"]
-        )
-        assert tx["to"].lower() == fake.tx_to
-        assert await client.swap_status(chain_id=8453, tx_hash="0xabc") == "SUCCESS"
-
-    async def test_permit_requires_signature(
-        self, fake: FakeUniswap, http: httpx.AsyncClient
-    ) -> None:
-        fake.permit_data = {"domain": {}, "types": {}, "values": {}}
-        client = UniswapClient("test-key", http=http)
-        quote = await client.quote(
-            chain_id=8453, swapper=WALLET, token_in=USDC, token_out=WETH, amount_raw=5
-        )
-        assert quote.permit_data is not None
-        with pytest.raises(UniswapError, match="signature"):
-            await client.swap(quote)
-        await client.swap(quote, signature="0xsig")
-        body = json.loads(fake.requests[-1].content)
-        assert body["signature"] == "0xsig" and body["permitData"] == fake.permit_data
-
-    async def test_swap_transaction_validation(
-        self, fake: FakeUniswap, http: httpx.AsyncClient
-    ) -> None:
-        from agentos.trading.uniswap import validate_transaction
-
+class TestSwapTransactionValidation:
+    def test_a_transaction_that_is_not_safe_to_sign_is_refused(self) -> None:
         good = {"to": "0x" + "11" * 20, "from": "0x" + "22" * 20, "data": "0xabcd", "value": "0"}
         validate_transaction(good)
         for bad in (
             {**good, "data": "0x"},
             {**good, "data": "zz"},
             {**good, "to": "0x1"},
+            {**good, "to": "0xnope"},
             {**good, "from": None},
             {k: v for k, v in good.items() if k != "value"},
             {**good, "maxFeePerGas": "1", "gasPrice": "1"},
         ):
-            with pytest.raises(UniswapError):
+            with pytest.raises(ProviderError) as refused:
                 validate_transaction(bad)
-        fake.tx_to = "0xnope"
-        client = UniswapClient("test-key", http=http)
-        quote = await client.quote(
-            chain_id=8453, swapper=WALLET, token_in=USDC, token_out=WETH, amount_raw=5
-        )
-        with pytest.raises(UniswapError, match="valid 'to'"):
-            await client.swap(quote)
-
-    async def test_no_key(self, http: httpx.AsyncClient) -> None:
-        with pytest.raises(UniswapAuthError):
-            await UniswapClient("", http=http).check_approval(
-                chain_id=8453, wallet=WALLET, token=USDC, amount_raw=1
-            )
+            assert refused.value.code == "trading.tx_failed"
 
 
 class TestPriceService:

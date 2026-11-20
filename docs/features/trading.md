@@ -1,9 +1,8 @@
 # Wallets and Trading
 
 AgentOS can hold EVM wallets of its own and swap tokens on **Base** and
-**Robinhood Chain** through a pluggable swap provider: the **AgentOS
-Aggregator** (default, no key) or the **Uniswap Trading API** (fallback,
-needs a free API key). The engine owns everything:
+**Robinhood Chain** through the **AgentOS DEX**, which needs no API key.
+The engine owns everything:
 the encrypted wallet vault, the ledger with cost basis and PnL, quote and
 swap execution, and the guardrails that bound what an agent may do on its
 own. The desktop app's Trading page, the `agentos wallet` / `agentos trade`
@@ -74,17 +73,9 @@ gateway RPC surface (`wallet.*`, `trading.*`).
   for this; where one exists it only widens the set of tokens the sweep
   reads. A full resync drops and rebuilds the ledger.
 - **Swaps** — quote, approve (a plain ERC-20 approval to the provider's
-  spender: the AgentOS Router or 0x's AllowanceHolder for the aggregator,
-  Uniswap's proxy for Uniswap, no Permit2 signatures),
-  sign and broadcast, then confirm from the receipt. A Uniswap quote that
-  carries `permitData` anyway is untrusted input: it is signed only when it
-  is a Permit2 `PermitSingle` / `PermitTransferFrom` on the order's chain and
-  the canonical Permit2 contract, for the order's sell token and at most its
-  amount, to a Universal Router pinned for the chain, with every deadline
-  under an hour away — and what is signed is rebuilt from those checked
-  fields. Anything else (an EIP-3009 transfer, a DAI or EIP-2612 permit,
-  another spender, an unlimited amount) fails the order with
-  `trading.permit_refused` before a signature exists.
+  spender: the AgentOS Router or 0x's AllowanceHolder, no Permit2
+  signatures: the engine signs transactions only, never typed data for a
+  swap), sign and broadcast, then confirm from the receipt.
   A swap can target one wallet, several, or all of them as a batch; one
   wallet failing never blocks the others.
 - **Agent trading** — the agent signs on its own within code-enforced limits
@@ -132,12 +123,24 @@ A swap into native ETH on an L2 may deliver **WETH** instead; the order then
 reports `deliveredToken` and the app offers a one-click unwrap
 (`trading.unwrap`, a `withdraw(uint256)` on the WETH contract).
 
-## Swap providers
+## Swap provider
 
-| Provider | Key | Notes |
-| --- | --- | --- |
-| `aggregator` (default) | none | AgentOS DEX at `https://agg.useagentos.dev`, an HTTP API in front of 0x Swap v2. One `GET /v1/quote` returns the price *and* the unsigned calldata, including the ERC-20 approval when one is needed. 20 bps integrator fee, reported in the quote and already deducted from the output. Quotes expire in 30 s upstream; the engine stops trusting them at 20 s. |
-| `uniswap` | Uniswap Trading API key | Universal Router; `x-agent-info` attribution on every call. Quotes fresh for 30 s. |
+There is one: the AgentOS DEX (`aggregator`), at
+`https://agg.useagentos.dev`. It needs no API key. One `GET /v1/quote`
+returns the price *and* the unsigned calldata, including the ERC-20 approval
+when one is needed. It quotes two liquidity sources, 0x Swap v2 (the default)
+and the Uniswap Trading API (`source=uniswap`), both executed through the
+same Router. A 20 bps integrator fee is reported in the quote and already
+deducted from the output. Quotes expire in 30 s upstream; the engine stops
+trusting them at 20 s.
+
+The Uniswap Trading API used to be a second provider, selected with
+`trading.provider = "uniswap"` and a `trading.uniswap_api_key`. It was
+removed in 2026-11: `trading.provider`, `trading.uniswap_api_key` and
+`trading.uniswap_api_key_env` are dropped from an existing config at boot
+(a backup is written first), `agentos trade provider` and the
+`trading.setProvider` RPC are gone, and an order row that still records
+`provider: "uniswap"` is priced and built by the AgentOS DEX.
 
 The aggregator holds no key of its own and neither signs nor broadcasts:
 reading it cannot move funds. Before anything is signed the engine checks
@@ -156,32 +159,17 @@ The tokenised stocks (AAPL, TSLA, NVDA, SPY, … on Robinhood Chain; AAPLc,
 TSLAc, … on Base) are refused by 0x in either direction, at any size, at any
 time, for legal reasons (`trading.token_not_tradeable`). Uniswap trades
 them, and the AgentOS DEX carries Uniswap as a second source, so the engine
-names it per pair: when `trading.provider` is `aggregator` and either side
-is a tokenised stock (a row of the chain's stock list, or a name ending
-`• Robinhood Token`), the quote, the swap, DCA runs and trigger fires ask
-the DEX with `source=uniswap`. No Uniswap API key is needed and the quote
-and the order keep `provider: "aggregator"`. A `token_not_tradeable` the
-flag missed is asked once more from the Uniswap source. Only when that
-source cannot take the pair does the engine fall back to the Uniswap
-provider, if a key is configured (the order then records
-`provider: "uniswap"`); without a key the error is returned with *"The AgentOS DEX's Uniswap source could not take this pair. Retry later, or add a Uniswap API key (`agentos config set trading.uniswap_api_key <key>`) to route through Uniswap directly"*
-appended. Pairs without
-a Stock Token keep the configured provider. ETH, WETH and USDG trade
+names it per pair: when either side is a tokenised stock (a row of the
+chain's stock list, or a name ending `• Robinhood Token`), the quote, the
+swap, DCA runs and trigger fires ask the DEX with `source=uniswap`. No
+Uniswap API key is needed. A `token_not_tradeable` the flag missed is asked
+once more from the Uniswap source. If that source cannot take the pair, the
+DEX's own error is returned. ETH, WETH and USDG trade
 normally there. Two more Robinhood Chain
 facts: the engine has no native USD price there yet, so `--usd` may be
 refused with `trading.unpriced` (size with `--amount`), and the bare symbol
 `USDC` resolves to unverified lookalikes (`TOKEN_UNVERIFIED`) — use an
 address the token search marks `verified: true`.
-
-The provider is read from `trading.provider` on **every** call, so switching
-takes effect immediately, no gateway restart. There is one canonical way to
-change it: write the config key. The CLI does
-`agentos trade provider uniswap` (`config.set trading.provider`);
-`trading.setProvider {provider}` is a thin RPC wrapper over the same
-`config.set` path. The desktop app swaps through the AgentOS DEX only: it
-offers no provider to choose and no Uniswap key to enter, and when the
-gateway's config names another provider it says so and offers one button
-that sets it back (`trading.setProvider {provider: "aggregator"}`).
 
 Prices, balances and history never depend on the provider (DexScreener /
 CoinGecko / your RPC node); only quoting and calldata do.
@@ -205,11 +193,8 @@ still found by address or through DexScreener, and is shown as unverified.
 ```toml
 [trading]
 enabled = true
-provider = "aggregator"              # or "uniswap"
 aggregator_base_url = "https://agg.useagentos.dev"
 aggregator_trusted_spenders = []     # extra aggregator spender/target contracts, on top of the built-in pins
-uniswap_api_key = ""                 # only for provider = "uniswap"; or set UNISWAP_API_KEY
-uniswap_api_key_env = "UNISWAP_API_KEY"
 approval_threshold_usd = 100.0       # agent orders above this wait for approval
 daily_cap_usd = 1000.0               # per wallet, agent-initiated swaps only; 0 = agent swaps off
 approval_ttl_seconds = 900           # unanswered approvals expire
@@ -232,9 +217,8 @@ nonces, receipts, fees, the sync's block height, logs and native balance). The
 wallet sync's bulk ERC-20 balance read goes to the chain's public node first, as
 one Multicall3 call per wallet, and falls back to the custom RPC when the public
 node does not answer. Every `[trading]` key is also an environment variable with
-the `AGENTOS_TRADING_` prefix (`AGENTOS_TRADING_DAILY_CAP_USD=250`,
-`AGENTOS_TRADING_PROVIDER=uniswap`). The API key is redacted in
-`config.snapshot` and every public config view like any other `*_api_key`;
+the `AGENTOS_TRADING_` prefix (`AGENTOS_TRADING_DAILY_CAP_USD=250`). In
+`config.snapshot` and every public config view,
 `rpc_urls` values are shown as scheme and host only (`https://base.drpc.org/…`)
 because dRPC, Alchemy and Infura keys live in the path. Writing that
 redacted form back through `config.apply` / `config.patch` keeps the stored
@@ -521,8 +505,7 @@ Every client goes through the same gateway methods:
 
 | Method | What it does |
 | --- | --- |
-| `trading.status`, `trading.limits`, `trading.probe`, `trading.network` | readiness (no `vaultPath` for an agent), the guardrails and today's spend, provider reachability (with `apiKey`: operator-only), head block / gas / RPC latency per chain |
-| `trading.setProvider` | switch the swap provider (a wrapper over `config.set trading.provider`) |
+| `trading.status`, `trading.limits`, `trading.probe`, `trading.network` | readiness (no `vaultPath` for an agent), the guardrails and today's spend, whether the AgentOS DEX is reachable, head block / gas / RPC latency per chain |
 | `trading.tokens.search`, `trading.tokens.resolve`, `trading.tokens.hide` | search a chain's tokens; resolve one address to its metadata (symbol, decimals, verification, price); hide or show a token (operator-only) |
 | `trading.quote`, `trading.swap`, `trading.send`, `trading.unwrap` | price a swap; place one (per wallet, several, or all); send a token to one or many recipients as one batch; unwrap WETH delivered by a swap (operator-only). `swap` and `send` take `clientOrderId` (idempotency: the same id returns the same order) and a `note` that is sanitised (control/bidi characters, 240 chars) |
 | `trading.allowances.list`, `trading.allowances.revoke` | live ERC-20 allowances with exposure; `approve(spender, 0)` |

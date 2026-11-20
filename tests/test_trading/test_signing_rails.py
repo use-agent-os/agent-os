@@ -10,24 +10,18 @@ import pytest
 
 from agentos.trading import service as service_module
 from agentos.trading.aggregator import AGENTOS_ROUTER, ALLOWANCE_HOLDER, AggregatorProvider
-from agentos.trading.chains import BASE, NATIVE_ADDRESS, ROBINHOOD
+from agentos.trading.chains import BASE, NATIVE_ADDRESS
 from agentos.trading.evm import EvmClient, EvmRpcError, EvmTransportError
 from agentos.trading.ledger import Ledger
-from agentos.trading.providers import UniswapProvider
 from agentos.trading.service import TradingError, TradingService, _local_tx_hash, _sign_tx
-from agentos.trading.uniswap import PROXY_SPENDER, UNIVERSAL_ROUTERS
 from tests.test_trading.fakes import (
-    AAPL,
     OTHER,
-    ROUTER,
-    UNIVERSAL_ROUTER,
     USDC,
     WALLET,
     WETH,
     FakeAggregator,
     FakeChain,
     FakePrices,
-    FakeUniswap,
     approve_calldata,
     decode_fake_raw,
 )
@@ -179,64 +173,6 @@ class TestPinnedSwapTargets:
                 {ALLOWANCE_HOLDER, AGENTOS_ROUTER}
             )
 
-    def test_uniswap_targets_are_pinned_per_chain(self) -> None:
-        provider = UniswapProvider(client=None)  # type: ignore[arg-type]
-        # Every Universal Router version the Trading API sends to, verified
-        # against Uniswap/universal-router deploy-addresses (docs/markets.md).
-        assert UNIVERSAL_ROUTERS == {
-            8453: frozenset(
-                {
-                    "0x6ff5693b99212da76ad316178a184ab56d299b43",  # v2.0
-                    "0xd6145b2d3f379919e8cdeda7b97e37c4b2ca9c40",  # v2.1.2
-                }
-            ),
-            4663: frozenset(
-                {
-                    "0x8876789976decbfcbbbe364623c63652db8c0904",  # v2.1.1
-                    "0x204faca1764b154221e35c0d20abb3c525710498",  # v2.1.2
-                }
-            ),
-        }
-        assert UNIVERSAL_ROUTER in UNIVERSAL_ROUTERS[8453]
-        assert provider.trusted_targets(BASE, None) == frozenset(  # type: ignore[arg-type]
-            {
-                UNIVERSAL_ROUTER,
-                "0xd6145b2d3f379919e8cdeda7b97e37c4b2ca9c40",
-                PROXY_SPENDER.lower(),
-                ROUTER,
-            }
-        )
-        robinhood = provider.trusted_targets(ROBINHOOD, None)  # type: ignore[arg-type]
-        assert "0x204faca1764b154221e35c0d20abb3c525710498" in robinhood
-        assert robinhood == UNIVERSAL_ROUTERS[4663] | {PROXY_SPENDER.lower()}
-
-    def test_a_chain_with_no_router_entry_gets_an_empty_set(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delitem(UNIVERSAL_ROUTERS, ROBINHOOD.chain_id)
-        provider = UniswapProvider(client=None)  # type: ignore[arg-type]
-        # Refuse, never guess: not even the proxy is trusted.
-        assert provider.trusted_targets(ROBINHOOD, None) == frozenset()  # type: ignore[arg-type]
-
-    async def test_uniswap_on_a_chain_without_a_pinned_router_is_refused(
-        self,
-        funded_service: TradingService,
-        robinhood_chain: FakeChain,
-        fake_uniswap: FakeUniswap,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.delitem(UNIVERSAL_ROUTERS, ROBINHOOD.chain_id)
-        service = funded_service
-        service.config.provider = "uniswap"
-        wallet = service.test_wallet  # type: ignore[attr-defined]
-        robinhood_chain.tokens[WETH_RH] = ("WETH", "Wrapped Ether", 18)
-        robinhood_chain.set_native(wallet, 10**18)
-        robinhood_chain.set_erc20(AAPL, wallet, 100 * 10**18)
-        order = await _swap(service, chain=ROBINHOOD, token_in="AAPL", token_out=WETH_RH)
-        assert order["status"] == "failed", order
-        assert "no swap contract is pinned for this chain" in order["reason"]
-        assert robinhood_chain.sent == []
-
 
 class TestGasCaps:
     async def test_the_tip_is_the_median_reward_capped_at_the_chain_ceiling(
@@ -280,11 +216,10 @@ class TestGasCaps:
         assert base_chain.sent == []
 
     async def test_provider_fee_fields_are_ignored(
-        self, funded_service: TradingService, base_chain: FakeChain, fake_uniswap: FakeUniswap
+        self, funded_service: TradingService, base_chain: FakeChain
     ) -> None:
-        """Uniswap's /swap names maxFeePerGas 0.2 gwei; the node (0.201) decides."""
+        """The quote's transaction names a gasPrice of its own; the node decides."""
         service = funded_service
-        service.config.provider = "uniswap"
         wallet = service.test_wallet  # type: ignore[attr-defined]
         _wire_swap_effects(base_chain, wallet)
         base_chain.fee_rewards = [3 * 10**6]
@@ -293,7 +228,8 @@ class TestGasCaps:
         signed = decode_fake_raw(base_chain.sent[-1])
         assert signed["maxPriorityFeePerGas"] == 3 * 10**6
         assert signed["maxFeePerGas"] == 2 * base_chain.base_fee + 3 * 10**6
-        assert signed["gas"] == 250_000  # the provider's limit, under the cap
+        assert "gasPrice" not in signed
+        assert signed["gas"] == int(288079 * 1.2)  # the provider's estimate + 20 %, under the cap
 
     async def test_gas_above_two_dollars_on_a_ten_dollar_order_is_refused(
         self, funded_service: TradingService, base_chain: FakeChain
@@ -398,13 +334,15 @@ class TestRecordBeforeSend:
         assert recovered["status"] == "confirmed" and recovered["receivedOut"] == "0.005"
 
     async def test_the_approval_hash_is_recorded_before_its_broadcast(
-        self, funded_service: TradingService, base_chain: FakeChain, fake_uniswap: FakeUniswap
+        self,
+        funded_service: TradingService,
+        base_chain: FakeChain,
+        fake_aggregator: FakeAggregator,
     ) -> None:
         service = funded_service
-        service.config.provider = "uniswap"
         wallet = service.test_wallet  # type: ignore[attr-defined]
         _wire_swap_effects(base_chain, wallet)
-        fake_uniswap.approval_needed = True
+        fake_aggregator.approval_needed = True
         # (field, hash, how many transactions the node had seen at that moment)
         seen: list[tuple[str, str, int]] = []
         real_update = service.ledger.update_order
@@ -426,7 +364,7 @@ class TestRecordBeforeSend:
         assert first_swap == ("tx_hash", _local_tx_hash(base_chain.sent[1]), 1)
         # What was signed is our own approve(spender, amount), not the provider's bytes.
         approval = decode_fake_raw(base_chain.sent[0])
-        assert approval["data"] == approve_calldata(fake_uniswap.approval_spender, 10 * 10**6)
+        assert approval["data"] == approve_calldata(ALLOWANCE_HOLDER, 10 * 10**6)
 
     async def test_recovery_treats_any_row_with_a_hash_as_submitted(
         self, funded_service: TradingService, base_chain: FakeChain
