@@ -1740,7 +1740,7 @@ async def _emit_to_subscribers(
             try:
                 await conn.send_event(event_name, send_payload)
             except Exception:
-                log.warning("emit.send_failed", conn_id=conn_id, event=event_name)
+                log.warning("emit.send_failed", conn_id=conn_id, event_name=event_name)
 
 
 def _task_id_param(params: dict | None) -> str | None:

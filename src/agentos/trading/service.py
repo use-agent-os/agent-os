@@ -342,7 +342,7 @@ def _err(exc: Exception) -> TradingError:
 
 async def _default_broadcast(event: str, payload: dict[str, Any]) -> None:
     """No transport wired (tests, CLI-only use): events are logged, not sent."""
-    log.debug("trading.event", event=event)
+    log.debug("trading.event", event_name=event)
 
 
 def _sign_tx(tx: dict[str, Any], key: bytes) -> str:
@@ -1092,7 +1092,7 @@ class TradingService:
         try:
             await self._broadcast(event, {"schema_version": 1, **payload})
         except Exception:  # pragma: no cover
-            log.debug("trading.emit_failed", event=event)
+            log.debug("trading.emit_failed", event_name=event)
 
     # ── status / probe ─────────────────────────────────────────────────
 
