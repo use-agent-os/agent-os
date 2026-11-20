@@ -227,10 +227,23 @@ System Settings › Notifications and that no Focus mode is on.
 ## Settings
 
 Open Settings with ⌘, or the toolbar gear. Escape or **Done** closes it. The
-rail on the left lists every section with its icon; type in its search field
-to narrow it (it matches names and words such as "telegram" or "api key"),
-and a dot marks a section the gateway says needs attention. Settings opens on
-**Overview**, a setup checklist of what is set up and what is still missing.
+first time after the app starts, Settings opens on **Overview**, a setup
+checklist of what is set up and what is still missing; after that it reopens
+on the section you last used. The rail on the left lists every section with
+its icon. Type in its search field to narrow it: it matches section names and
+the words for what is on each page, such as "telegram", "dark mode", "text
+size", "uniswap", "grok" or "api key", every word in any order; the best match
+comes first and Return opens it. A dot marks a section that needs you: no
+provider yet, or something switched on that cannot work, such as a missing
+key.
+
+The Overview head says where setup stands in one line: how many required
+steps are left, else "Required setup done" with how many things need fixing
+or how many optional ones remain, and "All set" only when nothing is left.
+Its checklist covers the provider, routing, memory, web search, image
+generation, voice, search on X, channels, skills, environment variables, the
+trading wallet and updates; each row's button lands on the place that changes
+it.
 
 | Group | Sections |
 | --- | --- |
@@ -254,8 +267,12 @@ setup the Web UI uses.
   tiers (model and thinking per tier, one of them the default), and the safety
   net and translation cap under **Fine-tuning**.
 - **Memory** is where the agent's memory is set up, in four tabs: Remembered,
-  Knowledge, Try it and Setup. **Capabilities** sets up web search, image
-  generation and voice.
+  Knowledge, Try it and Setup. **Capabilities** sets up web search, search on
+  X (Grok, with an xAI key or a SuperGrok login), image generation and voice,
+  under a strip that says which service answers each one and whether its key
+  is in place. Numbers are checked against what the engine accepts (results
+  per search 1 to 20; X search timeouts and retries within their limits), and
+  **Open Environment** next to a missing key lands on that variable.
 - **Skills** and **Environment** open on a summary strip. In Skills,
   **Needs setup** opens the Skills panel; in Environment, **Set** and
   **Missing** filter the list to those variables.
@@ -264,8 +281,8 @@ setup the Web UI uses.
   managed gateway is on its defaults.
 - **Trading** and **Notifications** carry their on/off switch in the page
   head. Trading opens on a summary of the swap provider, wallets and limits.
-- **Appearance** holds the theme (system/light/dark), the colour palette, text
-  size, reduced transparency and the optional pet mascot. **Behaviour** holds
+- **Appearance** holds the theme (system/light/dark), the colour palette, UI
+  scale, reduced transparency and the optional pet mascot. **Behaviour** holds
   open at login, what to open at launch, stopping the gateway on quit, the
   Quick Ask shortcut, and Return vs ⌘Return to send.
 
