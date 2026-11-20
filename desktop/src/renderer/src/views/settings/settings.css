@@ -544,6 +544,12 @@
 .stg-notice > span {
   flex: 1;
 }
+/* A notice that needs two parts: what is wrong, then what to do about it. */
+.stg-notice__title {
+  display: block;
+  margin-bottom: 2px;
+  font-weight: 600;
+}
 .stg-notice > .mac-button {
   flex-shrink: 0;
   white-space: nowrap;
