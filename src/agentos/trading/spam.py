@@ -9,7 +9,7 @@ ledger, kept out of what the user and the agent see.
 
 A token is hidden automatically when all three hold:
 
-1. Nobody lists it: it is not in the chain's CoinGecko registry (``verified``).
+1. Nobody lists it: it is not in the chain's token lists (``verified``).
 2. Nobody trades it: the price source answered and found no pool with at
    least :data:`MIN_LIQUIDITY_USD` behind it. Unreachable is not "no pool".
 3. The wallet never acted on it: never sold, sent, swapped or quoted it

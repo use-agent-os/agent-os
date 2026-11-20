@@ -30,6 +30,8 @@ export function nativeToken(chainId: number): Token {
  * its wrapped ether, so the receive side has somewhere sane to land before
  * anyone types. Addresses are the engine's own (src/agentos/trading/chains.py);
  * Robinhood Chain does not hard-code its USDC/WETH there, so it lists only ETH.
+ * Everything else comes from the search, which the gateway answers from the
+ * AgentOS token lists (src/agentos/trading/token_lists.py).
  */
 export const POPULAR_TOKENS: Record<number, Token[]> = {
   8453: [

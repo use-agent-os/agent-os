@@ -1235,13 +1235,15 @@ swap, reported back in the quote. **Uniswap** (`agentos trade provider
 uniswap`) is the fallback and needs a key: `agentos config set
 trading.uniswap_api_key <key>`, or Settings › Trading in the desktop app.
 
-The aggregator refuses the Robinhood Stock Tokens (the tokenised stocks —
-AAPL, TSLA, NVDA, SPY and the rest) for legal reasons
-(`trading.token_not_tradeable`), so when either side of a pair is a Stock
-Token the engine quotes and swaps it through **Uniswap** instead, provided a
-Uniswap API key is configured — `quote`, `swap`, DCA runs, trigger fires and
-bracket legs alike; the quote and the order record `provider: "uniswap"`.
-Without a key the refusal is kept and its message says to add one
+0x refuses the tokenised stocks (AAPL, TSLA, NVDA, SPY and the rest on
+Robinhood Chain, AAPLc and the rest on Base) for legal reasons
+(`trading.token_not_tradeable`), so when either side of a pair is one the
+engine asks the AgentOS DEX for its **Uniswap** source instead
+(`source=uniswap`) — `quote`, `swap`, DCA runs, trigger fires and bracket
+legs alike. No Uniswap API key is needed, and the quote and the order keep
+`provider: "aggregator"`. Only when that source cannot take the pair does
+the engine fall back to the Uniswap provider, if a key is configured;
+without one the error says how to route through Uniswap directly
 (`agentos config set trading.uniswap_api_key <key>`, or Settings › Trading
 in the desktop app). ETH, WETH and USDG trade normally there.
 Robinhood Chain has no native USD price feed yet, so `--usd` may be refused

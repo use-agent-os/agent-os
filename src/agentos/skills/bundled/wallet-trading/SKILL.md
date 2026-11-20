@@ -50,8 +50,8 @@ Wallets live in the engine's **vault**; the gateway signs. Chains: Base
 (8453), Robinhood Chain (4663). Providers: `aggregator` (default, no key,
 quotes fresh ~20 s, 20 bps fee included), `uniswap` (needs
 `trading.uniswap_api_key`, 30 s); `trade provider [aggregator|uniswap]` shows
-or switches (only when asked). Stock Tokens need Uniswap (a key), else
-`trading.token_not_tradeable`: the user adds the key, never substitute;
+or switches (only when asked). Stock Tokens swap through the default
+provider, no key; if one is refused, pass the message on, never substitute;
 `trade markets <stock> --chain robinhood` lists their pools. On Robinhood
 size in token units (`--usd` may fail `trading.unpriced`); bare `USDC` is a
 lookalike.

@@ -33,7 +33,13 @@ import structlog
 from agentos import __version__
 from agentos.redact import register_secret_values
 from agentos.trading import binding, dca, guardrails, integrity, permits, triggers
-from agentos.trading.aggregator import AGGREGATOR_BASE, AggregatorClient, AggregatorProvider
+from agentos.trading.aggregator import (
+    AGGREGATOR_BASE,
+    SOURCE_UNAVAILABLE,
+    SOURCE_UNISWAP,
+    AggregatorClient,
+    AggregatorProvider,
+)
 from agentos.trading.bridge import (
     BRIDGE_FILL_GIVE_UP_S,
     BRIDGE_FILL_POLL_S,
@@ -280,13 +286,28 @@ class TradingError(RuntimeError):
         self.details = details
 
 
-#: Appended to the aggregator's ``token_not_tradeable`` error when no Uniswap
-#: key is configured. Clients show it verbatim (``docs/markets.md``).
+#: Appended to the aggregator's error when its Uniswap source could not take
+#: a pair 0x refuses (a tokenized stock) and no Uniswap key is configured to
+#: route it directly. Clients show it verbatim (``docs/markets.md``).
 STOCK_TOKEN_UNISWAP_HINT = (
-    "Stock Tokens route through Uniswap: add a Uniswap API key "
-    "(`agentos config set trading.uniswap_api_key <key>`, "
-    "or Settings › Trading in the desktop app)"
+    "The AgentOS DEX's Uniswap source could not take this pair. Retry later, "
+    "or add a Uniswap API key (`agentos config set trading.uniswap_api_key <key>`, "
+    "or Settings › Trading in the desktop app) to route through Uniswap directly"
 )
+
+
+def _uniswap_source_refused(exc: ProviderError) -> bool:
+    """The AgentOS DEX could not put a pair 0x refuses through its Uniswap source.
+
+    Either the source said so (``SOURCE_UNAVAILABLE``: switched off for the
+    chain, or its Router is paused or unreadable), or the refusal is still
+    0x's own — the source was never reached, or the gateway predates it.
+    """
+    details = exc.details if isinstance(exc.details, dict) else {}
+    return (
+        exc.code == "trading.token_not_tradeable"
+        or details.get("aggregatorCode") == SOURCE_UNAVAILABLE
+    )
 
 
 def _with_hint(message: str, hint: str) -> str:
@@ -645,22 +666,76 @@ class TradingService:
             return UniswapProvider(self.uniswap(api_key))
         raise TradingError("trading.invalid", f"unknown swap provider {chosen!r}")
 
-    def _provider_id_for(self, meta_in: TokenMeta, meta_out: TokenMeta) -> str:
-        """The provider for this pair: the configured one, unless it cannot quote it.
+    async def _is_stock_token(self, chain: ChainSpec, meta: TokenMeta) -> bool:
+        """Whether ``meta`` is a tokenized stock: its own flag, or the chain's stock list.
 
-        The aggregator refuses Robinhood Stock Tokens (``token_not_tradeable``)
-        while Uniswap's Trading API quotes them, so a pair with a Stock Token
-        on either side goes to Uniswap when a Uniswap key is configured.
-        Every other pair keeps the configured provider, read on every call.
+        A row read back from the ledger keeps no list tag — only a Robinhood
+        Stock Token's name suffix marks it — so the list is asked as well.
         """
-        chosen = self.provider_id()
-        if (
-            chosen == "aggregator"
-            and (meta_in.stock_token or meta_out.stock_token)
-            and self.api_key()
+        if meta.native:
+            return False
+        if meta.stock_token:
+            return True
+        known = await self.prices.known_token(chain, meta.address)
+        return known is not None and known.stock_token
+
+    async def _aggregator_quote(
+        self,
+        provider: AggregatorProvider,
+        *,
+        chain: ChainSpec,
+        swapper: str,
+        meta_in: TokenMeta,
+        meta_out: TokenMeta,
+        amount_raw: int,
+        slippage_pct: float | None,
+        decision_origin: DecisionOrigin,
+    ) -> ProviderQuote:
+        """Quote through the AgentOS DEX, from its Uniswap source when a stock is involved.
+
+        0x refuses the tokenized stocks; the DEX's Uniswap source trades them.
+        A pair with a stock on either side is asked with ``source=uniswap``,
+        and every other pair the way it always was, with no ``source`` (0x).
+        A pair 0x refuses that the stock flag missed
+        (``trading.token_not_tradeable``) is asked once more from the Uniswap
+        source; when that source cannot take it either, the refusal raised is
+        0x's. Every path that prices an order comes through here, so a
+        re-quote at execution asks the same venue.
+        """
+
+        async def ask(source: str | None) -> ProviderQuote:
+            return await provider.quote(
+                chain=chain,
+                swapper=swapper,
+                token_in=NATIVE_ADDRESS if meta_in.native else meta_in.address,
+                token_out=NATIVE_ADDRESS if meta_out.native else meta_out.address,
+                amount_raw=amount_raw,
+                slippage_pct=slippage_pct,
+                decision_origin=decision_origin,
+                source=source,
+            )
+
+        if await self._is_stock_token(chain, meta_in) or await self._is_stock_token(
+            chain, meta_out
         ):
-            return "uniswap"
-        return chosen
+            return await ask(SOURCE_UNISWAP)
+        try:
+            return await ask(None)
+        except ProviderError as refused:
+            if refused.code != "trading.token_not_tradeable":
+                raise
+            log.info(
+                "trading.uniswap_source_retry",
+                chain=chain.chain_id,
+                token_in=meta_in.address,
+                token_out=meta_out.address,
+            )
+            try:
+                return await ask(SOURCE_UNISWAP)
+            except ProviderError as exc:
+                if _uniswap_source_refused(exc):
+                    raise refused from exc
+                raise
 
     async def _priced_routed(
         self,
@@ -674,12 +749,13 @@ class TradingService:
         slippage_pct: float | None,
         decision_origin: DecisionOrigin,
     ) -> ProviderQuote:
-        """:meth:`_priced` through ``provider_id``, with the Stock Token fallback.
+        """:meth:`_priced` through ``provider_id``, with the direct-Uniswap fallback.
 
-        When the aggregator answers ``trading.token_not_tradeable`` for a pair
-        the Stock Token flag missed, the quote is retried once through
-        Uniswap if a key is configured; without one the aggregator's error is
-        raised with :data:`STOCK_TOKEN_UNISWAP_HINT` appended. The returned
+        The AgentOS DEX routes a tokenized stock through its own Uniswap
+        source (:meth:`_aggregator_quote`). When that source cannot take a
+        pair 0x refuses, the quote is retried once through the Uniswap
+        provider if a key is configured; without one the aggregator's error
+        is raised with :data:`STOCK_TOKEN_UNISWAP_HINT` appended. The returned
         quote's ``provider`` says which provider actually answered.
         """
         provider = self.provider(provider_id)
@@ -695,7 +771,7 @@ class TradingService:
         try:
             return await self._priced(provider, **kwargs)
         except ProviderError as exc:
-            if provider.id != "aggregator" or exc.code != "trading.token_not_tradeable":
+            if provider.id != "aggregator" or not _uniswap_source_refused(exc):
                 raise
             if not self.api_key():
                 raise ProviderError(
@@ -2591,15 +2667,27 @@ class TradingService:
         and the guardrails treat the impact as unknown — on every provider,
         not only on the one that happens to leave it blank (WAL-06).
         """
-        quote = await provider.quote(
-            chain=chain,
-            swapper=swapper,
-            token_in=NATIVE_ADDRESS if meta_in.native else meta_in.address,
-            token_out=NATIVE_ADDRESS if meta_out.native else meta_out.address,
-            amount_raw=amount_raw,
-            slippage_pct=slippage_pct,
-            decision_origin=decision_origin,
-        )
+        if isinstance(provider, AggregatorProvider):
+            quote = await self._aggregator_quote(
+                provider,
+                chain=chain,
+                swapper=swapper,
+                meta_in=meta_in,
+                meta_out=meta_out,
+                amount_raw=amount_raw,
+                slippage_pct=slippage_pct,
+                decision_origin=decision_origin,
+            )
+        else:
+            quote = await provider.quote(
+                chain=chain,
+                swapper=swapper,
+                token_in=NATIVE_ADDRESS if meta_in.native else meta_in.address,
+                token_out=NATIVE_ADDRESS if meta_out.native else meta_out.address,
+                amount_raw=amount_raw,
+                slippage_pct=slippage_pct,
+                decision_origin=decision_origin,
+            )
         if quote.gas_usd is None and quote.gas_native is not None:
             native_price = await self.prices.price(chain, NATIVE_ADDRESS)
             if native_price:
@@ -2670,7 +2758,7 @@ class TradingService:
         self._check_agent_slippage(initiator, slippage)
         try:
             quote = await self._priced_routed(
-                self._provider_id_for(meta_in, meta_out),
+                self.provider_id(),
                 chain=chain,
                 swapper=record.address,
                 meta_in=meta_in,
@@ -4797,7 +4885,7 @@ class TradingService:
             "session_key": session_key,
             "note": note,
             "slippage_pct": slippage,
-            "provider": self._provider_id_for(meta_in, meta_out),
+            "provider": self.provider_id(),
             "client_order_id": client_order_id,
         }
         if quote_json is not None:
@@ -4836,8 +4924,8 @@ class TradingService:
             decision_origin=_origin(str(row["initiator"])),
         )
         if quote.provider != row_provider:
-            # The aggregator refused a Stock Token the flag missed and Uniswap
-            # answered instead: the row follows, so execution (now or after an
+            # The aggregator could not route a pair 0x refuses and the Uniswap
+            # provider answered instead: the row follows, so execution (now or after an
             # approval) builds the swap through the provider that quoted it.
             self.ledger.update_order(row["order_id"], provider=quote.provider)
             row["provider"] = quote.provider
