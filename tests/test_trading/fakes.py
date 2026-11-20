@@ -7,6 +7,7 @@ GeckoTerminal. Tests configure the fakes and assert on what was requested.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -560,6 +561,8 @@ class FakeAggregator:
     expires_in_s: float = 30.0
     configured: bool = True
     quote_error: tuple[int, dict[str, Any]] | None = None
+    # An error for one ``source`` only ("0x" when the request names none).
+    source_errors: dict[str, tuple[int, dict[str, Any]]] = field(default_factory=dict)
     tx_to: str = ALLOWANCE_HOLDER  # what the live API sends every swap to
     tx_value: str = "0"
     tx_data: str = "0x2213bc0b" + "22" * 32
@@ -569,6 +572,8 @@ class FakeAggregator:
     fee_formatted: str | None = None
     requests: list[httpx.Request] = field(default_factory=list)
     quotes: int = 0
+    # The ``source`` each quote asked for, in order ("0x" when it named none).
+    sources: list[str] = field(default_factory=list)
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -586,10 +591,13 @@ class FakeAggregator:
         if path not in ("/v1/quote", "/v1/price"):
             return httpx.Response(404, json={"error": {"code": "INVALID_REQUEST"}})
         self.quotes += 1
-        if self.quote_error is not None:
-            status, payload = self.quote_error
-            return httpx.Response(status, json=payload)
         params = {k: v[0] for k, v in parse_qs(request.url.query.decode()).items()}
+        source = params.get("source", "0x")
+        self.sources.append(source)
+        error = self.source_errors.get(source, self.quote_error)
+        if error is not None:
+            status, payload = error
+            return httpx.Response(status, json=payload)
         sell, buy = params["sell"], params["buy"]
         amount_raw = int(params["sellAmountRaw"])
         taker = params.get("taker", WALLET)
@@ -682,10 +690,16 @@ class FakeAggregator:
 
 @dataclass
 class FakePrices:
-    """DexScreener spot prices + CoinGecko lists/history + GeckoTerminal candles."""
+    """DexScreener spot prices + AgentOS token lists + CoinGecko history + GeckoTerminal candles."""
 
     spot: dict[tuple[str, str], float] = field(default_factory=dict)  # (slug, token) -> usd
-    lists: dict[str, list[dict[str, Any]]] = field(default_factory=dict)  # platform -> tokens
+    # chain key ("base", "robinhood") -> the rows of its ``<key>_tokens.json``;
+    # a chain with no entry answers 404.
+    lists: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # chain key -> the rows of its ``<key>_stock_tokens.json`` (empty when absent).
+    stock_lists: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # list file name without ``.json`` -> (major, minor, patch); unversioned when absent.
+    list_versions: dict[str, tuple[int, int, int]] = field(default_factory=dict)
     history: dict[str, float] = field(default_factory=dict)  # token -> usd at any past ts
     candles: list[list[float]] = field(default_factory=list)
     requests: list[httpx.Request] = field(default_factory=list)
@@ -712,9 +726,23 @@ class FakePrices:
                     if query in token
                 ]
                 return httpx.Response(200, json={"pairs": pairs})
-        if host == "tokens.coingecko.com":
-            platform = path.split("/")[1]
-            return httpx.Response(200, json={"tokens": self.lists.get(platform, [])})
+        if host == "raw.githubusercontent.com":
+            # agent-os-token-list: ``<chain>_tokens.json`` and ``<chain>_stock_tokens.json``.
+            name = path.rsplit("/", 1)[-1].removesuffix(".json")
+            if name.endswith("_stock_tokens"):
+                tokens = self.stock_lists.get(name.removesuffix("_stock_tokens"), [])
+            elif name.removesuffix("_tokens") in self.lists:
+                tokens = self.lists[name.removesuffix("_tokens")]
+            else:
+                return httpx.Response(404, text="404: Not Found")
+            body: dict[str, Any] = {"name": name, "tokens": tokens}
+            if name in self.list_versions:
+                major, minor, patch = self.list_versions[name]
+                body["version"] = {"major": major, "minor": minor, "patch": patch}
+            etag = '"' + hashlib.sha256(json.dumps(body).encode()).hexdigest() + '"'
+            if request.headers.get("if-none-match") == etag:
+                return httpx.Response(304, headers={"etag": etag})
+            return httpx.Response(200, json=body, headers={"etag": etag})
         if host == "api.coingecko.com":
             parts = path.split("/")
             token = parts[6].lower() if len(parts) > 6 else ""

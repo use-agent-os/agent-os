@@ -2,10 +2,11 @@
 
 Sources, in order of trust for the job:
 
-* CoinGecko token lists (``tokens.coingecko.com/<platform>/all.json``) for
-  symbol/name/decimals/logo and the *verified* flag. On Robinhood Chain the
-  genuine Stock Tokens carry the ``• Robinhood Token`` name suffix; community
-  tokens reuse the same tickers, so the flag matters.
+* The AgentOS token lists (:mod:`agentos.trading.token_lists`: each chain's
+  tokens and its tokenized stocks) for symbol/name/decimals/logo, the
+  *verified* flag and the *stock* flag. On Robinhood Chain the genuine Stock
+  Tokens also carry the ``• Robinhood Token`` name suffix; community tokens
+  reuse the same tickers, so the flag matters.
 * DexScreener for spot prices, 24h change and liquidity (``base`` and
   ``robinhood`` slugs both work), and for text search.
 * CoinGecko ``market_chart/range`` for a price at a past timestamp (cost
@@ -32,9 +33,9 @@ import httpx
 from agentos.display_text import clean_label
 from agentos.trading.chains import BASE, NATIVE_ADDRESS, ChainSpec, is_native, normalize_address
 from agentos.trading.evm import USER_AGENT
+from agentos.trading.token_lists import FetchResult, ListToken, TokenListStore
 
 DEXSCREENER_BASE = "https://api.dexscreener.com"
-COINGECKO_TOKENS_BASE = "https://tokens.coingecko.com"
 COINGECKO_API_BASE = "https://api.coingecko.com/api/v3"
 GECKOTERMINAL_BASE = "https://api.geckoterminal.com/api/v2"
 
@@ -43,17 +44,15 @@ ROBINHOOD_STOCK_SUFFIX = "• Robinhood Token"
 #: ``" NVIDIA Robinhood Token "`` (no bullet) is a lookalike, not a Stock Token.
 _STOCK_SUFFIX_RE = re.compile(r"\s*[•·]\s*robinhood token\s*$", re.IGNORECASE)
 #: The truncation-tolerant form: a bullet followed by any prefix of the
-#: marker. CoinGecko caps ``name``, so long listings arrive with the suffix
-#: chopped (``… • Robinhood Toke`` for IBM, ``… • Robinhood T`` for SPYD).
+#: marker. A registry that caps ``name`` hands long listings over with the
+#: suffix chopped (``… • Robinhood Toke`` for IBM, ``… • Robinhood T`` for
+#: SPYD), and the ledger still holds names stored that way.
 #: Ported from ``robinhood-chain-stocks/scripts/chain_stocks.py``.
 _STOCK_SUFFIX_LOOSE_RE = re.compile(
     r"\s*[•·]\s*r(?:o(?:b(?:i(?:n(?:h(?:o(?:o(?:d)?)?)?)?)?)?)?)?"
     r"(?:\s+t(?:o(?:k(?:e(?:n)?)?)?)?)?\s*$",
     re.IGNORECASE,
 )
-TOKEN_LIST_TTL_S = 24 * 3600
-# How long an empty (failed) token-list download is kept before retrying.
-TOKEN_LIST_EMPTY_HOLD_S = 60.0
 HISTORY_TTL_S = 6 * 3600
 DEXSCREENER_BATCH = 30
 #: DexScreener requests one ``prices`` call keeps in flight at once.
@@ -212,11 +211,14 @@ class PriceService:
         self._prices: dict[tuple[int, str], PriceInfo] = {}
         #: Cached ``unavailable`` misses: key -> when the source is asked again.
         self._held_until: dict[tuple[int, str], float] = {}
-        self._token_lists: dict[int, tuple[float, dict[str, TokenMeta]]] = {}
+        self.token_lists = TokenListStore(fetch=self._fetch_list, now=now)
+        #: The listed tokens of a chain as :class:`TokenMeta`, keyed on the
+        #: store's merged mapping they were built from (rebuilt when it is).
+        self._list_metas: dict[int, tuple[Any, dict[str, TokenMeta]]] = {}
         self._history: dict[tuple[int, str, int], tuple[float, float | None]] = {}
-        self._list_locks: dict[int, asyncio.Lock] = {}
 
     async def aclose(self) -> None:
+        await self.token_lists.aclose()
         if self._own_http:
             await self._http.aclose()
 
@@ -239,52 +241,51 @@ class PriceService:
 
     # ── token lists ────────────────────────────────────────────────────
 
+    async def _fetch_list(self, url: str, etag: str | None) -> FetchResult | None:
+        """One token list for the store: status, the JSON of a 200, the ETag."""
+        headers = {"accept": "application/json", "user-agent": USER_AGENT}
+        if etag:
+            headers["if-none-match"] = etag
+        try:
+            response = await self._http.get(url, headers=headers, timeout=self._timeout)
+        except httpx.HTTPError:
+            return None
+        body: Any = None
+        if response.status_code == 200:
+            try:
+                body = response.json()
+            except ValueError:
+                return None
+        return FetchResult(
+            status=response.status_code, body=body, etag=response.headers.get("etag")
+        )
+
     async def token_list(self, chain: ChainSpec) -> dict[str, TokenMeta]:
-        cached = self._token_lists.get(chain.chain_id)
-        if cached and self._now() - cached[0] < TOKEN_LIST_TTL_S:
+        """The chain's listed tokens by address: the registry behind ``verified``.
+
+        Loaded, re-checked and merged by :class:`TokenListStore`; a newer
+        version of a list is picked up without a restart.
+        """
+        listed = await self.token_lists.tokens(chain.chain_id)
+        cached = self._list_metas.get(chain.chain_id)
+        if cached is not None and cached[0] is listed:
             return cached[1]
-        lock = self._list_locks.setdefault(chain.chain_id, asyncio.Lock())
-        async with lock:
-            cached = self._token_lists.get(chain.chain_id)
-            if cached and self._now() - cached[0] < TOKEN_LIST_TTL_S:
-                return cached[1]
-            tokens: dict[str, TokenMeta] = {}
-            if chain.coingecko_platform:
-                body = await self._get(
-                    f"{COINGECKO_TOKENS_BASE}/{chain.coingecko_platform}/all.json"
-                )
-                for raw in (body or {}).get("tokens", []) if isinstance(body, dict) else []:
-                    meta = self._meta_from_list(chain, raw)
-                    if meta is not None:
-                        tokens[meta.address] = meta
-            if tokens:
-                self._token_lists[chain.chain_id] = (self._now(), tokens)
-            elif cached is None:
-                # A failed first download must not become a day of "unknown
-                # symbol": hold the empty list only briefly, then ask again.
-                stamp = self._now() - TOKEN_LIST_TTL_S + TOKEN_LIST_EMPTY_HOLD_S
-                self._token_lists[chain.chain_id] = (stamp, tokens)
-            return tokens or (cached[1] if cached else {})
+        metas = {token.address: self._meta_from_list(chain, token) for token in listed.values()}
+        self._list_metas[chain.chain_id] = (listed, metas)
+        return metas
 
     @staticmethod
-    def _meta_from_list(chain: ChainSpec, raw: Any) -> TokenMeta | None:
-        if not isinstance(raw, dict):
-            return None
-        try:
-            if int(raw.get("chainId") or chain.chain_id) != chain.chain_id:
-                return None
-            address = normalize_address(str(raw["address"]))
-        except (KeyError, ValueError, TypeError):
-            return None
-        name = str(raw.get("name") or "")
-        stock = chain.key == "robinhood" and is_stock_token_name(name)
+    def _meta_from_list(chain: ChainSpec, token: ListToken) -> TokenMeta:
+        # A stock list tags its rows; the name suffix is how the ledger's own
+        # rows (which keep no tags) are told apart, so both mark one here.
+        stock = token.stock or (chain.key == "robinhood" and is_stock_token_name(token.name))
         return TokenMeta(
             chain_id=chain.chain_id,
-            address=address,
-            symbol=str(raw.get("symbol") or ""),
-            name=name,
-            decimals=int(raw.get("decimals") or 18),
-            logo_url=str(raw["logoURI"]) if raw.get("logoURI") else None,
+            address=token.address,
+            symbol=token.symbol,
+            name=token.name,
+            decimals=token.decimals,
+            logo_url=token.logo_uri,
             verified=True,
             stock_token=stock,
         )

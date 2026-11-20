@@ -132,6 +132,47 @@ class TestRequestShape:
         assert quote.token_out == NATIVE_ADDRESS
         assert quote.routing == "Uniswap_V4"
         assert quote.slippage_pct == 1.0
+        # 0x is the default source and is asked by naming none.
+        assert "source" not in params and quote.raw.source is None
+
+    @pytest.mark.parametrize(
+        ("source", "sent"), [("uniswap", "uniswap"), (" Uniswap ", "uniswap"), ("0x", None)]
+    )
+    async def test_a_named_source_travels_as_the_source_parameter(
+        self, http, fake_aggregator: FakeAggregator, source: str, sent: str | None
+    ) -> None:
+        quote = await _provider(http).quote(
+            chain=ROBINHOOD,
+            swapper="0x1111111111111111111111111111111111111111",
+            token_in="0xaaaa000000000000000000000000000000000001",
+            token_out=NATIVE_ADDRESS,
+            amount_raw=10**18,
+            slippage_pct=None,
+            decision_origin="human_mediated",
+            source=source,
+        )
+        params = dict(fake_aggregator.requests[-1].url.params)
+        assert params.get("source") == sent
+        assert quote.raw.source == sent
+        # Whichever source answered, it is one provider with one set of pins.
+        assert quote.provider == "aggregator"
+
+    async def test_an_unknown_source_never_reaches_the_network(
+        self, http, fake_aggregator: FakeAggregator
+    ) -> None:
+        with pytest.raises(ProviderError) as info:
+            await _provider(http).quote(
+                chain=BASE,
+                swapper="0x1111111111111111111111111111111111111111",
+                token_in=USDC,
+                token_out=WETH,
+                amount_raw=10**6,
+                slippage_pct=None,
+                decision_origin="human_mediated",
+                source="kyber",
+            )
+        assert info.value.code == "trading.invalid"
+        assert fake_aggregator.requests == []
 
     async def test_an_out_of_range_slippage_is_clamped_and_said_so(self, http) -> None:
         quote = await _provider(http).quote(
@@ -175,6 +216,7 @@ class TestRefusals:
             ("UPSTREAM_REJECTED", 400, "trading.provider", False),
             ("UPSTREAM_ERROR", 502, "trading.provider", True),
             ("MISCONFIGURED", 503, "trading.provider", False),
+            ("SOURCE_UNAVAILABLE", 503, "trading.provider", False),
         ],
     )
     async def test_every_error_code_maps_to_one_of_ours(
@@ -492,6 +534,27 @@ class TestFreshness:
         assert fake_aggregator.quotes == 2
         assert quote.amount_out_raw == 4_000_000_000_000_000
         assert quote.min_out_raw == 4_000_000_000_000_000 * 995 // 1000
+        assert fake_aggregator.sources == ["0x", "0x"]
+
+    async def test_build_refetches_from_the_source_that_priced_the_order(
+        self, http, fake_aggregator
+    ) -> None:
+        provider = _provider(http)
+        quote = await provider.quote(
+            chain=BASE,
+            swapper="0x1111111111111111111111111111111111111111",
+            token_in=USDC,
+            token_out=WETH,
+            amount_raw=10**6,
+            slippage_pct=None,
+            decision_origin="human_mediated",
+            source="uniswap",
+        )
+        quote.fetched_at -= 120
+        await provider.build(quote, deadline=0, sign_permit=None, decision_origin="autonomous")
+        # A lapsed Uniswap quote re-fetched from 0x would be refused for a stock.
+        assert fake_aggregator.sources == ["uniswap", "uniswap"]
+        assert quote.raw.source == "uniswap"
 
 
 class TestThroughTheService:

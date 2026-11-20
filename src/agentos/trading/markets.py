@@ -94,8 +94,8 @@ LAUNCHERS: dict[str, str] = {
     "virtuals": "Virtuals",
 }
 
-# The Stock Token suffix, strict and truncation-tolerant (CoinGecko caps a
-# name at 60 characters: "… • Robinhood Toke"). The same regexes as the
+# The Stock Token suffix, strict and truncation-tolerant (a registry that
+# caps a name at 60 characters hands over "… • Robinhood Toke"). The same regexes as the
 # ``robinhood-chain-stocks`` skill, used here only to *strip* a suffix when a
 # lookalike's name is compared; whether a name is a Stock Token's is
 # ``prices.is_stock_token_name`` (the bullet is what makes one).
@@ -525,7 +525,7 @@ def _rel_id(pool: dict[str, Any], name: str) -> str:
 
 
 async def _stock_tokens(service: Any, chain: ChainSpec) -> dict[str, TokenMeta]:
-    """The chain's Stock Tokens from the CoinGecko list, by address."""
+    """The chain's Stock Tokens from its token list, by address."""
     try:
         listing = await service.prices.token_list(chain)
     except Exception:  # noqa: BLE001 - a missing list only means no lookalike check

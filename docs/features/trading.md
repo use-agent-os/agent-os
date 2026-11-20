@@ -58,7 +58,7 @@ gateway RPC surface (`wallet.*`, `trading.*`).
   wallets the background pass runs most of the time.
 - **Junk stays out of sight** — anyone can airdrop a token to any address.
   A token is hidden automatically when nobody lists it (not in the chain's
-  CoinGecko registry), nobody trades it (no DexScreener pool with at least
+  token lists), nobody trades it (no DexScreener pool with at least
   $1,000 behind it; an unreachable price source is not a verdict) and the
   wallet never acted on it (never sold, sent, swapped or quoted it). Hidden
   tokens keep their ledger rows — the balance is real — but are left out of
@@ -152,18 +152,20 @@ it quotes 0x directly), or one the operator added with
 otherwise. The approval is always for exactly
 the order's amount, never unlimited.
 
-The tokenised stocks on Robinhood Chain (29 of the 34 listed: AAPL, TSLA,
-NVDA, SPY, …) are refused by the aggregator in either direction, at any
-size, at any time — 0x refuses them for legal reasons
-(`trading.token_not_tradeable`). Uniswap's Trading API quotes them, so the
-engine picks the provider per pair: when `trading.provider` is `aggregator`
-and either side is a Stock Token (a name ending `• Robinhood Token`, or a
-truncated form of it), the quote, the swap, DCA runs and trigger fires go
-through Uniswap instead, provided a Uniswap API key is configured; the quote
-and the order record `provider: "uniswap"`. A `token_not_tradeable` the
-flag missed is retried once through Uniswap. Without a key the aggregator's
-error is returned with *"Stock Tokens route through Uniswap: add a Uniswap
-API key (`agentos config set trading.uniswap_api_key <key>`, or Settings › Trading in the desktop app)"* appended. Pairs without
+The tokenised stocks (AAPL, TSLA, NVDA, SPY, … on Robinhood Chain; AAPLc,
+TSLAc, … on Base) are refused by 0x in either direction, at any size, at any
+time, for legal reasons (`trading.token_not_tradeable`). Uniswap trades
+them, and the AgentOS DEX carries Uniswap as a second source, so the engine
+names it per pair: when `trading.provider` is `aggregator` and either side
+is a tokenised stock (a row of the chain's stock list, or a name ending
+`• Robinhood Token`), the quote, the swap, DCA runs and trigger fires ask
+the DEX with `source=uniswap`. No Uniswap API key is needed and the quote
+and the order keep `provider: "aggregator"`. A `token_not_tradeable` the
+flag missed is asked once more from the Uniswap source. Only when that
+source cannot take the pair does the engine fall back to the Uniswap
+provider, if a key is configured (the order then records
+`provider: "uniswap"`); without a key the error is returned with *"The AgentOS DEX's Uniswap source could not take this pair. Retry later, or add a Uniswap API key (`agentos config set trading.uniswap_api_key <key>`, or Settings › Trading in the desktop app) to route through Uniswap directly"*
+appended. Pairs without
 a Stock Token keep the configured provider. ETH, WETH and USDG trade
 normally there. Two more Robinhood Chain
 facts: the engine has no native USD price there yet, so `--usd` may be
@@ -181,6 +183,20 @@ change it: write the config key. The desktop does
 
 Prices, balances and history never depend on the provider (DexScreener /
 CoinGecko / your RPC node); only quoting and calldata do.
+
+Which tokens are `verified`, and which are tokenised stocks, comes from
+AgentOS's own
+[token lists](https://github.com/use-agent-os/agent-os-token-list), the same
+ones the AgentOS DEX uses: `base_tokens.json` and
+`base_stock_tokens.json` on Base, `robinhood_tokens.json` and
+`robinhood_stock_tokens.json` on Robinhood Chain. The gateway downloads them
+on first use and keeps them in memory. Each list is re-checked every 15
+minutes with its ETag, so an unchanged list costs a `304`, and a download
+replaces the held copy only when its version is newer: a new release of a
+list is picked up without a restart, and never rolled back. A list that
+cannot be reached is asked again after 2, 5 and 15 seconds, then once a
+minute, while the held copy keeps answering. A token outside the lists is
+still found by address or through DexScreener, and is shown as unverified.
 
 ## Configuration
 

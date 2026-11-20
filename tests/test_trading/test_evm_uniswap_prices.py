@@ -8,7 +8,8 @@ import pytest
 from agentos.trading import evm as evm_mod
 from agentos.trading.chains import BASE, NATIVE_ADDRESS, ROBINHOOD
 from agentos.trading.evm import EvmClient, EvmRpcError, EvmTransportError
-from agentos.trading.prices import TOKEN_LIST_EMPTY_HOLD_S, PriceService
+from agentos.trading.prices import PriceService
+from agentos.trading.token_lists import RETRY_DELAYS_S, REVALIDATE_TTL_S
 from agentos.trading.uniswap import UniswapAuthError, UniswapClient, UniswapError
 from tests.test_trading.fakes import (
     AAPL,
@@ -587,19 +588,98 @@ class TestPriceService:
     async def test_failed_token_list_download_is_retried_soon(
         self, svc: PriceService, fake: FakePrices
     ) -> None:
-        # A gateway that booted while CoinGecko was down answered "Unknown token
-        # symbol 'BONER' on Robinhood Chain" for a whole day: the empty list had
-        # been cached for TOKEN_LIST_TTL_S. An empty download is held briefly.
+        # A gateway that booted while the list was unreachable answered "Unknown
+        # token symbol 'BONER' on Robinhood Chain" for a whole day: the empty
+        # list had been cached. A failed download is held only briefly.
         saved = fake.lists.pop("robinhood")
         assert await svc.token_list(ROBINHOOD) == {}
         calls = len(fake.requests)
         assert await svc.token_list(ROBINHOOD) == {}
         assert len(fake.requests) == calls  # held: no hammering inside the hold
         fake.lists["robinhood"] = saved
-        svc.clock["now"] += TOKEN_LIST_EMPTY_HOLD_S + 1  # type: ignore[attr-defined]
+        svc.clock["now"] += RETRY_DELAYS_S[0] + 1  # type: ignore[attr-defined]
         tokens = await svc.token_list(ROBINHOOD)
         assert AAPL in tokens
         assert len(fake.requests) == calls + 1
+
+    async def test_token_list_merges_the_chain_and_stock_lists(
+        self, svc: PriceService, fake: FakePrices
+    ) -> None:
+        stock = "0xb200000000000000000000000000000000000001"
+        fake.stock_lists["base"] = [
+            {
+                "chainId": 8453,
+                "address": stock,
+                "symbol": "AAPLc",
+                "name": "Apple Inc.",
+                "decimals": 8,
+                "logoURI": "https://img/aaplc",
+                "tags": ["stock"],
+            },
+            # The chain's own list named USDC first: the stock list cannot
+            # rewrite its decimals, only lend it what it lacks.
+            {
+                "chainId": 8453,
+                "address": USDC,
+                "symbol": "FAKE",
+                "name": "Not USDC",
+                "decimals": 18,
+                "logoURI": "https://img/usdc",
+            },
+        ]
+        tokens = await svc.token_list(BASE)
+        asked = [r.url.path.rsplit("/", 1)[-1] for r in fake.requests]
+        assert asked == ["base_tokens.json", "base_stock_tokens.json"]
+        assert all(r.url.host == "raw.githubusercontent.com" for r in fake.requests)
+        # A Base stock carries no name suffix: the list's tag is what marks it.
+        assert tokens[stock].stock_token is True and tokens[stock].verified is True
+        assert tokens[stock].decimals == 8 and tokens[stock].logo_url == "https://img/aaplc"
+        assert (tokens[USDC].symbol, tokens[USDC].decimals) == ("USDC", 6)
+        assert tokens[USDC].logo_url == "https://img/usdc"
+        assert tokens[USDC].stock_token is False
+
+    async def test_token_list_picks_up_a_newer_version_without_a_restart(
+        self, svc: PriceService, fake: FakePrices
+    ) -> None:
+        fake.list_versions["base_tokens"] = (1, 0, 0)
+        first = await svc.token_list(BASE)
+        assert OTHER not in first
+        calls = len(fake.requests)
+        # Inside the re-check window nothing is asked, and the answer is the same object.
+        svc.clock["now"] += REVALIDATE_TTL_S - 1  # type: ignore[attr-defined]
+        assert await svc.token_list(BASE) is first
+        assert len(fake.requests) == calls
+
+        # Past it, an unchanged list costs a conditional request answered 304.
+        svc.clock["now"] += 2  # type: ignore[attr-defined]
+        assert await svc.token_list(BASE) is first  # answered at once, checked behind
+        await svc.token_lists.settle()
+        rechecks = fake.requests[calls:]
+        assert len(rechecks) == 2 and all(r.headers.get("if-none-match") for r in rechecks)
+        assert await svc.token_list(BASE) is first
+
+        # A new version of the list is published: the next re-check adopts it.
+        fake.lists["base"].append(
+            {"chainId": 8453, "address": OTHER, "symbol": "NEW", "name": "New", "decimals": 9}
+        )
+        fake.list_versions["base_tokens"] = (1, 0, 1)
+        svc.clock["now"] += REVALIDATE_TTL_S + 1  # type: ignore[attr-defined]
+        await svc.token_list(BASE)
+        await svc.token_lists.settle()
+        latest = await svc.token_list(BASE)
+        assert latest[OTHER].symbol == "NEW" and latest[OTHER].decimals == 9
+        assert (await svc.known_token(BASE, OTHER)) is latest[OTHER]
+
+    async def test_a_list_that_stops_answering_keeps_serving_its_held_copy(
+        self, svc: PriceService, fake: FakePrices
+    ) -> None:
+        first = await svc.token_list(ROBINHOOD)
+        assert AAPL in first
+        del fake.lists["robinhood"]
+        svc.clock["now"] += REVALIDATE_TTL_S + 1  # type: ignore[attr-defined]
+        assert await svc.token_list(ROBINHOOD) is first
+        await svc.token_lists.settle()
+        assert await svc.token_list(ROBINHOOD) is first
 
     async def test_search(self, svc: PriceService) -> None:
         rows = await svc.search(ROBINHOOD, "AAPL")

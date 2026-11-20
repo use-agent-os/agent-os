@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- Trading: the token registry is now AgentOS's own token lists
+  ([agent-os-token-list](https://github.com/use-agent-os/agent-os-token-list)),
+  the ones the AgentOS DEX uses, instead of CoinGecko's: `base_tokens.json`
+  and `base_stock_tokens.json` on Base, `robinhood_tokens.json` and
+  `robinhood_stock_tokens.json` on Robinhood Chain. They decide which tokens
+  the Trade tab's search, `agentos trade tokens` and the portfolio mark
+  `verified`, and which are tokenised stocks (Base's Coinbase stocks such as
+  AAPLc are now known too). The gateway re-checks each list every 15 minutes
+  with its ETag and takes a download only when its version is newer, so a new
+  release of a list is picked up without a restart and never rolled back; a
+  list that cannot be reached is retried after 2, 5 and 15 seconds, then once
+  a minute, while the held copy keeps answering. A token the old registry
+  listed and these do not is still found by address or through DexScreener,
+  and now shows as unverified.
+- Trading: tokenised stocks swap through the AgentOS DEX with no Uniswap API
+  key. The DEX carries Uniswap as a second liquidity source, so a pair with a
+  stock on either side is quoted with `source=uniswap` (and a pair 0x refuses
+  that the stock flag missed is asked there once); every other pair is still
+  quoted by 0x, as before. The quote and the order keep
+  `provider: "aggregator"`. The Uniswap provider is used for such a pair only
+  when the DEX's Uniswap source cannot take it and a key is configured.
+
 ## [2026.11.20] - 2026-11-20
 
 ### Added
