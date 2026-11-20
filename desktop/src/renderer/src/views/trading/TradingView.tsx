@@ -1,5 +1,5 @@
 import './trading.css'
-import { CandlestickChart, KeyRound, Lock, Wallet as WalletIcon } from 'lucide-react'
+import { CandlestickChart, Lock, Wallet as WalletIcon } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
@@ -28,7 +28,6 @@ import {
 } from '~/stores/trading'
 import { useTradingUi } from '~/stores/trading-ui'
 import { useUi } from '~/stores/ui'
-import { Notice } from '~/views/settings/parts'
 import { History } from './History'
 import { Holdings } from './Holdings'
 import { Liquidity } from './Liquidity'
@@ -42,6 +41,7 @@ import {
   syncShown,
 } from './logic'
 import { Orders } from './Orders'
+import { OffDexNotice } from './OffDexNotice'
 import { Overview } from './Overview'
 import { ChainMark } from './ChainMark'
 import { DecodeSheet } from './DecodeSheet'
@@ -64,7 +64,6 @@ import {
   type Totals,
   type Wallet,
 } from './types'
-import { useSwitchProvider } from './useSwitchProvider'
 import { WalletHead } from './WalletHead'
 import { Budget, WalletRail, type WalletAction, type WalletSelection } from './WalletRail'
 import { WalletSheet, type WalletSheetMode } from './WalletSheet'
@@ -227,9 +226,9 @@ function Gate({ entering, automations }: { entering: boolean; automations?: Desk
       entering={entering}
       automations={automations}
       provider={provider}
-      // Only Uniswap needs a key; the aggregator is ready as soon as it answers.
-      providerReady={provider !== 'uniswap' || Boolean(status.data?.apiKeyConfigured)}
-      needsKey={provider === 'uniswap' && !status.data?.apiKeyConfigured}
+      // The desk swaps through the AgentOS DEX only: a gateway configured for
+      // another provider is told so, and quotes nothing until it is put back.
+      providerReady={provider === DEFAULT_PROVIDER}
     />
   )
 }
@@ -258,13 +257,12 @@ function State({
 function Desk({
   provider,
   providerReady,
-  needsKey,
   entering,
   automations,
 }: {
   provider: ProviderId
+  /** The gateway's swap provider is the AgentOS DEX, the only route the desk uses. */
   providerReady: boolean
-  needsKey: boolean
   /** The mode switch is playing: the head counts its value up from zero. */
   entering: boolean
   automations?: DeskAutomations
@@ -295,7 +293,6 @@ function Desk({
   const [sheet, setSheet] = useState<WalletSheetMode | null>(null)
   const [highlight, setHighlight] = useState<string | null>(null)
   const [railWanted, setRailWanted] = useRailPreference()
-  const openSettings = useUi((s) => s.openSettings)
   const now = useNow(30_000)
   const location = useLocation()
   const navigate = useNavigate()
@@ -335,7 +332,6 @@ function Desk({
   const decide = useOrderDecision()
   const sync = useSync()
   const walletWrite = useWalletMutation()
-  const switchProvider = useSwitchProvider()
 
   const totalsByWallet = useMemo(() => {
     const m = new Map<string, Totals>()
@@ -488,19 +484,9 @@ function Desk({
         ) : null}
 
         <div className="trd-desk">
-          {needsKey ? (
+          {!providerReady ? (
             <div className="trd-desk__notice">
-              <Notice
-                tone="info"
-                action={
-                  <Button onClick={() => openSettings('trading')} data-testid="add-key">
-                    <KeyRound className="size-3.5" strokeWidth={1.75} aria-hidden />
-                    {t('trading.noKey.cta')}
-                  </Button>
-                }
-              >
-                <b>{t('trading.noKey.title')}</b> {t('trading.noKey.body')}
-              </Notice>
+              <OffDexNotice testId="use-dex" />
             </div>
           ) : null}
 
@@ -515,13 +501,6 @@ function Desk({
             now={now}
             loading={portfolio.isPending}
             onSync={onSync}
-            // A switch lands in trading.status, which the ticket's provider
-            // and its key gate are read from too: both follow it at once.
-            provider={provider}
-            providers={status.data?.providers ?? []}
-            switchingProvider={switchProvider.switching}
-            onSwitchProvider={switchProvider.switchTo}
-            onOpenSettings={() => openSettings('trading')}
             entering={entering}
             head={
               <WalletHead
@@ -753,7 +732,6 @@ function Desk({
           selectedWallet={selected}
           provider={provider}
           providerReady={providerReady}
-          onOpenSettings={() => openSettings('trading')}
           unlocked={Boolean(vault.data?.unlocked)}
           prefill={prefill}
           onSent={() => setTab('orders')}

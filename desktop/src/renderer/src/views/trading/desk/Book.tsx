@@ -93,7 +93,6 @@ export function Book({
   onResize,
   onToggle,
   onOpenDesk,
-  onOpenSettings,
   highlightOrder,
   entering = false,
   onReject,
@@ -117,7 +116,6 @@ export function Book({
   onToggle: () => void
   /** Full-width instruments — the only place the BOOK fits on a narrow frame. */
   onOpenDesk?: () => void
-  onOpenSettings: () => void
   highlightOrder: string | null
   /** The desk is powering on: the hero value counts up once. */
   entering?: boolean
@@ -521,7 +519,6 @@ export function Book({
               selectedWallet={selected}
               provider={provider}
               providerReady={providerReady}
-              onOpenSettings={onOpenSettings}
               unlocked={unlocked}
               prefill={prefill}
               onSent={() => setTab('orders')}

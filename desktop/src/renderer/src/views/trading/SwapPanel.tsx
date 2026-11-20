@@ -46,6 +46,7 @@ import {
   type Token,
   type Wallet,
 } from './types'
+import { useDexProvider } from './useDexProvider'
 
 /** The AgentOS DEX fee on the swap, in the token it is paid in (the sell token). */
 export function DexFeeFact({ fee }: { fee: SwapFee }) {
@@ -95,7 +96,6 @@ export function SwapPanel({
   selectedWallet,
   provider,
   providerReady,
-  onOpenSettings,
   unlocked,
   prefill,
   onSent,
@@ -106,10 +106,8 @@ export function SwapPanel({
   /** The rail's selection: an address, or 'all'. */
   selectedWallet: string
   provider: ProviderId
-  /** Uniswap has its key, or the keyless aggregator is selected. */
+  /** The gateway's swap provider is the AgentOS DEX, the only route the desk uses. */
   providerReady: boolean
-  /** Opens Settings › Trading, the one place a Uniswap key is added. */
-  onOpenSettings: () => void
   unlocked: boolean
   prefill: SwapPrefill | null
   onSent: (orders: Order[]) => void
@@ -216,6 +214,7 @@ export function SwapPanel({
       }
     : null
   const quote = useQuote(params)
+  const dex = useDexProvider()
   // The query keeps the previous params' price as a placeholder while the new
   // one loads. That price is about another swap: nothing on the ticket may
   // show it, and Review must not open on it.
@@ -243,9 +242,7 @@ export function SwapPanel({
   const ctaKey: MessageKey | null = !unlocked
     ? 'trading.swap.cta.locked'
     : !providerReady
-      ? provider === 'uniswap'
-        ? 'trading.swap.cta.noKey'
-        : 'trading.provider.switch'
+      ? 'trading.provider.switch'
       : !wallet
         ? 'trading.swap.cta.noWallet'
         : !tokenIn || !tokenOut
@@ -259,8 +256,8 @@ export function SwapPanel({
                 : null
   const canReview = ctaKey === null && fresh !== null && !quote.isError
   // A gate the ticket can open itself: the button does that instead of sitting
-  // dead. Only Uniswap can be un-ready, and only for want of its key.
-  const gateAction: (() => void) | null = unlocked && !providerReady ? onOpenSettings : null
+  // dead. The only one is a gateway whose swaps were pointed away from the DEX.
+  const gateAction: (() => void) | null = unlocked && !providerReady ? dex.useDex : null
 
   function flip() {
     setTokenIn(tokenOut)

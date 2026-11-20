@@ -1,24 +1,8 @@
-import {
-  ArrowLeftRight,
-  Lock,
-  Rocket,
-  SendHorizontal,
-  Wallet as WalletIcon,
-  Wrench,
-  Zap,
-} from 'lucide-react'
+import { Lock, Rocket, SendHorizontal, Wallet as WalletIcon, Wrench, Zap } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { t, type MessageKey } from '~/i18n'
 import { formatUsd, walletLabel } from '../logic'
-import { ProviderMark, providerMark } from '../ProviderMark'
-import { ProviderMenu } from '../ProviderMenu'
-import {
-  providerLabel,
-  type Limits,
-  type ProviderId,
-  type ProviderStatus,
-  type Wallet,
-} from '../types'
+import { type Limits, type Wallet } from '../types'
 import type { MissionKind } from './desk-logic'
 
 /**
@@ -39,30 +23,20 @@ const QUICK: readonly { kind: MissionKind; icon: LucideIcon; key: MessageKey }[]
  */
 export function ComposerSeats({
   limits,
-  provider,
-  providers,
-  switching,
   wallet,
   typing,
   onOpenSettings,
   onOpenWallets,
-  onSwitchProvider,
   onStartMission,
   onQuick,
   onSend,
   onOpenTools,
 }: {
   limits: Limits | null
-  provider: ProviderId
-  /** Per-provider facts from trading.status; the menu explains each choice. */
-  providers?: readonly ProviderStatus[]
-  switching?: boolean
   wallet: Wallet | null
   typing: boolean
   onOpenSettings: () => void
   onOpenWallets: () => void
-  /** Switching the swap route is allowed from the desk; limits are not. */
-  onSwitchProvider?: (id: ProviderId) => void
   /** Opens the mission contract; rendered as the first chip so it lines up with the capsule. */
   onStartMission?: () => void
   onQuick: (kind: MissionKind) => void
@@ -90,13 +64,6 @@ export function ComposerSeats({
             : t('trading.seat.permission.unknown')}
         </span>
       </button>
-      <ProviderSeat
-        provider={provider}
-        providers={providers ?? []}
-        switching={Boolean(switching)}
-        onSwitch={onSwitchProvider}
-        onOpenSettings={onOpenSettings}
-      />
       <button
         type="button"
         className="trd-seat app-no-drag"
@@ -171,45 +138,6 @@ export function ComposerSeats({
           </button>
         ) : null}
       </div>
-    </div>
-  )
-}
-
-/**
- * Which aggregator routes the swaps, changeable right here (it is not a
- * limit). The desk head's venue pill is the same control in another face.
- */
-function ProviderSeat({
-  provider,
-  providers,
-  switching,
-  onSwitch,
-  onOpenSettings,
-}: {
-  provider: ProviderId
-  providers: readonly ProviderStatus[]
-  switching: boolean
-  onSwitch?: (id: ProviderId) => void
-  onOpenSettings: () => void
-}) {
-  return (
-    <div className="trd-seat__anchor">
-      <ProviderMenu
-        className="trd-seat app-no-drag"
-        testId="provider-seat"
-        provider={provider}
-        providers={providers}
-        switching={switching}
-        onSwitch={onSwitch}
-        onOpenSettings={onOpenSettings}
-      >
-        {providerMark(provider) ? (
-          <ProviderMark id={provider} size={13} />
-        ) : (
-          <ArrowLeftRight className="size-3" strokeWidth={2} aria-hidden />
-        )}
-        <span className="trd-seat__text">{providerLabel(provider)}</span>
-      </ProviderMenu>
     </div>
   )
 }

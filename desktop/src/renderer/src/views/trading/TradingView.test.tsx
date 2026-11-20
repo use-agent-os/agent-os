@@ -65,10 +65,10 @@ describe('TradingView · gate', () => {
   })
 })
 
-describe('TradingView · the venue pill', () => {
-  it('switches the route from the desk head, and the ticket follows it at once', async () => {
+describe('TradingView · the swap route', () => {
+  function engine(start: ProviderId) {
     // One engine: trading.setProvider changes what trading.status reports.
-    let provider: ProviderId = 'aggregator'
+    let provider: ProviderId = start
     rpcCall.mockImplementation(async (method: string, params?: { provider?: ProviderId }) => {
       switch (method) {
         case 'trading.status':
@@ -112,27 +112,41 @@ describe('TradingView · the venue pill', () => {
           return {}
       }
     })
+  }
+
+  it('offers no provider to pick: swaps go through the AgentOS DEX', async () => {
+    engine('aggregator')
     renderDesk(<TradingView />)
 
-    const pill = await screen.findByTestId('provider-pill')
-    expect(pill).toHaveTextContent('AgentOS DEX')
-    // The keyless aggregator: the ticket has no key to ask for.
-    expect(screen.getByTestId('swap-review')).not.toHaveTextContent('Add a Uniswap key')
+    const cta = await screen.findByTestId('swap-review')
+    expect(cta).not.toHaveTextContent('Use AgentOS DEX')
+    expect(screen.queryByTestId('provider-pill')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Swap provider/ })).toBeNull()
+    expect(screen.queryByRole('menuitemradio')).toBeNull()
+    expect(screen.queryByTestId('use-dex')).toBeNull()
+    expect(screen.queryByText(/Uniswap API key/)).toBeNull()
+    expect(rpcCall.mock.calls.some((c) => c[0] === 'trading.setProvider')).toBe(false)
+  })
 
-    fireEvent.click(pill)
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /^Uniswap/ }))
+  it('tells a gateway set to another provider, and puts it back in one click', async () => {
+    // A config written from the CLI or by an older build. Nothing is rewritten
+    // behind the user's back: the desk says so and waits for the click.
+    engine('uniswap')
+    renderDesk(<TradingView />)
+
+    const back = await screen.findByTestId('use-dex')
+    expect(back).toHaveTextContent('Use AgentOS DEX')
+    expect(screen.getByText('Swaps are set to another provider.')).toBeInTheDocument()
+    expect(screen.getByTestId('swap-review')).toHaveTextContent('Use AgentOS DEX')
+    expect(rpcCall.mock.calls.some((c) => c[0] === 'trading.setProvider')).toBe(false)
+
+    fireEvent.click(back)
     await waitFor(() =>
-      expect(rpcCall).toHaveBeenCalledWith('trading.setProvider', { provider: 'uniswap' }),
+      expect(rpcCall).toHaveBeenCalledWith('trading.setProvider', { provider: 'aggregator' }),
     )
-
-    // The pill and the ticket read the same status: one refetch moves both, and
-    // the ticket keeps its gate — Uniswap without a key sends you to Settings.
-    await waitFor(() => expect(screen.getByTestId('provider-pill')).toHaveTextContent('Uniswap'))
-    const cta = screen.getByTestId('swap-review')
-    expect(cta).toHaveTextContent('Add a Uniswap key')
-    expect(screen.getByTestId('add-key')).toBeInTheDocument()
-    fireEvent.click(cta)
-    expect(useUi.getState()).toMatchObject({ settingsOpen: true, settingsSection: 'trading' })
+    // The notice and the ticket read the same status: one refetch clears both.
+    await waitFor(() => expect(screen.queryByTestId('use-dex')).toBeNull())
+    expect(screen.getByTestId('swap-review')).not.toHaveTextContent('Use AgentOS DEX')
   })
 })
 

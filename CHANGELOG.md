@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Changed
+- Desktop: swaps go through the AgentOS DEX only. The provider menu is gone
+  from the Trade tab (the venue pill beside "Last sync" on the desk, and the
+  route seat under the desk chat's composer), and Settings › Trading no longer
+  has the AgentOS DEX / Uniswap switch or the Uniswap API key card; it keeps
+  the AgentOS DEX row with **Test connection**. Tokenised stocks already
+  route through the DEX's own Uniswap source, so no key is needed for them.
+  If the gateway's config still names another swap provider (set from the
+  CLI, or by an older build), the desk says so and offers one **Use AgentOS
+  DEX** button instead of quoting; nothing is rewritten silently. The CLI's
+  `agentos trade provider` and the `trading.provider` /
+  `trading.uniswap_api_key` config keys are unchanged.
 - Trading: the token registry is now AgentOS's own token lists
   ([agent-os-token-list](https://github.com/use-agent-os/agent-os-token-list)),
   the ones the AgentOS DEX uses, instead of CoinGecko's: `base_tokens.json`

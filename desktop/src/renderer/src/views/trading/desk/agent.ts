@@ -569,10 +569,10 @@ skill only repeats it. Do not open it or run \`--help\` to find a flag.
   returns \`confirmed\` only once the funds have arrived on the destination.
   \`--chain\` on a swap or a send still never leaves its chain.
 - Readiness, once per conversation: \`agentos trade status --json\`
-  (provider, API key, vault, limits). \`trading.provider\` means the
-  aggregator is unreachable or erroring upstream (\`trading.uniswap\` for
-  Uniswap): say so, try once more after a pause, then stop and suggest
-  the user switch provider (\`agentos trade provider uniswap\`).
+  (provider, vault, limits). \`trading.provider\` means the AgentOS DEX
+  is unreachable or erroring upstream: say so, try once more after a
+  pause, then stop. The desk swaps through the AgentOS DEX only: never
+  suggest another provider or an API key.
 - The order, one line:
   \`agentos trade swap --chain base --in ETH --out USDC --usd 0.1 --note '<the user’s words>' --client-id <id> --wait --wait-seconds 600 --json\`
   \`--in\`/\`--out\` take \`ETH\`, a major (\`USDC\`, \`WETH\`, \`USDG\`) on Base,

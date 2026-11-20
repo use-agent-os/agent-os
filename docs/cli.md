@@ -1232,8 +1232,9 @@ needs no key and no account: one GET returns the price *and* the unsigned
 calldata, including the ERC-20 approval when one is needed. It never signs
 and never broadcasts — your wallet does both — and it charges 20 bps on the
 swap, reported back in the quote. **Uniswap** (`agentos trade provider
-uniswap`) is the fallback and needs a key: `agentos config set
-trading.uniswap_api_key <key>`, or Settings › Trading in the desktop app.
+uniswap`) is the fallback and needs a key:
+`agentos config set trading.uniswap_api_key <key>`. The desktop app swaps
+through the AgentOS DEX only and has no setting for either.
 
 0x refuses the tokenised stocks (AAPL, TSLA, NVDA, SPY and the rest on
 Robinhood Chain, AAPLc and the rest on Base) for legal reasons
@@ -1244,8 +1245,8 @@ legs alike. No Uniswap API key is needed, and the quote and the order keep
 `provider: "aggregator"`. Only when that source cannot take the pair does
 the engine fall back to the Uniswap provider, if a key is configured;
 without one the error says how to route through Uniswap directly
-(`agentos config set trading.uniswap_api_key <key>`, or Settings › Trading
-in the desktop app). ETH, WETH and USDG trade normally there.
+(`agentos config set trading.uniswap_api_key <key>`). ETH, WETH and USDG
+trade normally there.
 Robinhood Chain has no native USD price feed yet, so `--usd` may be refused
 with `trading.unpriced` (size with `--amount`), and the bare symbol `USDC`
 resolves to unverified lookalikes there (`TOKEN_UNVERIFIED`): use an

@@ -91,7 +91,7 @@ function answers(overrides: Record<string, unknown> = {}) {
           unlocked: true,
           syncing: false,
           lastSyncAt: null,
-          provider: 'uniswap',
+          provider: 'aggregator',
           providers: [],
         }
       case 'wallet.status':

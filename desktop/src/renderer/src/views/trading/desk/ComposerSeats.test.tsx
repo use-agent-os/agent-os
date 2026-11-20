@@ -20,8 +20,6 @@ function renderSeats() {
   return render(
     <ComposerSeats
       limits={limits}
-      provider="aggregator"
-      providers={[]}
       wallet={wallet}
       typing={false}
       onOpenSettings={vi.fn()}
@@ -67,7 +65,7 @@ describe('ComposerSeats shrink chain', () => {
 
   it('keeps an accessible name on each seat once its label can be hidden', () => {
     renderSeats()
-    for (const id of ['permission-seat', 'provider-seat', 'wallet-seat']) {
+    for (const id of ['permission-seat', 'wallet-seat']) {
       const seat = screen.getByTestId(id)
       expect(seat.getAttribute('aria-label')).toBeTruthy()
       expect(seat.querySelector('.trd-seat__text')).not.toBeNull()
@@ -81,7 +79,6 @@ describe('ComposerSeats shrink chain', () => {
     const steps = [
       ['permission-seat', null],
       ['wallet-seat', null],
-      ['provider-seat', null],
     ].map(([id]) => {
       const m = css.match(
         new RegExp(

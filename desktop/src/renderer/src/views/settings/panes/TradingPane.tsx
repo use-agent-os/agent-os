@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { AlertTriangle, Check, ExternalLink, Eye, EyeOff, LoaderCircle } from 'lucide-react'
+import { AlertTriangle, Check, LoaderCircle } from 'lucide-react'
 import { useId, useState } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
@@ -7,47 +7,24 @@ import type { SettingsSnapshot } from '@/views/settings/snapshot'
 import { Button } from '~/components/ui/button'
 import { Switch } from '~/components/ui/switch'
 import { t } from '~/i18n'
-import { desktopApi } from '~/lib/desktop-api'
 import { useProbe, useTradingStatus, useWalletMutation, useWalletStatus } from '~/stores/trading'
 import { errorText } from '~/views/trading/logic'
-import { ProviderMark } from '~/views/trading/ProviderMark'
-import {
-  DEFAULT_PROVIDER,
-  PROVIDERS,
-  type ProviderId,
-  type ProviderStatus,
-  type UnlockMode,
-} from '~/views/trading/types'
+import { type ProviderStatus, type UnlockMode } from '~/views/trading/types'
 import { Card, Head, Notice, Pill, Row, Segmented, Value } from '../parts'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
 
-export const UNISWAP_DASHBOARD_URL = 'https://developers.uniswap.org/dashboard'
-
 interface TradingConfig {
   enabled?: boolean
-  uniswap_api_key?: string
-  uniswap_api_key_env?: string
   rpc_urls?: Record<string, string>
   approval_threshold_usd?: number
   daily_cap_usd?: number
   approval_ttl_seconds?: number
   default_slippage_pct?: number | null
   unlock_mode?: UnlockMode
-  provider?: ProviderId
 }
 
-function isProviderId(value: unknown): value is ProviderId {
-  return PROVIDERS.some((p) => p.id === value)
-}
-
-/** The keyless default: one button says whether it answers from here. */
-function AggregatorRow({
-  status,
-  active,
-}: {
-  status: ProviderStatus | undefined
-  active: boolean
-}) {
+/** The swap route, which needs no key: one button says whether it answers from here. */
+function AggregatorRow({ status }: { status: ProviderStatus | undefined }) {
   const probe = useProbe()
   const result = probe.data
   const verdict: 'idle' | 'checking' | 'ok' | 'bad' = probe.isPending
@@ -93,7 +70,6 @@ function AggregatorRow({
       }
       align="start"
     >
-      {active ? <Pill tone="primary">{t('settings.providers.state.active')}</Pill> : null}
       <Button
         disabled={probe.isPending}
         onClick={() => probe.mutate({ provider: 'aggregator' })}
@@ -112,7 +88,7 @@ interface PatchResult {
 }
 
 /**
- * Settings › Trading: the Uniswap key with a Test button, the vault's
+ * Settings › Trading: the AgentOS DEX with a Test button, the vault's
  * state and unlock mode, the agent's limits, and each network's RPC.
  * Written through `config.patch` with the snapshot revision like every
  * other guided write; the vault itself is written through wallet.*.
@@ -151,23 +127,14 @@ function TradingBody({
   const blocked = Boolean(snapshot.writeBlocked)
   const status = useTradingStatus()
   const vault = useWalletStatus()
-  const provider: ProviderId = isProviderId(cfg.provider)
-    ? cfg.provider
-    : (status.data?.provider ?? DEFAULT_PROVIDER)
 
   const save = useMutation({
     mutationFn: (patch: Record<string, unknown>) =>
       rpc.call<PatchResult>('config.patch', withRevision(snapshot, { patch: { trading: patch } })),
-    onSuccess: async (res, patch) => {
+    onSuccess: async (res) => {
       toast.success(
-        res?.restartRequired
-          ? t('settings.restartRequired')
-          : 'provider' in patch
-            ? t('trading.settings.provider.saved')
-            : t('trading.settings.saved'),
-        {
-          id: 'stg-trading',
-        },
+        res?.restartRequired ? t('settings.restartRequired') : t('trading.settings.saved'),
+        { id: 'stg-trading' },
       )
       await reload()
       await status.refetch()
@@ -192,35 +159,8 @@ function TradingBody({
       </Card>
 
       <Card title={t('trading.settings.provider')} blurb={t('trading.settings.provider.help')}>
-        <Row label={t('trading.settings.provider')}>
-          <Segmented
-            label={t('trading.settings.provider')}
-            value={provider}
-            disabled={blocked || save.isPending}
-            options={PROVIDERS.map((p) => ({
-              value: p.id,
-              label: p.label,
-              icon: <ProviderMark id={p.id} size={13} />,
-            }))}
-            onChange={(next) => {
-              if (next !== provider) save.mutate({ provider: next })
-            }}
-          />
-        </Row>
-        <AggregatorRow
-          status={status.data?.providers?.find((p) => p.id === 'aggregator')}
-          active={provider === 'aggregator'}
-        />
+        <AggregatorRow status={status.data?.providers?.find((p) => p.id === 'aggregator')} />
       </Card>
-
-      <KeyCard
-        cfg={cfg}
-        configured={Boolean(status.data?.apiKeyConfigured)}
-        blocked={blocked}
-        saving={save.isPending}
-        idle={provider !== 'uniswap'}
-        onSave={(k) => save.mutate({ uniswap_api_key: k })}
-      />
 
       <VaultCard
         unlockMode={vault.data?.unlockMode ?? cfg.unlock_mode ?? 'auto'}
@@ -256,162 +196,6 @@ function TradingBody({
         ))}
       </Card>
     </>
-  )
-}
-
-function KeyCard({
-  cfg,
-  configured,
-  blocked,
-  saving,
-  idle,
-  onSave,
-}: {
-  cfg: TradingConfig
-  configured: boolean
-  blocked: boolean
-  saving: boolean
-  /** Another provider is selected: the key is kept but not in use. */
-  idle: boolean
-  onSave: (key: string) => void
-}) {
-  const id = useId()
-  const [key, setKey] = useState('')
-  const [show, setShow] = useState(false)
-  const probe = useProbe()
-  const verdict: 'idle' | 'checking' | 'ok' | 'bad' = probe.isPending
-    ? 'checking'
-    : probe.isError
-      ? 'bad'
-      : probe.data
-        ? probe.data.ok
-          ? 'ok'
-          : 'bad'
-        : 'idle'
-  const detail = probe.error ? errorText(probe.error) : (probe.data?.error ?? '')
-  const hasStored = configured || Boolean(cfg.uniswap_api_key)
-
-  return (
-    <Card
-      title={t('trading.settings.uniswap')}
-      blurb={
-        <>
-          {t('trading.settings.uniswap.blurb')}{' '}
-          <button
-            type="button"
-            className="trd-stg__keylink"
-            onClick={() => void desktopApi().app.openExternal(UNISWAP_DASHBOARD_URL)}
-          >
-            {t('trading.settings.key.get')}
-            <ExternalLink className="size-3" strokeWidth={2} aria-hidden />
-          </button>
-        </>
-      }
-      action={
-        idle ? (
-          <Pill>{t('trading.settings.key.idle')}</Pill>
-        ) : hasStored ? (
-          <Pill tone="ok">{t('settings.providers.state.active')}</Pill>
-        ) : (
-          <Pill>{t('settings.providers.state.needsKey')}</Pill>
-        )
-      }
-      foot={
-        <>
-          <Button disabled={!key.trim() || saving} onClick={() => setKey('')}>
-            {t('settings.revert')}
-          </Button>
-          <Button
-            variant="primary"
-            disabled={!key.trim() || saving || blocked}
-            onClick={() => {
-              onSave(key.trim())
-              setKey('')
-            }}
-            data-testid="trading-key-save"
-          >
-            {t('settings.save')}
-          </Button>
-        </>
-      }
-    >
-      <Row
-        label={t('trading.settings.key')}
-        htmlFor={id}
-        align="start"
-        help={
-          <>
-            <span className={idle ? 'text-dim' : undefined} data-testid="uniswap-key-hint">
-              {idle
-                ? t('trading.settings.key.idle')
-                : hasStored
-                  ? t('trading.settings.key.saved')
-                  : t('trading.settings.key.help')}
-            </span>
-            {verdict !== 'idle' ? (
-              <span
-                className="trd-stg__probe"
-                data-verdict={verdict}
-                data-testid="trading-key-probe"
-              >
-                {verdict === 'checking' ? (
-                  <>
-                    <LoaderCircle className="stg-spin size-3" strokeWidth={2} aria-hidden />
-                    {t('trading.settings.key.testing')}
-                  </>
-                ) : verdict === 'ok' ? (
-                  <>
-                    <Check className="size-3" strokeWidth={2.5} aria-hidden />
-                    {t('trading.settings.key.works')}
-                    {probe.data?.latencyMs ? ` ${probe.data.latencyMs} ms` : ''}
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle className="size-3" strokeWidth={2} aria-hidden />
-                    {t('trading.settings.key.failed')} <code>{detail}</code>
-                  </>
-                )}
-              </span>
-            ) : null}
-          </>
-        }
-      >
-        <span className="stg-input-wrap">
-          <input
-            id={id}
-            className="mac-input"
-            data-mono="true"
-            type={show ? 'text' : 'password'}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder={hasStored ? '••••••••••••' : t('trading.settings.key.placeholder')}
-            value={key}
-            disabled={blocked}
-            onChange={(e) => setKey(e.target.value)}
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={show ? t('trading.settings.key.hide') : t('trading.settings.key.show')}
-            aria-pressed={show}
-            onClick={() => setShow((v) => !v)}
-          >
-            {show ? (
-              <EyeOff className="size-3.5 text-muted-foreground" strokeWidth={1.75} aria-hidden />
-            ) : (
-              <Eye className="size-3.5 text-muted-foreground" strokeWidth={1.75} aria-hidden />
-            )}
-          </Button>
-        </span>
-        <Button
-          disabled={probe.isPending || (!key.trim() && !hasStored)}
-          onClick={() => probe.mutate({ provider: 'uniswap', apiKey: key.trim() || undefined })}
-          data-testid="trading-key-test"
-        >
-          {probe.isPending ? t('trading.settings.key.testing') : t('trading.settings.key.test')}
-        </Button>
-      </Row>
-    </Card>
   )
 }
 

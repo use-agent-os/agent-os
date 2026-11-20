@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useConnection } from '@/stores/connection'
 import { TradingPane } from './TradingPane'
@@ -7,11 +7,6 @@ import { TradingPane } from './TradingPane'
 const rpcCall = vi.fn()
 vi.mock('@/app/providers', () => ({
   useRpc: () => ({ call: rpcCall, waitForConnection: async () => {}, on: () => () => {} }),
-}))
-const openExternal = vi.fn(async () => {})
-vi.mock('~/lib/desktop-api', () => ({
-  desktopApi: () => ({ app: { openExternal } }),
-  isDesktop: () => true,
 }))
 
 function mount() {
@@ -27,7 +22,6 @@ function mount() {
 
 beforeEach(() => {
   rpcCall.mockReset()
-  openExternal.mockClear()
   rpcCall.mockImplementation(async (method: string) => {
     if (method === 'config.snapshot') {
       return {
@@ -82,69 +76,7 @@ beforeEach(() => {
   })
 })
 
-describe('TradingPane · Test key', () => {
-  it('tries the typed key against Uniswap and reports the verdict, then saves it with the revision', async () => {
-    mount()
-    const test = await screen.findByTestId('trading-key-test')
-    expect(test).toBeDisabled()
-    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'uni-123' } })
-    expect(test).not.toBeDisabled()
-    fireEvent.click(test)
-    await waitFor(() =>
-      expect(screen.getByTestId('trading-key-probe')).toHaveAttribute('data-verdict', 'ok'),
-    )
-    expect(rpcCall).toHaveBeenCalledWith('trading.probe', {
-      provider: 'uniswap',
-      apiKey: 'uni-123',
-    })
-    expect(screen.getByTestId('trading-key-probe')).toHaveTextContent('Key works. 412 ms')
-
-    fireEvent.click(screen.getByTestId('trading-key-save'))
-    await waitFor(() =>
-      expect(rpcCall).toHaveBeenCalledWith('config.patch', {
-        patch: { trading: { uniswap_api_key: 'uni-123' } },
-        expectedRevision: 'r1',
-      }),
-    )
-  })
-
-  it('shows Uniswap’s rejection verbatim', async () => {
-    rpcCall.mockImplementation(async (method: string) => {
-      if (method === 'trading.probe')
-        return { ok: false, latencyMs: 200, error: '401 Unauthorized' }
-      if (method === 'config.snapshot') return { config: { trading: {} }, revision: 'r1' }
-      if (method === 'trading.status')
-        return {
-          enabled: true,
-          apiKeyConfigured: false,
-          chains: [],
-          limits: { approvalThresholdUsd: 100, dailyCapUsd: 1000, approvalTtlSeconds: 900 },
-          unlockMode: 'auto',
-          unlocked: true,
-          syncing: false,
-          lastSyncAt: null,
-        }
-      if (method === 'wallet.status')
-        return {
-          initialized: false,
-          unlocked: false,
-          unlockMode: 'auto',
-          walletCount: 0,
-          primary: null,
-          vaultPath: '',
-        }
-      return {}
-    })
-    mount()
-    fireEvent.change(await screen.findByLabelText('API key'), { target: { value: 'bad' } })
-    fireEvent.click(screen.getByTestId('trading-key-test'))
-    await waitFor(() =>
-      expect(screen.getByTestId('trading-key-probe')).toHaveAttribute('data-verdict', 'bad'),
-    )
-    expect(screen.getByTestId('trading-key-probe')).toHaveTextContent('401 Unauthorized')
-    expect(screen.getByText('Not created')).toBeInTheDocument()
-  })
-
+describe('TradingPane', () => {
   it('shows the vault state, the networks and their health', async () => {
     mount()
     expect(await screen.findByText('Unlocked')).toBeInTheDocument()
@@ -152,53 +84,26 @@ describe('TradingPane · Test key', () => {
     expect(screen.getByText('Reachable')).toBeInTheDocument()
     expect(screen.getByText('Robinhood Chain · 4663')).toBeInTheDocument()
     expect(screen.getByText('Not checked')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /Get an API key/ }))
-    expect(openExternal).toHaveBeenCalledWith('https://developers.uniswap.org/dashboard')
   })
 })
 
 describe('TradingPane · Swap provider', () => {
-  it('switches the provider through config.patch with the revision and idles the Uniswap key', async () => {
-    mount()
-    // A config that names no provider is on the default: the aggregator. The
-    // Uniswap key is then kept but not in use, and the hint says so.
-    const aggregator = await screen.findByRole('radio', { name: 'AgentOS DEX' })
-    expect(aggregator).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByTestId('uniswap-key-hint')).toHaveTextContent('Only used while')
-    fireEvent.click(screen.getByRole('radio', { name: 'Uniswap' }))
-    await waitFor(() =>
-      expect(rpcCall).toHaveBeenCalledWith('config.patch', {
-        patch: { trading: { provider: 'uniswap' } },
-        expectedRevision: 'r1',
-      }),
-    )
-  })
-
-  it('greys the Uniswap key hint when the aggregator is the provider', async () => {
+  it('offers no provider to choose and no Uniswap key to enter', async () => {
+    // Swaps go through the AgentOS DEX only. A config left over from when
+    // there was a choice (a provider, a stored key) is neither shown nor
+    // editable here.
     rpcCall.mockImplementation(async (method: string) => {
       if (method === 'config.snapshot')
-        return { config: { trading: { provider: 'aggregator' } }, revision: 'r1' }
+        return {
+          config: { trading: { provider: 'uniswap', uniswap_api_key: 'uni-123' } },
+          revision: 'r1',
+        }
       if (method === 'trading.status')
         return {
           enabled: true,
-          apiKeyConfigured: false,
-          provider: 'aggregator',
-          providers: [
-            {
-              id: 'aggregator',
-              label: 'AgentOS DEX',
-              needsKey: false,
-              keyConfigured: true,
-              healthy: null,
-            },
-            {
-              id: 'uniswap',
-              label: 'Uniswap',
-              needsKey: true,
-              keyConfigured: false,
-              healthy: null,
-            },
-          ],
+          apiKeyConfigured: true,
+          provider: 'uniswap',
+          providers: [],
           chains: [],
           limits: { approvalThresholdUsd: 100, dailyCapUsd: 1000, approvalTtlSeconds: 900 },
           unlockMode: 'auto',
@@ -218,13 +123,15 @@ describe('TradingPane · Swap provider', () => {
       return {}
     })
     mount()
-    expect(await screen.findByRole('radio', { name: 'AgentOS DEX' })).toHaveAttribute(
-      'aria-checked',
-      'true',
-    )
-    expect(screen.getByTestId('uniswap-key-hint')).toHaveTextContent(
-      'Only used while Uniswap is the swap provider.',
-    )
+    expect(await screen.findByTestId('aggregator-test')).toBeInTheDocument()
+    expect(screen.getAllByText('AgentOS DEX').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('radio', { name: 'Uniswap' })).toBeNull()
+    expect(screen.queryByRole('radio', { name: 'AgentOS DEX' })).toBeNull()
+    expect(screen.queryByLabelText('API key')).toBeNull()
+    expect(screen.queryByTestId('trading-key-test')).toBeNull()
+    expect(screen.queryByTestId('trading-key-save')).toBeNull()
+    expect(screen.queryByText(/Uniswap/)).toBeNull()
+    expect(rpcCall.mock.calls.some((c) => c[0] === 'config.patch')).toBe(false)
   })
 
   it('tests the aggregator connection and says what it answered', async () => {

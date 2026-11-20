@@ -164,7 +164,7 @@ and the order keep `provider: "aggregator"`. A `token_not_tradeable` the
 flag missed is asked once more from the Uniswap source. Only when that
 source cannot take the pair does the engine fall back to the Uniswap
 provider, if a key is configured (the order then records
-`provider: "uniswap"`); without a key the error is returned with *"The AgentOS DEX's Uniswap source could not take this pair. Retry later, or add a Uniswap API key (`agentos config set trading.uniswap_api_key <key>`, or Settings › Trading in the desktop app) to route through Uniswap directly"*
+`provider: "uniswap"`); without a key the error is returned with *"The AgentOS DEX's Uniswap source could not take this pair. Retry later, or add a Uniswap API key (`agentos config set trading.uniswap_api_key <key>`) to route through Uniswap directly"*
 appended. Pairs without
 a Stock Token keep the configured provider. ETH, WETH and USDG trade
 normally there. Two more Robinhood Chain
@@ -175,11 +175,13 @@ address the token search marks `verified: true`.
 
 The provider is read from `trading.provider` on **every** call, so switching
 takes effect immediately, no gateway restart. There is one canonical way to
-change it: write the config key. The desktop does
-`config.patch {trading: {provider: "uniswap"}}`; the CLI does
+change it: write the config key. The CLI does
 `agentos trade provider uniswap` (`config.set trading.provider`);
 `trading.setProvider {provider}` is a thin RPC wrapper over the same
-`config.set` path.
+`config.set` path. The desktop app swaps through the AgentOS DEX only: it
+offers no provider to choose and no Uniswap key to enter, and when the
+gateway's config names another provider it says so and offers one button
+that sets it back (`trading.setProvider {provider: "aggregator"}`).
 
 Prices, balances and history never depend on the provider (DexScreener /
 CoinGecko / your RPC node); only quoting and calldata do.
