@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { LoaderCircle } from 'lucide-react'
+import { CircleOff, Gauge, LoaderCircle, Scale, ShieldAlert } from 'lucide-react'
 import { useId, useState } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
@@ -25,12 +25,11 @@ import {
   routerDirty,
   routerDraft,
   safetyNetValid,
-  textTiers,
   type RouterDraft,
   type TierName,
   type TierRow,
 } from '../logic'
-import { Card, Head, Notice, Pill, Row, Segmented } from '../parts'
+import { Card, Choices, Disclosure, Head, Notice, Pill, Row } from '../parts'
 import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
 
@@ -126,13 +125,6 @@ function RouterBody({
 function tierOptionLabel(o: ModelOption): string {
   const ctx = Number(o.contextWindow || 0)
   return ctx > 0 ? `${o.id}  ·  ${Math.round(ctx / 1000)}k` : o.id
-}
-
-const MODE_KEY: Record<RouterMode, 'pilot' | 'judge' | 'jev' | 'off'> = {
-  'pilot-v1': 'pilot',
-  llm_judge: 'judge',
-  jev: 'jev',
-  disabled: 'off',
 }
 
 function RouterForm({
@@ -246,107 +238,84 @@ function RouterForm({
     onSave(params as unknown as Record<string, unknown>)
   }
 
-  const modeHelp = t(`settings.router.mode.${MODE_KEY[draft.mode]}.help`)
   const routingOn = draft.mode !== 'disabled'
+  const providerLabel = catalog.providers?.find((p) => p.providerId === provider)?.label ?? provider
+  const tuning = [
+    draft.mode === 'pilot-v1'
+      ? `${t('settings.router.safetyNet')} ${Number(draft.safetyNet).toFixed(2)}`
+      : null,
+    draft.mode === 'jev'
+      ? `${t('settings.router.jevRisk')} ${Number(draft.jevHighRisk).toFixed(2)}`
+      : null,
+    `${t('settings.router.translate')} ${
+      draft.translateCeiling === 'off' ? t('settings.router.translate.off') : draft.translateCeiling
+    }`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <>
       <Card
         title={t('settings.router.mode')}
         blurb={t('settings.router.mode.blurb')}
-        action={<Pill tone={routingOn ? 'ok' : undefined}>{provider}</Pill>}
+        action={<Pill tone={routingOn ? 'ok' : undefined}>{providerLabel}</Pill>}
       >
-        <Row label={t('settings.router.modeRow')} help={modeHelp}>
-          <Segmented
-            label={t('settings.router.mode')}
-            value={draft.mode}
-            disabled={disabled}
-            options={[
-              { value: 'pilot-v1', label: t('settings.router.mode.pilot') },
-              { value: 'llm_judge', label: t('settings.router.mode.judge') },
-              { value: 'jev', label: t('settings.router.mode.jev') },
-              { value: 'disabled', label: t('settings.router.mode.off') },
-            ]}
-            onChange={(mode) => setDraft((d) => ({ ...d, mode }))}
-          />
-        </Row>
-        <Row label={t('settings.router.defaultTier')} help={t('settings.router.defaultTier.help')}>
-          <select
-            className="mac-select"
-            data-compact="true"
-            aria-label={t('settings.router.defaultTier')}
-            value={draft.defaultTier}
-            disabled={disabled}
-            onChange={(e) => setDraft((d) => ({ ...d, defaultTier: e.target.value }))}
-          >
-            {textTiers(draft).map((row) => (
-              <option key={row.tier} value={row.tier}>
-                {row.tier} · {t(`settings.router.tier.${row.tier}`)}
-              </option>
-            ))}
-          </select>
-        </Row>
-        {draft.mode === 'pilot-v1' ? (
-          <Row
-            label={t('settings.router.safetyNet')}
-            help={t('settings.router.safetyNet.help')}
-            htmlFor={ids.safety}
-          >
-            <span className="stg-slider">
-              <input
-                id={ids.safety}
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={safetyNetValid(draft.safetyNet) ? Number(draft.safetyNet) : 0.5}
-                disabled={disabled}
-                onChange={(e) => setDraft((d) => ({ ...d, safetyNet: e.target.value }))}
-              />
-              <output htmlFor={ids.safety}>{Number(draft.safetyNet).toFixed(2)}</output>
-            </span>
-          </Row>
-        ) : null}
+        <Choices<RouterMode>
+          label={t('settings.router.modeRow')}
+          value={draft.mode}
+          disabled={disabled}
+          options={[
+            {
+              value: 'pilot-v1',
+              title: t('settings.router.mode.pilot'),
+              blurb: t('settings.router.mode.pilot.help'),
+              icon: <Gauge strokeWidth={1.75} aria-hidden />,
+              tag: t('settings.router.mode.recommended'),
+              tagTone: 'ok',
+            },
+            {
+              value: 'llm_judge',
+              title: t('settings.router.mode.judge'),
+              blurb: t('settings.router.mode.judge.help'),
+              icon: <Scale strokeWidth={1.75} aria-hidden />,
+            },
+            {
+              value: 'jev',
+              title: t('settings.router.mode.jev'),
+              blurb: t('settings.router.mode.jev.help'),
+              icon: <ShieldAlert strokeWidth={1.75} aria-hidden />,
+              tag: t('settings.router.mode.experimental'),
+              tagTone: 'warn',
+            },
+            {
+              value: 'disabled',
+              title: t('settings.router.mode.off'),
+              blurb: t('settings.router.mode.off.help'),
+              icon: <CircleOff strokeWidth={1.75} aria-hidden />,
+            },
+          ]}
+          onChange={(mode) => setDraft((d) => ({ ...d, mode }))}
+        />
         {draft.mode === 'jev' ? (
-          <>
-            <Row
-              label={t('settings.router.jevKey')}
-              help={t('settings.router.jevKey.help')}
-              htmlFor={ids.jevKey}
-            >
-              <input
-                id={ids.jevKey}
-                className="mac-input"
-                data-mono="true"
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder={t('settings.router.jevKey.placeholder')}
-                value={draft.jevApiKey}
-                disabled={disabled}
-                onChange={(e) => setDraft((d) => ({ ...d, jevApiKey: e.target.value }))}
-              />
-            </Row>
-            <Row
-              label={t('settings.router.jevRisk')}
-              help={t('settings.router.jevRisk.help')}
-              htmlFor={ids.jevRisk}
-            >
-              <span className="stg-slider">
-                <input
-                  id={ids.jevRisk}
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={safetyNetValid(draft.jevHighRisk) ? Number(draft.jevHighRisk) : 0.7}
-                  disabled={disabled}
-                  onChange={(e) => setDraft((d) => ({ ...d, jevHighRisk: e.target.value }))}
-                />
-                <output htmlFor={ids.jevRisk}>{Number(draft.jevHighRisk).toFixed(2)}</output>
-              </span>
-            </Row>
-          </>
+          <Row
+            label={t('settings.router.jevKey')}
+            help={t('settings.router.jevKey.help')}
+            htmlFor={ids.jevKey}
+          >
+            <input
+              id={ids.jevKey}
+              className="mac-input"
+              data-mono="true"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={t('settings.router.jevKey.placeholder')}
+              value={draft.jevApiKey}
+              disabled={disabled}
+              onChange={(e) => setDraft((d) => ({ ...d, jevApiKey: e.target.value }))}
+            />
+          </Row>
         ) : null}
         {draft.mode === 'llm_judge' ? (
           <Row
@@ -373,27 +342,71 @@ function RouterForm({
             </select>
           </Row>
         ) : null}
-        <Row
-          label={t('settings.router.translate')}
-          help={t('settings.router.translate.help')}
-          htmlFor={ids.translate}
-        >
-          <select
-            id={ids.translate}
-            className="mac-select"
-            data-compact="true"
-            value={draft.translateCeiling}
-            disabled={disabled}
-            onChange={(e) => setDraft((d) => ({ ...d, translateCeiling: e.target.value }))}
+        <Disclosure title={t('settings.router.tuning')} hint={tuning}>
+          {draft.mode === 'pilot-v1' ? (
+            <Row
+              label={t('settings.router.safetyNet')}
+              help={t('settings.router.safetyNet.help')}
+              htmlFor={ids.safety}
+            >
+              <span className="stg-slider">
+                <input
+                  id={ids.safety}
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={safetyNetValid(draft.safetyNet) ? Number(draft.safetyNet) : 0.5}
+                  disabled={disabled}
+                  onChange={(e) => setDraft((d) => ({ ...d, safetyNet: e.target.value }))}
+                />
+                <output htmlFor={ids.safety}>{Number(draft.safetyNet).toFixed(2)}</output>
+              </span>
+            </Row>
+          ) : null}
+          {draft.mode === 'jev' ? (
+            <Row
+              label={t('settings.router.jevRisk')}
+              help={t('settings.router.jevRisk.help')}
+              htmlFor={ids.jevRisk}
+            >
+              <span className="stg-slider">
+                <input
+                  id={ids.jevRisk}
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={safetyNetValid(draft.jevHighRisk) ? Number(draft.jevHighRisk) : 0.7}
+                  disabled={disabled}
+                  onChange={(e) => setDraft((d) => ({ ...d, jevHighRisk: e.target.value }))}
+                />
+                <output htmlFor={ids.jevRisk}>{Number(draft.jevHighRisk).toFixed(2)}</output>
+              </span>
+            </Row>
+          ) : null}
+          <Row
+            label={t('settings.router.translate')}
+            help={t('settings.router.translate.help')}
+            htmlFor={ids.translate}
           >
-            <option value="off">{t('settings.router.translate.off')}</option>
-            {TEXT_TIERS.map((tier) => (
-              <option key={tier} value={tier}>
-                {tier} · {t(`settings.router.tier.${tier}`)}
-              </option>
-            ))}
-          </select>
-        </Row>
+            <select
+              id={ids.translate}
+              className="mac-select"
+              data-compact="true"
+              value={draft.translateCeiling}
+              disabled={disabled}
+              onChange={(e) => setDraft((d) => ({ ...d, translateCeiling: e.target.value }))}
+            >
+              <option value="off">{t('settings.router.translate.off')}</option>
+              {TEXT_TIERS.map((tier) => (
+                <option key={tier} value={tier}>
+                  {tier} · {t(`settings.router.tier.${tier}`)}
+                </option>
+              ))}
+            </select>
+          </Row>
+        </Disclosure>
       </Card>
 
       <Card
@@ -411,6 +424,11 @@ function RouterForm({
         }
       >
         <div className="stg-tiers" role="list">
+          <div className="stg-tier stg-tier--head" aria-hidden>
+            <span className="stg-tier__caption">{t('settings.router.tier.rung')}</span>
+            <span className="stg-tier__caption">{t('settings.router.tier.model')}</span>
+            <span className="stg-tier__caption">{t('settings.router.tier.thinking')}</span>
+          </div>
           {draft.tiers.map((row) => {
             const isImage = row.tier === 'image_model'
             const options = isImage ? visionOptions : textOptions
@@ -420,8 +438,10 @@ function RouterForm({
             return (
               <div key={row.tier} className="stg-tier" role="listitem" data-default={isDefault}>
                 <div className="stg-tier__rung">
-                  <span className="stg-tier__code">{row.tier}</span>
-                  <span className="stg-tier__name">{t(`settings.router.tier.${row.tier}`)}</span>
+                  <span className="stg-tier__label">
+                    <span className="stg-tier__code">{isImage ? 'img' : row.tier}</span>
+                    <span className="stg-tier__name">{t(`settings.router.tier.${row.tier}`)}</span>
+                  </span>
                   {!isImage ? (
                     <button
                       type="button"
@@ -438,7 +458,6 @@ function RouterForm({
                   ) : null}
                 </div>
                 <div className="stg-tier__model">
-                  <span className="stg-tier__caption">{t('settings.router.tier.model')}</span>
                   <select
                     className="mac-select"
                     aria-label={`${row.tier} ${t('settings.router.tier.model')}`}
@@ -463,7 +482,6 @@ function RouterForm({
                   ) : null}
                 </div>
                 <div className="stg-tier__think">
-                  <span className="stg-tier__caption">{t('settings.router.tier.thinking')}</span>
                   <select
                     className="mac-select"
                     aria-label={`${row.tier} ${t('settings.router.tier.thinking')}`}

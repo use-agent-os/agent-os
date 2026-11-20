@@ -73,12 +73,25 @@ export function NotificationsPane() {
       <Head
         title={t('settings.section.notifications')}
         blurb={t('settings.section.notifications.blurb')}
+        action={
+          <label className="trd-switch" title={t('settings.notifications.enabled.help')}>
+            <span>
+              {prefs.enabled ? t('settings.notifications.on') : t('settings.notifications.off')}
+            </span>
+            <Switch
+              checked={prefs.enabled}
+              aria-label={t('settings.notifications.enabled')}
+              onCheckedChange={(enabled) => void update({ notifications: { enabled } })}
+            />
+          </label>
+        }
       />
 
       {!desktop ? <Notice tone="info">{t('settings.notifications.browserOnly')}</Notice> : null}
       {supported === false ? (
         <Notice tone="danger">{t('settings.notifications.permission.unsupported')}</Notice>
       ) : null}
+      {off ? <Notice tone="info">{t('settings.notifications.offNotice')}</Notice> : null}
 
       <Card
         title={t('settings.notifications.delivery')}
@@ -88,16 +101,6 @@ export function NotificationsPane() {
           </Button>
         }
       >
-        <Row
-          label={t('settings.notifications.enabled')}
-          help={t('settings.notifications.enabled.help')}
-        >
-          <Switch
-            checked={prefs.enabled}
-            aria-label={t('settings.notifications.enabled')}
-            onCheckedChange={(enabled) => void update({ notifications: { enabled } })}
-          />
-        </Row>
         <Row
           label={t('settings.notifications.whenActive')}
           help={t('settings.notifications.whenActive.help')}
@@ -307,7 +310,7 @@ export function NotificationsPane() {
       </Card>
 
       {desktop ? (
-        <Card title={t('settings.notifications.dock')}>
+        <Card title={t('settings.notifications.dockAndSystem')}>
           <Row
             label={t('settings.notifications.badge')}
             help={t('settings.notifications.badge.help')}
@@ -330,11 +333,6 @@ export function NotificationsPane() {
               onCheckedChange={(bounce) => void update({ notifications: { bounce } })}
             />
           </Row>
-        </Card>
-      ) : null}
-
-      {desktop ? (
-        <Card title={t('settings.notifications.system')}>
           <Row
             label={t('settings.notifications.permission')}
             help={t('settings.notifications.permission.help')}

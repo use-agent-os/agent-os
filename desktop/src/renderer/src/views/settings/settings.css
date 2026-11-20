@@ -232,6 +232,11 @@
   /* Clear the floating Done button. */
   padding-right: 64px;
 }
+/* With a blurb the action sits low enough to clear Done: line it up with
+   the cards' right edge instead. */
+.stg-head:has(> div > p) {
+  padding-right: 0;
+}
 .stg-head h1 {
   font-size: 24px;
   font-weight: 650;
@@ -283,6 +288,8 @@
   font-size: 12px;
   color: var(--muted-foreground);
 }
+.stg-card > .stg-row:first-child,
+.stg-card > .stg-disclosure:first-child,
 .stg-card__head + .stg-row,
 .stg-card__head + .stg-tiers > .stg-tier:first-child,
 .stg-card__head + .stg-keys > .stg-keys__row:first-child {
@@ -290,6 +297,21 @@
 }
 .stg-card__body {
   padding: 4px 18px 16px;
+}
+/* A notice placed straight in a card sits inset, like the rows' text. */
+.stg-card > .stg-notice {
+  margin: 0 18px 14px;
+}
+.stg-card > .stg-row + .stg-notice,
+.stg-card > .stg-disclosure + .stg-notice {
+  margin-top: 2px;
+}
+/* A quiet paragraph under a card's control: the long form of a choice. */
+.stg-card__note {
+  padding: 0 18px 16px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
 }
 .stg-card__foot {
   display: flex;
@@ -305,12 +327,15 @@
   color: var(--muted-foreground);
 }
 
-/* Row: label column + control column. */
+/* Row: label column + control column. The control never shrinks to make
+   room for long help text: when both do not fit on one line, the control
+   drops under the label, still right-aligned. */
 .stg-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
+  gap: 8px 20px;
   min-height: 52px;
   padding: 10px 18px;
   border-top: 1px solid var(--hairline);
@@ -320,12 +345,19 @@
 }
 .stg-row[data-stack='true'] {
   flex-direction: column;
+  flex-wrap: nowrap;
   align-items: stretch;
   gap: 8px;
+}
+.stg-row[data-stack='true'] > .stg-row__label,
+.stg-row[data-stack='true'] > .stg-row__control {
+  flex: none;
+  margin-left: 0;
 }
 .stg-row__label {
   display: flex;
   min-width: 0;
+  flex: 1 1 280px;
   flex-direction: column;
   gap: 2px;
 }
@@ -342,14 +374,18 @@
 }
 .stg-row__control {
   display: flex;
-  flex-shrink: 0;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  max-width: 62%;
+  max-width: 100%;
+  margin-left: auto;
+}
+.stg-row__control > .mac-segmented {
+  white-space: nowrap;
 }
 .stg-row__control[data-wide='true'] {
-  flex: 1;
+  flex: 1 1 0%;
   max-width: none;
 }
 .stg-row[data-stack='true'] .stg-row__control {
@@ -736,41 +772,86 @@
   color: var(--dim);
 }
 
-/* ── Providers: the picker grid ──────────────────────────────────────────── */
+/* ── Providers: the catalog to switch from ─────────────────────────────── */
 
+.prov-switch {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scroll-margin-top: 56px;
+}
+.prov-back {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px 0 4px;
+  border-radius: var(--radius-control);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  transition:
+    color 90ms ease-out,
+    background-color 90ms ease-out;
+}
+.prov-back:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+}
+.prov-back:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 0;
+}
+.prov-filter {
+  width: 190px;
+  height: 28px;
+  flex-shrink: 0;
+}
+.prov-filter input::-webkit-search-cancel-button {
+  display: none;
+}
 .prov-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
+  gap: 8px;
+  padding: 6px 18px 18px;
+}
+.prov-cell {
+  display: flex;
+  min-width: 0;
 }
 .prov-tile {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 28px minmax(0, 1fr);
   grid-template-rows: auto auto;
-  column-gap: 12px;
-  row-gap: 2px;
+  column-gap: 10px;
+  row-gap: 1px;
   align-items: center;
-  padding: 12px 14px;
-  border-radius: var(--radius-surface);
+  padding: 9px 11px;
+  border-radius: var(--radius);
   text-align: left;
-  background: color-mix(in srgb, var(--card) 72%, transparent);
-  box-shadow: 0 0 0 0.5px var(--hairline);
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
   transition:
     background-color 100ms ease-out,
     box-shadow 100ms ease-out,
     transform 100ms ease-out;
 }
 .prov-tile:hover {
-  background: color-mix(in srgb, var(--card) 100%, transparent);
-  box-shadow: 0 0 0 0.5px var(--border);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--border);
 }
 .prov-tile:active {
   transform: scale(0.99);
 }
-.prov-tile[aria-checked='true'] {
-  background: color-mix(in srgb, var(--primary) 7%, var(--card));
+/* First run: the recommended provider is the obvious first click. */
+.prov-tile[data-recommended='true'] {
+  background: color-mix(in srgb, var(--primary) 7%, transparent);
   box-shadow:
-    0 0 0 1.5px var(--primary),
+    inset 0 0 0 1.5px var(--primary),
     0 6px 18px color-mix(in srgb, var(--primary) 10%, transparent);
 }
 .prov-tile:focus-visible {
@@ -781,7 +862,7 @@
   grid-row: 1 / span 2;
 }
 .prov-tile__name {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   letter-spacing: -0.005em;
   overflow: hidden;
@@ -790,11 +871,12 @@
 }
 .prov-tile__meta {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px 6px;
+  gap: 4px;
   min-width: 0;
+  overflow: hidden;
   font-size: 11px;
+  white-space: nowrap;
   color: var(--muted-foreground);
 }
 .prov-tile__state {
@@ -810,21 +892,70 @@
 .prov-tile__state[data-tone='dim'] {
   color: var(--dim);
 }
-.prov-tile__tag {
-  height: 16px;
-  padding: 0 5px;
-  border-radius: 4px;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  line-height: 16px;
-  color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
+
+/* A failed key test: the sentence, then the provider's words, small. */
+.prov-check {
+  padding: 0 18px 14px;
 }
-.prov-tile__tag[data-tone='recommended'] {
-  color: var(--ok);
-  background: color-mix(in srgb, var(--ok) 14%, transparent);
+.prov-check > .stg-notice {
+  align-items: flex-start;
+}
+.prov-check > .stg-notice > svg {
+  margin-top: 2px;
+}
+.prov-fail {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+.prov-fail__title {
+  font-weight: 500;
+  line-height: 1.4;
+}
+/* The vertical inset is a transparent border, not padding: a clamped block
+   clips at its padding edge, so padding would show a sliver of line four. */
+.prov-fail__raw {
+  display: block;
+  max-height: 220px;
+  padding: 0 9px;
+  border-block: 7px solid transparent;
+  overflow: auto;
+  border-radius: var(--radius-control);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  user-select: text;
+}
+.prov-fail__raw[data-clamped='true'] {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.prov-fail__actions {
+  display: flex;
+  gap: 14px;
+}
+.prov-fail__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.prov-fail__link:hover {
+  color: var(--foreground);
+}
+.prov-fail__link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 3px;
 }
 
 /* Brand mark: a rounded plate so colour and mono logos sit at one weight. */
@@ -881,6 +1012,113 @@
   gap: 12px;
 }
 
+/* ── Gateway: the status hero ─────────────────────────────────────────── */
+
+.gw-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+}
+.gw-hero__mark {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+}
+.gw-hero__mark svg {
+  width: 21px;
+  height: 21px;
+}
+.gw-hero__mark[data-tone='ok'] {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--ok) 30%, transparent);
+}
+.gw-hero__mark[data-tone='warn'] {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.gw-hero__mark[data-tone='danger'] {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.gw-hero__text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+.gw-hero__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.gw-hero__title::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--dim);
+}
+.gw-hero__title[data-tone='ok']::before {
+  background: var(--ok);
+}
+.gw-hero__title[data-tone='warn']::before {
+  background: var(--warn);
+}
+.gw-hero__title[data-tone='danger']::before {
+  background: var(--danger);
+}
+.gw-hero__title[data-pulse='true']::before {
+  animation: mac-light-pulse 1.2s ease-in-out infinite;
+}
+.gw-hero__endpoint {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+}
+.gw-hero__endpoint > .stg-value {
+  min-width: 0;
+  margin-right: 4px;
+}
+.gw-hero__process {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.gw-hero__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+.gw-hero__actions .mac-button {
+  white-space: nowrap;
+}
+.gw-hero__notice {
+  padding: 0 18px 16px;
+}
+.gw-cli {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+}
+.gw-cli > .mac-input {
+  min-width: 0;
+  flex: 1;
+}
+
 /* ── Router: the tier ladder ─────────────────────────────────────────────── */
 
 .stg-tiers {
@@ -889,11 +1127,16 @@
 }
 .stg-tier {
   display: grid;
-  grid-template-columns: 128px minmax(0, 1fr) 150px;
+  grid-template-columns: 116px minmax(0, 1fr) 150px;
   align-items: start;
   gap: 14px;
   padding: 12px 18px;
   border-top: 1px solid var(--hairline);
+}
+/* Column captions once, above the ladder, instead of on every rung. */
+.stg-tier--head {
+  padding-top: 2px;
+  padding-bottom: 6px;
 }
 .stg-tier[data-default='true'] {
   background: color-mix(in srgb, var(--primary) 5%, transparent);
@@ -901,8 +1144,13 @@
 .stg-tier__rung {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-top: 3px;
+  gap: 6px;
+  padding-top: 6px;
+}
+.stg-tier__label {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
 }
 .stg-tier__code {
   display: inline-flex;
@@ -993,6 +1241,22 @@
   font-size: 12px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* ── Trading: the on/off switch in the page head ─────────────────────────── */
+
+.trd-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 28px;
+  padding: 0 4px 0 11px;
+  border-radius: var(--radius-pill);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
 }
 
 /* ── Shortcuts ───────────────────────────────────────────────────────────── */
@@ -1223,6 +1487,60 @@
   text-decoration: underline;
 }
 
+/* ── Skills: where skills come from ──────────────────────────────────────── */
+
+.skl-sources {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 6px 18px 18px;
+  list-style: none;
+}
+.skl-source {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+}
+.skl-source__glyph {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+.skl-source__glyph svg {
+  width: 14px;
+  height: 14px;
+}
+.skl-source__text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.skl-source__name {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.skl-source__hint {
+  font-size: 11px;
+  color: var(--dim);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* ── Environment ─────────────────────────────────────────────────────────── */
 
 .env-actions {
@@ -1233,7 +1551,34 @@
 .env-actions .mac-button {
   white-space: nowrap;
 }
+.env-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: -6px;
+  padding: 0 2px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.env-file > svg {
+  flex-shrink: 0;
+  color: var(--dim);
+}
+.env-file > .stg-path {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  word-break: normal;
+}
+.env-file > .mac-button {
+  flex-shrink: 0;
+  margin-left: auto;
+}
 .env-toolbar {
+  /* Clear the floating Done button when a summary figure scrolls here. */
+  scroll-margin-top: 56px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1420,6 +1765,13 @@
 }
 .chn-person__actions .mac-button {
   white-space: nowrap;
+}
+
+/* A channel card is a jump target for the summary's stats. */
+.chn-anchor {
+  scroll-margin-top: 56px;
+  border-radius: var(--radius-surface);
+  outline: none;
 }
 
 /* The raw runtime row, folded under the card like the installer log. */
@@ -1737,6 +2089,16 @@ button.stg-stat {
 }
 button.stg-stat:hover {
   background: color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+/* A figure that leads somewhere says so: a chevron after its label. */
+button.stg-stat .stg-stat__label::after {
+  content: ' ›';
+  color: var(--dim);
+  transition: color 90ms ease-out;
+}
+button.stg-stat:hover .stg-stat__label,
+button.stg-stat:hover .stg-stat__label::after {
+  color: var(--foreground);
 }
 button.stg-stat:focus-visible {
   outline: 2px solid var(--ring);

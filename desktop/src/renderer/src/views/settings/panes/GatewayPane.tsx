@@ -1,10 +1,21 @@
-import { Copy, Eye, EyeOff, ExternalLink } from 'lucide-react'
+import {
+  Copy,
+  Eye,
+  EyeOff,
+  ExternalLink,
+  Globe,
+  Laptop,
+  Play,
+  RotateCw,
+  Server,
+  Square,
+} from 'lucide-react'
 import { useId, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { GatewayState } from '@shared/gateway'
-import { gatewayUrl, type GatewaySettings } from '@shared/settings'
+import { DEFAULT_GATEWAY_SETTINGS, gatewayUrl, type GatewaySettings } from '@shared/settings'
 import { Button } from '~/components/ui/button'
-import { t } from '~/i18n'
+import { t, type MessageKey } from '~/i18n'
 import { desktopApi, isDesktop } from '~/lib/desktop-api'
 import { useGateway } from '~/stores/gateway'
 import { useSettings } from '~/stores/settings'
@@ -17,7 +28,14 @@ import {
   switchGatewayMode,
   type GatewayDraft,
 } from '../logic'
-import { Card, Head, Notice, Pill, Row, Segmented, Value, type Tone } from '../parts'
+import { Card, Choices, Disclosure, Head, Notice, Row, Segmented, Value, type Tone } from '../parts'
+
+function fill(key: MessageKey, vars: Record<string, string | number>): string {
+  return Object.entries(vars).reduce(
+    (text, [name, value]) => text.replace(`{${name}}`, String(value)),
+    t(key),
+  )
+}
 
 const TONE: Record<GatewayState, Tone | undefined> = {
   stopped: undefined,
@@ -27,6 +45,12 @@ const TONE: Record<GatewayState, Tone | undefined> = {
   error: 'danger',
 }
 
+/**
+ * Settings › Gateway: the state first (running or not, where, what to do
+ * about it), then how the app reaches it. Most people run the managed
+ * gateway on its defaults and never touch the address, so in that case the
+ * address fields fold away under one line.
+ */
 export function GatewayPane() {
   const saved = useSettings((s) => s.settings.gateway)
   const loaded = useSettings((s) => s.loaded)
@@ -39,6 +63,7 @@ export function GatewayPane() {
   // An external gateway is not the app's to start or stop: the pane shows
   // its state, and the one action left is reconnecting to a changed endpoint.
   const external = saved.mode === 'external'
+  const endpoint = status.url ?? gatewayUrl(saved)
 
   function copyUrl() {
     if (!status.url) return
@@ -46,89 +71,112 @@ export function GatewayPane() {
     toast.success(t('settings.copied'), { id: 'stg-copy' })
   }
 
+  const process =
+    status.state !== 'running'
+      ? external
+        ? t('settings.gateway.pid.external')
+        : t('settings.gateway.process.stopped')
+      : status.pid !== null
+        ? fill('settings.gateway.process.managed', { pid: status.pid })
+        : external
+          ? t('settings.gateway.pid.external')
+          : t('settings.gateway.pid.adopted')
+
   return (
     <>
       <Head title={t('settings.section.gateway')} blurb={t('settings.section.gateway.blurb')} />
 
-      {status.error ? (
-        <Notice tone="danger">
-          <span className="stg-value" style={{ whiteSpace: 'pre-wrap' }}>
-            {status.error}
+      <Card>
+        <div className="gw-hero" aria-label={t('settings.gateway.status')} role="group">
+          <span className="gw-hero__mark" data-tone={TONE[status.state]} aria-hidden>
+            <Server strokeWidth={1.75} />
           </span>
-        </Notice>
-      ) : needsRestart ? (
-        <Notice
-          action={
-            <Button disabled={busy} onClick={() => void restart()}>
-              {external ? t('settings.gateway.reconnectNow') : t('settings.gateway.restartNow')}
-            </Button>
-          }
-        >
-          {external ? t('settings.gateway.reconnectNeeded') : t('settings.gateway.restartNeeded')}
-        </Notice>
-      ) : null}
-
-      <Card
-        title={t('settings.gateway.status')}
-        blurb={t('settings.gateway.status.blurb')}
-        action={
-          <Pill tone={TONE[status.state]} pulse={pulsing}>
-            {t(`gateway.state.${status.state}`)}
-          </Pill>
-        }
-      >
-        <Row label={t('settings.gateway.endpoint')}>
-          <Value>{status.url ?? gatewayUrl(saved)}</Value>
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled={!status.url}
-            aria-label={t('settings.copy')}
-            title={t('settings.copy')}
-            onClick={copyUrl}
-          >
-            <Copy className="size-3.5 text-muted-foreground" strokeWidth={1.75} aria-hidden />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled={status.state !== 'running' || !status.url}
-            aria-label={t('settings.gateway.openConsole')}
-            title={t('settings.gateway.openConsole')}
-            onClick={() => status.url && void desktopApi().app.openExternal(status.url)}
-          >
-            <ExternalLink
-              className="size-3.5 text-muted-foreground"
-              strokeWidth={1.75}
-              aria-hidden
-            />
-          </Button>
-        </Row>
-        <Row label={t('settings.gateway.pid')}>
-          <Value>
-            {status.state !== 'running'
-              ? '—'
-              : status.pid !== null
-                ? `pid ${status.pid}`
-                : external
-                  ? t('settings.gateway.pid.external')
-                  : t('settings.gateway.pid.adopted')}
-          </Value>
-          {external ? null : running ? (
-            <>
-              <Button disabled={busy} onClick={() => void restart()}>
-                {t('settings.gateway.restart')}
+          <div className="gw-hero__text">
+            <div
+              className="gw-hero__title"
+              data-tone={TONE[status.state]}
+              data-pulse={pulsing ? 'true' : undefined}
+            >
+              {t(`gateway.state.${status.state}`)}
+            </div>
+            <div className="gw-hero__endpoint">
+              <Value title={endpoint}>{endpoint}</Value>
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={!status.url}
+                aria-label={t('settings.copy')}
+                title={t('settings.copy')}
+                onClick={copyUrl}
+              >
+                <Copy className="size-3.5 text-muted-foreground" strokeWidth={1.75} aria-hidden />
               </Button>
-              <Button disabled={busy} onClick={() => void stop()}>
-                {t('settings.gateway.stop')}
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={status.state !== 'running' || !status.url}
+                aria-label={t('settings.gateway.openConsole')}
+                title={t('settings.gateway.openConsole')}
+                onClick={() => status.url && void desktopApi().app.openExternal(status.url)}
+              >
+                <ExternalLink
+                  className="size-3.5 text-muted-foreground"
+                  strokeWidth={1.75}
+                  aria-hidden
+                />
               </Button>
-            </>
-          ) : (
-            <Button variant="primary" disabled={busy || !isDesktop()} onClick={() => void start()}>
-              {t('settings.gateway.start')}
-            </Button>
+            </div>
+            <div className="gw-hero__process">{process}</div>
+          </div>
+          {external ? null : (
+            <div className="gw-hero__actions">
+              {running ? (
+                <>
+                  <Button disabled={busy} onClick={() => void stop()}>
+                    <Square className="size-3" strokeWidth={2.25} aria-hidden />
+                    {t('settings.gateway.stop')}
+                  </Button>
+                  <Button disabled={busy} onClick={() => void restart()}>
+                    <RotateCw className="size-3.5" strokeWidth={2} aria-hidden />
+                    {t('settings.gateway.restart')}
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="primary"
+                  disabled={busy || !isDesktop()}
+                  onClick={() => void start()}
+                >
+                  <Play className="size-3.5" strokeWidth={2} aria-hidden />
+                  {t('settings.gateway.start')}
+                </Button>
+              )}
+            </div>
           )}
-        </Row>
+        </div>
+        {status.error ? (
+          <div className="gw-hero__notice">
+            <Notice tone="danger">
+              <span className="stg-value" style={{ whiteSpace: 'pre-wrap' }}>
+                {status.error}
+              </span>
+            </Notice>
+          </div>
+        ) : needsRestart ? (
+          <div className="gw-hero__notice">
+            <Notice
+              action={
+                <Button disabled={busy} onClick={() => void restart()}>
+                  {external ? t('settings.gateway.reconnectNow') : t('settings.gateway.restartNow')}
+                </Button>
+              }
+            >
+              {external
+                ? t('settings.gateway.reconnectNeeded')
+                : t('settings.gateway.restartNeeded')}
+            </Notice>
+          </div>
+        ) : null}
       </Card>
 
       {/* Keyed on the saved value: a save or a reset re-seeds the form, while an
@@ -142,6 +190,19 @@ export function GatewayPane() {
         }}
       />
     </>
+  )
+}
+
+/** The managed gateway on the address and token it ships with. */
+export function onGatewayDefaults(gw: GatewaySettings): boolean {
+  const d = DEFAULT_GATEWAY_SETTINGS
+  return (
+    gw.mode === 'managed' &&
+    gw.scheme === d.scheme &&
+    gw.host === d.host &&
+    gw.port === d.port &&
+    !gw.token &&
+    !gw.cliPath
   )
 }
 
@@ -184,42 +245,13 @@ function ConnectionForm({
     if (picked) setDraft((d) => ({ ...d, cliPath: picked }))
   }
 
-  return (
-    <Card
-      title={t('settings.gateway.connection')}
-      blurb={t('settings.gateway.connection.blurb')}
-      foot={
-        <>
-          <Button
-            disabled={!dirty}
-            onClick={() => {
-              externalEndpoint.current = null
-              setDraft(draftFromGateway(saved))
-            }}
-          >
-            {t('settings.revert')}
-          </Button>
-          <Button
-            variant="primary"
-            disabled={!canSave}
-            onClick={() => void onSave(gatewayFromDraft(draft))}
-          >
-            {t('settings.save')}
-          </Button>
-        </>
-      }
-    >
-      <Row label={t('settings.gateway.mode')} help={t('settings.gateway.mode.help')}>
-        <Segmented
-          label={t('settings.gateway.mode')}
-          value={draft.mode}
-          options={[
-            { value: 'managed', label: t('settings.gateway.mode.managed') },
-            { value: 'external', label: t('settings.gateway.mode.external') },
-          ]}
-          onChange={changeMode}
-        />
-      </Row>
+  // Decided from what is saved, not the draft: rows must not fold away
+  // under the cursor while someone is editing them.
+  const folded = onGatewayDefaults(saved)
+  const managed = draft.mode === 'managed'
+
+  const endpointRows = (
+    <>
       <Row label={t('settings.gateway.scheme')} help={t('settings.gateway.scheme.help')}>
         <Segmented
           label={t('settings.gateway.scheme')}
@@ -278,7 +310,6 @@ function ConnectionForm({
         label={t('settings.gateway.token')}
         htmlFor={ids.token}
         help={t('settings.gateway.token.help')}
-        align="start"
       >
         <span className="stg-input-wrap">
           <input
@@ -309,30 +340,89 @@ function ConnectionForm({
           </Button>
         </span>
       </Row>
-      <Row
-        label={t('settings.gateway.cli')}
-        htmlFor={ids.cli}
-        help={t('settings.gateway.cli.help')}
-        align="start"
-      >
-        <input
-          id={ids.cli}
-          className="mac-input"
-          data-mono="true"
-          autoComplete="off"
-          spellCheck={false}
-          placeholder={t('settings.gateway.cli.auto')}
-          value={draft.cliPath}
-          disabled={draft.mode === 'external'}
-          onChange={(e) => setDraft((d) => ({ ...d, cliPath: e.target.value }))}
-        />
-        <Button
-          disabled={draft.mode === 'external' || !isDesktop()}
-          onClick={() => void chooseCli()}
+      {managed ? (
+        <Row
+          label={t('settings.gateway.cli')}
+          htmlFor={ids.cli}
+          help={t('settings.gateway.cli.help')}
+          stack
         >
-          {t('settings.gateway.cli.choose')}
-        </Button>
-      </Row>
+          <span className="gw-cli">
+            <input
+              id={ids.cli}
+              className="mac-input"
+              data-mono="true"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={t('settings.gateway.cli.auto')}
+              value={draft.cliPath}
+              onChange={(e) => setDraft((d) => ({ ...d, cliPath: e.target.value }))}
+            />
+            <Button disabled={!isDesktop()} onClick={() => void chooseCli()}>
+              {t('settings.gateway.cli.choose')}
+            </Button>
+          </span>
+        </Row>
+      ) : null}
+    </>
+  )
+
+  return (
+    <Card
+      title={t('settings.gateway.connection')}
+      blurb={t('settings.gateway.connection.blurb')}
+      foot={
+        <>
+          <Button
+            disabled={!dirty}
+            onClick={() => {
+              externalEndpoint.current = null
+              setDraft(draftFromGateway(saved))
+            }}
+          >
+            {t('settings.revert')}
+          </Button>
+          <Button
+            variant="primary"
+            disabled={!canSave}
+            onClick={() => void onSave(gatewayFromDraft(draft))}
+          >
+            {t('settings.save')}
+          </Button>
+        </>
+      }
+    >
+      <Choices
+        label={t('settings.gateway.mode')}
+        value={draft.mode}
+        options={[
+          {
+            value: 'managed',
+            title: t('settings.gateway.mode.managed'),
+            blurb: t('settings.gateway.mode.managed.blurb'),
+            icon: <Laptop strokeWidth={1.75} aria-hidden />,
+            tag: t('settings.gateway.mode.recommended'),
+            tagTone: 'ok',
+          },
+          {
+            value: 'external',
+            title: t('settings.gateway.mode.external'),
+            blurb: t('settings.gateway.mode.external.blurb'),
+            icon: <Globe strokeWidth={1.75} aria-hidden />,
+          },
+        ]}
+        onChange={changeMode}
+      />
+      {folded ? (
+        <Disclosure
+          title={t('settings.gateway.address')}
+          hint={`${gatewayUrl(saved)} · ${t('settings.gateway.address.noToken')}`}
+        >
+          {endpointRows}
+        </Disclosure>
+      ) : (
+        endpointRows
+      )}
     </Card>
   )
 }

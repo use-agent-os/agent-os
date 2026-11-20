@@ -25,6 +25,10 @@ import {
   routerDraft,
   safetyNetValid,
   textTiers,
+  filterProviders,
+  probeProblem,
+  isLongError,
+  ERROR_CLAMP_CHARS,
 } from './logic'
 import { isSettingsSection, SETTINGS_GROUPS, SETTINGS_SECTIONS } from './sections'
 import type { Catalog, SetupConfig } from '@/views/setup/logic'
@@ -444,5 +448,59 @@ describe('orderProviders', () => {
     expect(
       orderProviders([{ providerId: 'a' }, { providerId: 'b' }]).map((p) => p.providerId),
     ).toEqual(['a', 'b'])
+  })
+})
+
+describe('filterProviders', () => {
+  const catalog = [
+    { providerId: 'opencap', label: 'OpenCAP' },
+    { providerId: 'openai', label: 'OpenAI' },
+    { providerId: 'zai', label: 'Zhipu (Z.AI)' },
+    { providerId: 'ollama', label: 'Ollama (local)' },
+  ]
+
+  it('keeps every provider, in order, for an empty query', () => {
+    expect(filterProviders(catalog, '  ').map((p) => p.providerId)).toEqual([
+      'opencap',
+      'openai',
+      'zai',
+      'ollama',
+    ])
+  })
+
+  it('matches the name or the id, in any case, every word', () => {
+    expect(filterProviders(catalog, 'OPEN').map((p) => p.providerId)).toEqual(['opencap', 'openai'])
+    expect(filterProviders(catalog, 'zhipu ai').map((p) => p.providerId)).toEqual(['zai'])
+    expect(filterProviders(catalog, 'local').map((p) => p.providerId)).toEqual(['ollama'])
+    expect(filterProviders(catalog, 'open local')).toEqual([])
+  })
+})
+
+describe('probeProblem', () => {
+  it('reads the provider’s message into one likely cause', () => {
+    expect(
+      probeProblem(
+        "403: Surplus Intelligence chat request failed (HTTP 403): This key is not scoped to use model 'gpt-6-luna'.",
+      ),
+    ).toBe('scope')
+    expect(probeProblem('unauthorized: Invalid API key')).toBe('auth')
+    expect(probeProblem('HTTP 401')).toBe('auth')
+    expect(probeProblem('429 Too Many Requests: rate limit reached')).toBe('quota')
+    expect(probeProblem('402: insufficient credits')).toBe('quota')
+    expect(probeProblem('404: model gpt-x not found')).toBe('model')
+    expect(probeProblem('fetch failed: ECONNREFUSED 127.0.0.1:8000')).toBe('network')
+    expect(probeProblem('request timed out after 30s')).toBe('network')
+    expect(probeProblem('something odd happened')).toBe('other')
+    expect(probeProblem('')).toBe('other')
+  })
+})
+
+describe('isLongError', () => {
+  it('folds a message past the character limit or three lines', () => {
+    expect(isLongError('short')).toBe(false)
+    expect(isLongError('x'.repeat(ERROR_CLAMP_CHARS))).toBe(false)
+    expect(isLongError('x'.repeat(ERROR_CLAMP_CHARS + 1))).toBe(true)
+    expect(isLongError('a\nb\nc')).toBe(false)
+    expect(isLongError('a\nb\nc\nd')).toBe(true)
   })
 })

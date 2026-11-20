@@ -119,6 +119,24 @@ describe('EnvironmentPane', () => {
     expect(within(path).queryByRole('button', { name: /Edit|Remove/ })).toBeNull()
   })
 
+  it('turns a summary figure into the filter it counts', async () => {
+    renderPane()
+    await loaded()
+    const summary = screen.getByRole('group', { name: 'Environment summary' })
+    fireEvent.click(within(summary).getByRole('button', { name: /Missing/ }))
+    expect(screen.getByRole('radio', { name: 'Missing' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.queryByTestId('env-row-OPENAI_API_KEY')).toBeNull()
+    expect(screen.getByTestId('env-row-BRAVE_API_KEY')).toBeInTheDocument()
+    // A group holding only optional unset variables needs nothing: not listed.
+    expect(screen.queryByRole('region', { name: 'LLM providers' })).toBeNull()
+    fireEvent.click(within(summary).getByRole('button', { name: /Set/ }))
+    expect(screen.getByRole('radio', { name: 'Set' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('env-row-OPENAI_API_KEY')).toBeInTheDocument()
+    expect(screen.queryByTestId('env-row-BRAVE_API_KEY')).toBeNull()
+    // Shadowed has no filter of its own: a figure, not a button.
+    expect(within(summary).queryByRole('button', { name: /Shadowed/ })).toBeNull()
+  })
+
   it('filters and searches', async () => {
     renderPane()
     await loaded()

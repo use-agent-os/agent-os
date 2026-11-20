@@ -63,33 +63,31 @@ export const settings = {
     'Who answers your messages, with which credentials, and the model it falls back to.',
   'settings.section.skills': 'Skills',
   'settings.section.skills.blurb': 'What the agent can do, and where more comes from.',
+  'settings.skills.stats': 'Skills summary',
   'settings.skills.installed': 'Installed',
   'settings.skills.ready': 'Ready',
   'settings.skills.needsSetup': 'Needs setup',
-  'settings.skills.disabled': 'Disabled',
+  'settings.skills.needsSetup.help': 'Open Skills to fix',
+  'settings.skills.disabled.hint': '{n} turned off',
   'settings.skills.offered': 'Offered to the agent',
+  'settings.skills.offered.help': 'In the agent’s tool list',
   'settings.skills.open': 'Open Skills',
-  'settings.skills.library': 'Library',
-  'settings.skills.library.blurb':
-    'Browse what is installed, install from a partner catalog, the community hub or a GitHub URL, and fix anything that needs setup.',
-  'settings.skills.catalogs': 'Catalogs',
+  'settings.skills.loadError': 'Could not read the installed skills.',
+  'settings.skills.catalogs': 'Where skills come from',
   'settings.skills.catalogs.blurb':
-    'Robinhood, Bankr, Aeon and Capminal ship curated skills; Community is the open hub.',
-  'settings.skills.needsSetup.help':
-    'A missing command or environment variable. Open Skills to fix it.',
+    'Curated partner catalogs and the open community hub. Browse and install them in Skills.',
   'settings.section.channels': 'Channels',
   'settings.section.channels.blurb':
     'Where the agent can be reached: Telegram, Discord, Slack and the other messaging adapters.',
-  'settings.channels.overview': 'Overview',
-  'settings.channels.overview.blurb': 'Every configured adapter and how it is doing right now.',
+  'settings.channels.stats': 'Channel summary',
   'settings.channels.refresh': 'Refresh',
   'settings.channels.add': 'Add channel',
   'settings.channels.stat.total': 'Channels',
   'settings.channels.stat.connected': 'Connected',
   'settings.channels.stat.attention': 'Needs attention',
-  'settings.channels.stat.attention.help': 'Dead, restarting or out of retries.',
+  'settings.channels.stat.attention.help': 'Dead or restarting',
   'settings.channels.stat.pairing': 'Pairing requests',
-  'settings.channels.stat.pairing.help': 'Telegram senders waiting for you to let them in.',
+  'settings.channels.stat.pairing.help': 'Senders waiting for you',
   'settings.channels.loading': 'Loading channels…',
   'settings.channels.loadError': 'Channels unavailable',
   'settings.channels.retry': 'Retry',
@@ -172,16 +170,15 @@ export const settings = {
   'settings.section.environment': 'Environment',
   'settings.section.environment.blurb':
     'Credentials and settings the gateway, its providers and your skills read from the environment.',
-  'settings.env.overview': 'Overview',
+  'settings.env.stats': 'Environment summary',
   'settings.env.refresh': 'Refresh',
   'settings.env.add': 'Add variable',
   'settings.env.stat.set': 'Set',
   'settings.env.stat.missing': 'Missing',
-  'settings.env.stat.missing.help': 'Required by something installed, and not set anywhere.',
+  'settings.env.stat.missing.help': 'Needed, not set anywhere',
   'settings.env.stat.shadowed': 'Shadowed',
-  'settings.env.stat.shadowed.help':
-    'Exported by the shell that started the gateway; that value wins over the file.',
-  'settings.env.file': 'File',
+  'settings.env.stat.shadowed.help': 'The shell’s value wins',
+  'settings.env.file': 'Saved to',
   'settings.env.shadowWarning':
     'Shadowed variables come from the process environment. Edits here take effect only after the export is removed and the gateway restarts.',
   'settings.env.search': 'Search variables',
@@ -235,7 +232,7 @@ export const settings = {
   'settings.section.router.blurb':
     'Sends each message to the cheapest tier that can handle it. Tune the ladder here.',
   'settings.section.gateway': 'Gateway',
-  'settings.section.gateway.blurb': 'The local process the app talks to.',
+  'settings.section.gateway.blurb': 'The engine the app talks to: whether it runs, and where.',
   'settings.section.appearance': 'Appearance',
   'settings.section.appearance.blurb': 'Theme, palette, scale.',
   'settings.section.security': 'Security',
@@ -250,12 +247,11 @@ export const settings = {
   'settings.section.about.blurb': 'Versions and updates.',
 
   // Providers
-  'settings.providers.pick': 'Provider',
+  'settings.providers.pick': 'Providers',
   'settings.providers.state.active': 'Active',
   'settings.providers.state.saved': 'Used before',
   'settings.providers.state.local': 'Runs locally',
   'settings.providers.state.needsKey': 'Needs a key',
-  'settings.providers.state.router': 'Router',
   'settings.providers.state.recommended': 'Recommended',
   'settings.providers.savedRestarting': 'Provider saved. Restarting the gateway…',
   'settings.providers.routerOk': 'Router profile',
@@ -273,9 +269,35 @@ export const settings = {
   'settings.providers.key.testing': 'Testing…',
   'settings.providers.key.works': 'Key works.',
   'settings.providers.key.worksModels': 'models available.',
-  'settings.providers.key.failed': 'The provider rejected this key:',
+  'settings.providers.problem.network':
+    'Could not reach the provider. Check the connection, the proxy or the base URL.',
+  'settings.providers.problem.auth':
+    'The provider did not accept this key. Check it was copied whole, or create a new one.',
+  'settings.providers.problem.scope':
+    'The key is valid but not allowed to use this model. Choose another default model, or widen the key’s access at the provider.',
+  'settings.providers.problem.quota':
+    'The key is valid, but the account is out of credit or over its rate limit.',
+  'settings.providers.problem.model':
+    'The provider does not offer the model the test used. Choose another default model.',
+  'settings.providers.problem.other': 'The provider refused the test request.',
+  'settings.providers.problem.more': 'Show more',
+  'settings.providers.problem.less': 'Show less',
+  'settings.providers.problem.copy': 'Copy message',
+  'settings.providers.switch': 'Switch provider',
+  'settings.providers.switch.blurb': 'Pick one to set it up here. Nothing changes until you save.',
+  'settings.providers.choose': 'Choose a provider',
+  'settings.providers.choose.blurb':
+    'Who answers your messages. OpenCAP is recommended: one key, many models, and router tiers already tuned.',
+  'settings.providers.back': 'All providers',
+  'settings.providers.filter': 'Filter providers',
+  'settings.providers.filter.empty': 'No provider matches',
+  'settings.providers.filter.empty.body':
+    'Try another name, or the custom endpoint for any OpenAI-compatible server.',
+  'settings.providers.filter.clear': 'Clear filter',
+  'settings.providers.unlisted':
+    'The gateway is set to {provider}, which its catalog does not list. Choose a provider below to replace it.',
+  'settings.providers.connection.direct': 'Direct connection',
   'settings.providers.key.get': 'Get an API key',
-  'settings.providers.model.fromProvider': 'Fetched from the provider just now.',
   'settings.providers.model.refresh': 'Refresh',
   'settings.providers.saveContinue': 'Save and continue',
   'settings.providers.key.hide': 'Hide key',
@@ -290,7 +312,8 @@ export const settings = {
     'Answers when the router is off or sends nothing better. Empty follows the default tier.',
   'settings.providers.model.custom': 'not in the catalog',
   'settings.providers.model.none': 'Follow the default tier',
-  'settings.providers.catalog': 'models available from this provider',
+  'settings.providers.catalog': '{n} models in the catalog.',
+  'settings.providers.catalog.live': '{n} models, fetched from the provider just now.',
   'settings.providers.saved': 'Provider saved',
   'settings.providers.custom.label': 'Custom endpoint',
   'settings.providers.custom.need':
@@ -331,7 +354,10 @@ export const settings = {
     'A small local classifier picks the tier. No extra model call, English-optimised.',
   'settings.router.mode.judge.help': 'A cheap model reads each message and picks the tier.',
   'settings.router.mode.jev.help':
-    'Experimental. Sends the text of each turn to typesafe.ai, which picks the tier and flags risky requests.',
+    'Sends the text of each turn to typesafe.ai, which picks the tier and flags risky requests.',
+  'settings.router.mode.recommended': 'Recommended',
+  'settings.router.mode.experimental': 'Experimental',
+  'settings.router.tuning': 'Fine-tuning',
   'settings.router.jevKey': 'TypeSafe API key',
   'settings.router.jevKey.help':
     'Checked against typesafe.ai when you save. Leave blank to keep the stored key or TYPESAFE_API_KEY from ~/.agentos/.env.',
@@ -339,9 +365,7 @@ export const settings = {
   'settings.router.jevRisk': 'High-risk floor',
   'settings.router.jevRisk.help':
     'Requests this likely to be destructive are floored at c3, whatever the router says.',
-  'settings.router.mode.off.help': 'Everything goes to the default model.',
-  'settings.router.defaultTier': 'Default tier',
-  'settings.router.defaultTier.help': 'Where a message lands when the router is unsure or off.',
+  'settings.router.mode.off.help': 'Every message goes to the default tier.',
   'settings.router.safetyNet': 'Safety net',
   'settings.router.safetyNet.help':
     'Below this confidence the Pilot falls back to the default tier. Higher is more cautious.',
@@ -353,7 +377,8 @@ export const settings = {
     'Pure translation requests never go above this tier, whatever the router says.',
   'settings.router.translate.off': 'No cap',
   'settings.router.tiers': 'Tiers',
-  'settings.router.tiers.blurb': 'Cheapest first. Each rung names a model and how hard it thinks.',
+  'settings.router.tiers.blurb':
+    'Cheapest first. Each tier names a model and how hard it thinks; the default one takes a message when the router is unsure or off.',
   'settings.router.tier.c0': 'Fast',
   'settings.router.tier.c1': 'Balanced',
   'settings.router.tier.c2': 'Strong',
@@ -361,6 +386,7 @@ export const settings = {
   'settings.router.tier.image_model': 'Vision',
   'settings.router.tier.default': 'Default',
   'settings.router.tier.makeDefault': 'Make default',
+  'settings.router.tier.rung': 'Tier',
   'settings.router.tier.model': 'Model',
   'settings.router.tier.thinking': 'Thinking',
   'settings.router.tier.modelsLoading': 'Loading the provider’s models…',
@@ -375,21 +401,26 @@ export const settings = {
 
   // Gateway
   'settings.gateway.status': 'Status',
-  'settings.gateway.status.blurb': 'What the app is connected to right now.',
-  'settings.gateway.endpoint': 'Endpoint',
-  'settings.gateway.pid': 'Process',
-  'settings.gateway.pid.adopted': 'Adopted from outside the app',
-  'settings.gateway.pid.external': 'External gateway — the app only connects to it',
+  'settings.gateway.pid.adopted': 'Running, started outside the app',
+  'settings.gateway.pid.external': 'External gateway: the app only connects to it',
+  'settings.gateway.process.stopped': 'Not running. Start it here; it also starts with the app.',
+  'settings.gateway.process.managed': 'Started by this app · pid {pid}',
   'settings.gateway.start': 'Start',
   'settings.gateway.stop': 'Stop',
   'settings.gateway.restart': 'Restart',
   'settings.gateway.openConsole': 'Open web console',
   'settings.gateway.connection': 'Connection',
-  'settings.gateway.connection.blurb': 'Where the gateway lives and how the app reaches it.',
+  'settings.gateway.connection.blurb': 'Where the gateway runs and how the app reaches it.',
   'settings.gateway.mode': 'Run mode',
-  'settings.gateway.mode.help': 'Managed starts the gateway with the app. External only connects.',
   'settings.gateway.mode.managed': 'Managed',
+  'settings.gateway.mode.managed.blurb':
+    'The app starts the gateway on this Mac and looks after it.',
   'settings.gateway.mode.external': 'External',
+  'settings.gateway.mode.external.blurb':
+    'The app connects to a gateway running elsewhere: a server, another Mac, a container.',
+  'settings.gateway.mode.recommended': 'Recommended',
+  'settings.gateway.address': 'Address and token',
+  'settings.gateway.address.noToken': 'no token',
   'settings.gateway.scheme': 'Protocol',
   'settings.gateway.scheme.help':
     'HTTPS for a gateway behind TLS (a reverse proxy, Tailscale Serve); the WebSocket follows.',
@@ -416,7 +447,31 @@ export const settings = {
   'settings.gateway.reconnectNeeded': 'The app is still connected to the previous endpoint.',
   'settings.gateway.reconnectNow': 'Reconnect',
 
+  // Notifications (the rest lives in notifications.ts)
+  'settings.notifications.on': 'On',
+  'settings.notifications.off': 'Off',
+  'settings.notifications.offNotice':
+    'Notifications are off. Nothing below shows or sounds until you turn them back on.',
+  'settings.notifications.dockAndSystem': 'Dock and macOS',
+
+  // Trading
+  'settings.trading.on': 'On',
+  'settings.trading.off': 'Off',
+  'settings.trading.offNotice':
+    'Trading is off: the desk is hidden and every swap is refused, including the agent’s.',
+  'settings.trading.stats': 'Trading summary',
+  'settings.trading.perSwap': 'per swap',
+  'settings.trading.perWallet': 'per wallet, per day',
+  'settings.trading.provider.blurb': 'Who finds the route and builds the transaction.',
+  'settings.trading.uniswap.blurb':
+    'Quotes and calldata from the Uniswap Trading API. Needs an API key.',
+  'settings.trading.default': 'Default',
+  'settings.trading.key.notInUse': 'Not in use',
+  'settings.trading.aggregator.check': 'AgentOS DEX connection',
+  'settings.trading.aggregator.check.help': 'Checks that the AgentOS DEX answers from this Mac.',
+
   // Appearance
+  'settings.appearance.mode': 'Light and dark',
   'settings.appearance.window': 'Window',
   'settings.appearance.uiScale': 'UI scale',
   'settings.appearance.uiScale.help':
@@ -458,6 +513,12 @@ export const settings = {
     'A fingerprint before the desk approves, trades or fires anything. Cancel the prompt and nothing is sent.',
   'settings.security.mode': 'Confirm with Touch ID',
   'settings.security.mode.off': 'Off',
+  'settings.security.mode.short.off': 'Approvals, trades and key exports act on the click.',
+  'settings.security.mode.short.high':
+    'High-risk approvals, and any click that trades or may spend at once.',
+  'settings.security.mode.short.all': 'Every approval, and every click that trades or may spend.',
+  'settings.security.ready': 'Touch ID ready',
+  'settings.security.noSensor': 'No sensor',
   'settings.security.mode.high': 'High-risk approvals',
   'settings.security.mode.all': 'Every approval',
   'settings.security.mode.help.off':
@@ -532,10 +593,11 @@ export const settings = {
   'settings.advanced.gatewayConfig': 'Gateway configuration',
   'settings.advanced.gatewayConfig.help': 'Edited by this app, the web console and the CLI.',
   'settings.advanced.gatewayConfig.unknown': 'Known once the gateway is running',
-  'settings.advanced.diagnostics': 'Diagnostics',
+  'settings.advanced.troubleshoot': 'Troubleshooting',
+  'settings.advanced.danger': 'Start over',
+  'settings.advanced.danger.blurb': 'Each one asks first. Your sessions and data stay.',
   'settings.advanced.copyDiagnostics': 'Copy diagnostics',
   'settings.advanced.copyDiagnostics.help': 'Versions, gateway state and settings, token removed.',
-  'settings.advanced.reset': 'Reset',
   'settings.advanced.resetAll': 'Reset all app settings',
   'settings.advanced.resetAll.help':
     'Theme, gateway, behaviour: back to defaults. The gateway configuration is not touched.',
@@ -565,7 +627,7 @@ export const settings = {
   'settings.about.offline': 'Could not reach the update server.',
   'settings.about.updateAll': 'Update all',
   'settings.about.bothOutdated': 'Updates are available for the app and the engine.',
-  'settings.about.links': 'Links',
+  'settings.about.more': 'Runtime and links',
 
   // About · engine (the use-agent-os package behind the gateway)
   'settings.about.engine': 'Engine',

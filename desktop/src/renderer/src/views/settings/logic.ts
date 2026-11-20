@@ -319,6 +319,59 @@ export function orderProviders<T extends { providerId: string }>(providers: read
   return [...first, ...rest]
 }
 
+/**
+ * The "Switch provider" filter: every word of the query must appear in the
+ * provider's name or id, in any case. Order is kept, so the recommended
+ * provider stays first among the matches.
+ */
+export function filterProviders<T extends { providerId: string; label?: string }>(
+  providers: readonly T[],
+  query: string,
+): T[] {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return [...providers]
+  return providers.filter((p) => {
+    const hay = `${p.label ?? ''} ${p.providerId}`.toLowerCase()
+    return words.every((w) => hay.includes(w))
+  })
+}
+
+/**
+ * What a failed key test most likely means, read from the provider's own
+ * message. Drives the one human sentence above the raw text; the raw text is
+ * always shown too, since it is what a support request needs.
+ */
+export type ProbeProblem = 'network' | 'auth' | 'scope' | 'quota' | 'model' | 'other'
+
+export function probeProblem(raw: string): ProbeProblem {
+  const text = raw.toLowerCase()
+  if (
+    /econn|enotfound|eai_again|getaddrinfo|fetch failed|timed? ?out|unreachable|network|connection (refused|reset)|certificate/.test(
+      text,
+    )
+  )
+    return 'network'
+  if (
+    /\b401\b|unauthori[sz]ed|invalid[ _-]?api[ _-]?key|incorrect api key|invalid key|authentication/.test(
+      text,
+    )
+  )
+    return 'auth'
+  if (/\b403\b|forbidden|not scoped|not allowed|permission/.test(text)) return 'scope'
+  if (/\b402\b|\b429\b|quota|insufficient|credit|billing|payment|rate.?limit/.test(text))
+    return 'quota'
+  if (/\b404\b|model.*(not found|does not exist|unknown)|unknown model|no such model/.test(text))
+    return 'model'
+  return 'other'
+}
+
+/** A provider message longer than this is folded to three lines behind "Show more". */
+export const ERROR_CLAMP_CHARS = 180
+
+export function isLongError(text: string): boolean {
+  return text.length > ERROR_CLAMP_CHARS || text.split('\n').length > 3
+}
+
 export interface ProviderState {
   /** The provider every turn goes through right now. */
   active: boolean

@@ -33,12 +33,15 @@ function Field({
   field,
   draft,
   disabled,
+  editing,
   onValue,
   onChecked,
 }: {
   field: FieldSpec
   draft: DraftValue
   disabled: boolean
+  /** An existing channel: a blank secret keeps the stored one. */
+  editing: boolean
   onValue: (value: string) => void
   onChecked: (checked: boolean) => void
 }) {
@@ -93,7 +96,9 @@ function Field({
         step={field.type === 'float' ? 'any' : undefined}
         autoComplete="off"
         spellCheck={false}
-        placeholder={field.placeholder || (secret ? t('settings.channels.sheet.secret.keep') : '')}
+        placeholder={
+          field.placeholder || (secret && editing ? t('settings.channels.sheet.secret.keep') : '')
+        }
         value={draft.value}
         disabled={disabled}
         onChange={(e) => onValue(e.target.value)}
@@ -362,6 +367,7 @@ export function ChannelSetupSheet({
                         field={field}
                         draft={draft[field.name] ?? EMPTY_VALUE}
                         disabled={saving || (editing && field.name === 'name')}
+                        editing={editing}
                         onValue={(value) => patch(field.name, { value })}
                         onChecked={(checked) => patch(field.name, { checked })}
                       />
@@ -379,6 +385,7 @@ export function ChannelSetupSheet({
                             field={field}
                             draft={draft[field.name] ?? EMPTY_VALUE}
                             disabled={saving}
+                            editing={editing}
                             onValue={(value) => patch(field.name, { value })}
                             onChecked={(checked) => patch(field.name, { checked })}
                           />

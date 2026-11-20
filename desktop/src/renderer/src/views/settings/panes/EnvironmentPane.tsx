@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, ExternalLink, Eye, Lock, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Check, ExternalLink, Eye, FileText, Lock, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
@@ -22,7 +22,7 @@ import {
 import { Button } from '~/components/ui/button'
 import { t, type MessageKey } from '~/i18n'
 import { desktopApi, isDesktop } from '~/lib/desktop-api'
-import { Card, Head, Notice, Pill, Row, Segmented, Value } from '../parts'
+import { Card, Head, Notice, Pill, Segmented, Stat, Stats, Value } from '../parts'
 import { SNAPSHOT_KEY } from '../use-snapshot'
 
 /** A revealed value hides itself again after this long. */
@@ -74,7 +74,12 @@ export function EnvironmentPane() {
 
   const rows = useMemo(() => list.data?.vars ?? [], [list.data])
   const groups = useMemo(
-    () => groupByCategory(filterVars(rows, filter, query)),
+    () =>
+      groupByCategory(filterVars(rows, filter, query)).filter(
+        // "Missing" is about what something needs: a group whose unset
+        // variables are all optional has nothing to show there.
+        (group) => filter !== 'missing' || splitGroupRows(group).primary.length > 0,
+      ),
     [rows, filter, query],
   )
   const summary = useMemo(() => summarize(list.data), [list.data])
@@ -167,10 +172,43 @@ export function EnvironmentPane() {
     })
   }
 
+  const toolbarRef = useRef<HTMLDivElement>(null)
+
+  /** A summary figure is also the way to its rows: set the filter, show the list. */
+  function showOnly(next: EnvFilter) {
+    setFilter(next)
+    setQuery('')
+    toolbarRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+  }
+
   const head = (
     <Head
       title={t('settings.section.environment')}
       blurb={t('settings.section.environment.blurb')}
+      action={
+        connected && !list.isError ? (
+          <>
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={list.isFetching}
+              aria-label={t('settings.env.refresh')}
+              title={t('settings.env.refresh')}
+              onClick={() => void refresh()}
+            >
+              <RefreshCw
+                className={list.isFetching ? 'size-3.5 stg-spin' : 'size-3.5'}
+                strokeWidth={2}
+                aria-hidden
+              />
+            </Button>
+            <Button variant="primary" onClick={() => setAdding(true)}>
+              <Plus className="size-3.5" strokeWidth={2} aria-hidden />
+              {t('settings.env.add')}
+            </Button>
+          </>
+        ) : undefined
+      }
     />
   )
 
@@ -202,62 +240,48 @@ export function EnvironmentPane() {
     <>
       {head}
 
-      <Card
-        title={t('settings.env.overview')}
-        action={
-          <div className="env-actions">
-            <Button disabled={list.isFetching} onClick={() => void refresh()}>
-              <RefreshCw
-                className={list.isFetching ? 'size-3.5 stg-spin' : 'size-3.5'}
-                strokeWidth={2}
-                aria-hidden
-              />
-              {t('settings.env.refresh')}
-            </Button>
-            <Button variant="primary" onClick={() => setAdding(true)}>
-              <Plus className="size-3.5" strokeWidth={2} aria-hidden />
-              {t('settings.env.add')}
-            </Button>
-          </div>
-        }
-      >
-        <Row label={t('settings.env.stat.set')}>
-          <Value tone={ready && summary.setCount > 0 ? 'ok' : undefined}>
-            {ready ? `${summary.setCount} / ${summary.totalCount}` : '—'}
-          </Value>
-        </Row>
-        <Row label={t('settings.env.stat.missing')} help={t('settings.env.stat.missing.help')}>
-          <Value tone={summary.missingCount > 0 ? 'warn' : undefined}>
-            {ready ? String(summary.missingCount) : '—'}
-          </Value>
-        </Row>
-        <Row label={t('settings.env.stat.shadowed')} help={t('settings.env.stat.shadowed.help')}>
-          <Value tone={summary.shadowedCount > 0 ? 'warn' : undefined}>
-            {ready ? String(summary.shadowedCount) : '—'}
-          </Value>
-        </Row>
-        <Row
-          label={t('settings.env.file')}
-          help={
-            <code className="stg-path" title={envFilePath || undefined}>
-              {envFilePath ? shortPath(envFilePath) : '…'}
-            </code>
-          }
+      <Stats label={t('settings.env.stats')}>
+        <Stat
+          label={t('settings.env.stat.set')}
+          value={ready ? `${summary.setCount} / ${summary.totalCount}` : '—'}
+          tone={ready && summary.setCount > 0 ? 'ok' : undefined}
+          onClick={ready ? () => showOnly('set') : undefined}
+        />
+        <Stat
+          label={t('settings.env.stat.missing')}
+          hint={t('settings.env.stat.missing.help')}
+          value={ready ? summary.missingCount : '—'}
+          tone={summary.missingCount > 0 ? 'warn' : undefined}
+          onClick={ready ? () => showOnly('missing') : undefined}
+        />
+        <Stat
+          label={t('settings.env.stat.shadowed')}
+          hint={t('settings.env.stat.shadowed.help')}
+          value={ready ? summary.shadowedCount : '—'}
+          tone={summary.shadowedCount > 0 ? 'warn' : undefined}
+        />
+      </Stats>
+
+      <div className="env-file">
+        <FileText className="size-3.5" strokeWidth={1.75} aria-hidden />
+        <span>{t('settings.env.file')}</span>
+        <code className="stg-path" title={envFilePath || undefined}>
+          {envFilePath ? shortPath(envFilePath) : '…'}
+        </code>
+        <Button
+          variant="ghost"
+          disabled={!isDesktop() || !envFilePath}
+          onClick={() => void desktopApi().app.showItemInFolder(envFilePath)}
         >
-          <Button
-            disabled={!isDesktop() || !envFilePath}
-            onClick={() => void desktopApi().app.showItemInFolder(envFilePath)}
-          >
-            {t('settings.reveal')}
-          </Button>
-        </Row>
-      </Card>
+          {t('settings.reveal')}
+        </Button>
+      </div>
 
       {summary.shadowedCount > 0 ? (
         <Notice tone="warn">{t('settings.env.shadowWarning')}</Notice>
       ) : null}
 
-      <div className="env-toolbar">
+      <div className="env-toolbar" ref={toolbarRef}>
         <input
           className="mac-input"
           type="search"

@@ -16,7 +16,7 @@ export function AppearancePane() {
         title={t('settings.section.appearance')}
         blurb={t('settings.section.appearance.blurb')}
       />
-      <Card title={t('theme.section')} blurb={t('theme.section.blurb')}>
+      <Card title={t('settings.appearance.mode')} blurb={t('theme.section.blurb')}>
         <ThemeModeRow rowClass="stg-row" />
       </Card>
 
