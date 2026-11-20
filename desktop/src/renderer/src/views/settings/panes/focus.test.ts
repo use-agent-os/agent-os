@@ -1,5 +1,6 @@
+import { renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { clearOnEscape, keepFocus } from './focus'
+import { clearOnEscape, keepFocus, useArrivalFocus } from './focus'
 
 function sheet(): { dialog: HTMLElement; anchor: HTMLElement; button: HTMLButtonElement } {
   document.body.innerHTML = `
@@ -83,5 +84,24 @@ describe('clearOnEscape', () => {
     clearOnEscape(enter, 'xai', clear)
     expect(clear).not.toHaveBeenCalled()
     expect(empty.stopPropagation).not.toHaveBeenCalled()
+  })
+})
+
+describe('useArrivalFocus', () => {
+  it('lands a jump that left focus nowhere on the section’s rail item', () => {
+    document.body.innerHTML = '<button id="stg-rail-router">Pilot Router</button>'
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    renderHook(() => useArrivalFocus('router'))
+    vi.runAllTimers()
+    expect(document.activeElement).toBe(document.getElementById('stg-rail-router'))
+  })
+
+  it('leaves focus where a rail click put it', () => {
+    document.body.innerHTML = '<button id="stg-rail-router">Router</button><input id="other" />'
+    const other = document.getElementById('other') as HTMLInputElement
+    other.focus()
+    renderHook(() => useArrivalFocus('router'))
+    vi.runAllTimers()
+    expect(document.activeElement).toBe(other)
   })
 })

@@ -39,7 +39,7 @@ import { Card, Empty, Head, Notice, Pill, Row, Stat, Stats, Value } from '../par
 import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
 import { ChannelSetupSheet } from './ChannelSetupSheet'
-import { keepFocus } from './focus'
+import { keepFocus, useArrivalFocus } from './focus'
 
 export const CHANNELS_KEY = ['settings', 'channels'] as const
 
@@ -74,6 +74,7 @@ function fill(key: MessageKey, vars: Record<string, string | number>): string {
  * Providers does; an external one is told to restart.
  */
 export function ChannelsPane() {
+  useArrivalFocus('channels')
   const rpc = useRpc()
   const queryClient = useQueryClient()
   const connected = useConnection((s) => s.state === 'connected')

@@ -1,16 +1,14 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { CircleOff, Gauge, LoaderCircle, Scale, ShieldAlert } from 'lucide-react'
-import { useId, useRef, useState } from 'react'
+import { useId, useRef } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import {
-  buildRouterConfigureParams,
   classifyRouterModels,
   configuredProvider,
   mergeModelOptions,
   modelOptionLabel,
   offlineTierModels,
-  resolveJudgeModelParam,
   TEXT_TIERS,
   type ModelListEntry,
   type ModelOption,
@@ -25,19 +23,20 @@ import {
   routerChanges,
   routerDirty,
   routerDraft,
+  routerDraftId,
+  routerPatch,
   safetyNetValid,
-  type RouterDraft,
   type TierName,
   type TierRow,
 } from '../logic'
+import { useDraft, useDraftStore } from '../memory/drafts'
 import { Card, Choices, Disclosure, Head, Notice, Pill, Row } from '../parts'
 import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
-import { keepFocus } from './focus'
+import { keepFocus, useArrivalFocus } from './focus'
 
-interface ConfigureResult {
+interface PatchResult {
   restartRequired?: boolean
-  warnings?: string[]
 }
 
 function errorText(err: unknown): string {
@@ -46,10 +45,11 @@ function errorText(err: unknown): string {
 
 /**
  * The Pilot Router: routing mode, default tier, the tier ladder. Written
- * through `onboarding.router.configure` with the console's own payload
- * builder, so a router saved here reads identically in the web console.
+ * through `config.patch` with the snapshot revision, carrying only the keys
+ * the edit changed (`routerPatch` says why not the guided write).
  */
 export function RouterPane() {
+  useArrivalFocus('router')
   const { connected, query, snapshot, reload } = useConfigSnapshot()
   return (
     <>
@@ -86,10 +86,11 @@ function RouterBody({
   const formRef = useRef<HTMLDivElement>(null)
 
   const save = useMutation({
-    mutationFn: (params: Record<string, unknown>) =>
-      rpc.call<ConfigureResult>('onboarding.router.configure', withRevision(snapshot, params)),
+    mutationFn: (patch: Record<string, unknown>) =>
+      rpc.call<PatchResult>('config.patch', withRevision(snapshot, { patch })),
     onSuccess: async (res) => {
-      for (const w of res?.warnings ?? []) toast.warning(w)
+      // Saved: the next form is the file's, not the parked edit.
+      useDraftStore.getState().drop(routerDraftId(provider))
       toast.success(
         res?.restartRequired ? t('settings.restartRequired') : t('settings.router.saved'),
         { id: 'stg-router' },
@@ -153,7 +154,9 @@ function RouterForm({
   const router = config.agentos_router || {}
   const profile = catalog.routerProfiles?.profiles?.find((p) => p.providerId === provider)
   const saved = routerDraft(config, catalog, provider)
-  const [draft, setDraft] = useState<RouterDraft>(saved)
+  // Parked outside the form, so leaving the section or closing the sheet
+  // keeps the edit and its save bar for when the page is opened again.
+  const { draft, setDraft, revert } = useDraft(routerDraftId(provider), saved)
   const dirty = routerDirty(saved, draft)
   const ids = {
     safety: useId(),
@@ -166,7 +169,6 @@ function RouterForm({
   const judgeProfile = catalog.routerProfiles?.judge?.profiles?.[provider]
   const judgeModels = judgeProfile?.models ?? []
   const judgeAuto = judgeProfile?.autoModel ?? null
-  const judgeLoaded = router.judge_model || ''
   const judgeIsLocal = Boolean(router.judge_base_url)
 
   const hasImage = draft.tiers.some((row) => row.tier === 'image_model')
@@ -210,11 +212,15 @@ function RouterForm({
   const changes = routerChanges(saved, draft)
 
   function submit() {
-    const warnings = classifyRouterModels(
-      draft.tiers.map((row) => ({ tier: row.tier, model: row.model })),
-      textOptions,
-      visionOptions,
-    )
+    const patch = routerPatch(saved, draft, { judgeIsLocal })
+    if (!patch) return
+    const warnings = changes.includes('tiers')
+      ? classifyRouterModels(
+          draft.tiers.map((row) => ({ tier: row.tier, model: row.model })),
+          textOptions,
+          visionOptions,
+        )
+      : { unknown: [], nonVision: [] }
     if (warnings.unknown.length > 0) {
       toast.warning(`${t('settings.router.unknownModels')} ${warnings.unknown.join(', ')}`, {
         id: 'stg-router-unknown',
@@ -225,25 +231,7 @@ function RouterForm({
         id: 'stg-router-vision',
       })
     }
-    const params = buildRouterConfigureParams({
-      sel: draft.mode,
-      defaultTier: draft.defaultTier,
-      judgeModel: resolveJudgeModelParam(draft.judgeModel, judgeLoaded, judgeIsLocal),
-      pilotThresholdRaw: draft.safetyNet,
-      // Blank key → null → the gateway keeps the stored key / env fallback.
-      jevApiKeyRaw: draft.jevApiKey,
-      jevHighRiskThresholdRaw: draft.jevHighRisk,
-      translateCeilingEnabled: draft.translateCeiling !== 'off',
-      translateCeilingTier: draft.translateCeiling === 'off' ? 'c0' : draft.translateCeiling,
-      tiers: draft.tiers.map((row) => ({
-        tier: row.tier,
-        provider,
-        model: row.model,
-        thinkingLevel: row.thinkingLevel,
-        supportsImage: row.supportsImage,
-      })),
-    })
-    onSave(params as unknown as Record<string, unknown>)
+    onSave(patch)
   }
 
   const routingOn = draft.mode !== 'disabled'
@@ -505,7 +493,7 @@ function RouterForm({
           saving={saving}
           canSave={canSave}
           blockedReason={disabled ? t('settings.writeBlocked') : null}
-          onRevert={() => setDraft(saved)}
+          onRevert={revert}
           onSave={submit}
         />
       ) : null}

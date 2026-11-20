@@ -82,7 +82,7 @@ export const settings = {
   'settings.skills.installed': 'Installed',
   'settings.skills.ready': 'Ready',
   'settings.skills.needsSetup': 'Needs setup',
-  'settings.skills.needsSetup.help': 'Open Skills to fix',
+  'settings.skills.needsSetup.help': 'Open Skills, then pick Needs setup',
   'settings.skills.disabled.hint': '{n} turned off',
   'settings.skills.offered': 'Offered to the agent',
   'settings.skills.offered.help': 'In the agent’s tool list',
@@ -264,7 +264,7 @@ export const settings = {
   // Providers
   'settings.providers.pick': 'Providers',
   'settings.providers.state.active': 'Active',
-  'settings.providers.state.saved': 'Used before',
+  'settings.providers.state.noKey': 'No key needed',
   'settings.providers.state.local': 'Runs locally',
   'settings.providers.state.needsKey': 'Needs a key',
   'settings.providers.state.keyReady': 'Key ready',

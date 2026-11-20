@@ -22,7 +22,7 @@ import {
 import { jumpTo } from '../overview/jumps'
 import { Card, Choices, Head, Notice, Pill, Row, Segmented, Stat, Stats, Value } from '../parts'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
-import { clearOnEscape, keepFocus, sheetOf } from './focus'
+import { clearOnEscape, keepFocus, sheetOf, useArrivalFocus } from './focus'
 import { isOperatorRefusal, readOnlyAdvice, useTradingAccess } from './trading-access'
 
 export const UNISWAP_DASHBOARD_URL = 'https://developers.uniswap.org/dashboard'
@@ -115,6 +115,7 @@ interface PatchResult {
  * other guided write; the vault itself is written through wallet.*.
  */
 export function TradingPane() {
+  useArrivalFocus('trading')
   const { connected, query, snapshot, reload } = useConfigSnapshot()
   const head = (action?: React.ReactNode) => (
     <Head
@@ -489,6 +490,8 @@ function KeyCard({
           <Button
             variant="ghost"
             size="icon"
+            disabled={locked}
+            title={lockReason ?? undefined}
             aria-label={show ? t('trading.settings.key.hide') : t('trading.settings.key.show')}
             aria-pressed={show}
             onClick={() => setShow((v) => !v)}

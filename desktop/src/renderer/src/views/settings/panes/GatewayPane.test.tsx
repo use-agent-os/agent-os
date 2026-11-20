@@ -8,6 +8,7 @@ import {
 } from '@shared/settings'
 import { useGateway } from '~/stores/gateway'
 import { useSettings } from '~/stores/settings'
+import { useDraftStore } from '../memory/drafts'
 import { GatewayPane, onGatewayDefaults } from './GatewayPane'
 
 const update = vi.fn<(patch: SettingsPatch) => Promise<void>>(async () => {})
@@ -30,6 +31,7 @@ const stop = vi.fn(async () => {})
 const restart = vi.fn(async () => {})
 
 beforeEach(() => {
+  useDraftStore.setState({ drafts: {} })
   update.mockClear()
   start.mockClear()
   stop.mockClear()
@@ -174,5 +176,16 @@ describe('GatewayPane connection', () => {
     expect(onGatewayDefaults({ ...DEFAULT_GATEWAY_SETTINGS, token: 'secret' })).toBe(false)
     expect(onGatewayDefaults({ ...DEFAULT_GATEWAY_SETTINGS, cliPath: '/opt/agentos' })).toBe(false)
     expect(onGatewayDefaults(REMOTE)).toBe(false)
+  })
+
+  it('keeps an unsaved address when the page is left and opened again, until reverted', () => {
+    const first = render(<GatewayPane />)
+    fireEvent.change(field('Host'), { target: { value: 'gw.example.com' } })
+    first.unmount()
+    render(<GatewayPane />)
+    expect(field('Host')).toHaveValue('gw.example.com')
+    fireEvent.click(screen.getByRole('button', { name: 'Revert' }))
+    expect(field('Host')).toHaveValue('pn.capminal.ai')
+    expect(useDraftStore.getState().drafts).toEqual({})
   })
 })

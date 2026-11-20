@@ -36,16 +36,18 @@ import {
   providerDraft,
   providerNeedsKey,
   providerState,
+  providerTileState,
   THINKING_LEVELS,
   type CatalogModel,
   type ProviderDraft,
 } from '../logic'
+import { useDraft, useDraftStore } from '../memory/drafts'
 import { Card, Disclosure, Empty, Head, Notice, Pill, Row, Value } from '../parts'
 import { providerKeyUrl } from '../provider-links'
 import { ProviderLogo } from '../ProviderLogo'
 import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
-import { clearOnEscape, keepFocus } from './focus'
+import { clearOnEscape, keepFocus, useArrivalFocus } from './focus'
 
 interface ConfigureResult {
   restartRequired?: boolean
@@ -73,6 +75,11 @@ interface ProviderStatusResult {
  * refreshes both.
  */
 export const PROVIDER_KEYS_KEY = ['settings', 'providerKeys'] as const
+
+/** A provider form's unsaved edit, parked across section switches and sheet close. */
+const formDraftId = (providerId: string) => `provider:${providerId}`
+/** Which provider's form was open in place of the grid. */
+const PICKED_ID = 'providers:picked'
 
 /**
  * Provider id → the environment variable that holds its key, for each
@@ -107,6 +114,7 @@ function fill(key: MessageKey, vars: Record<string, string | number>): string {
  * with the snapshot revision, exactly as the console's setup does.
  */
 export function ProvidersPane() {
+  useArrivalFocus('providers')
   const { connected, query, snapshot, reload } = useConfigSnapshot()
 
   return (
@@ -163,7 +171,18 @@ function ProvidersBody({
   // handing the person a "restart to apply" chore.
   const managedGateway = useGateway((s) => s.status.pid !== null)
   const activeSpec = providers.find((p) => p.providerId === configured)
-  const [picked, setPicked] = useState<string | null>(null)
+  // The form that was open comes back with its edit when the page is opened
+  // again; one opened and left untouched does not.
+  const [picked, setPickedState] = useState<string | null>(() => {
+    const drafts = useDraftStore.getState().drafts
+    const id = drafts[PICKED_ID]
+    return typeof id === 'string' && formDraftId(id) in drafts ? id : null
+  })
+  function setPicked(id: string | null) {
+    setPickedState(id)
+    if (id) useDraftStore.getState().put(PICKED_ID, id)
+    else useDraftStore.getState().drop(PICKED_ID)
+  }
   const [filter, setFilter] = useState('')
   const pickedSpec =
     picked && picked !== configured ? providers.find((p) => p.providerId === picked) : undefined
@@ -214,8 +233,9 @@ function ProvidersBody({
             'onboarding.provider.configure',
             withRevision(snapshot, providerConfigurePayload(draft)),
           ),
-    onSuccess: async (res) => {
+    onSuccess: async (res, draft) => {
       for (const w of res?.warnings ?? []) toast.warning(w)
+      useDraftStore.getState().drop(formDraftId(draft.providerId))
       setPicked(null)
       setFilter('')
       keepFocus(switchRef.current)
@@ -267,6 +287,7 @@ function ProvidersBody({
         // Keyed on the revision so a save re-seeds the form.
         <ProviderForm
           key={`${activeSpec.providerId}:${snapshot.revision ?? ''}`}
+          draftId={formDraftId(activeSpec.providerId)}
           config={config}
           spec={activeSpec}
           configured={configured}
@@ -312,13 +333,18 @@ function ProvidersBody({
               ref={backRef}
               type="button"
               className="prov-back app-no-drag"
-              onClick={() => pick(null)}
+              onClick={() => {
+                // Back to the grid leaves that provider unpicked: its edit goes too.
+                if (picked) useDraftStore.getState().drop(formDraftId(picked))
+                pick(null)
+              }}
             >
               <ArrowLeft className="size-3.5" strokeWidth={2} aria-hidden />
               {t('settings.providers.back')}
             </button>
             <ProviderForm
               key={`${pickedSpec.providerId}:${snapshot.revision ?? ''}`}
+              draftId={formDraftId(pickedSpec.providerId)}
               config={config}
               spec={pickedSpec}
               configured={configured}
@@ -366,8 +392,6 @@ function ProvidersBody({
                   <ProviderTile
                     key={p.providerId}
                     spec={p}
-                    config={config}
-                    configured={configured}
                     envKey={envKeyed.get(p.providerId)}
                     highlight={firstRun && p.providerId === RECOMMENDED_PROVIDER}
                     onPick={() => pick(p.providerId)}
@@ -384,23 +408,18 @@ function ProvidersBody({
 
 function ProviderTile({
   spec,
-  config,
-  configured,
   envKey,
   highlight,
   onPick,
 }: {
   spec: ProviderSpec
-  config: SetupConfig
-  configured: string
   /** The variable holding this provider's key in the gateway's environment, when set. */
   envKey?: string
   highlight: boolean
   onPick: () => void
 }) {
-  const state = providerState(spec, config, configured)
+  const state = providerTileState(spec, Boolean(envKey))
   const label = spec.label ?? spec.providerId
-  const recommended = spec.providerId === RECOMMENDED_PROVIDER
   return (
     <div role="listitem" className="prov-cell">
       <button
@@ -414,35 +433,28 @@ function ProviderTile({
         <span className="prov-tile__name" title={label}>
           {label}
         </span>
-        <span className="prov-tile__meta">
-          {recommended && highlight ? (
+        <span className="prov-tile__meta" data-state={state}>
+          {highlight ? (
+            // First run: the one to start with. Its border says so too.
             <span className="prov-tile__state" data-tone="ok">
               <Star className="size-3" strokeWidth={2.25} aria-hidden />
               {t('settings.providers.state.recommended')}
             </span>
-          ) : state.profile ? (
-            <span className="prov-tile__state">
-              <Check className="size-3" strokeWidth={2.5} aria-hidden />
-              {t('settings.providers.state.saved')}
-            </span>
-          ) : envKey ? (
+          ) : state === 'keyReady' ? (
             <span
               className="prov-tile__state"
               data-tone="ok"
-              title={fill('settings.providers.state.keyReady.title', { env: envKey })}
+              title={fill('settings.providers.state.keyReady.title', { env: envKey ?? '' })}
             >
               <Check className="size-3" strokeWidth={2.5} aria-hidden />
               {t('settings.providers.state.keyReady')}
             </span>
-          ) : recommended ? (
-            <span className="prov-tile__state" data-tone="ok">
-              <Star className="size-3" strokeWidth={2.25} aria-hidden />
-              {t('settings.providers.state.recommended')}
-            </span>
-          ) : spec.deployment === 'local' ? (
+          ) : state === 'local' ? (
             <span className="prov-tile__state">{t('settings.providers.state.local')}</span>
-          ) : isCustomProvider(spec.providerId) ? (
+          ) : state === 'custom' ? (
             <span className="prov-tile__state">{t('settings.providers.custom.state')}</span>
+          ) : state === 'noKey' ? (
+            <span className="prov-tile__state">{t('settings.providers.state.noKey')}</span>
           ) : (
             <span className="prov-tile__state" data-tone="dim">
               {t('settings.providers.state.needsKey')}
@@ -454,6 +466,18 @@ function ProviderTile({
   )
 }
 
+/**
+ * A form's draft: parked under `id` when given (Settings keeps an edit across
+ * section switches and sheet close), plain component state otherwise (the
+ * first-run setup step, which saves or moves on).
+ */
+function useFormDraft<T>(id: string | undefined, saved: T) {
+  const parked = useDraft(id ?? '', saved)
+  const [local, setLocal] = useState<T>(saved)
+  if (id) return { draft: parked.draft, setDraft: parked.setDraft, revert: parked.revert }
+  return { draft: local, setDraft: setLocal, revert: () => setLocal(saved) }
+}
+
 export function ProviderForm({
   config,
   spec,
@@ -463,7 +487,10 @@ export function ProviderForm({
   disabled,
   onSave,
   submitLabel,
+  draftId,
 }: {
+  /** Park unsaved edits under this id (Settings); without one the form keeps them itself. */
+  draftId?: string
   config: SetupConfig
   spec: ProviderSpec
   configured: string
@@ -477,7 +504,7 @@ export function ProviderForm({
   const rpc = useRpc()
   const ids = { key: useId(), env: useId(), url: useId(), proxy: useId(), model: useId() }
   const saved = providerDraft(config, spec)
-  const [draft, setDraft] = useState<ProviderDraft>(saved)
+  const { draft, setDraft, revert } = useFormDraft(draftId, saved)
   const [showKey, setShowKey] = useState(false)
   const label = spec.label ?? spec.providerId
   const switching = spec.providerId !== configured
@@ -622,7 +649,7 @@ export function ProviderForm({
           <Button
             disabled={!providerDirty(saved, draft) || saving}
             onClick={() => {
-              setDraft(saved)
+              revert()
               setShowKey(false)
             }}
           >
