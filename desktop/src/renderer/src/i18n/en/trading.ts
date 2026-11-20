@@ -7,7 +7,7 @@ export const trading = {
   'trading.mode.stamp': 'TRADING DESK',
   'settings.section.trading': 'Trading',
   'settings.section.trading.blurb':
-    'The Uniswap key that quotes your swaps, how the vault unlocks, and the limits the agent trades within.',
+    'How swaps are routed, how the vault unlocks, and the limits the agent trades within.',
 
   // Page
   'trading.title': 'Trading',

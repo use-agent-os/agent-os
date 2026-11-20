@@ -225,7 +225,7 @@
 }
 .stg-head {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 4px;
@@ -253,8 +253,6 @@
   flex-shrink: 0;
   align-items: center;
   gap: 8px;
-  /* Level with the title's cap height, beside the floating Done. */
-  min-height: 28px;
 }
 
 /* Card: a soft slab with its own title inside. */
