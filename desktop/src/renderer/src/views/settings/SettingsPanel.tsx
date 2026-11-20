@@ -139,10 +139,16 @@ function SettingsBody({ titleId, onClose }: { titleId: string; onClose: () => vo
       })),
     [query],
   )
-  const groups = SETTINGS_GROUPS.map((g) => ({
-    id: g.id,
-    sections: g.sections.filter((id) => matches.includes(id)),
-  })).filter((g) => g.sections.length > 0)
+  // While searching, one flat list, best match first: the top row is the one
+  // Return opens.
+  const groups: {
+    id: (typeof SETTINGS_GROUPS)[number]['id'] | 'results'
+    sections: SettingsSection[]
+  }[] = query.trim()
+    ? matches.length > 0
+      ? [{ id: 'results', sections: matches }]
+      : []
+    : SETTINGS_GROUPS.map((g) => ({ id: g.id, sections: g.sections }))
 
   const Pane = PANE[section]
 
@@ -168,7 +174,7 @@ function SettingsBody({ titleId, onClose }: { titleId: string; onClose: () => vo
   function onSearchKey(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter' && matches[0]) {
       e.preventDefault()
-      go(matches.includes(section) ? section : matches[0])
+      go(matches[0])
     } else if (e.key === 'Escape' && query) {
       // First Escape clears the search; the next one closes the sheet.
       e.preventDefault()
@@ -201,7 +207,7 @@ function SettingsBody({ titleId, onClose }: { titleId: string; onClose: () => vo
           <div className="stg-rail__scroll">
             {groups.map((group) => (
               <div key={group.id} className="stg-rail__group">
-                {group.id === 'start' || query ? null : (
+                {group.id === 'start' || group.id === 'results' ? null : (
                   <div className="stg-rail__label">{t(`settings.group.${group.id}`)}</div>
                 )}
                 {group.sections.map((id) => {
