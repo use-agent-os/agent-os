@@ -22,8 +22,16 @@ export const overview = {
   'settings.overview.hero.failed.title': 'The gateway could not start',
   'settings.overview.hero.blocked.title': 'Your agent cannot answer yet',
   'settings.overview.hero.blocked.body': '{detail}. Everything else can wait.',
+  'settings.overview.hero.blocked.oneMore': '{detail}. After that, 1 more thing needs attention.',
+  'settings.overview.hero.blocked.more': '{detail}. After that, {n} more things need attention.',
   'settings.overview.hero.attention.title': '{title} needs attention',
-  'settings.overview.hero.attention.body': '{detail}. The rest of your setup is fine.',
+  'settings.overview.hero.attention.body': '{detail}. Nothing else needs fixing.',
+  'settings.overview.hero.attention.many': '{n} things need attention',
+  'settings.overview.hero.attention.two': 'Start with {title}: {detail}. Then {second}.',
+  'settings.overview.hero.attention.three':
+    'Start with {title}: {detail}. Then {second} and {third}.',
+  'settings.overview.hero.attention.more':
+    'Start with {title}: {detail}. Then {n} more, marked below.',
   'settings.overview.hero.optional.title': 'Your agent is ready',
   'settings.overview.hero.optional.body': 'Everything it needs is in place. {suggest}',
   'settings.overview.hero.complete.title': 'Everything is set up',

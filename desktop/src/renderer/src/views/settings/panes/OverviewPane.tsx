@@ -5,7 +5,7 @@ import { ENV_QUERY_KEY, type EnvListResponse } from '@/views/env/logic'
 import { skillStats, type RawSkill } from '@/views/skills/logic'
 import { gatewayUrl } from '@shared/settings'
 import { Button } from '~/components/ui/button'
-import { t, type MessageKey } from '~/i18n'
+import { t } from '~/i18n'
 import { useGateway } from '~/stores/gateway'
 import { useSettings } from '~/stores/settings'
 import { useWalletStatus } from '~/stores/trading'
@@ -13,6 +13,7 @@ import { useUpdates } from '~/stores/updates'
 import { useKeyFacts } from '../capabilities/key-context'
 import { Checklist } from '../overview/Checklist'
 import { Hero } from '../overview/Hero'
+import { pillCopy } from '../overview/hero-copy'
 import { jumpTo } from '../overview/jumps'
 import {
   hostOf,
@@ -22,16 +23,9 @@ import {
   type SetupItem,
   type SetupSummary,
 } from '../overview/setup-items'
-import { Head, Notice, Pill, type Tone } from '../parts'
+import { Head, Notice, Pill } from '../parts'
 import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot } from '../use-snapshot'
-
-function fill(key: MessageKey, vars: Record<string, string | number>): string {
-  return Object.entries(vars).reduce(
-    (text, [name, value]) => text.replace(`{${name}}`, String(value)),
-    t(key),
-  )
-}
 
 interface SkillsListResponse {
   skills?: RawSkill[]
@@ -93,35 +87,9 @@ function useUpdateFacts(external: boolean): SetupInput['updates'] {
   }
 }
 
-/**
- * The head pill says the same thing as the hero, in words that cannot be
- * read as "everything is done" while optional items are open: required steps
- * left, else what is broken, else how many optional items remain.
- */
-function summaryPillText(summary: SetupSummary): { text: string; tone: Tone } {
-  if (summary.phase === 'offline') {
-    return { text: t('settings.overview.pill.offline'), tone: 'danger' }
-  }
-  if (summary.requiredLeft > 0) {
-    return {
-      text:
-        summary.requiredLeft === 1
-          ? t('settings.overview.pill.requiredOne')
-          : fill('settings.overview.pill.requiredMany', { n: summary.requiredLeft }),
-      tone: 'warn',
-    }
-  }
-  if (summary.toFix > 0) {
-    return { text: fill('settings.overview.pill.toFix', { n: summary.toFix }), tone: 'warn' }
-  }
-  if (summary.optional > 0) {
-    return { text: fill('settings.overview.pill.optional', { n: summary.optional }), tone: 'ok' }
-  }
-  return { text: t('settings.overview.pill.allSet'), tone: 'ok' }
-}
-
 function summaryPill(summary: SetupSummary) {
-  const { text, tone } = summaryPillText(summary)
+  // Counted from the same summary the hero names its items from.
+  const { text, tone } = pillCopy(summary)
   return <Pill tone={tone}>{text}</Pill>
 }
 
