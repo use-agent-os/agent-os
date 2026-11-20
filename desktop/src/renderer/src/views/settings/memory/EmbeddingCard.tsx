@@ -23,6 +23,7 @@ import { Card, Choices, Disclosure, Notice, Row, type ChoiceOption, type Tone } 
 import { withRevision } from '../use-snapshot'
 import { reportSaveError, useEnvSet } from './api'
 import { useDraft } from './drafts'
+import { cardControl, refocus } from './focus'
 import {
   EMBEDDING_DEFAULTS,
   EMBEDDING_PROVIDERS,
@@ -235,7 +236,12 @@ export function EmbeddingCard({
           <Button
             variant="primary"
             disabled={!canSave}
-            onClick={() => save.mutate(embeddingWrite(draft))}
+            onClick={(e) => {
+              const card = e.currentTarget.closest('section')
+              save.mutate(embeddingWrite(draft), {
+                onSuccess: () => refocus(card, () => cardControl(card)),
+              })
+            }}
           >
             {save.isPending ? t('settings.memory.saving') : t('settings.save')}
           </Button>
@@ -318,7 +324,7 @@ export function EmbeddingCard({
           <Notice
             tone="warn"
             action={
-              <Button onClick={() => jumpTo('environment')}>
+              <Button onClick={(e) => openEnvironment(e.currentTarget, problem.name)}>
                 {t('settings.memory.embed.openEnv')}
               </Button>
             }
@@ -341,6 +347,15 @@ export function EmbeddingCard({
       ) : null}
     </Card>
   )
+}
+
+/**
+ * Environment, searched for the variable the key would come from (as typed),
+ * with the keyboard in that search: this pane, and the button, go away.
+ */
+function openEnvironment(from: HTMLElement, name: string) {
+  jumpTo('environment', name)
+  refocus(from, () => document.querySelector<HTMLElement>('.stg-main input[type="search"]'))
 }
 
 function problemText(problem: NonNullable<EmbeddingProblem>): string {
@@ -549,7 +564,10 @@ function KeywordOnlyNotice({
       action={
         <Button
           disabled={fix.isPending || Boolean(snapshot.writeBlocked)}
-          onClick={() => fix.mutate()}
+          onClick={(e) => {
+            const card = e.currentTarget.closest('section')
+            fix.mutate(undefined, { onSuccess: () => refocus(card, () => cardControl(card)) })
+          }}
         >
           {t('settings.memory.embed.ftsOnly.fix')}
         </Button>

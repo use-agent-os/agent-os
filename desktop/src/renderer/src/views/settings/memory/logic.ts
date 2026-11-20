@@ -547,20 +547,20 @@ export function factRoom(entries: readonly string[], limit: number, replacing?: 
 }
 
 /**
- * Would the file store `text` as more than one fact? A line that is only "§"
- * splits it, and a fact ending in a "§" line takes the next fact's start.
- * Asked the gateway's way: put it between two facts and read the file back.
+ * A fact that reads like the separator between facts. The file keeps facts
+ * apart with a line that is only "§" ("\n§\n"), so a fact that is only "§"
+ * (spaces around it included, which the gateway trims away) is not a fact,
+ * and a line inside a fact that is only "§" either splits it in two or reads
+ * like a split in the file. Stricter than the gateway, which takes some of
+ * these: a bare "§" and a "§" line with spaces both get stored.
  */
-export function splitsIntoFacts(text: string): boolean {
+export type SeparatorProblem = 'bare' | 'line' | null
+
+export function separatorProblem(text: string): SeparatorProblem {
   const content = text.replace(/\r\n?/g, '\n').trim()
-  const head = '\u0000head'
-  const tail = '\u0000tail'
-  const parsed = [head, content, tail]
-    .join(ENTRY_DELIMITER)
-    .split(ENTRY_DELIMITER)
-    .map((part) => part.trim())
-    .filter(Boolean)
-  return parsed.length !== 3 || parsed[1] !== content
+  if (!content) return null
+  if (content === '§') return 'bare'
+  return content.split('\n').some((line) => line.trim() === '§') ? 'line' : null
 }
 
 /** Why the gateway refused a fact write, from its message. */

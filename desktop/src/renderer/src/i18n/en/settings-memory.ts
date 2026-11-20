@@ -102,6 +102,8 @@ export const memory = {
   'settings.memory.editor.over': 'Too long by {over}. This list has room for {room}.',
   'settings.memory.editor.over.break':
     'Too long by {over}. This list has room for {room}; the break before a new fact takes 3.',
+  'settings.memory.editor.bare':
+    'A fact cannot be only “§”: in the file, that mark is what separates facts. Write the fact in words.',
   'settings.memory.editor.split':
     'A line with only “§” would split this into two facts. Remove that line or add words to it.',
   'settings.memory.editor.gone':
