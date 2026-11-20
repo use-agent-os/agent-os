@@ -226,42 +226,71 @@ System Settings › Notifications and that no Focus mode is on.
 
 ## Settings
 
-Open Settings with ⌘, or the toolbar gear. Escape or **Done** closes it.
+Open Settings with ⌘, or the toolbar gear. Escape or **Done** closes it. The
+rail on the left lists every section with its icon; type in its search field
+to narrow it (it matches names and words such as "telegram" or "api key"),
+and a dot marks a section the gateway says needs attention. Settings opens on
+**Overview**, a setup checklist of what is set up and what is still missing.
 
 | Group | Sections |
 | --- | --- |
-| Agent | Providers, Pilot Router, Skills, Channels, Environment, Trading |
+| (top) | Overview |
+| Agent | Providers, Pilot Router, Memory, Capabilities, Skills, Channels, Environment, Trading |
 | App | Gateway, Appearance, Notifications, Security, Behaviour, Shortcuts |
 | More | Advanced, About |
 
-Providers and Pilot Router edit the gateway's own configuration through the
-same guided setup the Web UI uses. Appearance holds the theme
-(system/light/dark), the colour palette, text size, reduced transparency and
-the optional pet mascot. Behaviour holds open at login, what to open at
-launch, stopping the gateway on quit, the Quick Ask shortcut, and Return vs
-⌘Return to send.
+Each page starts with its state and its one main action; settings most
+people never change sit under a fold. Providers, Pilot Router, Memory and
+Capabilities edit the gateway's own configuration through the same guided
+setup the Web UI uses.
+
+- **Providers** leads with the active provider: its key, the **Test key**
+  result, the default model and the connection. A refused key is explained in
+  one sentence, with the provider's own message under it to copy. Below,
+  **Switch provider** lists the others with a filter; picking one opens its
+  setup in place, and nothing changes until you save. With no provider yet,
+  the list comes first with the recommended one marked.
+- **Pilot Router**: the routing mode as cards that each say what they do, the
+  tiers (model and thinking per tier, one of them the default), and the safety
+  net and translation cap under **Fine-tuning**.
+- **Memory** is where the agent's memory is set up, in four tabs: Remembered,
+  Knowledge, Try it and Setup. **Capabilities** sets up web search, image
+  generation and voice.
+- **Skills** and **Environment** open on a summary strip. In Skills,
+  **Needs setup** opens the Skills panel; in Environment, **Set** and
+  **Missing** filter the list to those variables.
+- **Gateway** shows whether the gateway runs and where, with Start, Stop and
+  Restart when the app manages it. The address and token fold away while a
+  managed gateway is on its defaults.
+- **Trading** and **Notifications** carry their on/off switch in the page
+  head. Trading opens on a summary of the swap provider, wallets and limits.
+- **Appearance** holds the theme (system/light/dark), the colour palette, text
+  size, reduced transparency and the optional pet mascot. **Behaviour** holds
+  open at login, what to open at launch, stopping the gateway on quit, the
+  Quick Ask shortcut, and Return vs ⌘Return to send.
 
 Channels is the Web UI's Channels screen inside the app: every messaging
 adapter the gateway is configured with (Telegram, Discord, Slack, Microsoft
 Teams, Email), its live status, when it connected and how often it has been
-restarted. **Add channel** opens a sheet built from the gateway's adapter
-catalog: pick the adapter, paste what it needs, save; **Configure** reopens
-it for an existing channel with the adapter and name locked, and a secret
-left blank keeps the one already stored. Each card has an Enabled switch,
-Restart and Remove, and a Telegram card lists who is waiting to pair and who
-is in, with Pair, Deny and Disconnect. Changes to the configuration restart
-a gateway the app manages so they apply at once; with an external gateway
-the pane only says to restart it on its host, with no **Restart gateway**
-button (the app does not run that process). Providers and Router do the
-same.
+restarted, under a summary strip whose **Needs attention** and **Pairing
+requests** figures jump to the channel they count. With no channel yet the
+page is one empty state with **Add channel**, which opens a sheet built from
+the gateway's adapter catalog: pick the adapter, paste what it needs, save;
+**Configure** reopens it for an existing channel with the adapter and name
+locked, and a secret left blank keeps the one already stored. Each card has
+an Enabled switch, Restart and Remove, and a Telegram card lists who is
+waiting to pair and who is in, with Pair, Deny and Disconnect. Changes to the
+configuration restart a gateway the app manages so they apply at once; with
+an external gateway the pane only says to restart it on its host, with no
+**Restart gateway** button (the app does not run that process). Providers and
+Router do the same.
 
 Environment is the Web UI's Environment screen inside the app: every variable
-the gateway, its providers and your skills read, grouped by what uses it,
-with set, missing and shadowed counts. Set, replace, import from a source
-that already holds the credential, or remove a variable in
-`~/.agentos/.env`; **Add variable** stores one of your own. Listings never
-carry a value. Showing a secret asks first, is rate limited by the gateway,
-and hides again after 30 seconds.
+the gateway, its providers and your skills read, grouped by what uses it.
+Set, replace, import from a source that already holds the credential, or
+remove a variable in `~/.agentos/.env`; **Add variable** stores one of your
+own. Listings never carry a value. Showing a secret asks first, is rate
+limited by the gateway, and hides again after 30 seconds.
 
 ## Updates
 
