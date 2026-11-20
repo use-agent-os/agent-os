@@ -4,6 +4,7 @@ import { useEffect, type ReactNode } from 'react'
 import type { SettingsSnapshot } from '@/views/settings/snapshot'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
+import { cardEntry } from '../capabilities/card-focus'
 import { CapabilityCard, STATE_TONE } from '../capabilities/CapabilityCard'
 import { useKeyFacts } from '../capabilities/key-context'
 import {
@@ -42,11 +43,16 @@ export function scrollBehavior(): ScrollBehavior {
   return reduce ? 'instant' : 'smooth'
 }
 
-/** Bring a card into view and say "here" (the stats strip, a jump from elsewhere). */
+/**
+ * Bring a card into view, say "here", and put the keyboard on it (the key
+ * field when the key is what is missing): the stats strip, a jump from
+ * elsewhere.
+ */
 function scrollToCard(id: string) {
   const el = document.getElementById(ANCHOR[id] ?? id)
   if (!el) return
   el.scrollIntoView({ block: 'start', behavior: scrollBehavior() })
+  cardEntry(el)?.focus({ preventScroll: true })
   el.dataset.flash = 'true'
   window.setTimeout(() => delete el.dataset.flash, 1200)
 }

@@ -112,9 +112,29 @@ export const capabilities = {
   'settings.capabilities.test.ok': 'Works: {n} results from {label} in {s} s.',
   'settings.capabilities.test.okOne': 'Works: 1 result from {label} in {s} s.',
   'settings.capabilities.test.empty': '{label} answered in {s} s, but found nothing.',
-  'settings.capabilities.test.failed': '{label} did not answer:',
-  'settings.capabilities.test.noAnswer': 'no reason given',
+  'settings.capabilities.test.fail.noKey':
+    '{label} has no key yet. Add one above or in Environment, save, then test again.',
+  'settings.capabilities.test.fail.rejected':
+    '{label} rejected the key. Check that it was copied whole, or create a new one.',
+  'settings.capabilities.test.fail.refused':
+    '{label} refused the request. That usually means the key is wrong or incomplete.',
+  'settings.capabilities.test.fail.rateLimit':
+    '{label} says there were too many searches. Wait a minute, or check the limits of your plan.',
+  'settings.capabilities.test.fail.timeout':
+    '{label} did not answer in time. Check your connection, or the proxy under Advanced.',
+  'settings.capabilities.test.fail.network':
+    'Could not reach {label}. Check your connection, or the proxy under Advanced.',
+  'settings.capabilities.test.fail.server':
+    '{label} had a problem on its side. Try again in a moment.',
+  'settings.capabilities.test.fail.other': '{label} could not run the search.',
+  'settings.capabilities.test.showDetails': 'Show details',
+  'settings.capabilities.test.hideDetails': 'Hide details',
+  'settings.capabilities.test.copy': 'Copy',
 
+  'settings.capabilities.turnedOff.search': 'Web search is off.',
+  'settings.capabilities.turnedOff.x': 'Search on X is off.',
+  'settings.capabilities.turnedOff.image': 'Image generation is off.',
+  'settings.capabilities.turnedOff.voice': 'Voice is off.',
   'settings.capabilities.saved.search': 'Web search saved',
   'settings.capabilities.saved.x': 'Search on X saved',
   'settings.capabilities.saved.image': 'Image generation saved',

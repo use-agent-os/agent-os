@@ -38,6 +38,36 @@ export function jumpTo(section: SettingsSection, focus?: string): void {
   pendingFocus = focus ? { section, focus, at: Date.now() } : null
   useUi.getState().setSettingsSection(section)
   for (const fn of hooks.get(section) ?? []) fn(focus)
+  land(section, focus)
+}
+
+/**
+ * After the destination pane has had its turn (Capabilities puts the
+ * keyboard on the card it scrolled to, at 30 ms): the button that was
+ * clicked is gone with the old section, so focus sits on <body>.
+ */
+export const LAND_MS = 120
+
+/**
+ * Keyboard focus after a jump: the clicked button left with the old
+ * section, and focus on <body> loses the keyboard position (Tab starts over,
+ * Escape reaches nothing). If the destination pane has not placed focus
+ * itself, land on the field holding what the jump was for (Environment's
+ * search, filled with the variable), else on the section's heading.
+ */
+function land(section: SettingsSection, focus?: string): void {
+  window.setTimeout(() => {
+    const root = document.querySelector<HTMLElement>(`.stg-section[data-section="${section}"]`)
+    if (!root) return
+    const active = document.activeElement
+    if (active && active !== document.body && root.contains(active)) return
+    const field = focus
+      ? Array.from(root.querySelectorAll<HTMLInputElement>('input')).find((i) => i.value === focus)
+      : undefined
+    const heading = root.querySelector<HTMLElement>('h1')
+    if (!field && heading && !heading.hasAttribute('tabindex')) heading.tabIndex = -1
+    ;(field ?? heading)?.focus({ preventScroll: true })
+  }, LAND_MS)
 }
 
 /** The part of `section` the last jump asked for, while that jump is fresh. */
