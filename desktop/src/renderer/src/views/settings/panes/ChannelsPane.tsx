@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { LoaderCircle, Plus, RefreshCw } from 'lucide-react'
+import { LoaderCircle, MessagesSquare, Plus, RefreshCw } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
@@ -10,6 +10,7 @@ import {
   channelStats,
   isAccessLocked,
   mergeChannels,
+  needsAttention,
   senderLabel,
   senderMeta,
   sortChannels,
@@ -34,7 +35,7 @@ import {
   isRevisionConflict,
   statusTone,
 } from '../channels-logic'
-import { Card, Head, Notice, Pill, Row, Value } from '../parts'
+import { Card, Empty, Head, Notice, Pill, Row, Stat, Stats, Value } from '../parts'
 import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
 import { ChannelSetupSheet } from './ChannelSetupSheet'
@@ -227,8 +228,49 @@ export function ChannelsPane() {
     setSheet((s) => ({ editingName, nonce: (s?.nonce ?? 0) + 1 }))
   }
 
+  const empty = ready && channels.length === 0
+
+  /** A stat that counts some channels jumps to the first of them. */
+  function jumpTo(match: (channel: MergedChannel) => boolean) {
+    const target = channels.find(match)
+    const name = target ? String(target.name || target.id || '') : ''
+    if (!name) return
+    const el = [...document.querySelectorAll<HTMLElement>('[data-channel]')].find(
+      (node) => node.dataset.channel === name,
+    )
+    el?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+    el?.focus({ preventScroll: true })
+  }
+
   const head = (
-    <Head title={t('settings.section.channels')} blurb={t('settings.section.channels.blurb')} />
+    <Head
+      title={t('settings.section.channels')}
+      blurb={t('settings.section.channels.blurb')}
+      action={
+        connected && ready && !empty ? (
+          <>
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={list.isFetching}
+              aria-label={t('settings.channels.refresh')}
+              title={t('settings.channels.refresh')}
+              onClick={() => void invalidate()}
+            >
+              <RefreshCw
+                className={list.isFetching ? 'size-3.5 stg-spin' : 'size-3.5'}
+                strokeWidth={2}
+                aria-hidden
+              />
+            </Button>
+            <Button variant="primary" disabled={blocked} onClick={() => openSheet()}>
+              <Plus className="size-3.5" strokeWidth={2} aria-hidden />
+              {t('settings.channels.add')}
+            </Button>
+          </>
+        ) : undefined
+      }
+    />
   )
 
   if (!connected) {
@@ -261,94 +303,79 @@ export function ChannelsPane() {
         </Notice>
       ) : null}
 
-      <Card
-        title={t('settings.channels.overview')}
-        blurb={t('settings.channels.overview.blurb')}
-        action={
-          <div className="env-actions">
-            <Button disabled={list.isFetching} onClick={() => void invalidate()}>
-              <RefreshCw
-                className={list.isFetching ? 'size-3.5 stg-spin' : 'size-3.5'}
-                strokeWidth={2}
-                aria-hidden
-              />
-              {t('settings.channels.refresh')}
-            </Button>
-            <Button variant="primary" disabled={blocked} onClick={() => openSheet()}>
-              <Plus className="size-3.5" strokeWidth={2} aria-hidden />
-              {t('settings.channels.add')}
-            </Button>
-          </div>
-        }
-      >
-        <Row label={t('settings.channels.stat.total')}>
-          <Value>{ready ? String(stats.total) : '—'}</Value>
-        </Row>
-        <Row label={t('settings.channels.stat.connected')}>
-          <Value tone={ready && stats.connected > 0 ? 'ok' : undefined}>
-            {ready ? String(stats.connected) : '—'}
-          </Value>
-        </Row>
-        <Row
-          label={t('settings.channels.stat.attention')}
-          help={t('settings.channels.stat.attention.help')}
-        >
-          <Value tone={ready && stats.attention > 0 ? 'danger' : undefined}>
-            {ready ? String(stats.attention) : '—'}
-          </Value>
-        </Row>
-        <Row
-          label={t('settings.channels.stat.pairing')}
-          help={t('settings.channels.stat.pairing.help')}
-        >
-          <Value tone={ready && stats.pendingAccess > 0 ? 'warn' : undefined}>
-            {ready ? String(stats.pendingAccess) : '—'}
-          </Value>
-        </Row>
-      </Card>
-
       {!ready && !list.isError ? (
         <div className="flex items-center gap-2 text-muted-foreground" role="status">
           <LoaderCircle className="stg-spin size-3.5" strokeWidth={1.75} aria-hidden />
           {t('settings.channels.loading')}
         </div>
-      ) : ready && channels.length === 0 ? (
-        <Card
-          title={t('settings.channels.empty.title')}
-          blurb={t('settings.channels.empty.body')}
-          action={
-            <Button variant="primary" disabled={blocked} onClick={() => openSheet()}>
-              <Plus className="size-3.5" strokeWidth={2} aria-hidden />
-              {t('settings.channels.add')}
-            </Button>
-          }
-        >
-          <div className="stg-card__body" />
+      ) : empty ? (
+        <Card>
+          <Empty
+            icon={<MessagesSquare strokeWidth={1.75} aria-hidden />}
+            title={t('settings.channels.empty.title')}
+            body={t('settings.channels.empty.body')}
+            action={
+              <Button variant="primary" disabled={blocked} onClick={() => openSheet()}>
+                <Plus className="size-3.5" strokeWidth={2} aria-hidden />
+                {t('settings.channels.add')}
+              </Button>
+            }
+          />
         </Card>
-      ) : (
-        channels.map((channel) => {
-          const name = String(channel.name || channel.id || '')
-          return (
-            <ChannelCard
-              key={name}
-              channel={channel}
-              guided={hasGuidedSetup(channel, specs) && !snapshotQuery.isLoading}
-              busy={busyName === name}
-              pairingBusy={pairingBusy}
-              blocked={blocked}
-              configPath={configPath}
-              onConfigure={() => openSheet(name)}
-              onToggle={(enabled) => toggle.mutate({ name, enabled })}
-              onRestart={() => restartChannel.mutate(name)}
-              onRemove={() => setRemoving(name)}
-              onResolve={(senderId, approved) =>
-                resolve.mutate({ channel: name, senderId, approved })
-              }
-              onRevoke={(senderId) => revoke.mutate({ channel: name, senderId })}
+      ) : ready ? (
+        <>
+          <Stats label={t('settings.channels.stats')}>
+            <Stat label={t('settings.channels.stat.total')} value={stats.total} />
+            <Stat
+              label={t('settings.channels.stat.connected')}
+              value={stats.connected}
+              tone={stats.connected > 0 ? 'ok' : undefined}
             />
-          )
-        })
-      )}
+            <Stat
+              label={t('settings.channels.stat.attention')}
+              hint={t('settings.channels.stat.attention.help')}
+              value={stats.attention}
+              tone={stats.attention > 0 ? 'danger' : undefined}
+              onClick={
+                stats.attention > 0 ? () => jumpTo((c) => needsAttention(c.status)) : undefined
+              }
+            />
+            <Stat
+              label={t('settings.channels.stat.pairing')}
+              hint={t('settings.channels.stat.pairing.help')}
+              value={stats.pendingAccess}
+              tone={stats.pendingAccess > 0 ? 'warn' : undefined}
+              onClick={
+                stats.pendingAccess > 0
+                  ? () => jumpTo((c) => (c.access?.pending?.length ?? 0) > 0)
+                  : undefined
+              }
+            />
+          </Stats>
+          {channels.map((channel) => {
+            const name = String(channel.name || channel.id || '')
+            return (
+              <ChannelCard
+                key={name}
+                channel={channel}
+                guided={hasGuidedSetup(channel, specs) && !snapshotQuery.isLoading}
+                busy={busyName === name}
+                pairingBusy={pairingBusy}
+                blocked={blocked}
+                configPath={configPath}
+                onConfigure={() => openSheet(name)}
+                onToggle={(enabled) => toggle.mutate({ name, enabled })}
+                onRestart={() => restartChannel.mutate(name)}
+                onRemove={() => setRemoving(name)}
+                onResolve={(senderId, approved) =>
+                  resolve.mutate({ channel: name, senderId, approved })
+                }
+                onRevoke={(senderId) => revoke.mutate({ channel: name, senderId })}
+              />
+            )
+          })}
+        </>
+      ) : null}
 
       {sheet ? (
         <ChannelSetupSheet
@@ -424,72 +451,80 @@ function ChannelCard({
   const restartable = canRestartChannel(channel)
 
   return (
-    <Card
-      title={d.name}
-      icon={<AdapterMark type={type} size={36} />}
-      blurb={type || t('settings.channels.type.unknown')}
-      action={
-        <Pill tone={statusTone(d.status)} pulse={d.status === 'restarting'}>
-          {d.status}
-        </Pill>
-      }
-      footNote={hint}
-      foot={
-        <>
-          <Button disabled={busy || blocked} onClick={onRemove}>
-            {t('settings.channels.card.remove')}
-          </Button>
-          {restartable ? (
-            <Button disabled={busy} onClick={onRestart}>
-              {busy ? t('settings.channels.card.restarting') : t('settings.channels.card.restart')}
-            </Button>
-          ) : null}
-          {guided ? (
-            <Button variant="primary" disabled={busy || blocked} onClick={onConfigure}>
-              {t('settings.channels.card.configure')}
-            </Button>
-          ) : (
-            <Button
-              disabled={!isDesktop() || !configPath}
-              title={t('settings.channels.card.advanced.help')}
-              onClick={() => configPath && void desktopApi().app.openPath(configPath)}
-            >
-              {t('settings.channels.card.advanced')}
-            </Button>
-          )}
-        </>
-      }
+    <div
+      className="chn-anchor"
+      data-channel={String(channel.name || channel.id || '')}
+      tabIndex={-1}
     >
-      <Row label={t('settings.channels.card.connected')}>
-        <Value>{since}</Value>
-      </Row>
-      <Row label={t('settings.channels.card.restarts')}>
-        <Value tone={Number(d.attempts) > 0 ? 'warn' : undefined}>{d.attempts}</Value>
-      </Row>
-      <Row
-        label={t('settings.channels.card.enabled')}
-        help={t('settings.channels.card.enabled.help')}
+      <Card
+        title={d.name}
+        icon={<AdapterMark type={type} size={36} />}
+        blurb={type || t('settings.channels.type.unknown')}
+        action={
+          <Pill tone={statusTone(d.status)} pulse={d.status === 'restarting'}>
+            {d.status}
+          </Pill>
+        }
+        footNote={hint}
+        foot={
+          <>
+            <Button disabled={busy || blocked} onClick={onRemove}>
+              {t('settings.channels.card.remove')}
+            </Button>
+            {restartable ? (
+              <Button disabled={busy} onClick={onRestart}>
+                {busy
+                  ? t('settings.channels.card.restarting')
+                  : t('settings.channels.card.restart')}
+              </Button>
+            ) : null}
+            {guided ? (
+              <Button variant="primary" disabled={busy || blocked} onClick={onConfigure}>
+                {t('settings.channels.card.configure')}
+              </Button>
+            ) : (
+              <Button
+                disabled={!isDesktop() || !configPath}
+                title={t('settings.channels.card.advanced.help')}
+                onClick={() => configPath && void desktopApi().app.openPath(configPath)}
+              >
+                {t('settings.channels.card.advanced')}
+              </Button>
+            )}
+          </>
+        }
       >
-        <Switch
-          checked={enabled}
-          disabled={busy || blocked}
-          aria-label={`${t('settings.channels.card.enabled')} ${d.name}`}
-          onCheckedChange={onToggle}
-        />
-      </Row>
-      {channel.type === 'telegram' && channel.access ? (
-        <AccessRows
-          access={channel.access}
-          busy={pairingBusy}
-          onResolve={onResolve}
-          onRevoke={onRevoke}
-        />
-      ) : null}
-      <details className="stg-log chn-details">
-        <summary>{t('settings.channels.card.details')}</summary>
-        <pre>{d.configJson}</pre>
-      </details>
-    </Card>
+        <Row label={t('settings.channels.card.connected')}>
+          <Value>{since}</Value>
+        </Row>
+        <Row label={t('settings.channels.card.restarts')}>
+          <Value tone={Number(d.attempts) > 0 ? 'warn' : undefined}>{d.attempts}</Value>
+        </Row>
+        <Row
+          label={t('settings.channels.card.enabled')}
+          help={t('settings.channels.card.enabled.help')}
+        >
+          <Switch
+            checked={enabled}
+            disabled={busy || blocked}
+            aria-label={`${t('settings.channels.card.enabled')} ${d.name}`}
+            onCheckedChange={onToggle}
+          />
+        </Row>
+        {channel.type === 'telegram' && channel.access ? (
+          <AccessRows
+            access={channel.access}
+            busy={pairingBusy}
+            onResolve={onResolve}
+            onRevoke={onRevoke}
+          />
+        ) : null}
+        <details className="stg-log chn-details">
+          <summary>{t('settings.channels.card.details')}</summary>
+          <pre>{d.configJson}</pre>
+        </details>
+      </Card>
+    </div>
   )
 }
 

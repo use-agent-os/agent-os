@@ -21,8 +21,9 @@ function setMode(touchId: TouchIdMode): void {
   })
 }
 
+/** A mode card: its accessible name starts with the title, then its sentence. */
 function radio(name: string): HTMLElement {
-  return screen.getByRole('radio', { name })
+  return screen.getByRole('radio', { name: new RegExp(`^${name}`) })
 }
 
 beforeEach(() => {

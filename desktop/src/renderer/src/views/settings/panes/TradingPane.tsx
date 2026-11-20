@@ -18,7 +18,7 @@ import {
   type ProviderStatus,
   type UnlockMode,
 } from '~/views/trading/types'
-import { Card, Head, Notice, Pill, Row, Segmented, Value } from '../parts'
+import { Card, Choices, Head, Notice, Pill, Row, Segmented, Stat, Stats, Value } from '../parts'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
 
 export const UNISWAP_DASHBOARD_URL = 'https://developers.uniswap.org/dashboard'
@@ -41,13 +41,7 @@ function isProviderId(value: unknown): value is ProviderId {
 }
 
 /** The keyless default: one button says whether it answers from here. */
-function AggregatorRow({
-  status,
-  active,
-}: {
-  status: ProviderStatus | undefined
-  active: boolean
-}) {
+function AggregatorRow({ status }: { status: ProviderStatus | undefined }) {
   const probe = useProbe()
   const result = probe.data
   const verdict: 'idle' | 'checking' | 'ok' | 'bad' = probe.isPending
@@ -64,10 +58,10 @@ function AggregatorRow({
   const detail = probe.error ? errorText(probe.error) : (result?.error ?? '')
   return (
     <Row
-      label={t('trading.settings.aggregator')}
+      label={t('settings.trading.aggregator.check')}
       help={
         <>
-          <span>{t('trading.settings.aggregator.blurb')}</span>
+          {verdict === 'idle' ? <span>{t('settings.trading.aggregator.check.help')}</span> : null}
           {verdict !== 'idle' ? (
             <span className="trd-stg__probe" data-verdict={verdict} data-testid="aggregator-probe">
               {verdict === 'checking' ? (
@@ -93,7 +87,6 @@ function AggregatorRow({
       }
       align="start"
     >
-      {active ? <Pill tone="primary">{t('settings.providers.state.active')}</Pill> : null}
       <Button
         disabled={probe.isPending}
         onClick={() => probe.mutate({ provider: 'aggregator' })}
@@ -119,31 +112,45 @@ interface PatchResult {
  */
 export function TradingPane() {
   const { connected, query, snapshot, reload } = useConfigSnapshot()
+  const head = (action?: React.ReactNode) => (
+    <Head
+      title={t('settings.section.trading')}
+      blurb={t('settings.section.trading.blurb')}
+      action={action}
+    />
+  )
+  if (connected && snapshot) return <TradingBody snapshot={snapshot} reload={reload} head={head} />
   return (
     <>
-      <Head title={t('settings.section.trading')} blurb={t('settings.section.trading.blurb')} />
+      {head()}
       {!connected ? (
         <Notice tone="info">{t('settings.offline')}</Notice>
       ) : query.isError ? (
         <Notice tone="danger">{t('settings.loadFailed')}</Notice>
-      ) : !snapshot ? (
+      ) : (
         <div className="flex items-center gap-2 text-muted-foreground">
           <LoaderCircle className="stg-spin size-3.5" strokeWidth={1.75} aria-hidden />
           {t('settings.loading')}
         </div>
-      ) : (
-        <TradingBody snapshot={snapshot} reload={reload} />
       )}
     </>
   )
 }
 
+const USD = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  maximumFractionDigits: 0,
+})
+
 function TradingBody({
   snapshot,
   reload,
+  head,
 }: {
   snapshot: SettingsSnapshot
   reload: () => Promise<void>
+  head: (action?: React.ReactNode) => React.ReactNode
 }) {
   const rpc = useRpc()
   const cfg = ((snapshot.config as Record<string, unknown> | undefined)?.trading ??
@@ -176,41 +183,71 @@ function TradingBody({
       toast.error(`${t('settings.saveFailed')}: ${errorText(err)}`, { id: 'stg-trading-err' }),
   })
 
+  const enabled = cfg.enabled !== false
+  const vaultState = !vault.data?.initialized ? 'none' : vault.data.unlocked ? 'unlocked' : 'locked'
+  const providerName = PROVIDERS.find((p) => p.id === provider)?.label ?? provider
+
   return (
     <>
-      {snapshot.writeBlocked ? <Notice tone="danger">{t('settings.writeBlocked')}</Notice> : null}
-
-      <Card title={t('trading.settings.enabled')} blurb={t('trading.settings.enabled.help')}>
-        <Row label={t('trading.settings.enabled')}>
+      {head(
+        <label className="trd-switch" title={t('trading.settings.enabled.help')}>
+          <span>{enabled ? t('settings.trading.on') : t('settings.trading.off')}</span>
           <Switch
-            checked={cfg.enabled !== false}
+            checked={enabled}
             disabled={blocked || save.isPending}
             aria-label={t('trading.settings.enabled')}
-            onCheckedChange={(enabled) => save.mutate({ enabled })}
+            onCheckedChange={(next) => save.mutate({ enabled: next })}
           />
-        </Row>
-      </Card>
+        </label>,
+      )}
 
-      <Card title={t('trading.settings.provider')} blurb={t('trading.settings.provider.help')}>
-        <Row label={t('trading.settings.provider')}>
-          <Segmented
-            label={t('trading.settings.provider')}
-            value={provider}
-            disabled={blocked || save.isPending}
-            options={PROVIDERS.map((p) => ({
-              value: p.id,
-              label: p.label,
-              icon: <ProviderMark id={p.id} size={13} />,
-            }))}
-            onChange={(next) => {
-              if (next !== provider) save.mutate({ provider: next })
-            }}
-          />
-        </Row>
-        <AggregatorRow
-          status={status.data?.providers?.find((p) => p.id === 'aggregator')}
-          active={provider === 'aggregator'}
+      {snapshot.writeBlocked ? <Notice tone="danger">{t('settings.writeBlocked')}</Notice> : null}
+      {!enabled ? <Notice tone="info">{t('settings.trading.offNotice')}</Notice> : null}
+
+      <Stats label={t('settings.trading.stats')}>
+        <Stat
+          label={t('trading.settings.provider')}
+          value={providerName}
+          icon={<ProviderMark id={provider} size={15} />}
         />
+        <Stat
+          label={t('trading.settings.vault.wallets')}
+          value={vault.data ? vault.data.walletCount : '—'}
+          hint={vault.data ? t(`trading.settings.vault.state.${vaultState}`) : undefined}
+        />
+        <Stat
+          label={t('trading.settings.threshold')}
+          value={USD.format(cfg.approval_threshold_usd ?? 100)}
+          hint={t('settings.trading.perSwap')}
+        />
+        <Stat
+          label={t('trading.settings.dailyCap')}
+          value={USD.format(cfg.daily_cap_usd ?? 1000)}
+          hint={t('settings.trading.perWallet')}
+        />
+      </Stats>
+
+      <Card title={t('trading.settings.provider')} blurb={t('settings.trading.provider.blurb')}>
+        <Choices<ProviderId>
+          label={t('trading.settings.provider')}
+          value={provider}
+          disabled={blocked || save.isPending}
+          options={PROVIDERS.map((p) => ({
+            value: p.id,
+            title: p.label,
+            blurb:
+              p.id === 'aggregator'
+                ? t('trading.settings.aggregator.blurb')
+                : t('settings.trading.uniswap.blurb'),
+            icon: <ProviderMark id={p.id} size={16} />,
+            tag: p.id === DEFAULT_PROVIDER ? t('settings.trading.default') : undefined,
+            tagTone: 'ok' as const,
+          }))}
+          onChange={(next) => {
+            if (next !== provider) save.mutate({ provider: next })
+          }}
+        />
+        <AggregatorRow status={status.data?.providers?.find((p) => p.id === 'aggregator')} />
       </Card>
 
       <KeyCard
@@ -225,8 +262,6 @@ function TradingBody({
       <VaultCard
         unlockMode={vault.data?.unlockMode ?? cfg.unlock_mode ?? 'auto'}
         initialized={Boolean(vault.data?.initialized)}
-        unlocked={Boolean(vault.data?.unlocked)}
-        walletCount={vault.data?.walletCount ?? 0}
         vaultPath={vault.data?.vaultPath ?? ''}
         blocked={blocked}
       />
@@ -309,7 +344,7 @@ function KeyCard({
       }
       action={
         idle ? (
-          <Pill>{t('trading.settings.key.idle')}</Pill>
+          <Pill>{t('settings.trading.key.notInUse')}</Pill>
         ) : hasStored ? (
           <Pill tone="ok">{t('settings.providers.state.active')}</Pill>
         ) : (
@@ -418,15 +453,11 @@ function KeyCard({
 function VaultCard({
   unlockMode,
   initialized,
-  unlocked,
-  walletCount,
   vaultPath,
   blocked,
 }: {
   unlockMode: UnlockMode
   initialized: boolean
-  unlocked: boolean
-  walletCount: number
   vaultPath: string
   blocked: boolean
 }) {
@@ -434,17 +465,8 @@ function VaultCard({
   const [pendingMode, setPendingMode] = useState<UnlockMode | null>(null)
   const [password, setPassword] = useState('')
   const write = useWalletMutation()
-  const state = !initialized ? 'none' : unlocked ? 'unlocked' : 'locked'
   return (
     <Card title={t('trading.settings.vault')} blurb={t('trading.settings.vault.blurb')}>
-      <Row label={t('trading.settings.vault.state')}>
-        <Pill tone={state === 'unlocked' ? 'ok' : state === 'locked' ? 'warn' : undefined}>
-          {t(`trading.settings.vault.state.${state}`)}
-        </Pill>
-      </Row>
-      <Row label={t('trading.settings.vault.wallets')}>
-        <Value>{walletCount}</Value>
-      </Row>
       {vaultPath ? (
         <Row label={t('trading.settings.vault.path')}>
           <Value title={vaultPath}>{vaultPath}</Value>
