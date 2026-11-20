@@ -270,8 +270,9 @@ setup the Web UI uses.
   Knowledge, Try it and Setup. **Capabilities** sets up web search, search on
   X (Grok, with an xAI key or a SuperGrok login), image generation and voice,
   under a strip that says which service answers each one and whether its key
-  is in place. Numbers are checked against what the engine accepts (results
-  per search 1 to 20; X search timeouts and retries within their limits), and
+  is in place. **Test search** runs one real search with the saved web search
+  settings. Numbers are checked against what the engine accepts (results per
+  search 1 to 20; X search timeouts and retries within their limits), and
   **Open Environment** next to a missing key lands on that variable.
 - **Skills** and **Environment** open on a summary strip. In Skills,
   **Needs setup** opens the Skills panel; in Environment, **Set** and

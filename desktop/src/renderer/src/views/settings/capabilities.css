@@ -99,3 +99,26 @@
   border-color: color-mix(in srgb, var(--danger) 70%, transparent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 18%, transparent);
 }
+
+/* Web search's test result, under the row label. */
+.cap-test {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.cap-test svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.cap-test[data-verdict='ok'] {
+  color: var(--ok);
+}
+.cap-test[data-verdict='bad'] {
+  color: var(--warn);
+}
+.cap-test code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}

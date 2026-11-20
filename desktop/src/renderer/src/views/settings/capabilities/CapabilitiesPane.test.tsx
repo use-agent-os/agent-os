@@ -310,6 +310,44 @@ describe('CapabilitiesPane', () => {
     expect(takeFocus('environment')).toBe('BRAVE_SEARCH_API_KEY')
   })
 
+  it('Test search runs one real search with the saved settings and says how it went', async () => {
+    let answer: unknown = {
+      ok: true,
+      provider: 'duckduckgo',
+      results: [{ title: 'a' }, { title: 'b' }, { title: 'c' }],
+    }
+    rpcCall.mockImplementation(async (method: string) => {
+      if (method === 'config.snapshot') return snapshot()
+      if (method === 'env.list') return { vars: [] }
+      if (method === 'auth.status') return { xai: {} }
+      if (method === 'search.query') return answer
+      return {}
+    })
+    mount()
+    await screen.findByRole('region', { name: 'Web search' })
+    const search = card('Web search')
+    fireEvent.click(within(search).getByRole('button', { name: 'Test search' }))
+    expect(
+      await within(search).findByText(/Works: 3 results from DuckDuckGo in [\d.]+ s\./),
+    ).toBeInTheDocument()
+    expect(rpcCall).toHaveBeenCalledWith('search.query', {
+      query: 'AgentOS',
+      provider: 'duckduckgo',
+      limit: 3,
+    })
+
+    answer = { ok: false, results: [], error: { kind: 'network', message: 'timed out' } }
+    fireEvent.click(within(search).getByRole('button', { name: 'Test search' }))
+    expect(await within(search).findByText('timed out')).toBeInTheDocument()
+    expect(within(search).getByText('DuckDuckGo did not answer:')).toBeInTheDocument()
+
+    // An unsaved change hides it: the test only speaks for what is saved.
+    fireEvent.change(within(search).getByLabelText('Results per search'), {
+      target: { value: '7' },
+    })
+    expect(within(search).queryByRole('button', { name: 'Test search' })).toBeNull()
+  })
+
   it('a jump scrolls smoothly, or at once for reduced motion or a hidden window', () => {
     const original = window.matchMedia
     const visibility = vi.spyOn(document, 'visibilityState', 'get')

@@ -104,6 +104,17 @@ export const capabilities = {
   'settings.capabilities.problem.whole': '{field} must be a whole number.',
   'settings.capabilities.problem.required': '{field} is required.',
 
+  'settings.capabilities.test.label': 'Try it',
+  'settings.capabilities.test.help':
+    'Runs one real search through {label} with the saved settings.',
+  'settings.capabilities.test.button': 'Test search',
+  'settings.capabilities.test.running': 'Searching…',
+  'settings.capabilities.test.ok': 'Works: {n} results from {label} in {s} s.',
+  'settings.capabilities.test.okOne': 'Works: 1 result from {label} in {s} s.',
+  'settings.capabilities.test.empty': '{label} answered in {s} s, but found nothing.',
+  'settings.capabilities.test.failed': '{label} did not answer:',
+  'settings.capabilities.test.noAnswer': 'no reason given',
+
   'settings.capabilities.saved.search': 'Web search saved',
   'settings.capabilities.saved.x': 'Search on X saved',
   'settings.capabilities.saved.image': 'Image generation saved',

@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { ExternalLink, LoaderCircle } from 'lucide-react'
+import { AlertTriangle, Check, ExternalLink, LoaderCircle } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
@@ -10,7 +10,16 @@ import { Switch } from '~/components/ui/switch'
 import { t, type MessageKey } from '~/i18n'
 import { desktopApi } from '~/lib/desktop-api'
 import { jumpTo } from '../overview/jumps'
-import { Card, Choices, Disclosure, Notice, Pill, type ChoiceOption, type Tone } from '../parts'
+import {
+  Card,
+  Choices,
+  Disclosure,
+  Notice,
+  Pill,
+  Row,
+  type ChoiceOption,
+  type Tone,
+} from '../parts'
 import { ProviderLogo } from '../ProviderLogo'
 import { withRevision } from '../use-snapshot'
 import { FieldRow, fieldLabel } from './FieldRow'
@@ -74,7 +83,7 @@ function providerBlurb(def: CapabilityDef, spec: ProviderSpec): string {
   return key ? t(key) : (spec.whatYouNeed?.[0] ?? '')
 }
 
-function problemText(problem: SaveProblem, def: CapabilityDef, spec: ProviderSpec): string {
+export function problemText(problem: SaveProblem, def: CapabilityDef, spec: ProviderSpec): string {
   if (problem.kind === 'key') return t('settings.capabilities.problem.key')
   if (problem.kind === 'model-prefix') {
     return fill('settings.capabilities.problem.modelPrefix', { prefix: problem.prefix })
@@ -385,6 +394,14 @@ export function CapabilityCard({
             </div>
           ) : null}
           {core.map(renderField)}
+          {def.id === 'search' && spec && !dirty ? (
+            <SearchTest
+              key={draft.providerId}
+              providerId={draft.providerId}
+              label={shortLabel(spec.label || spec.providerId)}
+              disabled={disabled}
+            />
+          ) : null}
           {advanced.length > 0 ? (
             <Disclosure
               title={t('settings.capabilities.advanced')}
@@ -396,5 +413,106 @@ export function CapabilityCard({
         </>
       )}
     </Card>
+  )
+}
+
+/** What the test asks: plain, harmless, and sure to have answers. */
+export const SEARCH_TEST_QUERY = 'AgentOS'
+
+interface SearchQueryResult {
+  ok?: boolean
+  results?: unknown[]
+  error?: { message?: string } | string | null
+  errorMessage?: string
+}
+
+function searchError(res: SearchQueryResult): string {
+  if (typeof res.error === 'string') return res.error
+  return res.error?.message || res.errorMessage || t('settings.capabilities.test.noAnswer')
+}
+
+/**
+ * Web search's "does it work": one real search through the gateway with the
+ * saved settings (`search.query`), the same path the agent's tool takes. Shown
+ * while the card is saved: a pasted key is tested once it is saved.
+ */
+function SearchTest({
+  providerId,
+  label,
+  disabled,
+}: {
+  providerId: string
+  label: string
+  disabled: boolean
+}) {
+  const rpc = useRpc()
+  const probe = useMutation({
+    mutationFn: async () => {
+      const started = performance.now()
+      const res = await rpc.call<SearchQueryResult>('search.query', {
+        query: SEARCH_TEST_QUERY,
+        provider: providerId,
+        limit: 3,
+      })
+      return { res, ms: Math.round(performance.now() - started) }
+    },
+  })
+  const data = probe.data
+  const verdict = probe.isPending
+    ? 'checking'
+    : probe.isError || (data && !data.res.ok)
+      ? 'bad'
+      : data
+        ? 'ok'
+        : 'idle'
+  const count = data?.res.results?.length ?? 0
+  const seconds = data ? (data.ms / 1000).toFixed(1) : '0'
+  return (
+    <Row
+      label={t('settings.capabilities.test.label')}
+      help={
+        verdict === 'idle' ? (
+          fill('settings.capabilities.test.help', { label })
+        ) : (
+          <span className="cap-test" data-verdict={verdict} data-testid="search-test-result">
+            {verdict === 'checking' ? (
+              <>
+                <LoaderCircle className="stg-spin size-3" strokeWidth={2} aria-hidden />
+                {t('settings.capabilities.test.running')}
+              </>
+            ) : verdict === 'ok' ? (
+              <>
+                <Check className="size-3" strokeWidth={2.5} aria-hidden />
+                {count > 0
+                  ? fill(
+                      count === 1
+                        ? 'settings.capabilities.test.okOne'
+                        : 'settings.capabilities.test.ok',
+                      { n: count, label, s: seconds },
+                    )
+                  : fill('settings.capabilities.test.empty', { label, s: seconds })}
+              </>
+            ) : (
+              <>
+                <AlertTriangle className="size-3" strokeWidth={2} aria-hidden />
+                <span>
+                  {fill('settings.capabilities.test.failed', { label })}{' '}
+                  <code>
+                    {probe.error ? errorText(probe.error) : data ? searchError(data.res) : ''}
+                  </code>
+                </span>
+              </>
+            )}
+          </span>
+        )
+      }
+      align="start"
+    >
+      <Button disabled={disabled || probe.isPending} onClick={() => probe.mutate()}>
+        {probe.isPending
+          ? t('settings.capabilities.test.running')
+          : t('settings.capabilities.test.button')}
+      </Button>
+    </Row>
   )
 }

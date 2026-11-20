@@ -40,6 +40,7 @@ export const DESKTOP_REQUIRED_METHODS: readonly string[] = [
   'onboarding.channel.remove',
   'providers.probe',
   'providers.status',
+  'search.query',
   'sessions.preview',
   'sessions.subscribe',
   'trading.allowances.list',
