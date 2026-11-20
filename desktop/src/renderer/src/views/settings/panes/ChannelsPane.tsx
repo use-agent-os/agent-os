@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { LoaderCircle, MessagesSquare, Plus, RefreshCw } from 'lucide-react'
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { ModalShell } from '@/components/ModalShell'
@@ -39,6 +39,7 @@ import { Card, Empty, Head, Notice, Pill, Row, Stat, Stats, Value } from '../par
 import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
 import { ChannelSetupSheet } from './ChannelSetupSheet'
+import { keepFocus } from './focus'
 
 export const CHANNELS_KEY = ['settings', 'channels'] as const
 
@@ -84,6 +85,20 @@ export function ChannelsPane() {
   const [conflict, setConflict] = useState(false)
   const [removing, setRemoving] = useState<string | null>(null)
   const [busyName, setBusyName] = useState<string | null>(null)
+  const addRef = useRef<HTMLButtonElement>(null)
+  // A row's control greys out while its write runs (or goes, with a removed
+  // channel or a resolved request), which drops keyboard focus out of the
+  // sheet. Note it when the write starts, put it back when it settles.
+  const lastFocus = useRef<HTMLElement | null>(null)
+  function noteFocus() {
+    lastFocus.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
+  }
+  function restoreFocus() {
+    keepFocus(addRef.current, () =>
+      lastFocus.current?.isConnected ? lastFocus.current : addRef.current,
+    )
+  }
 
   const list = useQuery<MergedChannel[]>({
     queryKey: CHANNELS_KEY,
@@ -154,7 +169,10 @@ export function ChannelsPane() {
         enabled ? 'onboarding.channel.enable' : 'onboarding.channel.disable',
         withRevision(snapshot, { name }),
       ),
-    onMutate: ({ name }) => setBusyName(name),
+    onMutate: ({ name }) => {
+      noteFocus()
+      setBusyName(name)
+    },
     onSuccess: (res, { name, enabled }) =>
       settle(
         res,
@@ -164,28 +182,44 @@ export function ChannelsPane() {
       ),
     onError: (err) =>
       toast.error(`${t('settings.saveFailed')}: ${errorText(err)}`, { id: 'stg-channels-err' }),
-    onSettled: () => setBusyName(null),
+    onSettled: () => {
+      setBusyName(null)
+      restoreFocus()
+    },
   })
 
   const remove = useMutation({
     mutationFn: (name: string) =>
       rpc.call<WriteResult>('onboarding.channel.remove', withRevision(snapshot, { name })),
-    onMutate: (name) => setBusyName(name),
+    onMutate: (name) => {
+      noteFocus()
+      setBusyName(name)
+    },
+    // The removed channel's card takes the focused control with it.
     onSuccess: (res, name) => settle(res, fill('settings.channels.toast.removed', { name })),
     onError: (err) =>
       toast.error(`${t('settings.saveFailed')}: ${errorText(err)}`, { id: 'stg-channels-err' }),
-    onSettled: () => setBusyName(null),
+    onSettled: () => {
+      setBusyName(null)
+      restoreFocus()
+    },
   })
 
   const restartChannel = useMutation({
     mutationFn: (name: string) => rpc.call('channels.restart', { channel: name }),
-    onMutate: (name) => setBusyName(name),
+    onMutate: (name) => {
+      noteFocus()
+      setBusyName(name)
+    },
     onSuccess: async (_res, name) => {
       toast.success(fill('settings.channels.toast.restarted', { name }), { id: 'stg-channels' })
       await invalidate()
     },
     onError: (err) => toast.error(errorText(err), { id: 'stg-channels-err' }),
-    onSettled: () => setBusyName(null),
+    onSettled: () => {
+      setBusyName(null)
+      restoreFocus()
+    },
   })
 
   const resolve = useMutation({
@@ -194,6 +228,7 @@ export function ChannelsPane() {
         channel: vars.channel,
         senderId: vars.senderId,
       }),
+    onMutate: noteFocus,
     onSuccess: async (_res, vars) => {
       toast.success(
         vars.approved ? t('settings.channels.toast.paired') : t('settings.channels.toast.denied'),
@@ -202,16 +237,19 @@ export function ChannelsPane() {
       await invalidate()
     },
     onError: (err) => toast.error(errorText(err), { id: 'stg-channels-err' }),
+    onSettled: restoreFocus,
   })
 
   const revoke = useMutation({
     mutationFn: (vars: { channel: string; senderId: string }) =>
       rpc.call('channels.pairing.revoke', vars),
+    onMutate: noteFocus,
     onSuccess: async () => {
       toast.success(t('settings.channels.toast.disconnected'), { id: 'stg-channels' })
       await invalidate()
     },
     onError: (err) => toast.error(errorText(err), { id: 'stg-channels-err' }),
+    onSettled: restoreFocus,
   })
 
   const channels = list.data ?? []
@@ -263,7 +301,7 @@ export function ChannelsPane() {
                 aria-hidden
               />
             </Button>
-            <Button variant="primary" disabled={blocked} onClick={() => openSheet()}>
+            <Button ref={addRef} variant="primary" disabled={blocked} onClick={() => openSheet()}>
               <Plus className="size-3.5" strokeWidth={2} aria-hidden />
               {t('settings.channels.add')}
             </Button>

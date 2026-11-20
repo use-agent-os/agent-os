@@ -1,5 +1,5 @@
 import { ExternalLink, LoaderCircle, Lock } from 'lucide-react'
-import { useId, useMemo, useState } from 'react'
+import { useId, useMemo, useRef, useState } from 'react'
 import { ModalShell } from '@/components/ModalShell'
 import type { MergedChannel } from '@/views/channels/logic'
 import type { SettingsSnapshot } from '@/views/settings/snapshot'
@@ -21,6 +21,7 @@ import {
   type DraftValue,
 } from '../channels-logic'
 import { Notice } from '../parts'
+import { keepFocus } from './focus'
 
 function fill(key: MessageKey, vars: Record<string, string | number>): string {
   return Object.entries(vars).reduce(
@@ -231,10 +232,24 @@ export function ChannelSetupSheet({
     onSave(result.entry)
   }
 
+  // Where focus was when the discard question opened. Making the form inert
+  // drops that focus to <body>, outside this sheet, where Escape reaches no
+  // handler; Keep editing puts it back.
+  const beforeDiscard = useRef<HTMLElement | null>(null)
+  const frameRef = useRef<HTMLDivElement>(null)
+
   function requestClose() {
     if (saving) return
-    if (dirty) setConfirmDiscard(true)
-    else onClose()
+    if (dirty) {
+      beforeDiscard.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null
+      setConfirmDiscard(true)
+    } else onClose()
+  }
+
+  function keepEditing() {
+    setConfirmDiscard(false)
+    keepFocus(frameRef.current, () => beforeDiscard.current)
   }
 
   const title = editing
@@ -261,6 +276,7 @@ export function ChannelSetupSheet({
       className="chn-sheet"
     >
       <div
+        ref={frameRef}
         className="chn-sheet__frame"
         inert={confirmDiscard ? true : undefined}
         aria-hidden={confirmDiscard ? true : undefined}
@@ -437,7 +453,7 @@ export function ChannelSetupSheet({
 
       {confirmDiscard ? (
         <DiscardDialog
-          onKeep={() => setConfirmDiscard(false)}
+          onKeep={keepEditing}
           onDiscard={() => {
             setConfirmDiscard(false)
             onClose()
