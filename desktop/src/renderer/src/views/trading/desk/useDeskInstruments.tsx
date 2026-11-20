@@ -1,9 +1,7 @@
-import { KeyRound } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { useRpc } from '@/app/providers'
 import type { RawJob } from '@/views/cron/logic'
-import { Button } from '~/components/ui/button'
 import { sessionPath } from '~/components/sidebar/SessionRow'
 import { t } from '~/i18n'
 import { isTouchIdDeclined } from '~/lib/biometric-gate'
@@ -19,11 +17,9 @@ import {
 } from '~/stores/trading'
 import { useTradingUi, type BookTab } from '~/stores/trading-ui'
 import { useUi } from '~/stores/ui'
-import { Notice } from '~/views/settings/parts'
 import { errorText, isAwaitingApproval, sameAddress } from '../logic'
-import { useSwitchProvider } from '../useSwitchProvider'
 import { WalletSheet, type WalletSheetMode } from '../WalletSheet'
-import type { Bracket, Limits, Mandate, Order, ProviderId, Trigger, Wallet } from '../types'
+import type { Bracket, Limits, Mandate, Order, Trigger, Wallet } from '../types'
 import { ApprovalsRegion } from './ApprovalsRegion'
 import { ComposerSeats } from './ComposerSeats'
 import {
@@ -60,11 +56,6 @@ const NO_BRACKETS: Bracket[] = []
 /** A settled ask stays in the region this long as a stamp. */
 const STAMP_TTL_MS = 10 * 60_000
 
-export interface DeskGate {
-  needsKey: boolean
-  provider: ProviderId
-}
-
 /** What the desk hands the chat when the open session is the desk's. */
 export interface DeskProps {
   /** The power-on is playing: the chat snaps its own layout instead of
@@ -74,7 +65,6 @@ export interface DeskProps {
   wallets: Wallet[]
   primary: string | null
   limits: Limits | null
-  gate: DeskGate
   /** The desk's missions, bound once by the frame (the strip reads them too). */
   missions: MissionsApi
   /** After the first send: files the session into the desk project. */
@@ -139,7 +129,6 @@ export function useDeskInstruments(
   const queryClient = useQueryClient()
   const enabled = desk !== null
   const tradingStatus = useTradingStatus(enabled)
-  const switchProvider = useSwitchProvider()
   const navigate = useNavigate()
   const location = useLocation()
   const openSettings = useUi((s) => s.openSettings)
@@ -488,19 +477,6 @@ export function useDeskInstruments(
     ),
     dockAbove: (
       <div className="trd-dock">
-        {desk.gate.needsKey ? (
-          <Notice
-            tone="info"
-            action={
-              <Button onClick={() => openSettings('trading')} data-testid="chat-add-key">
-                <KeyRound className="size-3.5" strokeWidth={1.75} aria-hidden />
-                {t('trading.noKey.cta')}
-              </Button>
-            }
-          >
-            <b>{t('trading.noKey.title')}</b> {t('trading.noKey.chatBody')}
-          </Notice>
-        ) : null}
         <MissionStrip
           missions={missions.missions}
           running={missions.running}
@@ -573,13 +549,9 @@ export function useDeskInstruments(
         <ComposerSeats
           limits={desk.limits}
           onStartMission={() => setContract({ mode: 'pick' })}
-          provider={desk.gate.provider}
-          providers={tradingStatus.data?.providers ?? []}
-          switching={switchProvider.switching}
           wallet={primaryWallet}
           typing={composerValue.length > 0}
           onOpenSettings={() => openSettings('trading')}
-          onSwitchProvider={switchProvider.switchTo}
           onOpenWallets={() => setWalletSheet({ kind: 'manage' })}
           onQuick={(kind) => setContract({ mode: 'form', kind, preset: null })}
           onSend={() => openSheet('send')}

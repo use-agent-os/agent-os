@@ -380,11 +380,11 @@ class TestExampleTomlConfig:
 
 
 def test_load_migrates_a_kyber_trading_config(tmp_path: Path) -> None:
-    """A config written before the provider change still boots.
+    """A config written before the provider changes still boots.
 
-    ``TradingConfig`` forbids extras, so a stale ``kyber_client_id`` would
-    otherwise fail validation at boot, and ``provider = "kyber"`` now names a
-    provider that no longer exists.
+    ``TradingConfig`` forbids extras, so a stale ``kyber_client_id`` (or, since
+    the Uniswap provider was removed, ``provider`` and ``uniswap_api_key``)
+    would otherwise fail validation at boot.
     """
     toml_path = tmp_path / "config.toml"
     toml_path.write_text(
@@ -404,25 +404,59 @@ def test_load_migrates_a_kyber_trading_config(tmp_path: Path) -> None:
 
     cfg = GatewayConfig.load_from_toml(toml_path)
 
-    assert cfg.trading.provider == DEFAULT_SWAP_PROVIDER == "aggregator"
-    assert cfg.trading.uniswap_api_key == "keep-me"
+    assert not hasattr(cfg.trading, "provider")
     assert cfg.trading.daily_cap_usd == 250.0
     backups = sorted(tmp_path.glob("config.toml.backup.*"))
     assert backups
     assert 'provider = "kyber"' in backups[-1].read_text(encoding="utf-8")
     data = toml_path.read_text(encoding="utf-8")
-    assert 'provider = "aggregator"' in data
+    assert "provider" not in data
     assert "kyber_client_id" not in data
+    assert "uniswap_api_key" not in data
 
 
-def test_a_uniswap_trading_config_is_left_alone(tmp_path: Path) -> None:
-    """Uniswap is still a provider; only the removed one is rewritten."""
+@pytest.mark.parametrize("provider", ["uniswap", "aggregator"])
+def test_a_trading_config_from_before_the_uniswap_provider_was_removed_boots(
+    tmp_path: Path, provider: str
+) -> None:
+    """The AgentOS DEX is the only swap route: the provider and the key are dropped.
+
+    The key stays recoverable from the backup the migration writes.
+    """
     toml_path = tmp_path / "config.toml"
-    toml_path.write_text('[trading]\nprovider = "uniswap"\n', encoding="utf-8")
+    toml_path.write_text(
+        "\n".join(
+            [
+                "[trading]",
+                f'provider = "{provider}"',
+                'uniswap_api_key = "uni-secret"',
+                'uniswap_api_key_env = "MY_UNISWAP_KEY"',
+                "approval_threshold_usd = 42.0",
+                'rpc_urls = { "8453" = "https://rpc.example/base" }',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
     cfg = GatewayConfig.load_from_toml(toml_path)
 
-    assert cfg.trading.provider == "uniswap"
+    assert cfg.trading.approval_threshold_usd == 42.0
+    assert cfg.trading.rpc_urls == {"8453": "https://rpc.example/base"}
+    data = toml_path.read_text(encoding="utf-8")
+    assert "provider" not in data and "uniswap" not in data
+    assert "approval_threshold_usd = 42.0" in data
+    backups = sorted(tmp_path.glob("config.toml.backup.*"))
+    assert backups and 'uniswap_api_key = "uni-secret"' in backups[-1].read_text(encoding="utf-8")
+
+
+def test_a_trading_config_without_the_removed_keys_is_left_alone(tmp_path: Path) -> None:
+    toml_path = tmp_path / "config.toml"
+    toml_path.write_text("[trading]\ndaily_cap_usd = 250.0\n", encoding="utf-8")
+
+    cfg = GatewayConfig.load_from_toml(toml_path)
+
+    assert cfg.trading.daily_cap_usd == 250.0
     assert not sorted(tmp_path.glob("config.toml.backup.*"))
 
 

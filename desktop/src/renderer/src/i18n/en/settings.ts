@@ -480,13 +480,6 @@ export const settings = {
   'settings.trading.stats': 'Trading summary',
   'settings.trading.perSwap': 'per swap',
   'settings.trading.perWallet': 'per wallet, per day',
-  'settings.trading.provider.blurb': 'Who finds the route and builds the transaction.',
-  'settings.trading.uniswap.blurb':
-    'Quotes and calldata from the Uniswap Trading API. Needs an API key.',
-  'settings.trading.default': 'Default',
-  'settings.trading.key.notInUse': 'Not in use',
-  'settings.trading.aggregator.check': 'AgentOS DEX connection',
-  'settings.trading.aggregator.check.help': 'Checks that the AgentOS DEX answers from this Mac.',
   'settings.trading.readOnly.title': 'Trading settings are read-only in this window.',
   'settings.trading.readOnly.local':
     'This window is connected to a gateway the app did not start, and the gateway takes trading changes only from the app that started it. To change them here, stop that gateway and let the app run it: Settings › Gateway › Managed.',
@@ -498,7 +491,6 @@ export const settings = {
   'settings.trading.readOnly.refused':
     'Not saved: the gateway does not take trading changes from this window.',
   'settings.trading.vault.needsVault': 'Create the vault first, on the Trading desk.',
-  'settings.trading.key.testNeedsKey': 'Paste a key to test it.',
 
   // Appearance
   'settings.appearance.mode': 'Light and dark',

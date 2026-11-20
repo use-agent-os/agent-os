@@ -24,7 +24,6 @@ from tests.test_trading.fakes import (
     FakeChain,
     FakeIndexer,
     FakePrices,
-    FakeUniswap,
     make_transport,
 )
 
@@ -285,14 +284,19 @@ def fake_markets() -> FakeMarkets:
 def transport(
     base_chain: FakeChain,
     robinhood_chain: FakeChain,
-    fake_uniswap: FakeUniswap,
     fake_aggregator: FakeAggregator,
     fake_prices: FakePrices,
     fake_indexer: FakeIndexer,
     fake_markets: FakeMarkets,
 ) -> httpx.MockTransport:
     fake_prices.lists["robinhood"] += [
-        {"chainId": 4663, "address": NVDA, "symbol": "NVDA", "name": "NVIDIA • Robinhood Token"},
+        {
+            "chainId": 4663,
+            "address": NVDA,
+            "symbol": "NVDA",
+            "name": "NVIDIA • Robinhood Token",
+            "decimals": 18,
+        },
         {
             "chainId": 4663,
             "address": USDG,
@@ -300,9 +304,21 @@ def transport(
             "name": "Global Dollar",
             "decimals": 6,
         },
-        {"chainId": 4663, "address": AI, "symbol": "AI", "name": "Artificial Inu"},
-        {"chainId": 4663, "address": "0x" + "d1" * 20, "symbol": "DUP", "name": "Dup One"},
-        {"chainId": 4663, "address": "0x" + "d2" * 20, "symbol": "DUP", "name": "Dup Two"},
+        {"chainId": 4663, "address": AI, "symbol": "AI", "name": "Artificial Inu", "decimals": 18},
+        {
+            "chainId": 4663,
+            "address": "0x" + "d1" * 20,
+            "symbol": "DUP",
+            "name": "Dup One",
+            "decimals": 18,
+        },
+        {
+            "chainId": 4663,
+            "address": "0x" + "d2" * 20,
+            "symbol": "DUP",
+            "name": "Dup Two",
+            "decimals": 18,
+        },
     ]
     fake_prices.spot[("robinhood", NVDA)] = 240.30
     inner = make_transport(
@@ -310,7 +326,6 @@ def transport(
             "mainnet.base.org": base_chain,
             "rpc.mainnet.chain.robinhood.com": robinhood_chain,
         },
-        uniswap=fake_uniswap,
         aggregator=fake_aggregator,
         prices=fake_prices,
         indexer=fake_indexer,

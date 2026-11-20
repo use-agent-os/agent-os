@@ -185,7 +185,6 @@ describe('ComposerSeats', () => {
           thresholdUsd: 100,
           approvalTtlSeconds: 900,
         }}
-        provider="uniswap"
         wallet={WALLET}
         typing={false}
         onOpenSettings={onOpenSettings}
@@ -196,7 +195,9 @@ describe('ComposerSeats', () => {
     expect(screen.getByTestId('permission-seat')).toHaveTextContent(
       'Asks above $100.00 · $1,000.00/day',
     )
-    expect(screen.getByTestId('provider-seat')).toHaveTextContent('Uniswap')
+    // Swaps go through the AgentOS DEX only: there is no route seat to switch.
+    expect(screen.queryByTestId('provider-seat')).toBeNull()
+    expect(screen.getByTestId('composer-seats').querySelector('[aria-haspopup]')).toBeNull()
     expect(screen.getByTestId('wallet-seat')).toHaveTextContent('Main')
     fireEvent.click(screen.getByTestId('permission-seat'))
     expect(onOpenSettings).toHaveBeenCalled()
@@ -213,7 +214,6 @@ describe('ComposerSeats', () => {
     renderDesk(
       <ComposerSeats
         limits={null}
-        provider="aggregator"
         wallet={null}
         typing
         onOpenSettings={vi.fn()}
@@ -223,51 +223,5 @@ describe('ComposerSeats', () => {
     )
     expect(screen.getByTestId('composer-seats')).toHaveAttribute('data-typing')
     expect(screen.getByTestId('quick-swap')).toHaveAttribute('tabindex', '-1')
-    expect(screen.getByTestId('provider-seat')).toHaveTextContent('AgentOS DEX')
-  })
-})
-
-describe('ProviderSeat', () => {
-  it('switches the swap provider from the desk and explains each choice', () => {
-    const onSwitchProvider = vi.fn()
-    renderDesk(
-      <ComposerSeats
-        limits={null}
-        provider="uniswap"
-        providers={[
-          {
-            id: 'uniswap',
-            label: 'Uniswap',
-            needsKey: true,
-            keyConfigured: false,
-            healthy: null,
-          },
-          {
-            id: 'aggregator',
-            label: 'AgentOS DEX',
-            needsKey: false,
-            keyConfigured: true,
-            healthy: null,
-          },
-        ]}
-        wallet={WALLET}
-        typing={false}
-        onOpenSettings={vi.fn()}
-        onOpenWallets={vi.fn()}
-        onSwitchProvider={onSwitchProvider}
-        onQuick={vi.fn()}
-      />,
-    )
-    fireEvent.click(screen.getByTestId('provider-seat'))
-    const aggregator = screen.getByRole('menuitemradio', { name: /AgentOS DEX/ })
-    expect(screen.getByRole('menuitemradio', { name: /^Uniswap/ })).toHaveTextContent(
-      'needs an API key',
-    )
-    fireEvent.click(aggregator)
-    expect(onSwitchProvider).toHaveBeenCalledWith('aggregator')
-    // Picking the active one is a no-op.
-    fireEvent.click(screen.getByTestId('provider-seat'))
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /^Uniswap/ }))
-    expect(onSwitchProvider).toHaveBeenCalledTimes(1)
   })
 })

@@ -5,6 +5,12 @@ An HTTP API in front of 0x Swap API v2, served at
 is no API key: a quote is one request that comes back with the price *and*
 the unsigned calldata, including the ERC-20 approval when one is needed.
 
+It has a second liquidity source, the Uniswap Trading API, asked for with
+``source=uniswap`` (:data:`SOURCE_UNISWAP`). 0x refuses the tokenized stocks
+and Uniswap trades them, so a pair with a stock on either side is quoted
+there; everything else is asked the way it always was, with no ``source``,
+and answered by 0x. Either way the swap is sent to the same Router.
+
 The service holds no key and never broadcasts, so reading it cannot move
 funds — a swap happens only when this wallet signs the calldata below. Two
 facts from that response are checked here before anything is signed:
@@ -40,18 +46,26 @@ from agentos.trading.chains import NATIVE_ADDRESS, ChainSpec, is_native, normali
 from agentos.trading.evm import USER_AGENT, EvmClient, is_unlimited
 from agentos.trading.providers import (
     PROVIDER_LABELS,
+    DecisionOrigin,
     ProbeResult,
     ProviderError,
     ProviderQuote,
     SwapFee,
 )
-from agentos.trading.uniswap import DecisionOrigin
 
 AGGREGATOR_BASE = "https://agg.useagentos.dev"
 #: What the aggregator calls the gas coin. Our own native address is the zero
 #: address, which the API rejects outright ("the zero address is not a token").
 NATIVE_SENTINEL = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
 SUPPORTED_CHAIN_IDS: frozenset[int] = frozenset({8453, 4663})
+#: The ``source`` values of ``/v1/quote``. 0x is the default and is asked by
+#: leaving the parameter out; ``GET /v1/chains`` lists what each chain offers.
+SOURCE_ZEROX = "0x"
+SOURCE_UNISWAP = "uniswap"
+SWAP_SOURCES: frozenset[str] = frozenset({SOURCE_ZEROX, SOURCE_UNISWAP})
+#: The aggregator's own error code for "the source you named cannot serve
+#: this right now" (switched off for the chain, Router paused or unreadable).
+SOURCE_UNAVAILABLE = "SOURCE_UNAVAILABLE"
 #: A quote is stamped ``now + 30s`` upstream; stop trusting it earlier so the
 #: approval-then-swap sequence never reaches the chain with lapsed calldata.
 QUOTE_FRESH_S = 20.0
@@ -87,6 +101,9 @@ _ERROR_CODES: dict[str, tuple[str, bool]] = {
     "UPSTREAM_REJECTED": ("trading.provider", False),
     "UPSTREAM_RATE_LIMITED": ("trading.provider", True),
     "UPSTREAM_ERROR": ("trading.provider", True),
+    # Not retried here: two of its three causes are configuration, the
+    # service has its own fallback, and dropping ``source`` works at once.
+    SOURCE_UNAVAILABLE: ("trading.provider", False),
     "MISCONFIGURED": ("trading.provider", False),
     "INTERNAL_ERROR": ("trading.provider", True),
 }
@@ -162,6 +179,9 @@ class AggregatorResponse:
     explanation: str
     fetched_at: float
     warnings: list[str] = field(default_factory=list)
+    #: The ``source`` this quote was asked with (``None``: the default, 0x),
+    #: so a re-quote of the same order asks the same venue.
+    source: str | None = None
 
     @property
     def spender(self) -> str | None:
@@ -300,19 +320,33 @@ class AggregatorClient:
         token_out: str,
         amount_raw: int,
         slippage_bps: int,
+        source: str | None = None,
     ) -> AggregatorResponse:
-        body = await self._get(
-            "/v1/quote",
-            {
-                "chain": self.chain_param(chain),
-                "sell": self.to_token_param(token_in),
-                "buy": self.to_token_param(token_out),
-                "sellAmountRaw": str(amount_raw),
-                "slippageBps": str(int(slippage_bps)),
-                "taker": taker,
-            },
-        )
-        return self._parse_quote(body, chain=chain, taker=taker, amount_raw=amount_raw)
+        params = {
+            "chain": self.chain_param(chain),
+            "sell": self.to_token_param(token_in),
+            "buy": self.to_token_param(token_out),
+            "sellAmountRaw": str(amount_raw),
+            "slippageBps": str(int(slippage_bps)),
+            "taker": taker,
+        }
+        named = self.source_param(source)
+        if named is not None:
+            params["source"] = named
+        body = await self._get("/v1/quote", params)
+        parsed = self._parse_quote(body, chain=chain, taker=taker, amount_raw=amount_raw)
+        parsed.source = named
+        return parsed
+
+    @staticmethod
+    def source_param(source: str | None) -> str | None:
+        """The ``source`` to send: ``None`` for the default (0x is asked by omission)."""
+        name = str(source or "").strip().lower()
+        if not name or name == SOURCE_ZEROX:
+            return None
+        if name not in SWAP_SOURCES:
+            raise AggregatorError("trading.invalid", f"unknown swap source {source!r}")
+        return name
 
     def _parse_quote(
         self, body: dict[str, Any], *, chain: ChainSpec, taker: str, amount_raw: int
@@ -461,7 +495,9 @@ class AggregatorProvider:
         amount_raw: int,
         slippage_pct: float | None,
         decision_origin: DecisionOrigin,
+        source: str | None = None,
     ) -> ProviderQuote:
+        """Quote the pair; ``source`` names the venue (``None``: the default, 0x)."""
         warnings: list[str] = []
         bps = slippage_to_bps(slippage_pct)
         if slippage_pct is not None and bps != int(round(float(slippage_pct) * 100)):
@@ -476,6 +512,7 @@ class AggregatorProvider:
             token_out=token_out,
             amount_raw=amount_raw,
             slippage_bps=bps,
+            source=source,
         )
         return self._to_quote(parsed, chain=chain, swapper=swapper, extra_warnings=warnings)
 
@@ -558,13 +595,12 @@ class AggregatorProvider:
         quote: ProviderQuote,
         *,
         deadline: int,
-        sign_permit: Callable[[dict[str, Any]], str] | None,
         decision_origin: DecisionOrigin,
     ) -> dict[str, Any]:
         """The calldata from the quote, re-fetched if it has gone stale.
 
         The aggregator builds the transaction as part of the quote, so there
-        is nothing to sign here: no permit, no second call unless the
+        is nothing to sign here: no second call unless the
         30-second window lapsed while the approval was being mined.
         """
         parsed: AggregatorResponse = quote.raw
@@ -576,6 +612,8 @@ class AggregatorProvider:
                 token_out=quote.token_out,
                 amount_raw=quote.amount_in_raw,
                 slippage_bps=slippage_to_bps(quote.slippage_pct),
+                # The venue that priced the order is the one that builds it.
+                source=parsed.source,
             )
             quote.raw = parsed
             quote.amount_out_raw = parsed.buy_amount_raw
@@ -638,6 +676,10 @@ __all__ = [
     "MAX_SLIPPAGE_BPS",
     "NATIVE_SENTINEL",
     "QUOTE_FRESH_S",
+    "SOURCE_UNAVAILABLE",
+    "SOURCE_UNISWAP",
+    "SOURCE_ZEROX",
+    "SWAP_SOURCES",
     "TRUSTED_SPENDERS",
     "AggregatorClient",
     "AggregatorError",

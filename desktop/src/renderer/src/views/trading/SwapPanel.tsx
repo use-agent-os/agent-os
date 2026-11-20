@@ -94,8 +94,6 @@ export function SwapPanel({
   primary,
   selectedWallet,
   provider,
-  providerReady,
-  onOpenSettings,
   unlocked,
   prefill,
   onSent,
@@ -106,10 +104,6 @@ export function SwapPanel({
   /** The rail's selection: an address, or 'all'. */
   selectedWallet: string
   provider: ProviderId
-  /** Uniswap has its key, or the keyless aggregator is selected. */
-  providerReady: boolean
-  /** Opens Settings › Trading, the one place a Uniswap key is added. */
-  onOpenSettings: () => void
   unlocked: boolean
   prefill: SwapPrefill | null
   onSent: (orders: Order[]) => void
@@ -201,7 +195,6 @@ export function SwapPanel({
     tokenOut !== null &&
     !sameToken(tokenIn, tokenOut) &&
     isPositiveAmount(parsed) &&
-    providerReady &&
     unlocked &&
     slippageValid
 
@@ -242,25 +235,18 @@ export function SwapPanel({
 
   const ctaKey: MessageKey | null = !unlocked
     ? 'trading.swap.cta.locked'
-    : !providerReady
-      ? provider === 'uniswap'
-        ? 'trading.swap.cta.noKey'
-        : 'trading.provider.switch'
-      : !wallet
-        ? 'trading.swap.cta.noWallet'
-        : !tokenIn || !tokenOut
-          ? 'trading.swap.pick'
-          : sameToken(tokenIn, tokenOut)
-            ? 'trading.swap.cta.sameToken'
-            : !isPositiveAmount(parsed)
-              ? 'trading.swap.cta.noAmount'
-              : insufficient
-                ? 'trading.swap.cta.insufficient'
-                : null
+    : !wallet
+      ? 'trading.swap.cta.noWallet'
+      : !tokenIn || !tokenOut
+        ? 'trading.swap.pick'
+        : sameToken(tokenIn, tokenOut)
+          ? 'trading.swap.cta.sameToken'
+          : !isPositiveAmount(parsed)
+            ? 'trading.swap.cta.noAmount'
+            : insufficient
+              ? 'trading.swap.cta.insufficient'
+              : null
   const canReview = ctaKey === null && fresh !== null && !quote.isError
-  // A gate the ticket can open itself: the button does that instead of sitting
-  // dead. Only Uniswap can be un-ready, and only for want of its key.
-  const gateAction: (() => void) | null = unlocked && !providerReady ? onOpenSettings : null
 
   function flip() {
     setTokenIn(tokenOut)
@@ -470,7 +456,7 @@ export function SwapPanel({
         <button
           type="button"
           className="trd-cta app-no-drag"
-          disabled={gateAction ? false : !canReview}
+          disabled={!canReview}
           data-testid="swap-review"
           data-fresh={ready && fresh && !countdown.expired ? 'true' : undefined}
           style={
@@ -478,7 +464,7 @@ export function SwapPanel({
               '--fresh': ready && fresh && !countdown.expired ? countdown.fraction : 0,
             } as CSSProperties
           }
-          onClick={gateAction ?? (() => setConfirm(true))}
+          onClick={() => setConfirm(true)}
         >
           {ctaKey ? t(ctaKey) : t('trading.swap.cta')}
         </button>

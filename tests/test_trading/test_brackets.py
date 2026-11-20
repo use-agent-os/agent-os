@@ -26,12 +26,13 @@ from agentos.trading.dca import iso
 from agentos.trading.ledger import SCHEMA_VERSION, Ledger
 from agentos.trading.service import TradingError, TradingService
 from tests.test_trading.conftest import PASSWORD
-from tests.test_trading.fakes import USDC, WETH, FakeChain, FakePrices, FakeUniswap
+from tests.test_trading.fakes import USDC, WETH, FakeAggregator, FakeChain, FakePrices
 from tests.test_trading.test_triggers import (
     DAY,
     FIXTURES,
     HOUR,
     KEY,
+    NO_ROUTE,
     T0,
     TICK,
     Clock,
@@ -65,7 +66,7 @@ def ids(monkeypatch: pytest.MonkeyPatch) -> None:
 async def world(
     service: TradingService,
     base_chain: FakeChain,
-    fake_uniswap: FakeUniswap,
+    fake_aggregator: FakeAggregator,
     fake_prices: FakePrices,
     monkeypatch: pytest.MonkeyPatch,
     ids: None,
@@ -73,13 +74,12 @@ async def world(
     monkeypatch.setattr(service_module, "CHAIN_CATCHUP_POLL_S", 0.0)
     clock = Clock()
     service._now = clock
-    service.config.provider = "uniswap"
     service.vault.setup(PASSWORD, "auto")
     wallet = (await service.import_wallet("Key main", private_key=KEY))["address"]
     base_chain.set_native(wallet, 10**18)
     base_chain.set_erc20(USDC, wallet, 1_000 * 10**6)
     base_chain.set_erc20(WETH, wallet, 10**17)  # 0.1 WETH: $200 at $2,000
-    return World(service, base_chain, fake_uniswap, fake_prices, clock, wallet)
+    return World(service, base_chain, fake_aggregator, fake_prices, clock, wallet)
 
 
 async def protect(world: World, **overrides: Any) -> dict[str, Any]:
@@ -533,7 +533,7 @@ async def test_partial_take_profit_releases_the_stop_for_the_rest(world: World) 
 
 
 async def test_failed_fire_releases_the_hold(world: World) -> None:
-    world.uniswap.quote_error = (404, {"errorCode": "NO_ROUTE", "detail": "No quotes available"})
+    world.aggregator.quote_error = NO_ROUTE
     bracket_id = (await protect(world))["bracket"]["id"]
     await world.check(2110)
     await world.check(2120)
@@ -587,7 +587,7 @@ async def test_skipped_pauses_both(world: World) -> None:
 async def test_a_sibling_the_user_paused_is_not_released(world: World) -> None:
     bracket_id = (await protect(world))["bracket"]["id"]
     await world.service.bracket_pause(bracket_id)
-    world.uniswap.quote_error = (404, {"errorCode": "NO_ROUTE", "detail": "No quotes available"})
+    world.aggregator.quote_error = NO_ROUTE
     answer = await world.service.bracket_fire_now(bracket_id, leg="tp")
     assert answer["fire"]["status"] == "failed"
     tp, sl = legs(world, bracket_id)

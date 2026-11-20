@@ -11,6 +11,7 @@ from agentos.trading.service import DUST_USD, TradingError, TradingService
 from tests.test_trading.conftest import PASSWORD
 from tests.test_trading.fakes import (
     AAPL,
+    ALLOWANCE_HOLDER,
     OTHER,
     ROUTER,
     SWAP_TARGETS,
@@ -20,7 +21,6 @@ from tests.test_trading.fakes import (
     FakeChain,
     FakeIndexer,
     FakePrices,
-    FakeUniswap,
     decode_fake_raw,
     transfer_log,
 )
@@ -83,7 +83,12 @@ def _wire_swap_effects(
 class TestStatusAndWallets:
     async def test_status_reports_config_and_vault(self, service: TradingService) -> None:
         status = await service.status(check_rpc=True)
-        assert status["apiKeyConfigured"] is True
+        # One swap route, with no key to configure.
+        assert "apiKeyConfigured" not in status
+        assert status["provider"] == "aggregator"
+        assert [(p["id"], p["needsKey"], p["healthy"]) for p in status["providers"]] == [
+            ("aggregator", False, True)
+        ]
         assert [c["chainId"] for c in status["chains"]] == [8453, 4663]
         assert all(c["healthy"] for c in status["chains"])
         assert status["limits"] == {
@@ -95,17 +100,13 @@ class TestStatusAndWallets:
         }
         assert status["initialized"] is False and status["unlocked"] is False
 
-    async def test_probe(self, service: TradingService, fake_uniswap: FakeUniswap) -> None:
-        # The default provider is the aggregator: no key, so nothing to reject.
-        assert (await service.probe())["ok"] is True
-        assert (await service.probe(provider_id="uniswap"))["ok"] is True
-        bad = await service.probe("nope", provider_id="uniswap")
-        assert bad["ok"] is False and bad["error"]
-        service.config.uniswap_api_key = ""
-        no_key = await service.probe(provider_id="uniswap")
-        assert no_key["error"] == "No Uniswap API key configured"
-        # Losing the Uniswap key does not disturb the default route.
-        assert (await service.probe())["ok"] is True
+    async def test_probe(self, service: TradingService, fake_aggregator: FakeAggregator) -> None:
+        # One swap route, and it needs no key: the probe asks whether it answers.
+        result = await service.probe()
+        assert result["provider"] == "aggregator" and result["ok"] is True
+        fake_aggregator.configured = False
+        down = await service.probe()
+        assert down["ok"] is False and down["error"]
 
     async def test_create_wallet_stamps_block_and_mirrors(
         self, service: TradingService, base_chain: FakeChain, robinhood_chain: FakeChain
@@ -555,16 +556,15 @@ class TestQuote:
 
 class TestSwapFlow:
     async def test_manual_swap_end_to_end(
-        self, funded_service: TradingService, base_chain: FakeChain, fake_uniswap: FakeUniswap
+        self,
+        funded_service: TradingService,
+        base_chain: FakeChain,
+        fake_aggregator: FakeAggregator,
     ) -> None:
-        """The Uniswap path, end to end — it is the fallback, not the default.
-
-        The aggregator's own end-to-end lives in ``test_aggregator.py``.
-        """
+        """A swap with an approval, end to end: orders, ledger, lots and events."""
         service = funded_service
-        service.config.provider = "uniswap"
         wallet = service.test_wallet  # type: ignore[attr-defined]
-        fake_uniswap.approval_needed = True
+        fake_aggregator.approval_needed = True
         _wire_swap_effects(base_chain, wallet)
         orders = await service.swap(
             chain=BASE,
@@ -592,17 +592,13 @@ class TestSwapFlow:
         assert len(base_chain.sent) == 2
         swap_tx = decode_fake_raw(base_chain.sent[1])
         assert (
-            swap_tx["to"].lower() == ROUTER and swap_tx["type"] == 2 and swap_tx["chainId"] == 8453
+            swap_tx["to"].lower() == ALLOWANCE_HOLDER
+            and swap_tx["type"] == 2
+            and swap_tx["chainId"] == 8453
         )
-        assert swap_tx["nonce"] == 1 and swap_tx["gas"] == 250_000
-        # The /swap body is the whole quote response, not a {quote: …} wrapper.
-        swap_request = [r for r in fake_uniswap.requests if r.url.path.endswith("/swap")][-1]
-        body = json.loads(swap_request.content)
-        assert body["routing"] == "CLASSIC" and body["requestId"].startswith("req-")
-        assert "permitData" not in body and body["simulateTransaction"] is True and body["deadline"]
-        assert (
-            json.loads(swap_request.headers["x-agent-info"])["decision_origin"] == "human_mediated"
-        )
+        assert swap_tx["nonce"] == 1 and swap_tx["gas"] == int(288079 * 1.2)
+        # One quote carried the approval and the calldata: nothing else was asked.
+        assert {r.url.path for r in fake_aggregator.requests} == {"/v1/quote"}
         # Ledger: swap entry + approval entry, lots moved, manual swaps do not count toward the cap.
         kinds = [e["kind"] for e in service.ledger.list_entries(wallet=wallet)]
         assert "swap" in kinds and "approval" in kinds
@@ -659,13 +655,11 @@ class TestSwapFlow:
         assert positions[WETH].amount_raw == 5 * 10**14
 
     async def test_agent_swap_within_limits_counts_toward_cap(
-        self, funded_service: TradingService, base_chain: FakeChain, fake_uniswap: FakeUniswap
+        self, funded_service: TradingService, base_chain: FakeChain
     ) -> None:
         service = funded_service
-        service.config.provider = "uniswap"  # this asserts Uniswap's own headers
-        # Uniswap's own priceImpact is cross-checked against the feed (WAL-06):
-        # the quote has to add up, 10 USDC for 0.005 WETH at $2,000.
-        fake_uniswap.amount_out = 5 * 10**15
+        # The quote has to add up for the engine's own impact check (WAL-06):
+        # 10 USDC for 0.005 WETH at $2,000, which is the fake's default.
         wallet = service.test_wallet  # type: ignore[attr-defined]
         _wire_swap_effects(base_chain, wallet, out_amount=5 * 10**15)
         orders = await service.swap(
@@ -683,12 +677,6 @@ class TestSwapFlow:
         )
         assert orders[0]["status"] == "confirmed" and orders[0]["sessionKey"] == "agent:main:x"
         assert service.limits(wallet)["spentTodayUsd"] == pytest.approx(10.0)
-        quote_request = [r for r in fake_uniswap.requests if r.url.path.endswith("/quote")][-1]
-        assert json.loads(quote_request.headers["x-agent-info"]) == {
-            "integration_name": "agentos",
-            "decision_origin": "autonomous",
-            "version": json.loads(quote_request.headers["x-agent-info"])["version"],
-        }
 
     async def test_agent_swap_above_threshold_waits_then_approves(
         self, funded_service: TradingService, base_chain: FakeChain
@@ -949,14 +937,6 @@ class TestSwapFlow:
             await service.swap(
                 token_in="USDC", token_out="WETH", amount_in=None, amount_pct=150, **common
             )
-        # Only Uniswap needs a key; the default route has none to lose.
-        service.config.provider = "uniswap"
-        service.config.uniswap_api_key = ""
-        with pytest.raises(TradingError, match="No Uniswap API key"):
-            await service.swap(
-                token_in="USDC", token_out="WETH", amount_in="1", amount_pct=None, **common
-            )
-        service.config.uniswap_api_key = "test-key"
         service.vault.lock()
         service.vault.unlock_path.unlink()
         with pytest.raises(TradingError, match="locked"):
@@ -1107,7 +1087,7 @@ class TestRealSigning:
     def test_sign_tx_recovers_sender(self) -> None:
         from eth_account import Account
 
-        from agentos.trading.service import _sign_permit, _sign_tx
+        from agentos.trading.service import _sign_tx
 
         key = bytes.fromhex("11" * 32)
         raw = _sign_tx(
@@ -1126,18 +1106,6 @@ class TestRealSigning:
         )
         assert raw.startswith("0x")
         assert Account.recover_transaction(raw) == Account.from_key(key).address
-        permit = {
-            "domain": {"name": "Permit2", "chainId": 8453, "verifyingContract": "0x" + "33" * 20},
-            "types": {
-                "EIP712Domain": [{"name": "name", "type": "string"}],
-                "PermitSingle": [
-                    {"name": "spender", "type": "address"},
-                    {"name": "nonce", "type": "uint256"},
-                ],
-            },
-            "values": {"spender": "0x" + "44" * 20, "nonce": 1},
-        }
-        assert _sign_permit(permit, key).startswith("0x") and len(_sign_permit(permit, key)) == 132
 
 
 class TestSafetyRails:
@@ -1324,34 +1292,6 @@ class TestSafetyRails:
             note=None,
         )
         assert orders[0]["status"] == "rejected" and "switched off" in orders[0]["reason"]
-
-    async def test_approval_to_an_untrusted_spender_is_never_signed(
-        self, funded_service: TradingService, base_chain: FakeChain, fake_uniswap: FakeUniswap
-    ) -> None:
-        service = funded_service
-        # Uniswap's approval is a separate call, so a rogue spender reaches
-        # this service-level check. The aggregator refuses one layer earlier,
-        # in the provider — see test_aggregator.py.
-        service.config.provider = "uniswap"
-        wallet = service.test_wallet  # type: ignore[attr-defined]
-        _wire_swap_effects(base_chain, wallet)
-        fake_uniswap.approval_needed = True
-        fake_uniswap.approval_spender = "0x000000000000000000000000000000000000dEaD"
-        orders = await service.swap(
-            chain=BASE,
-            wallets=None,
-            token_in="USDC",
-            token_out="WETH",
-            amount_in="10",
-            amount_pct=None,
-            slippage_pct=None,
-            initiator="manual",
-            session_key=None,
-            note=None,
-            wait=True,
-        )
-        assert orders[0]["status"] == "failed" and "not trusted" in orders[0]["reason"]
-        assert base_chain.sent == []
 
     def test_approval_calldata_checks(self) -> None:
         from agentos.trading.providers import PERMIT2

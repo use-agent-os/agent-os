@@ -515,7 +515,10 @@ describe('tradingAgentFiles · markets (v25)', () => {
   it('no longer calls Stock Tokens untradeable: they route through Uniswap', () => {
     expect(agents).toMatch(/Stock Tokens \(AAPL, TSLA, NVDA …\) route through\s+Uniswap/)
     expect(agents).not.toMatch(/the venue refuses them for legal reasons/)
-    expect(tools).toMatch(/the message says to add a Uniswap key/)
+    expect(agents).toMatch(/asks its Uniswap source for them by itself, with\s+no key/)
+    expect(agents).not.toMatch(/when a Uniswap\s+key is configured/)
+    expect(tools).not.toMatch(/Uniswap key|route through Uniswap directly/)
+    expect(tools).toMatch(/never\s+suggest another provider or an API key/)
   })
 
   it('stays English only', () => {

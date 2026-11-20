@@ -84,14 +84,13 @@ function answers(overrides: Record<string, unknown> = {}) {
       case 'trading.status':
         return {
           enabled: true,
-          apiKeyConfigured: true,
           chains: [{ chainId: 8453 }],
           limits: { approvalThresholdUsd: 100, dailyCapUsd: 1000, approvalTtlSeconds: 900 },
           unlockMode: 'auto',
           unlocked: true,
           syncing: false,
           lastSyncAt: null,
-          provider: 'uniswap',
+          provider: 'aggregator',
           providers: [],
         }
       case 'wallet.status':

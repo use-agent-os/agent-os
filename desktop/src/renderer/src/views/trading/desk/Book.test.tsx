@@ -42,7 +42,7 @@ beforeEach(() => {
         return {
           enabled: true,
           chains: [{ chainId: 8453, name: 'Base', explorer: 'https://basescan.org' }],
-          provider: 'uniswap',
+          provider: 'aggregator',
           providers: [],
         }
       case 'wallet.list':
@@ -97,14 +97,12 @@ function render(extra: Partial<React.ComponentProps<typeof Book>> = {}) {
       onOpenSession={vi.fn()}
       wallets={[WALLET, SECOND]}
       primary={WALLET.address}
-      provider="uniswap"
-      providerReady
+      provider="aggregator"
       unlocked
       collapsed={false}
       width={360}
       onResize={vi.fn()}
       onToggle={vi.fn()}
-      onOpenSettings={vi.fn()}
       highlightOrder={null}
       {...extra}
     />,

@@ -1,37 +1,32 @@
-"""Swap providers: one protocol, two implementations.
+"""Swap providers: the protocol the order pipeline talks to.
 
 The service only ever talks to a :class:`SwapProvider`: quote, approval
-transaction (if any), swap transaction. The AgentOS DEX is the
-default and needs no key; Uniswap's Trading API is the fallback, and needs
-one. Each provider normalises its own quirks — native-token sentinel, quote
-freshness, slippage units — so the order pipeline stays provider-agnostic.
+transaction (if any), swap transaction. There is one implementation, the
+AgentOS DEX (:mod:`agentos.trading.aggregator`), which needs no key and
+quotes 0x and Uniswap as its two liquidity sources. A provider normalises its
+own quirks — native-token sentinel, quote freshness, slippage units — so the
+order pipeline stays provider-agnostic.
 """
 
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
-from agentos.trading.chains import NATIVE_ADDRESS, ChainSpec, is_native
+from agentos.trading.chains import ChainSpec
 from agentos.trading.evm import EvmClient
-from agentos.trading.uniswap import (
-    PROXY_SPENDER,
-    UNIVERSAL_ROUTERS,
-    DecisionOrigin,
-    Quote,
-    UniswapAuthError,
-    UniswapClient,
-    UniswapError,
-)
 
-ProviderId = Literal["aggregator", "uniswap"]
-#: Ordered: the default comes first, everywhere a client lists providers.
-PROVIDER_IDS: tuple[str, ...] = ("aggregator", "uniswap")
+#: Who decided an order: a person at a client, or the agent on its own.
+DecisionOrigin = Literal["human_mediated", "autonomous"]
+
+ProviderId = Literal["aggregator"]
+PROVIDER_IDS: tuple[str, ...] = ("aggregator",)
 DEFAULT_PROVIDER_ID = "aggregator"
 PROVIDER_LABELS: dict[str, str] = {
     "aggregator": "AgentOS DEX",
+    # Not a provider any more (removed 2026-11): the label of order rows the
+    # Uniswap Trading API provider filled while it existed.
     "uniswap": "Uniswap",
     # Not a swap provider: the bridge an order of kind ``bridge`` runs through.
     "relay": "Relay",
@@ -176,7 +171,6 @@ class SwapProvider(Protocol):
         quote: ProviderQuote,
         *,
         deadline: int,
-        sign_permit: Callable[[dict[str, Any]], str] | None,
         decision_origin: DecisionOrigin,
     ) -> dict[str, Any]: ...
 
@@ -185,123 +179,36 @@ class SwapProvider(Protocol):
 PERMIT2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
 
 
-# ── Uniswap ────────────────────────────────────────────────────────────────
+def _is_address(value: Any) -> bool:
+    text = str(value or "")
+    if not text.startswith("0x") or len(text) != 42:
+        return False
+    try:
+        int(text[2:], 16)
+    except ValueError:
+        return False
+    return True
 
 
-class UniswapProvider:
-    id = "uniswap"
-    label = PROVIDER_LABELS["uniswap"]
-    needs_api_key = True
-
-    def __init__(self, client: UniswapClient) -> None:
-        self.client = client
-
-    @staticmethod
-    def _addr(address: str) -> str:
-        return NATIVE_ADDRESS if is_native(address) else address
-
-    async def probe(self, *, chain: ChainSpec) -> ProbeResult:
-        try:
-            ok, latency, error = await self.client.probe(chain_id=chain.chain_id)
-        except UniswapAuthError as exc:
-            return ProbeResult(ok=False, latency_ms=None, error=str(exc))
-        return ProbeResult(ok=ok, latency_ms=latency, error=error)
-
-    async def quote(
-        self,
-        *,
-        chain: ChainSpec,
-        swapper: str,
-        token_in: str,
-        token_out: str,
-        amount_raw: int,
-        slippage_pct: float | None,
-        decision_origin: DecisionOrigin,
-    ) -> ProviderQuote:
-        try:
-            quote = await self.client.quote(
-                chain_id=chain.chain_id,
-                swapper=swapper,
-                token_in=self._addr(token_in),
-                token_out=self._addr(token_out),
-                amount_raw=amount_raw,
-                slippage_pct=slippage_pct,
-                decision_origin=decision_origin,
-            )
-        except UniswapError as exc:
-            raise ProviderError(
-                exc.code, str(exc), retryable=exc.retryable, details={"errorCode": exc.error_code}
-            ) from exc
-        return ProviderQuote(
-            provider=self.id,
-            chain_id=chain.chain_id,
-            swapper=swapper,
-            token_in=self._addr(token_in).lower(),
-            token_out=self._addr(token_out).lower(),
-            amount_in_raw=quote.amount_in_raw,
-            amount_out_raw=quote.amount_out_raw,
-            min_out_raw=quote.min_out_raw,
-            slippage_pct=quote.slippage_pct,
-            price_impact_pct=quote.price_impact_pct,
-            gas_usd=quote.gas_fee_usd,
-            quote_id=quote.quote_id or quote.request_id,
-            routing=quote.routing,
-            fetched_at=quote.fetched_at,
-            fresh_for_s=30.0,
-            raw=quote,
+def validate_transaction(tx: dict[str, Any]) -> None:
+    """Refuse a swap transaction that is not safe to sign as-is."""
+    data = str(tx.get("data") or "")
+    if not data.startswith("0x") or len(data) <= 2:
+        raise ProviderError("trading.tx_failed", "Swap transaction has empty calldata")
+    try:
+        int(data[2:], 16)
+    except ValueError as exc:
+        raise ProviderError("trading.tx_failed", "Swap calldata is not hex") from exc
+    if not _is_address(tx.get("to")):
+        raise ProviderError("trading.tx_failed", "Swap transaction has no valid 'to'")
+    if not _is_address(tx.get("from")):
+        raise ProviderError("trading.tx_failed", "Swap transaction has no valid 'from'")
+    if tx.get("value") is None:
+        raise ProviderError("trading.tx_failed", "Swap transaction has no 'value'")
+    if tx.get("maxFeePerGas") and tx.get("gasPrice"):
+        raise ProviderError(
+            "trading.tx_failed", "Swap transaction sets both maxFeePerGas and gasPrice"
         )
-
-    async def approval_tx(
-        self, quote: ProviderQuote, *, evm: EvmClient, decision_origin: DecisionOrigin
-    ) -> dict[str, Any] | None:
-        if is_native(quote.token_in):
-            return None
-        try:
-            return await self.client.check_approval(
-                chain_id=quote.chain_id,
-                wallet=quote.swapper,
-                token=quote.token_in,
-                amount_raw=quote.amount_in_raw,
-                decision_origin=decision_origin,
-            )
-        except UniswapError as exc:
-            raise ProviderError(exc.code, str(exc), retryable=exc.retryable) from exc
-
-    def trusted_spenders(self, chain: ChainSpec, quote: ProviderQuote) -> frozenset[str]:
-        # The Trading API approves either Permit2 (classic routes with a
-        # permit signature) or its allowance-holder proxy; nothing else.
-        return frozenset({PERMIT2.lower(), PROXY_SPENDER.lower()})
-
-    def trusted_targets(self, chain: ChainSpec, quote: ProviderQuote) -> frozenset[str]:
-        # The no-Permit2 workflow sends the swap to the Trading API's proxy;
-        # a permit route to the Universal Router. Both are pinned per chain
-        # in ``UNIVERSAL_ROUTERS``: a chain without a verified router entry
-        # gets an empty set, which refuses the swap rather than guessing.
-        routers = UNIVERSAL_ROUTERS.get(chain.chain_id)
-        if not routers:
-            return frozenset()
-        return frozenset({r.lower() for r in routers} | {PROXY_SPENDER.lower()})
-
-    async def build(
-        self,
-        quote: ProviderQuote,
-        *,
-        deadline: int,
-        sign_permit: Callable[[dict[str, Any]], str] | None,
-        decision_origin: DecisionOrigin,
-    ) -> dict[str, Any]:
-        raw: Quote = quote.raw
-        signature = None
-        if raw.permit_data is not None:
-            if sign_permit is None:
-                raise ProviderError("trading.tx_failed", "quote needs a permit signature")
-            signature = sign_permit(raw.permit_data)
-        try:
-            return await self.client.swap(
-                raw, signature=signature, deadline=deadline, decision_origin=decision_origin
-            )
-        except UniswapError as exc:
-            raise ProviderError(exc.code, str(exc), retryable=exc.retryable) from exc
 
 
 def provider_label(provider_id: str) -> str:

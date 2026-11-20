@@ -172,10 +172,10 @@ only when none applies.
   Robinhood — it resolves to unverified lookalikes; use ETH or an address
   from \`agentos trade tokens --chain robinhood … --json\` with
   \`verified: true\`. Stock Tokens (AAPL, TSLA, NVDA …) route through
-  Uniswap: the engine picks that provider for them by itself when a Uniswap
-  key is configured. Without one they answer
-  \`trading.token_not_tradeable\` and the message says to add the key: pass
-  that on. It is final for this token:
+  Uniswap: the AgentOS DEX asks its Uniswap source for them by itself, with
+  no key. If one still answers \`trading.token_not_tradeable\`, or the
+  message says the Uniswap source could not take the pair, pass the message
+  on. It is final for this token:
   do not retry, do not retry by address; tell the user and stop.
 - Tokens: \`ETH\`, \`USDC\`, \`WETH\`, \`USDG\` go straight into \`--in\`/\`--out\`
   on Base: the CLI resolves a unique verified symbol and refuses
@@ -569,10 +569,10 @@ skill only repeats it. Do not open it or run \`--help\` to find a flag.
   returns \`confirmed\` only once the funds have arrived on the destination.
   \`--chain\` on a swap or a send still never leaves its chain.
 - Readiness, once per conversation: \`agentos trade status --json\`
-  (provider, API key, vault, limits). \`trading.provider\` means the
-  aggregator is unreachable or erroring upstream (\`trading.uniswap\` for
-  Uniswap): say so, try once more after a pause, then stop and suggest
-  the user switch provider (\`agentos trade provider uniswap\`).
+  (provider, vault, limits). \`trading.provider\` means the AgentOS DEX
+  is unreachable or erroring upstream: say so, try once more after a
+  pause, then stop. The desk swaps through the AgentOS DEX only: never
+  suggest another provider or an API key.
 - The order, one line:
   \`agentos trade swap --chain base --in ETH --out USDC --usd 0.1 --note '<the user’s words>' --client-id <id> --wait --wait-seconds 600 --json\`
   \`--in\`/\`--out\` take \`ETH\`, a major (\`USDC\`, \`WETH\`, \`USDG\`) on Base,
@@ -770,8 +770,7 @@ skill only repeats it. Do not open it or run \`--help\` to find a flag.
   once after 30 s with the SAME --client-id, then report.
   \`trading.unpriced\` — the engine has no USD price for --in; size with
   \`--amount\` instead of \`--usd\`.
-  \`trading.token_not_tradeable\` — the venue refuses this token (for a
-  Stock Token the message says to add a Uniswap key: pass that on); final,
+  \`trading.token_not_tradeable\` — the venue refuses this token; final,
   no retry, not by address either.
   \`trading.quote_expired\` / \`trading.price_moved\` — quote again; send
   once more with the SAME --client-id only if the user's instruction

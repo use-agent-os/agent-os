@@ -864,11 +864,11 @@ export interface ChainStatus {
   healthy: boolean | null
 }
 
-/** Who routes and builds the swap. The aggregator is the default and needs no
- *  key; Uniswap is the fallback and needs one. */
+/** Who routed and built a swap. Swaps go through the AgentOS DEX (`aggregator`);
+ *  `uniswap` is history, the provider of orders filled before it was removed. */
 export type ProviderId = 'aggregator' | 'uniswap'
 
-/** Ordered as the engine orders them: the default first. */
+/** The labels of both, for the order rows that name them. */
 export const PROVIDERS: readonly { id: ProviderId; label: string }[] = [
   { id: 'aggregator', label: 'AgentOS DEX' },
   { id: 'uniswap', label: 'Uniswap' },
@@ -876,7 +876,7 @@ export const PROVIDERS: readonly { id: ProviderId; label: string }[] = [
 
 export const DEFAULT_PROVIDER: ProviderId = 'aggregator'
 
-/** The bridge route's label; `relay` is never a swap provider the menu offers. */
+/** The bridge route's label; `relay` is not a swap provider. */
 const ROUTE_LABELS: Record<string, string> = { relay: 'Relay' }
 
 export function providerLabel(id: string | null | undefined): string {
@@ -893,7 +893,6 @@ export interface ProviderStatus {
 
 export interface TradingStatus {
   enabled: boolean
-  apiKeyConfigured: boolean
   chains: ChainStatus[]
   limits: { approvalThresholdUsd: number; dailyCapUsd: number; approvalTtlSeconds: number }
   unlockMode: UnlockMode

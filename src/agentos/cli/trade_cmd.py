@@ -77,6 +77,8 @@ app = typer.Typer(
 )
 
 AGENT_ENV_MARKERS = ("AGENTOS_SESSION_KEY", "AGENTOS_AGENT")
+#: Labels for the ``provider`` an order row records. ``uniswap`` is history:
+#: rows filled while the Uniswap Trading API provider existed.
 PROVIDERS: dict[str, str] = {"aggregator": "AgentOS DEX", "uniswap": "Uniswap"}
 # Statuses that still move on their own after ``trading.swap`` returns.
 _PENDING_STATUSES = frozenset({"awaiting_approval", "approved", "submitted", "quoted"})
@@ -101,18 +103,6 @@ class TokenResolutionError(Exception):
     def __init__(self, message: str, *, code: str = "TOKEN_UNRESOLVED") -> None:
         super().__init__(message)
         self.code = code
-
-
-def provider_id_from_arg(value: str) -> str:
-    """Normalise ``aggregator``/``uniswap`` (case-insensitive; ``agg`` accepted)."""
-
-    key = value.strip().lower()
-    if key in ("agg", "404", "agentos"):
-        key = "aggregator"
-    if key not in PROVIDERS:
-        choices = ", ".join(PROVIDERS)
-        raise typer.BadParameter(f"unknown provider {value!r}; expected one of: {choices}")
-    return key
 
 
 def provider_label(value: Any) -> str:
@@ -525,7 +515,7 @@ def _print_lp_order(order: dict[str, Any], table: Table) -> None:
 def trade_status(
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
-    """Show trading readiness: API key, chains, limits, vault state."""
+    """Show trading readiness: swap route, chains, limits, vault state."""
 
     async def _run(client):
         return await client.call("trading.status", {})
@@ -541,7 +531,6 @@ def trade_status(
     table.add_column("Value")
     table.add_row("enabled", "yes" if result.get("enabled") else "no")
     table.add_row("provider", provider_label(result.get("provider")))
-    table.add_row("Uniswap API key", "configured" if result.get("apiKeyConfigured") else "missing")
     table.add_row("vault", "unlocked" if result.get("unlocked") else "locked")
     table.add_row("unlock mode", str(result.get("unlockMode") or "—"))
     table.add_row("approval threshold", money(limits.get("approvalThresholdUsd")))
@@ -551,29 +540,6 @@ def trade_status(
     if result.get("ledgerRepair"):
         table.add_row("ledger", f"[bold red]{markup_escape(str(result['ledgerRepair']))}[/]")
     console.print(table)
-    providers = result.get("providers", [])
-    if isinstance(providers, list) and providers:
-        pt = Table(title="Swap providers", show_header=True, header_style=ACCENT_HEADER)
-        pt.add_column("Provider")
-        pt.add_column("Active")
-        pt.add_column("API key")
-        pt.add_column("Reachable")
-        for entry in providers:
-            if not isinstance(entry, dict):
-                continue
-            healthy = entry.get("healthy")
-            reachable = "—" if healthy is None else ("yes" if healthy else "no")
-            if entry.get("needsKey"):
-                key_state = "configured" if entry.get("keyConfigured") else "missing"
-            else:
-                key_state = "not needed"
-            pt.add_row(
-                str(entry.get("label") or entry.get("id") or ""),
-                "★" if entry.get("id") == result.get("provider") else "",
-                key_state,
-                reachable,
-            )
-        console.print(pt)
     chains = result.get("chains", [])
     if isinstance(chains, list) and chains:
         ct = Table(title="Chains", show_header=True, header_style=ACCENT_HEADER)
@@ -596,24 +562,12 @@ def trade_status(
 
 @app.command("probe")
 def trade_probe(
-    provider: str | None = typer.Option(
-        None, "--provider", help="aggregator or uniswap (default: the configured provider)"
-    ),
-    api_key: str | None = typer.Option(
-        None, "--api-key", help="Test this Uniswap key instead of the configured one"
-    ),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
-    """Check that the swap provider is reachable (and, for Uniswap, that the key works)."""
-
-    params: dict[str, Any] = {}
-    if provider:
-        params["provider"] = provider_id_from_arg(provider)
-    if api_key:
-        params["apiKey"] = api_key
+    """Check that the swap route (the AgentOS DEX) is reachable from the gateway."""
 
     async def _run(client):
-        return await client.call("trading.probe", params)
+        return await client.call("trading.probe", {})
 
     result = _gateway(_run, json_output=json_output)
     if json_output:
@@ -622,7 +576,7 @@ def trade_probe(
             raise typer.Exit(1)
         return
     result = _dict(result)
-    name = provider_label(result.get("provider") or params.get("provider"))
+    name = provider_label(result.get("provider") or "aggregator")
     if result.get("ok"):
         latency = result.get("latencyMs")
         suffix = f" ({latency} ms)" if latency is not None else ""
@@ -630,47 +584,6 @@ def trade_probe(
         return
     console.print(f"[red]{name} failed:[/] {markup_escape(str(result.get('error')))}")
     raise typer.Exit(1)
-
-
-@app.command("provider")
-def trade_provider(
-    name: str | None = typer.Argument(
-        None, help="aggregator or uniswap (omit to show the current one)"
-    ),
-    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
-) -> None:
-    """Show or switch the swap provider (the aggregator needs no key; Uniswap needs one)."""
-
-    if name is None:
-
-        async def _show(client):
-            return await client.call("trading.status", {})
-
-        result = _dict(_gateway(_show, json_output=json_output))
-        current = result.get("provider")
-        if json_output:
-            print_json({"provider": current, "providers": result.get("providers", [])})
-            return
-        console.print(f"Swap provider: [{ACCENT}]{provider_label(current)}[/]")
-        return
-
-    provider = provider_id_from_arg(name)
-
-    async def _set(client):
-        return await client.call("config.set", {"path": "trading.provider", "value": provider})
-
-    result = _dict(_gateway(_set, json_output=json_output))
-    if json_output:
-        print_json({"provider": provider, **result})
-        return
-    console.print(f"Swap provider is now [{ACCENT}]{provider_label(provider)}[/].")
-    if provider == "uniswap":
-        console.print(
-            "Uniswap needs an API key in `trading.uniswap_api_key` (or UNISWAP_API_KEY). "
-            "Run `agentos trade probe --provider uniswap` to check it from here."
-        )
-    elif result.get("restartRequired"):
-        console.print("Restart the gateway to apply.")
 
 
 @app.command("tokens")

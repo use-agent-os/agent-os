@@ -287,13 +287,12 @@ when Settings closes.
   seconds, 0 to 5 retries), and an empty one is refused rather than saved as
   a default. Switching a capability off says so ("Search on X is off.").
 - **Skills** opens on a summary strip (installed, ready, needs setup, offered
-  to the agent); **Needs setup** opens the Skills panel, and a card lists
+  to the agent); **Needs setup** opens the Skills panel on those skills, and a card lists
   where skills come from.
 - **Trading** carries its on/off switch in the page head and opens on a
-  summary strip: the swap provider, the wallets, the amount above which the
-  agent asks you, and the daily cap. Below: the swap provider (the AgentOS
-  DEX by default, with **Test connection**; Uniswap with its API key and
-  **Test key**), the networks and their RPC endpoints, the vault (where it
+  summary strip: the wallets, the amount above which the agent asks you, and
+  the daily cap. Below: the swap route (the AgentOS DEX, with **Test
+  connection**), the networks and their RPC endpoints, the vault (where it
   lives and whether it unlocks automatically or asks each time; changing that
   asks for the vault password), and the agent's limits (ask-me-above amount,
   daily cap, approval timeout, default slippage). When the gateway does not

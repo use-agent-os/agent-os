@@ -6,7 +6,7 @@ import { useUi } from '~/stores/ui'
 import type { MissionsApi } from './desk/missions'
 import { holding, LP_ROW, renderDesk, USDC, WALLET } from './test-utils'
 import { TradingView } from './TradingView'
-import type { LpBook, ProviderId } from './types'
+import type { LpBook } from './types'
 
 const rpcCall = vi.fn()
 vi.mock('@/app/providers', () => ({
@@ -37,7 +37,6 @@ describe('TradingView · gate', () => {
         if (fail) throw new Error('socket closed')
         return {
           enabled: false,
-          apiKeyConfigured: false,
           chains: [],
           limits: { approvalThresholdUsd: 100, dailyCapUsd: 1000, approvalTtlSeconds: 900 },
           unlockMode: 'auto',
@@ -65,36 +64,26 @@ describe('TradingView · gate', () => {
   })
 })
 
-describe('TradingView · the venue pill', () => {
-  it('switches the route from the desk head, and the ticket follows it at once', async () => {
-    // One engine: trading.setProvider changes what trading.status reports.
-    let provider: ProviderId = 'aggregator'
-    rpcCall.mockImplementation(async (method: string, params?: { provider?: ProviderId }) => {
+describe('TradingView · the swap route', () => {
+  it('offers no provider to pick: swaps go through the AgentOS DEX', async () => {
+    rpcCall.mockImplementation(async (method: string) => {
       switch (method) {
         case 'trading.status':
           return {
             enabled: true,
-            apiKeyConfigured: false,
             chains: [],
             limits: { approvalThresholdUsd: 100, dailyCapUsd: 1000, approvalTtlSeconds: 900 },
             unlockMode: 'auto',
             unlocked: true,
             syncing: false,
             lastSyncAt: null,
-            provider,
+            provider: 'aggregator',
             providers: [
               {
                 id: 'aggregator',
                 label: 'AgentOS DEX',
                 needsKey: false,
                 keyConfigured: true,
-                healthy: null,
-              },
-              {
-                id: 'uniswap',
-                label: 'Uniswap',
-                needsKey: true,
-                keyConfigured: false,
                 healthy: null,
               },
             ],
@@ -105,34 +94,19 @@ describe('TradingView · the venue pill', () => {
           return { wallets: [WALLET], primary: WALLET.address }
         case 'trading.limits':
           return { dailyCapUsd: 1000, spentTodayUsd: 0, thresholdUsd: 100, approvalTtlSeconds: 900 }
-        case 'trading.setProvider':
-          provider = params?.provider ?? provider
-          return { provider, restartRequired: false }
         default:
           return {}
       }
     })
     renderDesk(<TradingView />)
 
-    const pill = await screen.findByTestId('provider-pill')
-    expect(pill).toHaveTextContent('AgentOS DEX')
-    // The keyless aggregator: the ticket has no key to ask for.
-    expect(screen.getByTestId('swap-review')).not.toHaveTextContent('Add a Uniswap key')
-
-    fireEvent.click(pill)
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /^Uniswap/ }))
-    await waitFor(() =>
-      expect(rpcCall).toHaveBeenCalledWith('trading.setProvider', { provider: 'uniswap' }),
-    )
-
-    // The pill and the ticket read the same status: one refetch moves both, and
-    // the ticket keeps its gate — Uniswap without a key sends you to Settings.
-    await waitFor(() => expect(screen.getByTestId('provider-pill')).toHaveTextContent('Uniswap'))
-    const cta = screen.getByTestId('swap-review')
-    expect(cta).toHaveTextContent('Add a Uniswap key')
-    expect(screen.getByTestId('add-key')).toBeInTheDocument()
-    fireEvent.click(cta)
-    expect(useUi.getState()).toMatchObject({ settingsOpen: true, settingsSection: 'trading' })
+    const cta = await screen.findByTestId('swap-review')
+    expect(cta).not.toHaveTextContent(/Uniswap|provider|key/i)
+    expect(screen.queryByTestId('provider-pill')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Swap provider/ })).toBeNull()
+    expect(screen.queryByRole('menuitemradio')).toBeNull()
+    expect(screen.queryByText(/Uniswap API key/)).toBeNull()
+    expect(rpcCall.mock.calls.some((c) => c[0] === 'trading.setProvider')).toBe(false)
   })
 })
 
@@ -143,7 +117,6 @@ describe('TradingView · the sync state', () => {
         case 'trading.status':
           return {
             enabled: true,
-            apiKeyConfigured: false,
             chains: [],
             limits: { approvalThresholdUsd: 100, dailyCapUsd: 1000, approvalTtlSeconds: 900 },
             unlockMode: 'auto',
@@ -253,7 +226,6 @@ describe('TradingView · Markets and the ticket', () => {
         case 'trading.status':
           return {
             enabled: true,
-            apiKeyConfigured: false,
             chains: [],
             limits: { approvalThresholdUsd: 100, dailyCapUsd: 1000, approvalTtlSeconds: 900 },
             unlockMode: 'auto',
@@ -480,7 +452,6 @@ describe('TradingView · the wallet rail', () => {
         case 'trading.status':
           return {
             enabled: true,
-            apiKeyConfigured: false,
             chains: [],
             limits: { approvalThresholdUsd: 100, dailyCapUsd: 1000, approvalTtlSeconds: 900 },
             unlockMode: 'auto',
@@ -523,7 +494,6 @@ describe('TradingView · one wallet selected', () => {
         case 'trading.status':
           return {
             enabled: true,
-            apiKeyConfigured: false,
             chains: [],
             limits: { approvalThresholdUsd: 100, dailyCapUsd: 1000, approvalTtlSeconds: 900 },
             unlockMode: 'auto',

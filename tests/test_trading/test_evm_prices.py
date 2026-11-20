@@ -8,8 +8,9 @@ import pytest
 from agentos.trading import evm as evm_mod
 from agentos.trading.chains import BASE, NATIVE_ADDRESS, ROBINHOOD
 from agentos.trading.evm import EvmClient, EvmRpcError, EvmTransportError
-from agentos.trading.prices import TOKEN_LIST_EMPTY_HOLD_S, PriceService
-from agentos.trading.uniswap import UniswapAuthError, UniswapClient, UniswapError
+from agentos.trading.prices import PriceService
+from agentos.trading.providers import ProviderError, validate_transaction
+from agentos.trading.token_lists import RETRY_DELAYS_S, REVALIDATE_TTL_S
 from tests.test_trading.fakes import (
     AAPL,
     OTHER,
@@ -18,7 +19,6 @@ from tests.test_trading.fakes import (
     WETH,
     FakeChain,
     FakePrices,
-    FakeUniswap,
     transfer_log,
 )
 
@@ -269,179 +269,22 @@ class TestEvmClient:
         assert logs and "re-read failed" in logs[-1]["reason"]
 
 
-class TestUniswapClient:
-    @pytest.fixture
-    def fake(self) -> FakeUniswap:
-        return FakeUniswap()
-
-    @pytest.fixture
-    async def http(self, fake: FakeUniswap):
-        async with httpx.AsyncClient(transport=httpx.MockTransport(fake.handle)) as client:
-            yield client
-
-    async def test_quote_headers_and_shape(
-        self, fake: FakeUniswap, http: httpx.AsyncClient
-    ) -> None:
-        client = UniswapClient("test-key", http=http)
-        quote = await client.quote(
-            chain_id=8453,
-            swapper=WALLET,
-            token_in=USDC,
-            token_out=WETH,
-            amount_raw=10 * 10**6,
-        )
-        request = fake.requests[-1]
-        assert request.headers["x-permit2-disabled"] == "true"
-        assert request.headers["x-api-key"] == "test-key"
-        assert "x-universal-router-version" not in request.headers
-        body = json.loads(request.content)
-        assert body["autoSlippage"] == "DEFAULT" and "slippageTolerance" not in body
-        assert body["protocols"] == ["V2", "V3", "V4"]
-        assert body["type"] == "EXACT_INPUT" and body["amount"] == str(10 * 10**6)
-        assert json.loads(request.headers["x-agent-info"])["decision_origin"] == "human_mediated"
-        assert quote.routing == "CLASSIC"
-        assert quote.amount_out_raw == fake.amount_out
-        assert quote.min_out_raw == fake.amount_out * 995 // 1000
-        assert quote.price_impact_pct == pytest.approx(0.12)
-        assert quote.gas_fee_usd == pytest.approx(0.05)
-        assert quote.fresh and quote.permit_data is None
-
-    async def test_explicit_slippage(self, fake: FakeUniswap, http: httpx.AsyncClient) -> None:
-        client = UniswapClient("test-key", http=http)
-        await client.quote(
-            chain_id=8453,
-            swapper=WALLET,
-            token_in=USDC,
-            token_out=WETH,
-            amount_raw=1,
-            slippage_pct=1.25,
-        )
-        body = json.loads(fake.requests[-1].content)
-        assert body["slippageTolerance"] == 1.25 and "autoSlippage" not in body
-
-    async def test_bad_key(self, fake: FakeUniswap, http: httpx.AsyncClient) -> None:
-        client = UniswapClient("wrong", http=http, max_retries=0)
-        with pytest.raises(UniswapAuthError):
-            await client.quote(
-                chain_id=8453, swapper=WALLET, token_in=USDC, token_out=WETH, amount_raw=1
-            )
-        ok, _, error = await client.probe()
-        assert ok is False and error
-
-    async def test_probe_ok_on_404(self, fake: FakeUniswap, http: httpx.AsyncClient) -> None:
-        fake.quote_error = (
-            404,
-            {"errorCode": "NoRouteFoundError", "detail": "No quotes available"},
-        )
-        ok, latency, error = await UniswapClient("test-key", http=http).probe()
-        assert ok is True and error is None and latency is not None
-
-    async def test_error_mapping(self, fake: FakeUniswap, http: httpx.AsyncClient) -> None:
-        client = UniswapClient("test-key", http=http, max_retries=0)
-        fake.quote_error = (404, {"errorCode": "UnsupportedTokenError"})
-        with pytest.raises(UniswapError) as info:
-            await client.quote(
-                chain_id=8453, swapper=WALLET, token_in=USDC, token_out=WETH, amount_raw=1
-            )
-        assert info.value.code == "trading.no_route"
-        assert "does not route" in str(info.value)
-        fake.quote_error = (404, {"errorCode": "UpstreamTimeoutError"})
-        with pytest.raises(UniswapError) as info:
-            await client.quote(
-                chain_id=8453, swapper=WALLET, token_in=USDC, token_out=WETH, amount_raw=1
-            )
-        assert info.value.retryable is True
-
-    async def test_unsupported_routing_rejected(
-        self, fake: FakeUniswap, http: httpx.AsyncClient
-    ) -> None:
-        fake.routing = "DUTCH_V2"
-        with pytest.raises(UniswapError, match="Unsupported routing"):
-            await UniswapClient("test-key", http=http).quote(
-                chain_id=8453, swapper=WALLET, token_in=USDC, token_out=WETH, amount_raw=1
-            )
-
-    async def test_check_approval_and_swap(
-        self, fake: FakeUniswap, http: httpx.AsyncClient
-    ) -> None:
-        client = UniswapClient("test-key", http=http)
-        assert (
-            await client.check_approval(chain_id=8453, wallet=WALLET, token=USDC, amount_raw=5)
-            is None
-        )
-        fake.approval_needed = True
-        approval = await client.check_approval(
-            chain_id=8453, wallet=WALLET, token=USDC, amount_raw=5
-        )
-        assert approval is not None and approval["to"] == USDC
-        quote = await client.quote(
-            chain_id=8453, swapper=WALLET, token_in=USDC, token_out=WETH, amount_raw=5
-        )
-        tx = await client.swap(quote, deadline=123, decision_origin="autonomous")
-        request = fake.requests[-1]
-        body = json.loads(request.content)
-        # Whole quote response spread into the body; null permit fields stripped.
-        assert body["quote"] == quote.raw_quote and body["deadline"] == 123
-        assert body["routing"] == "CLASSIC" and body["requestId"] == quote.request_id
-        assert body["simulateTransaction"] is True and body["refreshGasPrice"] is True
-        assert "permitData" not in body and "signature" not in body
-        info = json.loads(request.headers["x-agent-info"])
-        assert info == {
-            "integration_name": "agentos",
-            "decision_origin": "autonomous",
-            "version": info["version"],
-        }
-        assert (
-            request.headers["x-agent-info"].isascii() and " " not in request.headers["x-agent-info"]
-        )
-        assert tx["to"].lower() == fake.tx_to
-        assert await client.swap_status(chain_id=8453, tx_hash="0xabc") == "SUCCESS"
-
-    async def test_permit_requires_signature(
-        self, fake: FakeUniswap, http: httpx.AsyncClient
-    ) -> None:
-        fake.permit_data = {"domain": {}, "types": {}, "values": {}}
-        client = UniswapClient("test-key", http=http)
-        quote = await client.quote(
-            chain_id=8453, swapper=WALLET, token_in=USDC, token_out=WETH, amount_raw=5
-        )
-        assert quote.permit_data is not None
-        with pytest.raises(UniswapError, match="signature"):
-            await client.swap(quote)
-        await client.swap(quote, signature="0xsig")
-        body = json.loads(fake.requests[-1].content)
-        assert body["signature"] == "0xsig" and body["permitData"] == fake.permit_data
-
-    async def test_swap_transaction_validation(
-        self, fake: FakeUniswap, http: httpx.AsyncClient
-    ) -> None:
-        from agentos.trading.uniswap import validate_transaction
-
+class TestSwapTransactionValidation:
+    def test_a_transaction_that_is_not_safe_to_sign_is_refused(self) -> None:
         good = {"to": "0x" + "11" * 20, "from": "0x" + "22" * 20, "data": "0xabcd", "value": "0"}
         validate_transaction(good)
         for bad in (
             {**good, "data": "0x"},
             {**good, "data": "zz"},
             {**good, "to": "0x1"},
+            {**good, "to": "0xnope"},
             {**good, "from": None},
             {k: v for k, v in good.items() if k != "value"},
             {**good, "maxFeePerGas": "1", "gasPrice": "1"},
         ):
-            with pytest.raises(UniswapError):
+            with pytest.raises(ProviderError) as refused:
                 validate_transaction(bad)
-        fake.tx_to = "0xnope"
-        client = UniswapClient("test-key", http=http)
-        quote = await client.quote(
-            chain_id=8453, swapper=WALLET, token_in=USDC, token_out=WETH, amount_raw=5
-        )
-        with pytest.raises(UniswapError, match="valid 'to'"):
-            await client.swap(quote)
-
-    async def test_no_key(self, http: httpx.AsyncClient) -> None:
-        with pytest.raises(UniswapAuthError):
-            await UniswapClient("", http=http).check_approval(
-                chain_id=8453, wallet=WALLET, token=USDC, amount_raw=1
-            )
+            assert refused.value.code == "trading.tx_failed"
 
 
 class TestPriceService:
@@ -587,19 +430,98 @@ class TestPriceService:
     async def test_failed_token_list_download_is_retried_soon(
         self, svc: PriceService, fake: FakePrices
     ) -> None:
-        # A gateway that booted while CoinGecko was down answered "Unknown token
-        # symbol 'BONER' on Robinhood Chain" for a whole day: the empty list had
-        # been cached for TOKEN_LIST_TTL_S. An empty download is held briefly.
+        # A gateway that booted while the list was unreachable answered "Unknown
+        # token symbol 'BONER' on Robinhood Chain" for a whole day: the empty
+        # list had been cached. A failed download is held only briefly.
         saved = fake.lists.pop("robinhood")
         assert await svc.token_list(ROBINHOOD) == {}
         calls = len(fake.requests)
         assert await svc.token_list(ROBINHOOD) == {}
         assert len(fake.requests) == calls  # held: no hammering inside the hold
         fake.lists["robinhood"] = saved
-        svc.clock["now"] += TOKEN_LIST_EMPTY_HOLD_S + 1  # type: ignore[attr-defined]
+        svc.clock["now"] += RETRY_DELAYS_S[0] + 1  # type: ignore[attr-defined]
         tokens = await svc.token_list(ROBINHOOD)
         assert AAPL in tokens
         assert len(fake.requests) == calls + 1
+
+    async def test_token_list_merges_the_chain_and_stock_lists(
+        self, svc: PriceService, fake: FakePrices
+    ) -> None:
+        stock = "0xb200000000000000000000000000000000000001"
+        fake.stock_lists["base"] = [
+            {
+                "chainId": 8453,
+                "address": stock,
+                "symbol": "AAPLc",
+                "name": "Apple Inc.",
+                "decimals": 8,
+                "logoURI": "https://img/aaplc",
+                "tags": ["stock"],
+            },
+            # The chain's own list named USDC first: the stock list cannot
+            # rewrite its decimals, only lend it what it lacks.
+            {
+                "chainId": 8453,
+                "address": USDC,
+                "symbol": "FAKE",
+                "name": "Not USDC",
+                "decimals": 18,
+                "logoURI": "https://img/usdc",
+            },
+        ]
+        tokens = await svc.token_list(BASE)
+        asked = [r.url.path.rsplit("/", 1)[-1] for r in fake.requests]
+        assert asked == ["base_tokens.json", "base_stock_tokens.json"]
+        assert all(r.url.host == "raw.githubusercontent.com" for r in fake.requests)
+        # A Base stock carries no name suffix: the list's tag is what marks it.
+        assert tokens[stock].stock_token is True and tokens[stock].verified is True
+        assert tokens[stock].decimals == 8 and tokens[stock].logo_url == "https://img/aaplc"
+        assert (tokens[USDC].symbol, tokens[USDC].decimals) == ("USDC", 6)
+        assert tokens[USDC].logo_url == "https://img/usdc"
+        assert tokens[USDC].stock_token is False
+
+    async def test_token_list_picks_up_a_newer_version_without_a_restart(
+        self, svc: PriceService, fake: FakePrices
+    ) -> None:
+        fake.list_versions["base_tokens"] = (1, 0, 0)
+        first = await svc.token_list(BASE)
+        assert OTHER not in first
+        calls = len(fake.requests)
+        # Inside the re-check window nothing is asked, and the answer is the same object.
+        svc.clock["now"] += REVALIDATE_TTL_S - 1  # type: ignore[attr-defined]
+        assert await svc.token_list(BASE) is first
+        assert len(fake.requests) == calls
+
+        # Past it, an unchanged list costs a conditional request answered 304.
+        svc.clock["now"] += 2  # type: ignore[attr-defined]
+        assert await svc.token_list(BASE) is first  # answered at once, checked behind
+        await svc.token_lists.settle()
+        rechecks = fake.requests[calls:]
+        assert len(rechecks) == 2 and all(r.headers.get("if-none-match") for r in rechecks)
+        assert await svc.token_list(BASE) is first
+
+        # A new version of the list is published: the next re-check adopts it.
+        fake.lists["base"].append(
+            {"chainId": 8453, "address": OTHER, "symbol": "NEW", "name": "New", "decimals": 9}
+        )
+        fake.list_versions["base_tokens"] = (1, 0, 1)
+        svc.clock["now"] += REVALIDATE_TTL_S + 1  # type: ignore[attr-defined]
+        await svc.token_list(BASE)
+        await svc.token_lists.settle()
+        latest = await svc.token_list(BASE)
+        assert latest[OTHER].symbol == "NEW" and latest[OTHER].decimals == 9
+        assert (await svc.known_token(BASE, OTHER)) is latest[OTHER]
+
+    async def test_a_list_that_stops_answering_keeps_serving_its_held_copy(
+        self, svc: PriceService, fake: FakePrices
+    ) -> None:
+        first = await svc.token_list(ROBINHOOD)
+        assert AAPL in first
+        del fake.lists["robinhood"]
+        svc.clock["now"] += REVALIDATE_TTL_S + 1  # type: ignore[attr-defined]
+        assert await svc.token_list(ROBINHOOD) is first
+        await svc.token_lists.settle()
+        assert await svc.token_list(ROBINHOOD) is first
 
     async def test_search(self, svc: PriceService) -> None:
         rows = await svc.search(ROBINHOOD, "AAPL")

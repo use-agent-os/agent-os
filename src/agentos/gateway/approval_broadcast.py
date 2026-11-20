@@ -112,7 +112,7 @@ class ApprovalBroadcaster:
         try:
             await self._broadcast(event_name, payload)
         except Exception:
-            log.debug("approval_broadcast.send_failed", event=event_name, exc_info=True)
+            log.debug("approval_broadcast.send_failed", event_name=event_name, exc_info=True)
 
     async def drain(self) -> None:
         """Wait for the frames already handed to the loop (tests, shutdown)."""

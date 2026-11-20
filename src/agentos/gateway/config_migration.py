@@ -683,19 +683,26 @@ def migrate_config_payload(data: dict[str, Any]) -> ConfigMigrationResult:
 
     # 2026-09: the KyberSwap provider was removed and the AgentOS DEX
     # became the default. TradingConfig forbids extras, so an existing
-    # agentos.toml carrying `kyber_client_id` would fail validation at boot;
-    # and `provider = "kyber"` now names a provider that no longer exists.
-    # Both are rewritten rather than rejected, so an upgrade keeps trading.
+    # agentos.toml carrying `kyber_client_id` would fail validation at boot.
+    # It is dropped rather than rejected, so an upgrade keeps trading.
     trading_section = builder.payload.get("trading")
     if isinstance(trading_section, dict):
         if "kyber_client_id" in trading_section:
             trading_section.pop("kyber_client_id")
             builder.removed_fields.append("trading.kyber_client_id")
-        if str(trading_section.get("provider") or "").strip().lower() == "kyber":
-            trading_section["provider"] = DEFAULT_SWAP_PROVIDER
-            builder.changes.append(f"trading.provider: kyber -> {DEFAULT_SWAP_PROVIDER}")
+        # 2026-11: the Uniswap Trading API provider was removed too. The
+        # AgentOS DEX is the only swap route (it quotes Uniswap itself, as a
+        # second source), so there is no provider to name and no key to keep.
+        # The three keys are dropped rather than rejected; the backup this
+        # migration writes still holds the key.
+        previous = str(trading_section.get("provider") or "").strip().lower()
+        for leaf in ("provider", "uniswap_api_key", "uniswap_api_key_env"):
+            if leaf in trading_section:
+                trading_section.pop(leaf)
+                builder.removed_fields.append(f"trading.{leaf}")
+        if previous and previous != DEFAULT_SWAP_PROVIDER:
             builder.warnings.append(
-                "The KyberSwap provider was removed; swaps now route through the "
+                f"The {previous} swap provider was removed; swaps now route through the "
                 "AgentOS DEX, which needs no API key"
             )
 

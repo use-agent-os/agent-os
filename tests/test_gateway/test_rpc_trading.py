@@ -21,7 +21,6 @@ from tests.test_trading.fakes import (
     FakeChain,
     FakePrices,
     FakeRelay,
-    FakeUniswap,
     fake_sign_tx,
     make_transport,
 )
@@ -38,7 +37,6 @@ async def stack(tmp_path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[dict
     base.tokens[USDC] = ("USDC", "USD Coin", 6)
     base.tokens[WETH] = ("WETH", "Wrapped Ether", 18)
     robinhood = FakeChain(chain_id=4663, block=100)
-    uniswap = FakeUniswap()
     prices = FakePrices()
     prices.spot[("base", USDC)] = 1.0
     prices.spot[("base", WETH)] = 2000.0
@@ -55,12 +53,11 @@ async def stack(tmp_path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[dict
     relay = FakeRelay()
     transport = make_transport(
         chains={"mainnet.base.org": base, "rpc.mainnet.chain.robinhood.com": robinhood},
-        uniswap=uniswap,
         prices=prices,
         relay=relay,
     )
     config = GatewayConfig()
-    config.trading = TradingConfig(uniswap_api_key="test-key", price_ttl_seconds=1)
+    config.trading = TradingConfig(price_ttl_seconds=1)
     events: list[tuple[str, dict[str, Any]]] = []
 
     async def broadcast(event: str, payload: dict[str, Any]) -> None:
@@ -84,7 +81,6 @@ async def stack(tmp_path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[dict
                 "service": service,
                 "base": base,
                 "robinhood": robinhood,
-                "uniswap": uniswap,
                 "relay": relay,
                 "events": events,
                 "config": config,
@@ -226,17 +222,20 @@ class TestTradingRpc:
 
     async def test_status_probe_search_resolve(self, ctx: RpcContext) -> None:
         status = await call("trading.status", {}, ctx)
-        assert status.ok and status.payload["apiKeyConfigured"] is True
+        assert status.ok and "apiKeyConfigured" not in status.payload
+        assert status.payload["provider"] == "aggregator"
+        assert [p["id"] for p in status.payload["providers"]] == ["aggregator"]
         assert status.payload["limits"]["approvalThresholdUsd"] == 100.0
         probe = await call("trading.probe", {}, ctx)
         assert probe.payload["ok"] is True
         assert probe.payload["provider"] == "aggregator"
-        # A key is only ever checked for Uniswap; the default route has none.
-        uniswap = await call("trading.probe", {"provider": "uniswap"}, ctx)
-        assert uniswap.payload["ok"] is True
-        bad = await call("trading.probe", {"apiKey": "bad", "provider": "uniswap"}, ctx)
-        assert bad.payload["ok"] is False
-        assert (await call("trading.probe", {"provider": "kyber"}, ctx)).ok is False
+        # One route and no key: a provider or a key an older client still
+        # sends changes nothing about what is probed.
+        legacy = await call("trading.probe", {"provider": "uniswap", "apiKey": "old"}, ctx)
+        assert legacy.payload["ok"] is True and legacy.payload["provider"] == "aggregator"
+        # The provider can no longer be switched.
+        gone = await call("trading.setProvider", {"provider": "uniswap"}, ctx)
+        assert gone.ok is False
         search = await call("trading.tokens.search", {"chainId": 8453, "query": "USDC"}, ctx)
         assert search.payload["tokens"][0]["symbol"] == "USDC"
         assert (await call("trading.tokens.search", {"chainId": 8453}, ctx)).ok is False
@@ -348,14 +347,6 @@ class TestTradingRpc:
         assert (
             await call("trading.swap", {**base, "chainId": 999}, ctx)
         ).error.code == "trading.unsupported_chain"
-        no_key = dict(stack["config"].trading)
-        # Only the Uniswap route can be missing a key, so select it to test that.
-        stack["config"].trading.provider = "uniswap"
-        stack["config"].trading.uniswap_api_key = ""
-        res = await call("trading.swap", base, ctx)
-        assert res.ok is False and res.error.code == "trading.no_api_key"
-        stack["config"].trading.uniswap_api_key = no_key["uniswap_api_key"]
-        stack["config"].trading.provider = no_key["provider"]
 
 
 def _agent_ctx(stack: dict[str, Any], session_key: str = "agent:trading:webchat:t") -> RpcContext:
@@ -471,23 +462,18 @@ class TestAgentSurfaceRpc:
             res = await call(method, params, agent)
             assert res.ok, (method, res.error)
 
-    async def test_agent_probe_with_key_and_full_sync_are_operator_only(
+    async def test_agent_probe_is_a_read_and_full_sync_is_operator_only(
         self, ctx: RpcContext, stack: dict[str, Any]
     ) -> None:
         await self._funded(ctx, stack)
         agent = _agent_ctx(stack)
         # The plain forms are reads any client may do.
         assert (await call("trading.probe", {}, agent)).ok
-        assert (await call("trading.probe", {"provider": "uniswap"}, agent)).ok
         assert (await call("trading.sync", {}, agent)).payload == {"started": True}
-        # Testing a key that is not in config, or rebuilding the ledger, is not.
-        res = await call("trading.probe", {"apiKey": "guess", "provider": "uniswap"}, agent)
-        assert res.ok is False and res.error.code == "trading.operator_required"
-        assert "trading.probe(apiKey)" in res.error.message
+        # Rebuilding the ledger is not.
         res = await call("trading.sync", {"full": True}, agent)
         assert res.ok is False and res.error.code == "trading.operator_required"
         # The operator's connection still can.
-        assert (await call("trading.probe", {"apiKey": "k", "provider": "uniswap"}, ctx)).ok
         assert (await call("trading.sync", {"full": True}, ctx)).payload == {"started": True}
 
     async def test_agent_status_has_no_paths(self, ctx: RpcContext, stack: dict[str, Any]) -> None:
@@ -641,24 +627,23 @@ class TestConfig:
         cfg = TradingConfig()
         assert cfg.approval_threshold_usd == 100.0 and cfg.daily_cap_usd == 1000.0
         assert cfg.approval_ttl_seconds == 900 and cfg.unlock_mode == "auto"
-        assert cfg.resolved_uniswap_api_key() == ""
-        monkeypatch.setenv("UNISWAP_API_KEY", "from-env")
-        assert cfg.resolved_uniswap_api_key() == "from-env"
-        assert TradingConfig(uniswap_api_key="explicit").resolved_uniswap_api_key() == "explicit"
+        # One swap route and no key: neither is a setting any more.
+        assert not hasattr(cfg, "provider") and not hasattr(cfg, "uniswap_api_key")
+        with pytest.raises(ValueError):
+            TradingConfig(provider="uniswap")  # type: ignore[call-arg]
+        with pytest.raises(ValueError):
+            TradingConfig(uniswap_api_key="k")  # type: ignore[call-arg]
         monkeypatch.setenv("AGENTOS_TRADING_DAILY_CAP_USD", "50")
         assert TradingConfig().daily_cap_usd == 50.0
         with pytest.raises(ValueError):
             TradingConfig(approval_ttl_seconds=1)
 
-    def test_gateway_config_carries_trading_and_redacts_key(self) -> None:
-        from agentos.gateway.config import redact_public_config
-
+    def test_gateway_config_carries_trading_without_a_provider_or_a_key(self) -> None:
         cfg = GatewayConfig()
-        cfg.trading = TradingConfig(uniswap_api_key="sekret")
+        cfg.trading = TradingConfig(daily_cap_usd=250.0)
         data = cfg.to_toml_dict()
-        assert data["trading"]["uniswap_api_key"] == "sekret"
-        assert redact_public_config(data)["trading"]["uniswap_api_key"] == "[redacted]"
-        assert redact_public_config(data)["trading"]["uniswap_api_key_env"] == "UNISWAP_API_KEY"
+        assert data["trading"]["daily_cap_usd"] == 250.0
+        assert not {"provider", "uniswap_api_key", "uniswap_api_key_env"} & set(data["trading"])
 
 
 class TestSendAndToolsRpc:

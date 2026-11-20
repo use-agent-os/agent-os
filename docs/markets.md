@@ -58,36 +58,39 @@ Swap button would be decoration. Two engine changes land with the feature:
    entry still gets the empty set (refuse, never guess). Verified 2026-10-06:
    both 4663 addresses hold code (24 380 and 24 546 bytes).
 
-2. **Provider routing for Stock Tokens** (`trading/service.py`). The
-   aggregator (0x) refuses the 29 Stock Tokens for legal reasons
-   (`trading.token_not_tradeable`); the Uniswap Trading API quotes them
-   (checked: ETH→AAPL via a v4 0.08 % pool, NVDA→AI, NVDA→ORBIO). So:
+2. **Stock Token routing** (`trading/service.py`, `trading/aggregator.py`).
+   0x refuses the Stock Tokens for legal reasons
+   (`trading.token_not_tradeable`); Uniswap trades them (checked: ETH→AAPL
+   via a v4 0.08 % pool, NVDA→AI, NVDA→ORBIO). The AgentOS DEX carries
+   Uniswap as a second liquidity source, asked for with `source=uniswap` on
+   `/v1/quote` and executed through the same Router. So:
    - `quote`, `swap`, and every path that quotes for an order (DCA runs,
-     trigger fires, bracket legs) pick the provider **per pair**: when the
-     configured provider is the aggregator and either token is a Robinhood
-     Stock Token (`stock_token`), the Uniswap provider is used instead,
-     provided a Uniswap API key is configured. The quote dict and the order
-     row record `provider: "uniswap"` (the row's provider is what the fire
-     paths already read back).
-   - If the aggregator still answers `token_not_tradeable` for a pair the
-     flag missed, and a Uniswap key exists, the engine retries that one
-     quote through Uniswap. Without a key the original error is raised with
-     its message extended: *"Stock Tokens route through Uniswap: add a
-     Uniswap API key (`agentos config set trading.uniswap_api_key <key>`, or Settings › Trading in the desktop app)"* — the
-     exact wording lives in the engine, the desktop shows it verbatim.
-   - Nothing changes for pairs with no Stock Token; the configured provider
-     is still read on every call.
+     trigger fires, bracket legs, the re-quote at execution) name that
+     source when either token is a tokenized stock (`stock_token`). No
+     Uniswap API key is needed, and the quote dict and the order row say
+     `provider: "aggregator"`.
+   - Every other pair is asked the way it always was, with no `source`,
+     and answered by 0x.
+   - If 0x still answers `token_not_tradeable` for a pair the flag missed,
+     the engine asks the Uniswap source once for that quote.
+   - If the Uniswap source cannot take the pair (the gateway's
+     `SOURCE_UNAVAILABLE`), the DEX's error is returned as it is for a
+     stock, and 0x's `token_not_tradeable` for a pair the flag missed. The
+     AgentOS DEX is the only swap provider: there is no other to fall back
+     to, and no Uniswap API key to configure.
 
-3. **Stock Token detection** (`trading/prices.py`). CoinGecko caps `name`
-   at 60 characters, so long listings arrive as `… • Robinhood Toke` or
-   `… • Robinhood T`, and `name.endswith("• Robinhood Token")` misses them.
-   One helper `is_stock_token_name(name)` in `prices.py` replaces the three
-   suffix checks (`prices.py`, `service.py` ×2) with the regexes the skill
-   already uses (`robinhood-chain-stocks/scripts/chain_stocks.py`:
-   `_RH_SUFFIX_RE` + the truncation-tolerant form: a bullet followed by any
-   prefix of `Robinhood Token`). A name without the bullet is **not** a
-   Stock Token however it is spelt (` NVIDIA Robinhood Token ` is a
-   lookalike with a $649 k pool).
+3. **Stock Token detection** (`trading/prices.py`, `trading/token_lists.py`).
+   A row of a chain's stock list (`robinhood_stock_tokens.json`,
+   `base_stock_tokens.json` in the AgentOS
+   [token lists](https://github.com/use-agent-os/agent-os-token-list),
+   tagged `stock`) is a Stock Token. The ledger's own token rows keep no
+   tag, so a Robinhood Stock Token is also known by its name: one helper,
+   `is_stock_token_name(name)`, matches `… • Robinhood Token` and the
+   truncated forms an older registry stored (`… • Robinhood Toke`,
+   `… • Robinhood T`: a bullet followed by any prefix of `Robinhood Token`,
+   the regexes of `robinhood-chain-stocks/scripts/chain_stocks.py`). A name
+   without the bullet is **not** a Stock Token however it is spelt
+   (` NVIDIA Robinhood Token ` is a lookalike with a $649 k pool).
 
 ## Sources, and why in this order
 
@@ -139,7 +142,7 @@ async def markets(service, *, chain, target, side="all", min_tvl_usd=10_000.0,
   Lookalike counterparties are dropped and counted unless `lookalikes`
   (`counts.hiddenLookalikes`). A **lookalike** is a counterparty whose
   symbol (case-insensitive) or name (minus the suffix) matches a Stock
-  Token in the CoinGecko list but whose address is not that token's.
+  Token in the chain's token list but whose address is not that token's.
 - `side` filters to one section; `all` returns both. Rows are sorted by
   `tvlUsd` descending within each section.
 - Counterparty metadata comes from `included[]` first, then
@@ -402,9 +405,9 @@ paragraph quoted above), `CHANGELOG.md` under *Unreleased / Added*.
 - `is_stock_token_name`: `"NVIDIA • Robinhood Token"` → true,
   `"International Business Machines • Robinhood Toke"` → true,
   `" NVIDIA Robinhood Token "` → false, `"memestock TSLA"` → false.
-- Provider routing: aggregator configured + Stock Token on either side +
-  Uniswap key → the quote carries `provider: "uniswap"`; no key → the
-  `token_not_tradeable` error carries the Uniswap hint.
+- Routing: a Stock Token on either side → the quote is asked with
+  `source=uniswap` and carries `provider: "aggregator"`; no Uniswap key
+  exists or is needed.
 - Markets: a recorded GeckoTerminal page set for NVDA (fixture) yields
   `AI/NVDA` in `sections.quote` with `dex.label = "Bankr"`, `NVDA/USDG` in
   `sections.base` with `feePct = 0.01`, `viaUniswap = true`; a 429 on page

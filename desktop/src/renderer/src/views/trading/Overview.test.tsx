@@ -19,8 +19,6 @@ function render(
   opts: { loading?: boolean; syncing?: boolean; unpricedCount?: number } = {},
 ) {
   const onSync = vi.fn()
-  const onSwitchProvider = vi.fn()
-  const onOpenSettings = vi.fn()
   renderDesk(
     <Overview
       unpricedCount={opts.unpricedCount}
@@ -38,22 +36,9 @@ function render(
       now={Date.now()}
       onSync={onSync}
       loading={Boolean(opts.loading)}
-      provider="uniswap"
-      providers={[
-        {
-          id: 'aggregator',
-          label: 'AgentOS DEX',
-          needsKey: false,
-          keyConfigured: true,
-          healthy: null,
-        },
-        { id: 'uniswap', label: 'Uniswap', needsKey: true, keyConfigured: true, healthy: null },
-      ]}
-      onSwitchProvider={onSwitchProvider}
-      onOpenSettings={onOpenSettings}
     />,
   )
-  return { onSync, onSwitchProvider, onOpenSettings }
+  return { onSync }
 }
 
 describe('Overview · the desk head', () => {
@@ -81,35 +66,15 @@ describe('Overview · the desk head', () => {
     expect(legend).toHaveTextContent('WETH27.5%')
   })
 
-  it('says which venue routes, and re-syncs on demand', () => {
+  it('offers no choice of swap route, and re-syncs on demand', () => {
+    // Swaps go through the AgentOS DEX only: the head carries no venue pill
+    // and no menu to pick another provider from.
     const { onSync } = render()
-    expect(screen.getByTestId('provider-pill')).toHaveTextContent('Uniswap')
+    expect(screen.queryByTestId('provider-pill')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Swap provider/ })).toBeNull()
+    expect(document.querySelector('[aria-haspopup="menu"]')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Resync from chain' }))
     expect(onSync).toHaveBeenCalled()
-  })
-
-  it('switches the venue in place: the pill is the route’s menu button', () => {
-    // It used to be a label: changing the route meant leaving the desk for
-    // Settings, or finding the seat under the desk chat's composer.
-    const { onSwitchProvider, onOpenSettings } = render()
-    const pill = screen.getByRole('button', { name: 'Swap provider: Uniswap' })
-    expect(pill).toBe(screen.getByTestId('provider-pill'))
-    expect(pill).toHaveAttribute('aria-haspopup', 'menu')
-    expect(pill).toHaveAttribute('aria-expanded', 'false')
-
-    fireEvent.click(pill)
-    expect(pill).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('menuitemradio', { name: /^Uniswap/ })).toHaveAttribute(
-      'aria-checked',
-      'true',
-    )
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /^AgentOS DEX/ }))
-    expect(onSwitchProvider).toHaveBeenCalledWith('aggregator')
-    expect(screen.queryByRole('menu')).toBeNull()
-
-    fireEvent.click(pill)
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Provider settings…' }))
-    expect(onOpenSettings).toHaveBeenCalledTimes(1)
   })
 
   it('holds the shape of the head while the figures are still loading', () => {

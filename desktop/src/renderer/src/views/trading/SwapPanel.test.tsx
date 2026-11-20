@@ -19,9 +19,7 @@ function mount(extra: Partial<Parameters<typeof SwapPanel>[0]> = {}) {
       wallets={[WALLET]}
       primary={WALLET.address}
       selectedWallet="all"
-      provider="uniswap"
-      providerReady
-      onOpenSettings={vi.fn()}
+      provider="aggregator"
       unlocked
       prefill={{ chainId: 8453, tokenIn: ETH, tokenOut: USDC, seq: 1 }}
       onSent={vi.fn()}
@@ -125,9 +123,7 @@ describe('SwapPanel', () => {
         wallets={[WALLET]}
         primary={WALLET.address}
         selectedWallet="all"
-        provider="uniswap"
-        providerReady
-        onOpenSettings={vi.fn()}
+        provider="aggregator"
         unlocked
         prefill={prefill}
         onSent={vi.fn()}
@@ -243,22 +239,6 @@ describe('SwapPanel', () => {
       amountIn: '1',
       initiator: 'manual',
     })
-  })
-
-  it('cannot review without a Uniswap key or an unlocked vault', () => {
-    mount({ providerReady: false })
-    expect(screen.getByTestId('swap-review')).toHaveTextContent('Add a Uniswap key')
-    expect(rpcCall.mock.calls.some((c) => c[0] === 'trading.quote')).toBe(false)
-  })
-
-  it('opens Settings from the no-key button', () => {
-    const onOpenSettings = vi.fn()
-    mount({ provider: 'uniswap', providerReady: false, onOpenSettings })
-    const cta = screen.getByTestId('swap-review')
-    expect(cta).toHaveTextContent('Add a Uniswap key')
-    expect(cta).not.toBeDisabled()
-    fireEvent.click(cta)
-    expect(onOpenSettings).toHaveBeenCalledTimes(1)
   })
 
   it('keeps the vault gate closed: a locked vault is not something the ticket can open', () => {
@@ -385,9 +365,7 @@ describe('SwapPanel', () => {
         wallets={wallets}
         primary={WALLET.address}
         selectedWallet="all"
-        provider="uniswap"
-        providerReady
-        onOpenSettings={vi.fn()}
+        provider="aggregator"
         unlocked
         prefill={null}
         onSent={vi.fn()}
@@ -505,9 +483,13 @@ describe('SwapPanel · providers', () => {
     expect(screen.getByTestId('swap-review')).toBeDisabled()
   })
 
-  it('does not ask for a key when the aggregator is the provider', () => {
-    mount({ provider: 'aggregator', providerReady: true })
-    expect(screen.getByTestId('swap-review')).toHaveTextContent('Enter an amount')
+  it('has no provider gate: with a vault and a pair, the next step is the amount', () => {
+    // Swaps go through the AgentOS DEX, which needs no key: nothing about a
+    // provider can stand between the ticket and a quote.
+    mount()
+    const cta = screen.getByTestId('swap-review')
+    expect(cta).toHaveTextContent('Enter an amount')
+    expect(cta).not.toHaveTextContent(/Uniswap|provider|key/i)
   })
 })
 

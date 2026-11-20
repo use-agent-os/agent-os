@@ -82,15 +82,17 @@ def _quote_body(*, spender: str, target: str, approve_amount: int, amount_needed
 class TestRegistry:
     def test_aggregator_is_the_default_and_comes_first(self) -> None:
         assert DEFAULT_PROVIDER_ID == "aggregator"
-        assert PROVIDER_IDS[0] == "aggregator"
-        assert PROVIDER_IDS == ("aggregator", "uniswap")
+        # The AgentOS DEX is the only swap provider.
+        assert PROVIDER_IDS == ("aggregator",)
         assert provider_label("aggregator") == "AgentOS DEX"
-        assert "kyber" not in PROVIDER_IDS
+        # Rows the removed Uniswap provider filled keep a readable label.
+        assert provider_label("uniswap") == "Uniswap"
 
-    def test_config_default_matches_the_registry(self) -> None:
+    def test_the_provider_is_not_a_setting(self) -> None:
         from agentos.gateway.config import TradingConfig
 
-        assert TradingConfig().provider == DEFAULT_PROVIDER_ID
+        assert "provider" not in TradingConfig.model_fields
+        assert "uniswap_api_key" not in TradingConfig.model_fields
 
     def test_slippage_is_clamped_to_what_the_api_accepts(self) -> None:
         assert slippage_to_bps(None) == 50
@@ -132,6 +134,47 @@ class TestRequestShape:
         assert quote.token_out == NATIVE_ADDRESS
         assert quote.routing == "Uniswap_V4"
         assert quote.slippage_pct == 1.0
+        # 0x is the default source and is asked by naming none.
+        assert "source" not in params and quote.raw.source is None
+
+    @pytest.mark.parametrize(
+        ("source", "sent"), [("uniswap", "uniswap"), (" Uniswap ", "uniswap"), ("0x", None)]
+    )
+    async def test_a_named_source_travels_as_the_source_parameter(
+        self, http, fake_aggregator: FakeAggregator, source: str, sent: str | None
+    ) -> None:
+        quote = await _provider(http).quote(
+            chain=ROBINHOOD,
+            swapper="0x1111111111111111111111111111111111111111",
+            token_in="0xaaaa000000000000000000000000000000000001",
+            token_out=NATIVE_ADDRESS,
+            amount_raw=10**18,
+            slippage_pct=None,
+            decision_origin="human_mediated",
+            source=source,
+        )
+        params = dict(fake_aggregator.requests[-1].url.params)
+        assert params.get("source") == sent
+        assert quote.raw.source == sent
+        # Whichever source answered, it is one provider with one set of pins.
+        assert quote.provider == "aggregator"
+
+    async def test_an_unknown_source_never_reaches_the_network(
+        self, http, fake_aggregator: FakeAggregator
+    ) -> None:
+        with pytest.raises(ProviderError) as info:
+            await _provider(http).quote(
+                chain=BASE,
+                swapper="0x1111111111111111111111111111111111111111",
+                token_in=USDC,
+                token_out=WETH,
+                amount_raw=10**6,
+                slippage_pct=None,
+                decision_origin="human_mediated",
+                source="kyber",
+            )
+        assert info.value.code == "trading.invalid"
+        assert fake_aggregator.requests == []
 
     async def test_an_out_of_range_slippage_is_clamped_and_said_so(self, http) -> None:
         quote = await _provider(http).quote(
@@ -175,6 +218,7 @@ class TestRefusals:
             ("UPSTREAM_REJECTED", 400, "trading.provider", False),
             ("UPSTREAM_ERROR", 502, "trading.provider", True),
             ("MISCONFIGURED", 503, "trading.provider", False),
+            ("SOURCE_UNAVAILABLE", 503, "trading.provider", False),
         ],
     )
     async def test_every_error_code_maps_to_one_of_ours(
@@ -481,17 +525,38 @@ class TestFreshness:
         )
         assert fake_aggregator.quotes == 1
         # A fresh quote is built from what it already has.
-        tx = await provider.build(quote, deadline=0, sign_permit=None, decision_origin="autonomous")
+        tx = await provider.build(quote, deadline=0, decision_origin="autonomous")
         assert fake_aggregator.quotes == 1
         assert tx["to"] == ALLOWANCE_HOLDER and tx["data"].startswith("0x2213bc0b")
         assert tx["gasLimit"] == str(int(288079 * 1.2))
         # A lapsed one is fetched again rather than broadcast.
         quote.fetched_at -= 120
         fake_aggregator.amount_out = 4_000_000_000_000_000
-        await provider.build(quote, deadline=0, sign_permit=None, decision_origin="autonomous")
+        await provider.build(quote, deadline=0, decision_origin="autonomous")
         assert fake_aggregator.quotes == 2
         assert quote.amount_out_raw == 4_000_000_000_000_000
         assert quote.min_out_raw == 4_000_000_000_000_000 * 995 // 1000
+        assert fake_aggregator.sources == ["0x", "0x"]
+
+    async def test_build_refetches_from_the_source_that_priced_the_order(
+        self, http, fake_aggregator
+    ) -> None:
+        provider = _provider(http)
+        quote = await provider.quote(
+            chain=BASE,
+            swapper="0x1111111111111111111111111111111111111111",
+            token_in=USDC,
+            token_out=WETH,
+            amount_raw=10**6,
+            slippage_pct=None,
+            decision_origin="human_mediated",
+            source="uniswap",
+        )
+        quote.fetched_at -= 120
+        await provider.build(quote, deadline=0, decision_origin="autonomous")
+        # A lapsed Uniswap quote re-fetched from 0x would be refused for a stock.
+        assert fake_aggregator.sources == ["uniswap", "uniswap"]
+        assert quote.raw.source == "uniswap"
 
 
 class TestThroughTheService:
@@ -500,7 +565,6 @@ class TestThroughTheService:
         funded_service: TradingService,
         base_chain: FakeChain,
         fake_aggregator: FakeAggregator,
-        fake_uniswap,
     ) -> None:
         from tests.test_trading.test_service import _wire_swap_effects
 
@@ -535,7 +599,6 @@ class TestThroughTheService:
         assert approval_tx["to"].lower() == USDC
         assert swap_tx["to"].lower() == ALLOWANCE_HOLDER and swap_tx["value"] == 0
         # Uniswap was never consulted.
-        assert fake_uniswap.requests == []
         # And the calldata went out byte for byte as the aggregator sent it.
         assert swap_tx["data"] == fake_aggregator.tx_data
 
@@ -583,16 +646,14 @@ class TestThroughTheService:
         )
         assert quote["swapFee"] is None
 
-    async def test_status_lists_the_aggregator_first_and_active(
-        self, funded_service: TradingService
-    ) -> None:
+    async def test_status_lists_the_one_provider(self, funded_service: TradingService) -> None:
         status = await funded_service.status(check_rpc=True)
         assert status["provider"] == "aggregator"
         rows = status["providers"]
-        assert [r["id"] for r in rows] == ["aggregator", "uniswap"]
+        assert [r["id"] for r in rows] == ["aggregator"]
         assert rows[0]["active"] is True and rows[0]["needsKey"] is False
         assert rows[0]["healthy"] is True
-        assert rows[1]["active"] is False and rows[1]["needsKey"] is True
+        assert "apiKeyConfigured" not in status
         # The geo-block flag went with KyberSwap; nothing reports one now.
         assert "blocked" not in rows[0]
         assert json.dumps(status)  # the whole payload stays JSON-serialisable
