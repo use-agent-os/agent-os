@@ -7,6 +7,9 @@ import { projects } from './en/projects'
 import { quickAsk } from './en/quick-ask'
 import { sessions } from './en/sessions'
 import { settings } from './en/settings'
+import { capabilities } from './en/settings-capabilities'
+import { memory } from './en/settings-memory'
+import { overview } from './en/settings-overview'
 import { setup } from './en/setup'
 import { shell } from './en/shell'
 import { skills } from './en/skills'
@@ -21,6 +24,9 @@ const en = {
   ...projects,
   ...sessions,
   ...settings,
+  ...overview,
+  ...memory,
+  ...capabilities,
   ...setup,
   ...notifications,
   ...trading,

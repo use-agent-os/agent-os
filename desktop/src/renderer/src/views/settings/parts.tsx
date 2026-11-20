@@ -1,18 +1,32 @@
-import { AlertTriangle, CheckCircle2, Info, XCircle } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { AlertTriangle, Check, CheckCircle2, ChevronRight, Info, XCircle } from 'lucide-react'
+import { useId, useState, type ReactNode } from 'react'
 
 /**
  * The vocabulary every section is written in: a page head, a card with its
  * title inside, a row with a label column and a control column, a segmented
- * control, a pill, a notice. Visuals live in settings.css (.stg-*) and
+ * control, a pill, a notice; and for the composed pages a strip of summary
+ * stats, in-page tabs, choice cards, a meter, a disclosure and an empty
+ * state. Visuals live in settings.css (.stg-*) and
  * tokens.css (.mac-*).
  */
 
-export function Head({ title, blurb }: { title: string; blurb?: string }) {
+export function Head({
+  title,
+  blurb,
+  action,
+}: {
+  title: string
+  blurb?: string
+  /** Right of the title: the page's one primary action, or a status pill. */
+  action?: ReactNode
+}) {
   return (
     <header className="stg-head">
-      <h1>{title}</h1>
-      {blurb ? <p>{blurb}</p> : null}
+      <div>
+        <h1>{title}</h1>
+        {blurb ? <p>{blurb}</p> : null}
+      </div>
+      {action ? <div className="stg-head__action">{action}</div> : null}
     </header>
   )
 }
@@ -190,5 +204,249 @@ export function Pill({
     <span className="stg-pill" data-tone={tone} data-pulse={pulse ? 'true' : undefined}>
       {children}
     </span>
+  )
+}
+
+/**
+ * The page's numbers at a glance: one strip of figures instead of a card of
+ * rows that each hold a single number. A stat with `onClick` is a button
+ * (jump to the list it counts).
+ */
+export function Stats({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="stg-stats" role="group" aria-label={label}>
+      {children}
+    </div>
+  )
+}
+
+export function Stat({
+  label,
+  value,
+  hint,
+  tone,
+  icon,
+  onClick,
+}: {
+  label: string
+  value: ReactNode
+  /** Small text under the label: what the figure means, or its unit. */
+  hint?: ReactNode
+  tone?: Tone
+  icon?: ReactNode
+  onClick?: () => void
+}) {
+  const body = (
+    <>
+      <span className="stg-stat__value" data-tone={tone}>
+        {icon}
+        {value}
+      </span>
+      <span className="stg-stat__label">{label}</span>
+      {hint ? <span className="stg-stat__hint">{hint}</span> : null}
+    </>
+  )
+  return onClick ? (
+    <button type="button" className="stg-stat app-no-drag" onClick={onClick}>
+      {body}
+    </button>
+  ) : (
+    <div className="stg-stat">{body}</div>
+  )
+}
+
+/** In-page tabs for a section with more than one job (Memory). */
+export function Tabs<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: T
+  options: readonly { value: T; label: string; icon?: ReactNode; count?: number }[]
+  onChange: (value: T) => void
+}) {
+  function onKey(e: React.KeyboardEvent) {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
+    const i = options.findIndex((o) => o.value === value)
+    const next = options[(i + (e.key === 'ArrowRight' ? 1 : options.length - 1)) % options.length]
+    if (!next) return
+    e.preventDefault()
+    onChange(next.value)
+    const tabs = e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')
+    tabs[options.indexOf(next)]?.focus()
+  }
+  return (
+    <div role="tablist" aria-label={label} className="stg-tabs" onKeyDown={onKey}>
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          role="tab"
+          aria-selected={opt.value === value}
+          tabIndex={opt.value === value ? 0 : -1}
+          className="stg-tab app-no-drag"
+          onClick={() => onChange(opt.value)}
+        >
+          {opt.icon}
+          {opt.label}
+          {opt.count !== undefined ? <span className="stg-tab__count">{opt.count}</span> : null}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+export interface ChoiceOption<T extends string> {
+  value: T
+  title: string
+  blurb?: string
+  icon?: ReactNode
+  /** A short tag next to the title: Recommended, Local, Needs a key. */
+  tag?: string
+  tagTone?: Tone
+  disabled?: boolean
+}
+
+/**
+ * Pick one of a few options that each need a sentence to explain: cards in a
+ * radio group rather than a select whose options hide their meaning.
+ */
+export function Choices<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  columns = 2,
+  disabled,
+}: {
+  label: string
+  value: T | null
+  options: readonly ChoiceOption<T>[]
+  onChange: (value: T) => void
+  columns?: 1 | 2 | 3
+  disabled?: boolean
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="stg-choices" data-columns={columns}>
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          role="radio"
+          aria-checked={opt.value === value}
+          disabled={disabled || opt.disabled}
+          className="stg-choice app-no-drag"
+          onClick={() => onChange(opt.value)}
+        >
+          {opt.icon ? <span className="stg-choice__icon">{opt.icon}</span> : null}
+          <span className="stg-choice__text">
+            <span className="stg-choice__title">
+              {opt.title}
+              {opt.tag ? (
+                <span className="stg-choice__tag" data-tone={opt.tagTone}>
+                  {opt.tag}
+                </span>
+              ) : null}
+            </span>
+            {opt.blurb ? <span className="stg-choice__blurb">{opt.blurb}</span> : null}
+          </span>
+          <span className="stg-choice__check" aria-hidden>
+            <Check className="size-3" strokeWidth={3} />
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** A budget: how much of a limit is used. Turns amber near the top, red at it. */
+export function Meter({
+  label,
+  value,
+  max,
+  caption,
+}: {
+  label: string
+  value: number
+  max: number
+  /** Right of the label: "1,240 of 4,000 characters". */
+  caption?: ReactNode
+}) {
+  const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0
+  const tone = pct >= 100 ? 'danger' : pct >= 85 ? 'warn' : undefined
+  return (
+    <div className="stg-meter" data-tone={tone}>
+      <div className="stg-meter__text">
+        <span>{label}</span>
+        {caption ? <span className="stg-meter__caption">{caption}</span> : null}
+      </div>
+      <div
+        className="stg-meter__track"
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+      >
+        <div className="stg-meter__fill" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
+
+/** Rows most people never need, folded under one line inside a card. */
+export function Disclosure({
+  title,
+  hint,
+  children,
+  defaultOpen = false,
+}: {
+  title: string
+  /** Right of the title while closed: what is inside, or the current values. */
+  hint?: ReactNode
+  children: ReactNode
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  const id = useId()
+  return (
+    <div className="stg-disclosure" data-open={open ? 'true' : undefined}>
+      <button
+        type="button"
+        className="stg-disclosure__summary app-no-drag"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <ChevronRight className="size-3.5" strokeWidth={2} aria-hidden />
+        <span>{title}</span>
+        {hint && !open ? <span className="stg-disclosure__hint">{hint}</span> : null}
+      </button>
+      {open ? <div id={id}>{children}</div> : null}
+    </div>
+  )
+}
+
+/** Nothing here yet: say what would be here and offer the way to add it. */
+export function Empty({
+  icon,
+  title,
+  body,
+  action,
+}: {
+  icon?: ReactNode
+  title: string
+  body?: ReactNode
+  action?: ReactNode
+}) {
+  return (
+    <div className="stg-empty">
+      {icon ? <span className="stg-empty__icon">{icon}</span> : null}
+      <p className="stg-empty__title">{title}</p>
+      {body ? <p className="stg-empty__body">{body}</p> : null}
+      {action ? <div className="stg-empty__action">{action}</div> : null}
+    </div>
   )
 }

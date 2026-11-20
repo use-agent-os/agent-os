@@ -21,10 +21,43 @@ export const settings = {
   'settings.writeBlocked':
     'config.toml changed outside AgentOS. Restart the gateway before editing here.',
 
+  'settings.search': 'Search settings',
+  'settings.search.empty': 'No section matches.',
+  'settings.needsAttention': 'Needs attention',
+  'settings.advanced': 'Advanced',
+
+  'settings.group.start': 'Start',
   'settings.group.agent': 'Agent',
   'settings.group.app': 'App',
   'settings.group.more': 'More',
 
+  'settings.section.overview': 'Overview',
+  'settings.section.overview.blurb': 'What is set up, and what is still missing.',
+  'settings.section.overview.keywords': 'setup checklist status start onboarding ready',
+  'settings.section.memory': 'Memory',
+  'settings.section.memory.blurb':
+    'What the agent remembers about you and your work, and how it finds it again.',
+  'settings.section.memory.keywords':
+    'remember facts recall embedding knowledge base documents search index forget MEMORY.md USER.md',
+  'settings.section.capabilities': 'Capabilities',
+  'settings.section.capabilities.blurb':
+    'Web search, image generation and voice: the services the agent reaches for.',
+  'settings.section.capabilities.keywords':
+    'web search image generation voice audio speech tts stt brave tavily',
+  'settings.section.providers.keywords': 'model llm api key openai anthropic ollama endpoint',
+  'settings.section.router.keywords': 'pilot router tier model thinking routing cost',
+  'settings.section.skills.keywords': 'skills catalog install library',
+  'settings.section.channels.keywords': 'telegram discord slack bot messaging pairing',
+  'settings.section.environment.keywords': 'env variable secret credential api key .env',
+  'settings.section.trading.keywords': 'wallet swap rpc chain guardrail aggregator',
+  'settings.section.gateway.keywords': 'gateway port host token managed external process',
+  'settings.section.appearance.keywords': 'theme palette dark light scale pet transparency',
+  'settings.section.notifications.keywords': 'notification sound badge banner mute',
+  'settings.section.security.keywords': 'touch id fingerprint approval confirm',
+  'settings.section.behaviour.keywords': 'login launch quick ask enter send menu bar sidebar',
+  'settings.section.shortcuts.keywords': 'keyboard shortcut hotkey keys',
+  'settings.section.advanced.keywords': 'logs diagnostics config file reset reinstall uninstall',
+  'settings.section.about.keywords': 'version update engine release',
   'settings.section.providers': 'Providers',
   'settings.section.providers.blurb':
     'Who answers your messages, with which credentials, and the model it falls back to.',
