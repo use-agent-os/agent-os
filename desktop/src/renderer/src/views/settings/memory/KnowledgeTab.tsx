@@ -26,6 +26,7 @@ import {
   uploadVerdict,
   type UploadVerdict,
 } from './logic'
+import { refocus, rowButtonAt } from './focus'
 import { Confirm, Sheet, Spinner, counted, fill } from './ui'
 
 interface IngestResult {
@@ -89,9 +90,29 @@ function DocumentsCard({ onView }: { onView: (path: string) => void }) {
   const [removing, setRemoving] = useState<string | null>(null)
   const [path, setPath] = useState('')
   const pathId = useId()
+  const box = useRef<HTMLDivElement>(null)
   const busy = uploading !== null || action.busy !== null
   const disabled = !connected || busy
   const list = docs.data ?? []
+
+  /** A document's row (its name, which opens it), by path. */
+  function docButton(docPath: string): HTMLElement | null {
+    const name = documentName(docPath)
+    const row = Array.from(
+      box.current?.querySelectorAll<HTMLElement>('li.mem-file-row') ?? [],
+    ).find((li) => li.querySelector('.mem-file-row__name')?.textContent === name)
+    return row?.querySelector<HTMLElement>('button') ?? null
+  }
+
+  /** Choose files: the header one, or the empty state's. */
+  function chooseButton(): HTMLElement | null {
+    const card = box.current?.closest('section')
+    return (
+      card?.querySelector<HTMLElement>('.stg-card__head button') ??
+      box.current?.querySelector<HTMLElement>('.stg-empty button') ??
+      null
+    )
+  }
 
   /** Files waiting for a yes before they replace documents of the same name. */
   const [replacing, setReplacing] = useState<
@@ -122,6 +143,7 @@ function DocumentsCard({ onView }: { onView: (path: string) => void }) {
   async function upload(files: File[], replaced: ReadonlySet<string>) {
     let added = 0
     let swapped = 0
+    let last: string | null = null
     for (const file of files) {
       setUploading(file.name)
       const res = await action.run('ingest', async () =>
@@ -139,11 +161,17 @@ function DocumentsCard({ onView }: { onView: (path: string) => void }) {
       } else if (res) {
         if (replaced.has(file.name)) swapped += 1
         else added += 1
+        last = file.name
       }
     }
     setUploading(null)
     const done = addedToast(added, swapped)
     if (done) toast.success(done, { id: 'stg-memory-docs' })
+    // Choose files was greyed out while adding: land on what was added.
+    refocus(
+      box.current,
+      () => (last ? docButton(`knowledge_base/${last}`) : null) ?? chooseButton(),
+    )
   }
 
   function startPath() {
@@ -175,6 +203,11 @@ function DocumentsCard({ onView }: { onView: (path: string) => void }) {
     }
     if (ok > 0) {
       setPath('')
+      const first = results.find((r) => r.status !== 'error')?.path
+      refocus(
+        box.current,
+        () => (first ? docButton(first) : null) ?? document.getElementById(pathId),
+      )
       // One file over one document is a replacement; a folder merge is told as added.
       const single = replaces && ok === 1 && results.length === 1
       toast.success(addedToast(single ? 0 : ok, single ? 1 : 0)!, { id: 'stg-memory-docs' })
@@ -192,6 +225,7 @@ function DocumentsCard({ onView }: { onView: (path: string) => void }) {
   }
 
   async function remove(doc: string) {
+    const at = list.findIndex((d) => d.path === doc)
     const done = await action.run('remove', async () => {
       await action.rpc.call('memory.knowledge_base.remove', { agentId: AGENT_ID, path: doc })
       return true
@@ -202,6 +236,12 @@ function DocumentsCard({ onView }: { onView: (path: string) => void }) {
       })
     }
     setRemoving(null)
+    // Its row goes: land on the next document, else the one before, else Choose files.
+    refocus(box.current, () =>
+      done
+        ? (rowButtonAt(box.current, 'li.mem-file-row', Math.max(0, at)) ?? chooseButton())
+        : (docButton(doc) ?? chooseButton()),
+    )
   }
 
   function onDrag(e: DragEvent) {
@@ -258,7 +298,7 @@ function DocumentsCard({ onView }: { onView: (path: string) => void }) {
           aria-label={t('settings.memory.docs.choose')}
           onChange={(e) => chooseFiles(Array.from(e.target.files ?? []))}
         />
-        <div className="mem-docs">
+        <div className="mem-docs" ref={box}>
           {!connected ? (
             <p className="mem-quiet">{t('settings.memory.offlineList')}</p>
           ) : docs.isPending ? (

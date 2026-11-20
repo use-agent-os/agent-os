@@ -13,7 +13,8 @@ import {
   useMemoryAction,
   useRefreshWhenShown,
 } from './api'
-import { AGENT_ID, factFailure, factRoom, splitsIntoFacts } from './logic'
+import { factRowButton, refocus, rowButtonAt } from './focus'
+import { AGENT_ID, factFailure, factRoom, separatorProblem } from './logic'
 import { useMemoryTab } from './tab-store'
 import { Confirm, Spinner, count, counted, fill } from './ui'
 
@@ -83,6 +84,7 @@ function FactsCard({ target }: { target: Target }) {
   const [removing, setRemoving] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const filterId = useId()
+  const box = useRef<HTMLDivElement>(null)
   const data = query.data
   const entries = data?.entries ?? []
   const blocked = !connected || Boolean(data?.loadFailed)
@@ -117,10 +119,32 @@ function FactsCard({ target }: { target: Target }) {
     if (done) {
       toast.success(t('settings.memory.saved'), { id: `stg-memory-fact-${target}` })
       setEditing(null)
+      // The editor goes: land on the saved fact's row.
+      refocus(box.current, () => factRowButton(box.current, content) ?? addButton())
     }
   }
 
+  /** Close the editor and go back to where it was opened from. */
+  function cancel() {
+    const from = editing
+    setEditing(null)
+    refocus(box.current, () =>
+      from?.mode === 'edit' ? (factRowButton(box.current, from.entry) ?? addButton()) : addButton(),
+    )
+  }
+
+  /** The list's Add button: the header one, or the empty state's. */
+  function addButton(): HTMLElement | null {
+    const card = box.current?.closest('section')
+    return (
+      card?.querySelector<HTMLElement>(`button[aria-label="${CSS.escape(addLabel)}"]`) ??
+      box.current?.querySelector<HTMLElement>('.stg-empty button') ??
+      null
+    )
+  }
+
   async function remove(entry: string) {
+    const at = shown.indexOf(entry)
     const done = await action.run(
       'remove',
       async () => {
@@ -135,8 +159,18 @@ function FactsCard({ target }: { target: Target }) {
     )
     if (done) toast.success(t('settings.memory.removed'), { id: `stg-memory-fact-${target}` })
     setRemoving(null)
+    // The row (or, on failure, the list as it was) goes: land on the next
+    // row, else the one before, else Add.
+    refocus(box.current, () =>
+      done
+        ? (rowButtonAt(box.current, 'li.mem-fact', Math.max(0, at)) ?? addButton())
+        : (factRowButton(box.current, entry) ??
+          rowButtonAt(box.current, 'li.mem-fact', 0) ??
+          addButton()),
+    )
   }
 
+  const addLabel = fill('settings.memory.addTo', { list: t(copy.title) })
   const used = data?.charCount ?? 0
   const limit = data?.charLimit ?? 0
   // Full means not even a one-character fact fits after the break before it.
@@ -156,7 +190,7 @@ function FactsCard({ target }: { target: Target }) {
         saveLabel={gone ? t('settings.memory.saveAsNew') : undefined}
         busy={action.busy === 'save'}
         onText={setText}
-        onCancel={() => setEditing(null)}
+        onCancel={cancel}
         onSave={() => void save()}
       />
     ) : null
@@ -178,7 +212,7 @@ function FactsCard({ target }: { target: Target }) {
         entries.length > 0 || editing ? (
           <Button
             disabled={blocked || editing !== null || full}
-            aria-label={fill('settings.memory.addTo', { list: t(copy.title) })}
+            aria-label={addLabel}
             title={full ? t('settings.memory.full.add') : undefined}
             onClick={() => setEditing({ mode: 'add', text: '' })}
           >
@@ -188,7 +222,7 @@ function FactsCard({ target }: { target: Target }) {
         ) : undefined
       }
     >
-      <div className="mem-facts">
+      <div className="mem-facts" ref={box}>
         {!connected ? (
           <p className="mem-quiet">{t('settings.memory.offlineList')}</p>
         ) : query.isPending ? (
@@ -223,7 +257,11 @@ function FactsCard({ target }: { target: Target }) {
               <Notice
                 tone="danger"
                 action={
-                  <Button onClick={() => setTab('setup')}>{t('settings.memory.full.raise')}</Button>
+                  <Button
+                    onClick={() => setTab('setup', target === 'user' ? 'limit-you' : 'limit-work')}
+                  >
+                    {t('settings.memory.full.raise')}
+                  </Button>
                 }
               >
                 {t('settings.memory.full')}
@@ -376,13 +414,15 @@ function FactEditor({
   }, [])
 
   const content = text.trim()
-  const split = content !== '' && splitsIntoFacts(content)
+  const separator = separatorProblem(text)
+  const split = separator !== null
   const over = room !== null && content ? content.length - room : 0
   const unchanged = content === initial.trim()
   const canSave = !busy && content !== '' && !unchanged && over <= 0 && !split
 
   let hint: string
-  if (split) hint = t('settings.memory.editor.split')
+  if (separator === 'bare') hint = t('settings.memory.editor.bare')
+  else if (separator === 'line') hint = t('settings.memory.editor.split')
   else if (over > 0)
     hint = fill(
       breakCounted ? 'settings.memory.editor.over.break' : 'settings.memory.editor.over',

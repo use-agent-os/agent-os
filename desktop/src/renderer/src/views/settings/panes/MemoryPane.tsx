@@ -19,7 +19,10 @@ import { count, fill } from '../memory/ui'
  * Settings › Memory: what the agent remembers (two lists you can edit), the
  * documents it can look things up in, a search to test what it would find,
  * and the setup of how memory is searched, recalled and learned. Every tab
- * stays mounted so an edit in one is never lost by visiting another.
+ * stays mounted so an edit in one is never lost by visiting another; a
+ * hidden tab is also inert, so the sheet's focus trap (which reads the
+ * focusable controls by selector) does not take a hidden control for its
+ * first or last stop and let Tab out of the sheet.
  */
 export function MemoryPane() {
   const connected = useConnected()
@@ -140,6 +143,7 @@ export function MemoryPane() {
         className="mem-panel"
         aria-label={t('settings.memory.tab.remembered')}
         hidden={tab !== 'remembered'}
+        inert={tab !== 'remembered'}
       >
         <RememberedTab active={tab === 'remembered'} />
       </div>
@@ -148,6 +152,7 @@ export function MemoryPane() {
         className="mem-panel"
         aria-label={t('settings.memory.tab.knowledge')}
         hidden={tab !== 'knowledge'}
+        inert={tab !== 'knowledge'}
       >
         <KnowledgeTab active={tab === 'knowledge'} />
       </div>
@@ -156,6 +161,7 @@ export function MemoryPane() {
         className="mem-panel"
         aria-label={t('settings.memory.tab.try')}
         hidden={tab !== 'try'}
+        inert={tab !== 'try'}
       >
         <TryTab kind={kind} sessionsIndexed={sessionsIndexed} />
       </div>
@@ -164,6 +170,7 @@ export function MemoryPane() {
         className="mem-panel"
         aria-label={t('settings.memory.tab.setup')}
         hidden={tab !== 'setup'}
+        inert={tab !== 'setup'}
       >
         <SetupTab active={tab === 'setup'} />
       </div>

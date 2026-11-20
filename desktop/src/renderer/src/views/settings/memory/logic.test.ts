@@ -32,7 +32,7 @@ import {
   savedEmbeddingProvider,
   searchKind,
   seedEmbedding,
-  splitsIntoFacts,
+  separatorProblem,
   uploadVerdict,
   type EmbeddingDraft,
   type EmbeddingKeyContext,
@@ -387,15 +387,22 @@ describe('facts, documents, recall records, forget', () => {
     expect(factRoom(['abc'], 100, 'abc')).toBe(100)
   })
 
-  it('spots text the file would store as more than one fact, as the gateway does', () => {
-    expect(splitsIntoFacts('First part\n§\nsecond part')).toBe(true)
-    expect(splitsIntoFacts('Ends badly\n§')).toBe(true)
-    expect(splitsIntoFacts('Line one\r\n§\r\nline two')).toBe(true)
-    // A § inside a line, an indented one, or a bare § is harmless.
-    expect(splitsIntoFacts('Costs 5§ per unit')).toBe(false)
-    expect(splitsIntoFacts('a\n  §  x\nb')).toBe(false)
-    expect(splitsIntoFacts('§')).toBe(false)
-    expect(splitsIntoFacts('Plain fact.')).toBe(false)
+  it('refuses a fact that reads like the separator between facts', () => {
+    expect(separatorProblem('First part\n§\nsecond part')).toBe('line')
+    expect(separatorProblem('Ends badly\n§')).toBe('line')
+    expect(separatorProblem('§\nStarts badly')).toBe('line')
+    expect(separatorProblem('Line one\r\n§\r\nline two')).toBe('line')
+    expect(separatorProblem('a\n  §  \nb')).toBe('line')
+    // Only "§", with or without spaces or blank lines around it.
+    expect(separatorProblem('§')).toBe('bare')
+    expect(separatorProblem('§ ')).toBe('bare')
+    expect(separatorProblem('  \n  §\t\n ')).toBe('bare')
+    // A § with words on its line is just a character.
+    expect(separatorProblem('Costs 5§ per unit')).toBe(null)
+    expect(separatorProblem('a\n  §  x\nb')).toBe(null)
+    expect(separatorProblem('§§')).toBe(null)
+    expect(separatorProblem('Plain fact.')).toBe(null)
+    expect(separatorProblem('   ')).toBe(null)
   })
 
   it('reads why the gateway refused a fact write', () => {

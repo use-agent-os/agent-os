@@ -14,6 +14,7 @@ import { useConfigSnapshot, withRevision } from '../use-snapshot'
 import { MEMORY_KEY, reportSaveError, useConnected, useFacts, useMemoryAction } from './api'
 import { useDraft } from './drafts'
 import { EmbeddingCard } from './EmbeddingCard'
+import { cardControl, refocus, scrollBehavior } from './focus'
 import { ForgetSheet } from './ForgetSheet'
 import {
   AGENT_ID,
@@ -34,6 +35,7 @@ import {
   type RecallMode,
   type ReviewDraft,
 } from './logic'
+import { useMemoryTab } from './tab-store'
 import { Confirm, Spinner, count, counted, fill, unitFor } from './ui'
 
 /**
@@ -117,14 +119,19 @@ function SaveFoot({
   canSave: boolean
   saving: boolean
   onRevert: () => void
-  onSave: () => void
+  /** Gets the card, so focus can stay in it once Save greys out. */
+  onSave: (card: HTMLElement | null) => void
 }) {
   return (
     <>
       <Button disabled={!dirty || saving} onClick={onRevert}>
         {t('settings.revert')}
       </Button>
-      <Button variant="primary" disabled={!canSave || saving} onClick={onSave}>
+      <Button
+        variant="primary"
+        disabled={!canSave || saving}
+        onClick={(e) => onSave(e.currentTarget.closest('section'))}
+      >
         {saving ? t('settings.memory.saving') : t('settings.save')}
       </Button>
     </>
@@ -230,7 +237,10 @@ function RecallCard({
           canSave={patches !== null && Object.keys(patches).length > 0 && !blocked}
           saving={save.isPending}
           onRevert={revert}
-          onSave={() => patches && save.mutate(patches)}
+          onSave={(card) =>
+            patches &&
+            save.mutate(patches, { onSuccess: () => refocus(card, () => cardControl(card)) })
+          }
         />
       }
     >
@@ -373,7 +383,10 @@ function ReviewCard({
             revert()
             setCustom(!(REVIEW_INTERVALS as readonly string[]).includes(saved.interval))
           }}
-          onSave={() => patches && save.mutate(patches)}
+          onSave={(card) =>
+            patches &&
+            save.mutate(patches, { onSuccess: () => refocus(card, () => cardControl(card)) })
+          }
         />
       }
     >
@@ -486,6 +499,20 @@ function LimitsCard({
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved)
   const blocked = Boolean(snapshot.writeBlocked) || save.isPending
   const ids = { work: useId(), you: useId(), inject: useId() }
+  // "Raise the limit" on a full list: bring this card into view, focus that list's field.
+  const focus = useMemoryTab((s) => (s.tab === 'setup' ? s.focus : null))
+  useEffect(() => {
+    if (focus !== 'limit-work' && focus !== 'limit-you') return
+    const id = focus === 'limit-work' ? ids.work : ids.you
+    // After the tab is shown: a hidden or inert panel takes no focus.
+    const timer = window.setTimeout(() => {
+      useMemoryTab.getState().clearFocus()
+      const input = document.getElementById(id)
+      input?.closest('section')?.scrollIntoView?.({ block: 'start', behavior: scrollBehavior() })
+      input?.focus({ preventScroll: true })
+    }, 30)
+    return () => window.clearTimeout(timer)
+  }, [focus, ids.work, ids.you])
   const tooSmall = check.inject !== null && check.needed !== null && check.inject < check.needed
   const invalid = check.work === null || check.you === null || check.inject === null
 
@@ -520,7 +547,10 @@ function LimitsCard({
           canSave={patches !== null && Object.keys(patches).length > 0 && !blocked}
           saving={save.isPending}
           onRevert={revert}
-          onSave={() => patches && save.mutate(patches)}
+          onSave={(card) =>
+            patches &&
+            save.mutate(patches, { onSuccess: () => refocus(card, () => cardControl(card)) })
+          }
         />
       }
     >

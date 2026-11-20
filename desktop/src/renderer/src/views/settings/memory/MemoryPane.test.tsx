@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useConnection } from '@/stores/connection'
 import { useUi } from '~/stores/ui'
 import { MemoryPane } from '../panes/MemoryPane'
+import { takeFocus } from '../overview/jumps'
 import { useDraftStore } from './drafts'
 import { openMemoryTab, useMemoryTab } from './tab-store'
 
@@ -103,6 +104,9 @@ function fakeGateway(method: string, params: Record<string, unknown> = {}): unkn
         lineCount: 1,
       })
       return { results: [{ status: 'indexed', chunksIndexed: 1 }] }
+    case 'memory.knowledge_base.remove':
+      gw.docs = gw.docs.filter((d) => d.path !== params.path)
+      return { removed: true }
     case 'memory.list':
       return { files: [{ path: 'MEMORY.md', source: 'memory' }, ...gw.docs] }
     case 'memory.recall.status':
@@ -661,6 +665,131 @@ describe('MemoryPane · fixes from testing', () => {
         patches: { 'memory.embedding': { provider: 'auto' } },
         expectedRevision: 'r1',
       }),
+    )
+  })
+})
+
+describe('MemoryPane · keyboard and round 2', () => {
+  it('makes the hidden tabs inert, so the sheet trap only sees the open tab', () => {
+    const { container } = mount()
+    const panels = () => Array.from(container.querySelectorAll<HTMLElement>('[role="tabpanel"]'))
+    const state = () =>
+      panels().map((p) => [p.getAttribute('aria-label'), p.hidden, p.hasAttribute('inert')])
+    expect(state()).toEqual([
+      ['Remembered', false, false],
+      ['Knowledge', true, true],
+      ['Try it', true, true],
+      ['Setup', true, true],
+    ])
+    fireEvent.click(screen.getByRole('tab', { name: /Setup/ }))
+    expect(state()).toEqual([
+      ['Remembered', true, true],
+      ['Knowledge', true, true],
+      ['Try it', true, true],
+      ['Setup', false, false],
+    ])
+  })
+
+  it('refuses a fact that is only §, with or without spaces', async () => {
+    mount()
+    const you = card('About you')
+    fireEvent.click(await within(you).findByRole('button', { name: /Add a fact/ }))
+    const box = within(you).getByRole('textbox', { name: 'Fact' })
+    for (const value of ['§', '§ ', '  §\t']) {
+      fireEvent.change(box, { target: { value } })
+      expect(within(you).getByText(/A fact cannot be only “§”/)).toBeInTheDocument()
+      expect(within(you).getByRole('button', { name: 'Save' })).toBeDisabled()
+      fireEvent.keyDown(box, { key: 'Enter', metaKey: true })
+    }
+    expect(rpcCall).not.toHaveBeenCalledWith('memory.curated.add', expect.anything())
+  })
+
+  it('opens Environment searched for the variable named in the field', async () => {
+    useMemoryTab.setState({ tab: 'setup' })
+    mount()
+    const embed = await screen.findByRole('region', { name: 'How memory is searched' })
+    await waitFor(() => expect(rpcCall).toHaveBeenCalledWith('env.list', {}))
+    fireEvent.click(within(embed).getByRole('radio', { name: /^OpenAI/ }))
+    fireEvent.click(within(embed).getByRole('button', { name: /Advanced/ }))
+    fireEvent.change(
+      within(embed).getByRole('textbox', { name: 'Key from an environment variable' }),
+      { target: { value: 'MY_EMBED_KEY' } },
+    )
+    fireEvent.click(await within(embed).findByRole('button', { name: 'Open Environment' }))
+    expect(useUi.getState().settingsSection).toBe('environment')
+    expect(takeFocus('environment')).toBe('MY_EMBED_KEY')
+  })
+
+  it('Raise the limit lands on that list’s limit field, focused', async () => {
+    gw.you = ['x'.repeat(2000)]
+    mount()
+    const you = card('About you')
+    fireEvent.click(await within(you).findByRole('button', { name: 'Raise the limit' }))
+    const limits = await screen.findByRole('region', { name: 'Limits' })
+    const field = within(limits).getByRole('spinbutton', { name: 'About you' })
+    await waitFor(() => expect(field).toHaveFocus())
+    expect(useMemoryTab.getState().focus).toBeNull()
+  })
+
+  it('keeps the keyboard on the list after saving and removing facts', async () => {
+    gw.work = ['First fact.', 'Second fact.']
+    mount()
+    const work = card('About your work')
+    // Saved: the row that was saved.
+    fireEvent.click(await within(work).findByRole('button', { name: /^Add a fact to/ }))
+    const box = within(work).getByRole('textbox', { name: 'Fact' })
+    fireEvent.change(box, { target: { value: 'Third fact.' } })
+    fireEvent.keyDown(box, { key: 'Enter', metaKey: true })
+    await waitFor(() =>
+      expect(within(work).getByRole('button', { name: 'Edit “Third fact.”' })).toHaveFocus(),
+    )
+    // Removed: the row after it.
+    fireEvent.click(within(work).getByRole('button', { name: 'Remove “First fact.”' }))
+    fireEvent.click(
+      within(screen.getByRole('alertdialog', { name: 'Remove this fact?' })).getByRole('button', {
+        name: 'Remove',
+      }),
+    )
+    await waitFor(() =>
+      expect(within(work).getByRole('button', { name: 'Edit “Second fact.”' })).toHaveFocus(),
+    )
+  })
+
+  it('lands on Add once the last fact is removed', async () => {
+    mount()
+    const work = card('About your work')
+    fireEvent.click(await within(work).findByRole('button', { name: /^Remove “The Q4/ }))
+    fireEvent.click(
+      within(screen.getByRole('alertdialog', { name: 'Remove this fact?' })).getByRole('button', {
+        name: 'Remove',
+      }),
+    )
+    await waitFor(() =>
+      expect(within(work).getByRole('button', { name: /Add a fact/ })).toHaveFocus(),
+    )
+  })
+
+  it('keeps the keyboard on the documents after adding and removing one', async () => {
+    useMemoryTab.setState({ tab: 'knowledge' })
+    mount()
+    const docs = card('Documents')
+    const input = (await within(docs).findByLabelText('Choose files', {
+      selector: 'input',
+    })) as HTMLInputElement
+    fireEvent.change(input, {
+      target: { files: [new File(['Bay 7.'], 'aurora.md', { type: 'text/markdown' })] },
+    })
+    await waitFor(() =>
+      expect(within(docs).getByRole('button', { name: /^aurora\.md/ })).toHaveFocus(),
+    )
+    fireEvent.click(within(docs).getByRole('button', { name: 'Remove aurora.md' }))
+    fireEvent.click(
+      within(screen.getByRole('alertdialog', { name: 'Remove aurora.md?' })).getByRole('button', {
+        name: 'Remove',
+      }),
+    )
+    await waitFor(() =>
+      expect(within(docs).getByRole('button', { name: /Choose files/ })).toHaveFocus(),
     )
   })
 })
