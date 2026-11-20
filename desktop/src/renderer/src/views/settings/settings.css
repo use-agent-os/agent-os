@@ -828,6 +828,8 @@
   column-gap: 10px;
   row-gap: 1px;
   align-items: center;
+  /* A row stretched by a neighbour's two-line name keeps name and state together. */
+  align-content: center;
   padding: 9px 11px;
   border-radius: var(--radius);
   text-align: left;
@@ -859,13 +861,19 @@
 .prov-tile > .prov-logo {
   grid-row: 1 / span 2;
 }
+/* A long name ("Surplus Intelligence", "Bankr LLM Gateway") takes a second
+   line rather than losing its end; past two lines it ends in an ellipsis,
+   and the full name is the tile's title. */
 .prov-tile__name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   font-size: 12.5px;
   font-weight: 600;
+  line-height: 1.25;
   letter-spacing: -0.005em;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 .prov-tile__meta {
   display: flex;

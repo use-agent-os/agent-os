@@ -252,6 +252,8 @@ export const settings = {
   'settings.providers.state.saved': 'Used before',
   'settings.providers.state.local': 'Runs locally',
   'settings.providers.state.needsKey': 'Needs a key',
+  'settings.providers.state.keyReady': 'Key ready',
+  'settings.providers.state.keyReady.title': '{env} is set on the gateway',
   'settings.providers.state.recommended': 'Recommended',
   'settings.providers.savedRestarting': 'Provider saved. Restarting the gateway…',
   'settings.providers.routerOk': 'Router profile',
