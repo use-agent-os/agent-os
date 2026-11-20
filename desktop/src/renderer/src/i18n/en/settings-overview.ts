@@ -1,1 +1,151 @@
-export const overview = {} as const
+export const overview = {
+  'settings.overview.blurb': 'Is your agent set up, and what is the next thing to do.',
+  'settings.overview.pill.allSet': 'All set',
+  'settings.overview.pill.one': '1 thing to finish',
+  'settings.overview.pill.many': '{n} things to finish',
+  'settings.overview.pill.offline': 'Gateway offline',
+  'settings.overview.pill.checking': 'Checking',
+
+  'settings.overview.progress': '{done} of {total} ready',
+  'settings.overview.progress.label': 'Setup progress',
+
+  'settings.overview.hero.offline.title': 'The gateway is not running',
+  'settings.overview.hero.offline.body':
+    'Your agent lives in the gateway. Start it to chat and to see the rest of this checklist.',
+  'settings.overview.hero.unreachable.title': 'Cannot reach the gateway',
+  'settings.overview.hero.unreachable.body':
+    'It runs outside the app, at {url}. Start it on its host, then try again.',
+  'settings.overview.hero.starting.title': 'The gateway is starting',
+  'settings.overview.hero.starting.body': 'This usually takes a few seconds.',
+  'settings.overview.hero.failed.title': 'The gateway could not start',
+  'settings.overview.hero.blocked.title': 'Your agent cannot answer yet',
+  'settings.overview.hero.blocked.body': '{detail}. Everything else can wait.',
+  'settings.overview.hero.attention.title': '{title} needs attention',
+  'settings.overview.hero.attention.body': '{detail}. The rest of your setup is fine.',
+  'settings.overview.hero.optional.title': 'Your agent is ready',
+  'settings.overview.hero.optional.body': 'Everything it needs is in place. {suggest}',
+  'settings.overview.hero.complete.title': 'Everything is set up',
+  'settings.overview.hero.complete.body':
+    'Nothing is left to do. Come back here when you add a service or something changes.',
+  'settings.overview.startGateway': 'Start gateway',
+  'settings.overview.tryAgain': 'Try again',
+  'settings.overview.openGateway': 'Open Gateway settings',
+
+  'settings.overview.group.required': 'Required',
+  'settings.overview.group.required.blurb': 'Your agent cannot work without these.',
+  'settings.overview.group.recommended': 'Recommended',
+  'settings.overview.group.recommended.blurb':
+    'Each one makes the agent more useful. Skip any you do not need.',
+  'settings.overview.offlineRest': 'The rest of the checklist appears once the gateway is running.',
+  'settings.overview.retry': 'Retry',
+  'settings.overview.loadFailed': 'Could not read the setup state from the gateway.',
+
+  'settings.overview.state.done': 'Done',
+  'settings.overview.state.todo': 'To do',
+  'settings.overview.state.attention': 'Needs attention',
+  'settings.overview.state.checking': 'Checking',
+
+  'settings.overview.action.open': 'Open',
+  'settings.overview.action.review': 'Review',
+  'settings.overview.action.setUp': 'Set up',
+  'settings.overview.action.fix': 'Fix',
+  'settings.overview.action.start': 'Start',
+  'settings.overview.action.update': 'Update',
+
+  'settings.overview.item.gateway': 'Gateway running',
+  'settings.overview.item.provider': 'Provider and model',
+  'settings.overview.item.router': 'Model routing',
+  'settings.overview.item.memory': 'Memory',
+  'settings.overview.item.search': 'Web search',
+  'settings.overview.item.image': 'Image generation',
+  'settings.overview.item.voice': 'Voice',
+  'settings.overview.item.channels': 'Channels',
+  'settings.overview.item.skills': 'Skills',
+  'settings.overview.item.env': 'Environment variables',
+  'settings.overview.item.wallet': 'Trading wallet',
+  'settings.overview.item.updates': 'Updates',
+
+  'settings.overview.detail.checking': 'Checking…',
+  'settings.overview.detail.off': 'Off',
+  'settings.overview.detail.keyMissing': '{label} · {key} is not set',
+  'settings.overview.detail.needsKey': '{label} · needs a key',
+
+  'settings.overview.detail.gateway.running': 'Running · {url}',
+  'settings.overview.detail.gateway.connected': 'Connected · {url}',
+  'settings.overview.detail.gateway.runningBare': 'Running',
+  'settings.overview.detail.gateway.stopped': 'Not running',
+  'settings.overview.detail.gateway.starting': 'Starting…',
+  'settings.overview.detail.gateway.stopping': 'Stopping…',
+  'settings.overview.detail.gateway.unreachable': 'Not answering at {url}',
+  'settings.overview.detail.gateway.failed': 'Could not start',
+
+  'settings.overview.detail.provider.none': 'No provider yet',
+  'settings.overview.detail.provider.noModel': '{label} · no model chosen',
+  'settings.overview.detail.provider.defaultModel': 'default model',
+
+  'settings.overview.detail.router.off': 'Off · every message goes to one model',
+  'settings.overview.detail.router.needsProvider': 'Waits for a provider',
+  'settings.overview.detail.router.pilot': 'Pilot Router on',
+  'settings.overview.detail.router.judge': 'Judge router on',
+  'settings.overview.detail.router.jev': 'Risk-aware router on',
+  'settings.overview.detail.router.tiers': '{n} tiers',
+
+  'settings.overview.detail.memory.auto': 'Automatic · finds by meaning',
+  'settings.overview.detail.memory.local': 'On this Mac · finds by meaning',
+  'settings.overview.detail.memory.ollama': 'Ollama · finds by meaning',
+  'settings.overview.detail.memory.remote': '{label} · finds by meaning',
+  'settings.overview.detail.memory.none': 'Keyword search only',
+  'settings.overview.detail.memory.remoteLabel': 'Remote service',
+
+  'settings.overview.detail.image.sameKey': '{label} · uses your provider key',
+
+  'settings.overview.detail.channels.none': 'No channels yet',
+
+  'settings.overview.detail.skills.needsOne': '1 skill needs a key or a tool',
+  'settings.overview.detail.skills.needsMany': '{n} skills need a key or a tool',
+  'settings.overview.detail.skills.ready': 'All {n} ready',
+  'settings.overview.detail.skills.none': 'None installed',
+
+  'settings.overview.detail.env.missingOne': '1 variable a skill needs is not set',
+  'settings.overview.detail.env.missingMany': '{n} variables skills need are not set',
+  'settings.overview.detail.env.ok': 'Nothing missing',
+
+  'settings.overview.detail.wallet.none': 'No wallet yet',
+  'settings.overview.detail.wallet.one': '1 wallet',
+  'settings.overview.detail.wallet.many': '{n} wallets',
+
+  'settings.overview.detail.updates.engine': 'Engine {version} is available',
+  'settings.overview.detail.updates.app': 'App {version} is available',
+  'settings.overview.detail.updates.appReady': 'App {version} is ready to install',
+  'settings.overview.detail.updates.both': 'A new engine and app are available',
+  'settings.overview.detail.updates.current': 'Up to date',
+
+  'settings.overview.next.provider': 'Add a provider key',
+  'settings.overview.next.gateway': 'Open Gateway settings',
+  'settings.overview.next.router': 'Turn on routing',
+  'settings.overview.next.memory': 'Set up memory',
+  'settings.overview.next.search': 'Turn on web search',
+  'settings.overview.next.image': 'Set up image generation',
+  'settings.overview.next.voice': 'Set up voice',
+  'settings.overview.next.channels': 'Add a channel',
+  'settings.overview.next.skills': 'Finish skill setup',
+  'settings.overview.next.env': 'Set the missing variables',
+  'settings.overview.next.wallet': 'Create a wallet',
+  'settings.overview.next.updates': 'Review the update',
+  'settings.overview.fix': 'Fix {title}',
+
+  'settings.overview.suggest.router':
+    'Next, turn on routing so easy questions go to a cheaper, faster model.',
+  'settings.overview.suggest.memory':
+    'Next, let memory find things by meaning, not just by matching words.',
+  'settings.overview.suggest.search': 'Next, turn on web search so the agent can look things up.',
+  'settings.overview.suggest.image':
+    'Next, set up image generation so the agent can draw from a description.',
+  'settings.overview.suggest.voice': 'Next, set up voice so the agent can speak and transcribe.',
+  'settings.overview.suggest.channels':
+    'Next, add a channel to reach the agent from Telegram, Slack or Discord.',
+  'settings.overview.suggest.skills': 'Next, finish setting up the skills that are waiting.',
+  'settings.overview.suggest.env': 'Next, set the variables your skills are waiting for.',
+  'settings.overview.suggest.wallet': 'Next, create a wallet so the agent can trade for you.',
+  'settings.overview.suggest.updates': 'Next, install the update that is waiting.',
+} as const

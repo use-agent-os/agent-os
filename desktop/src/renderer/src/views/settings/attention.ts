@@ -18,7 +18,9 @@ export const SECTION_FOR_ONBOARDING: Record<string, SettingsSection> = {
 /**
  * The rail's dots: a section is marked when the gateway says something it
  * owns needs action. Blocking items (no provider) read as danger, the rest as
- * a warning. Optional items that are merely unset are not marked.
+ * a warning. Optional items that are merely unset are not marked. Overview
+ * carries the worst of them, so the page Settings opens on says "something
+ * here" even when the section that owns it is scrolled out of the rail.
  */
 export function sectionAttention(
   snapshot: SettingsSnapshot | undefined,
@@ -30,6 +32,7 @@ export function sectionAttention(
     if (!section || !detail?.actionRequired) continue
     const tone: AttentionTone = detail.blocking ? 'danger' : 'warn'
     if (out[section] !== 'danger') out[section] = tone
+    if (out.overview !== 'danger') out.overview = tone
   }
   return out
 }

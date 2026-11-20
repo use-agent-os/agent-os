@@ -1,1 +1,299 @@
 /* Settings › overview. Shared vocabulary (.stg-*) lives in settings.css. */
+
+/* ── Hero: progress, the state in one sentence, the next step ──────────── */
+
+.ovw-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  padding: 20px 22px;
+  border-radius: var(--radius-surface);
+  background:
+    radial-gradient(
+      120% 140% at 0% 0%,
+      color-mix(in srgb, var(--primary) 9%, transparent),
+      transparent 55%
+    ),
+    color-mix(in srgb, var(--card) 72%, transparent);
+  box-shadow:
+    0 0 0 0.5px var(--hairline),
+    inset 0 1px 0 color-mix(in srgb, var(--foreground) 3%, transparent);
+  overflow: hidden;
+}
+.ovw-hero[data-phase='blocked'],
+.ovw-hero[data-phase='attention'] {
+  background:
+    radial-gradient(
+      120% 140% at 0% 0%,
+      color-mix(in srgb, var(--warn) 10%, transparent),
+      transparent 55%
+    ),
+    color-mix(in srgb, var(--card) 72%, transparent);
+}
+.ovw-hero[data-phase='offline'] {
+  background:
+    radial-gradient(
+      120% 140% at 0% 0%,
+      color-mix(in srgb, var(--danger) 9%, transparent),
+      transparent 55%
+    ),
+    color-mix(in srgb, var(--card) 72%, transparent);
+}
+.ovw-hero[data-phase='complete'] {
+  background:
+    radial-gradient(
+      120% 140% at 0% 0%,
+      color-mix(in srgb, var(--ok) 10%, transparent),
+      transparent 55%
+    ),
+    color-mix(in srgb, var(--card) 72%, transparent);
+}
+.ovw-hero__text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.ovw-hero__kicker {
+  font-size: 11.5px;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
+.ovw-hero__text h2 {
+  font-size: 17px;
+  font-weight: 640;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+.ovw-hero__text p {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+  text-wrap: pretty;
+}
+.ovw-hero__error {
+  font-family: var(--font-mono);
+  font-size: 12px !important;
+  white-space: pre-wrap;
+  color: var(--danger) !important;
+}
+.ovw-hero__actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+.ovw-hero__actions .mac-button {
+  white-space: nowrap;
+}
+.ovw-hero__tile {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  place-items: center;
+  border-radius: 18px;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+.ovw-hero__tile svg {
+  width: 26px;
+  height: 26px;
+}
+.ovw-hero__tile[data-tone='danger'] {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
+}
+.ovw-hero__tile[data-tone='warn'] {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 13%, transparent);
+}
+.ovw-hero__tile[data-tone='ok'] {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+}
+
+/* The progress ring. */
+.ovw-ring {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  --ring: var(--primary);
+}
+.ovw-ring[data-tone='ok'] {
+  --ring: var(--ok);
+}
+.ovw-ring[data-tone='warn'] {
+  --ring: var(--warn);
+}
+.ovw-ring svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.ovw-ring circle {
+  fill: none;
+  stroke-width: 5;
+}
+.ovw-ring__track {
+  stroke: color-mix(in srgb, var(--foreground) 9%, transparent);
+}
+.ovw-ring__fill {
+  stroke: var(--ring);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 420ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ovw-ring__fill {
+    transition: none;
+  }
+}
+.ovw-ring__text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  padding-top: 21px;
+  font-variant-numeric: tabular-nums;
+}
+.ovw-ring__text b {
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.ovw-ring__text small {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+/* ── Checklist ────────────────────────────────────────────────────────── */
+
+.ovw-count {
+  flex-shrink: 0;
+  padding: 0 7px;
+  border-radius: var(--radius-pill);
+  font-size: 11.5px;
+  font-weight: 550;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+.ovw-list {
+  margin: 0;
+  padding: 0 0 4px;
+  list-style: none;
+}
+.ovw-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 54px;
+  padding: 9px 18px;
+  border-top: 1px solid var(--hairline);
+}
+.ovw-item:first-child {
+  border-top: 0;
+}
+.ovw-item__text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+.ovw-item__title {
+  font-size: 13px;
+  font-weight: 520;
+}
+.ovw-item__detail {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ovw-item[data-state='attention'] .ovw-item__detail {
+  color: var(--warn);
+}
+.ovw-item .mac-button {
+  min-width: 64px;
+  white-space: nowrap;
+}
+
+/* State marks: a filled check, an empty ring, a warning, a spinner. */
+.ovw-mark {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: var(--radius-pill);
+}
+.ovw-mark[data-state='done'] {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+}
+.ovw-mark[data-state='todo'] {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--foreground) 22%, transparent);
+}
+.ovw-mark[data-state='attention'] {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+}
+.ovw-mark[data-state='checking'] {
+  color: var(--dim);
+}
+
+.ovw-note {
+  padding: 10px 18px 14px;
+  border-top: 1px solid var(--hairline);
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* ── Loading ──────────────────────────────────────────────────────────── */
+
+.ovw-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.ovw-skel {
+  border-radius: var(--radius-surface);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--foreground) 4%, transparent) 0%,
+    color-mix(in srgb, var(--foreground) 8%, transparent) 50%,
+    color-mix(in srgb, var(--foreground) 4%, transparent) 100%
+  );
+  background-size: 200% 100%;
+  animation: ovw-shimmer 1.4s ease-in-out infinite;
+}
+.ovw-skel--hero {
+  height: 104px;
+}
+.ovw-skel--card {
+  height: 150px;
+}
+.ovw-skel--tall {
+  height: 300px;
+}
+@keyframes ovw-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ovw-skel {
+    animation: none;
+  }
+}
