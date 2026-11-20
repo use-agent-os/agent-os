@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.21] - 2026-11-21
+
 ### Changed
 - Trading: the AgentOS DEX is the only swap provider; the Uniswap Trading
   API provider is removed from the engine, the CLI and the desktop app.
