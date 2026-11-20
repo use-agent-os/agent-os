@@ -27,6 +27,8 @@ import { t } from '~/i18n'
 import { useSettings } from '~/stores/settings'
 import { useUi } from '~/stores/ui'
 import { useSectionAttention } from './attention'
+import { useMemoryTab } from './memory/tab-store'
+import { registerJump } from './overview/jumps'
 import { AboutPane } from './panes/AboutPane'
 import { AdvancedPane } from './panes/AdvancedPane'
 import { AppearancePane } from './panes/AppearancePane'
@@ -65,6 +67,9 @@ const PANE: Record<SettingsSection, () => React.JSX.Element> = {
   advanced: AdvancedPane,
   about: AboutPane,
 }
+
+// The Overview's Memory row is about setup, so it lands on that tab.
+registerJump('memory', () => useMemoryTab.getState().setTab('setup'))
 
 const ICON: Record<SettingsSection, LucideIcon> = {
   overview: ListChecks,

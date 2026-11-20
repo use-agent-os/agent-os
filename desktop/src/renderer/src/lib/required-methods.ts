@@ -33,6 +33,8 @@ export const DESKTOP_REQUIRED_METHODS: readonly string[] = [
   'flows.stop',
   'flows.upload',
   'flows.validate',
+  'memory.forget',
+  'memory.recall.status',
   'onboarding.channel.disable',
   'onboarding.channel.enable',
   'onboarding.channel.remove',
