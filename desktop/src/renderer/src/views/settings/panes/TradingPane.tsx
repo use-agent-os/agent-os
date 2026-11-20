@@ -72,7 +72,7 @@ function AggregatorRow({ status }: { status: ProviderStatus | undefined }) {
     >
       <Button
         disabled={probe.isPending}
-        onClick={() => probe.mutate({ provider: 'aggregator' })}
+        onClick={() => probe.mutate()}
         data-testid="aggregator-test"
       >
         {probe.isPending

@@ -47,11 +47,10 @@ metadata:
 # Wallet trading (Base + Robinhood Chain)
 
 Wallets live in the engine's **vault**; the gateway signs. Chains: Base
-(8453), Robinhood Chain (4663). Providers: `aggregator` (default, no key,
-quotes fresh ~20 s, 20 bps fee included), `uniswap` (needs
-`trading.uniswap_api_key`, 30 s); `trade provider [aggregator|uniswap]` shows
-or switches (only when asked). Stock Tokens swap through the default
-provider, no key; if one is refused, pass the message on, never substitute;
+(8453), Robinhood Chain (4663). One swap provider, the AgentOS DEX (no key,
+quotes fresh ~20 s, 20 bps fee included); there is none to switch to. Stock
+Tokens swap through it too; if one is refused, pass the message on, never
+substitute;
 `trade markets <stock> --chain robinhood` lists their pools. On Robinhood
 size in token units (`--usd` may fail `trading.unpriced`); bare `USDC` is a
 lookalike.
@@ -134,7 +133,7 @@ you only proposes (24 h).
 - Success: JSON on stdout. Failure: empty stdout, stderr
   `{"error": {"code", "message", "details"?}}`.
 - Exit 1: gateway/provider refused or unreachable (`GATEWAY_UNAVAILABLE`,
-  `trading.*`; `trading.provider`/`uniswap` = venue down). Exit 2: bad input
+  `trading.*`; `trading.provider` = venue down). Exit 2: bad input
   (`INVALID_ARGUMENT`, `TOKEN_*`, `CONFIRMATION_REQUIRED`,
   `trading.bridge.unsupported_route`). Exit 3: `CONFLICT`, `VERSION_SKEW`.
 - `status`: `quoted` poll `--wait`; `submitted` `txHash` set, watched across

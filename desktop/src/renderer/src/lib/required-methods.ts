@@ -74,7 +74,6 @@ export const DESKTOP_REQUIRED_METHODS: readonly string[] = [
   'trading.probe',
   'trading.quote',
   'trading.send',
-  'trading.setProvider',
   'trading.status',
   'trading.swap',
   'trading.sync',

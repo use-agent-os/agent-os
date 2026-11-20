@@ -41,7 +41,6 @@ import {
   syncShown,
 } from './logic'
 import { Orders } from './Orders'
-import { OffDexNotice } from './OffDexNotice'
 import { Overview } from './Overview'
 import { ChainMark } from './ChainMark'
 import { DecodeSheet } from './DecodeSheet'
@@ -221,16 +220,7 @@ function Gate({ entering, automations }: { entering: boolean; automations?: Desk
     )
   }
   const provider = status.data?.provider ?? DEFAULT_PROVIDER
-  return (
-    <Desk
-      entering={entering}
-      automations={automations}
-      provider={provider}
-      // The desk swaps through the AgentOS DEX only: a gateway configured for
-      // another provider is told so, and quotes nothing until it is put back.
-      providerReady={provider === DEFAULT_PROVIDER}
-    />
-  )
+  return <Desk entering={entering} automations={automations} provider={provider} />
 }
 
 function State({
@@ -256,13 +246,10 @@ function State({
 
 function Desk({
   provider,
-  providerReady,
   entering,
   automations,
 }: {
   provider: ProviderId
-  /** The gateway's swap provider is the AgentOS DEX, the only route the desk uses. */
-  providerReady: boolean
   /** The mode switch is playing: the head counts its value up from zero. */
   entering: boolean
   automations?: DeskAutomations
@@ -484,12 +471,6 @@ function Desk({
         ) : null}
 
         <div className="trd-desk">
-          {!providerReady ? (
-            <div className="trd-desk__notice">
-              <OffDexNotice testId="use-dex" />
-            </div>
-          ) : null}
-
           <Overview
             totals={totals}
             holdings={holdings}
@@ -731,7 +712,6 @@ function Desk({
           primary={primary}
           selectedWallet={selected}
           provider={provider}
-          providerReady={providerReady}
           unlocked={Boolean(vault.data?.unlocked)}
           prefill={prefill}
           onSent={() => setTab('orders')}

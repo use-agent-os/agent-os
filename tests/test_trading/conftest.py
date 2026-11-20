@@ -25,7 +25,6 @@ from tests.test_trading.fakes import (
     FakeIndexer,
     FakePrices,
     FakeRelay,
-    FakeUniswap,
     fake_sign_tx,
     make_transport,
 )
@@ -72,11 +71,6 @@ def robinhood_chain() -> FakeChain:
     chain = FakeChain(chain_id=4663, block=5_000)
     chain.tokens[AAPL] = ("AAPL", "Apple • Robinhood Token", 18)
     return chain
-
-
-@pytest.fixture
-def fake_uniswap() -> FakeUniswap:
-    return FakeUniswap()
 
 
 @pytest.fixture
@@ -148,7 +142,6 @@ def fake_relay() -> FakeRelay:
 def transport(
     base_chain: FakeChain,
     robinhood_chain: FakeChain,
-    fake_uniswap: FakeUniswap,
     fake_aggregator: FakeAggregator,
     fake_prices: FakePrices,
     fake_indexer: FakeIndexer,
@@ -159,7 +152,6 @@ def transport(
             "mainnet.base.org": base_chain,
             "rpc.mainnet.chain.robinhood.com": robinhood_chain,
         },
-        uniswap=fake_uniswap,
         aggregator=fake_aggregator,
         prices=fake_prices,
         indexer=fake_indexer,
@@ -176,7 +168,6 @@ async def http(transport: httpx.MockTransport) -> AsyncIterator[httpx.AsyncClien
 @pytest.fixture
 def trading_config() -> TradingConfig:
     return TradingConfig(
-        uniswap_api_key="test-key",
         approval_threshold_usd=100.0,
         daily_cap_usd=1000.0,
         approval_ttl_seconds=900,

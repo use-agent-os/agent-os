@@ -35,7 +35,6 @@ from agentos.trading.evm import (
     pad_address,
     pad_uint,
 )
-from agentos.trading.providers import PERMIT2
 
 WALLET = "0x1111111111111111111111111111111111111111"
 OTHER = "0x2222222222222222222222222222222222222222"
@@ -438,105 +437,6 @@ class _RpcFailError(Exception):
 
 
 @dataclass
-class FakeUniswap:
-    api_key: str = "test-key"
-    amount_out: int = 500_000_000_000_000  # 0.0005 WETH for the default quote
-    min_out: int | None = None
-    approval_needed: bool = False
-    approval_spender: str = PERMIT2
-    permit_data: dict[str, Any] | None = None
-    price_impact: float = 0.12
-    gas_fee_usd: str = "0.05"
-    routing: str = "CLASSIC"
-    quote_error: tuple[int, dict[str, Any]] | None = None
-    swap_error: tuple[int, dict[str, Any]] | None = None
-    tx_to: str = ROUTER
-    tx_value: str = "0"
-    requests: list[httpx.Request] = field(default_factory=list)
-    quotes: int = 0
-
-    def handle(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
-        if request.headers.get("x-api-key") != self.api_key:
-            return httpx.Response(401, json={"errorCode": "Unauthorized"})
-        path = request.url.path.removeprefix("/v1")
-        body = json.loads(request.content or b"{}") if request.content else {}
-        if path == "/check_approval":
-            approval = None
-            if self.approval_needed:
-                # What the Trading API really sends: approve(Permit2, amount).
-                approval = {
-                    "to": body["token"],
-                    "from": body["walletAddress"],
-                    "data": approve_calldata(self.approval_spender, int(body["amount"])),
-                    "value": "0",
-                    "chainId": body["chainId"],
-                    "gasLimit": "60000",
-                }
-            return httpx.Response(
-                200, json={"requestId": "r-appr", "approval": approval, "cancel": None}
-            )
-        if path == "/quote":
-            self.quotes += 1
-            if self.quote_error is not None:
-                status, payload = self.quote_error
-                return httpx.Response(status, json=payload)
-            amount_out = self.amount_out
-            min_out = self.min_out if self.min_out is not None else amount_out * 995 // 1000
-            quote = {
-                "chainId": body["tokenInChainId"],
-                "swapper": body["swapper"],
-                "input": {"amount": body["amount"], "token": body["tokenIn"]},
-                "output": {
-                    "amount": str(amount_out),
-                    "token": body["tokenOut"],
-                    "minimumAmount": str(min_out),
-                    "recipient": body["swapper"],
-                },
-                "slippage": body.get("slippageTolerance", 0.5),
-                "tradeType": "EXACT_INPUT",
-                "gasFee": "5000000000000",
-                "gasFeeUSD": self.gas_fee_usd,
-                "priceImpact": self.price_impact,
-                "quoteId": f"q-{self.quotes}",
-                "blockNumber": "1000",
-            }
-            return httpx.Response(
-                200,
-                json={
-                    "requestId": f"req-{self.quotes}",
-                    "routing": self.routing,
-                    "quote": quote,
-                    "permitData": self.permit_data,
-                },
-            )
-        if path == "/swap":
-            if self.swap_error is not None:
-                status, payload = self.swap_error
-                return httpx.Response(status, json=payload)
-            quote = body["quote"]
-            return httpx.Response(
-                200,
-                json={
-                    "requestId": "req-swap",
-                    "swap": {
-                        "to": self.tx_to,
-                        "from": quote["swapper"],
-                        "data": "0x3593564c" + "11" * 32,
-                        "value": self.tx_value,
-                        "chainId": quote["chainId"],
-                        "gasLimit": "250000",
-                        "maxFeePerGas": "200000000",
-                        "maxPriorityFeePerGas": "1000000",
-                    },
-                },
-            )
-        if path == "/swaps":
-            return httpx.Response(200, json={"swaps": [{"status": "SUCCESS"}]})
-        return httpx.Response(404, json={"errorCode": "ResourceNotFound"})
-
-
-@dataclass
 class FakeAggregator:
     """The AgentOS DEX: one GET answers with price *and* calldata.
 
@@ -934,7 +834,6 @@ class FakeRelay:
 def make_transport(
     *,
     chains: dict[str, FakeChain],
-    uniswap: FakeUniswap,
     prices: FakePrices,
     aggregator: FakeAggregator | None = None,
     indexer: FakeIndexer | None = None,
@@ -948,8 +847,6 @@ def make_transport(
             return (aggregator or FakeAggregator()).handle(request)
         if host == "api.relay.link":
             return (relay or FakeRelay()).handle(request)
-        if host == "trade-api.gateway.uniswap.org":
-            return uniswap.handle(request)
         if host.endswith("blockscout.com"):
             return indexer.handle(request) if indexer else httpx.Response(404)
         return prices.handle(request)

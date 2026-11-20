@@ -168,14 +168,14 @@ async def test_rewrite_while_a_manual_swap_is_being_quoted_is_refused(
 ) -> None:
     """The row is re-read at execution; a write during the quote round-trip is caught there."""
     service = funded_service
-    original = service._priced_routed
+    original = service._priced
 
     async def quote_then_tamper(*args: Any, **kwargs: Any) -> Any:
         quote = await original(*args, **kwargs)
         service.ledger._conn.execute("UPDATE orders SET amount_raw = '999000000' WHERE 1 = 1")
         return quote
 
-    monkeypatch.setattr(service, "_priced_routed", quote_then_tamper)
+    monkeypatch.setattr(service, "_priced", quote_then_tamper)
 
     orders = await service.swap(
         chain=BASE,

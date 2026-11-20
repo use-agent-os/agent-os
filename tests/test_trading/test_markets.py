@@ -24,7 +24,6 @@ from tests.test_trading.fakes import (
     FakeChain,
     FakeIndexer,
     FakePrices,
-    FakeUniswap,
     make_transport,
 )
 
@@ -285,7 +284,6 @@ def fake_markets() -> FakeMarkets:
 def transport(
     base_chain: FakeChain,
     robinhood_chain: FakeChain,
-    fake_uniswap: FakeUniswap,
     fake_aggregator: FakeAggregator,
     fake_prices: FakePrices,
     fake_indexer: FakeIndexer,
@@ -328,7 +326,6 @@ def transport(
             "mainnet.base.org": base_chain,
             "rpc.mainnet.chain.robinhood.com": robinhood_chain,
         },
-        uniswap=fake_uniswap,
         aggregator=fake_aggregator,
         prices=fake_prices,
         indexer=fake_indexer,

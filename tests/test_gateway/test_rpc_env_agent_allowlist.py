@@ -212,7 +212,6 @@ class TestCatalogFlag:
             "PYTHONWARNINGS_TOKEN",
             "AGENTOS_SOMETHING_TOKEN",
             "RPC_ROBINHOOD_URL",
-            "UNISWAP_API_KEY",
             "LD_PRELOAD",
         ],
     )

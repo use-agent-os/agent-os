@@ -32,7 +32,7 @@ import structlog
 
 from agentos import __version__
 from agentos.redact import register_secret_values
-from agentos.trading import binding, dca, guardrails, integrity, permits, triggers
+from agentos.trading import binding, dca, guardrails, integrity, triggers
 from agentos.trading.aggregator import (
     AGGREGATOR_BASE,
     SOURCE_UNAVAILABLE,
@@ -117,23 +117,16 @@ from agentos.trading.prices import (
 from agentos.trading.providers import (
     DEFAULT_PROVIDER_ID,
     PROVIDER_IDS,
+    DecisionOrigin,
     ProbeResult,
     ProviderError,
     ProviderQuote,
     SwapProvider,
-    UniswapProvider,
     provider_label,
+    validate_transaction,
 )
 from agentos.trading.spam import MIN_LIQUIDITY_USD, TokenCurator
 from agentos.trading.sync import WalletSyncer
-from agentos.trading.uniswap import (
-    UNIVERSAL_ROUTERS,
-    DecisionOrigin,
-    UniswapAuthError,
-    UniswapClient,
-    UniswapError,
-    validate_transaction,
-)
 from agentos.trading.vault import (
     Vault,
     VaultError,
@@ -286,16 +279,6 @@ class TradingError(RuntimeError):
         self.details = details
 
 
-#: Appended to the aggregator's error when its Uniswap source could not take
-#: a pair 0x refuses (a tokenized stock) and no Uniswap key is configured to
-#: route it directly. Clients show it verbatim (``docs/markets.md``).
-STOCK_TOKEN_UNISWAP_HINT = (
-    "The AgentOS DEX's Uniswap source could not take this pair. Retry later, "
-    "or add a Uniswap API key (`agentos config set trading.uniswap_api_key <key>`) "
-    "to route through Uniswap directly"
-)
-
-
 def _uniswap_source_refused(exc: ProviderError) -> bool:
     """The AgentOS DEX could not put a pair 0x refuses through its Uniswap source.
 
@@ -310,25 +293,12 @@ def _uniswap_source_refused(exc: ProviderError) -> bool:
     )
 
 
-def _with_hint(message: str, hint: str) -> str:
-    text = message.strip()
-    if not text:
-        return hint
-    if text[-1] not in ".!?":
-        text += "."
-    return f"{text} {hint}"
-
-
 def _err(exc: Exception) -> TradingError:
     """Normalise every subsystem error into a coded TradingError."""
     if isinstance(exc, TradingError):
         return exc
     if isinstance(exc, VaultError):
         return TradingError(getattr(exc, "code", "wallet.error"), str(exc))
-    if isinstance(exc, UniswapAuthError):
-        return TradingError("trading.no_api_key", str(exc))
-    if isinstance(exc, UniswapError):
-        return TradingError(exc.code, str(exc), details={"errorCode": exc.error_code})
     if isinstance(exc, ProviderError):
         return TradingError(exc.code, str(exc), details=exc.details)
     if isinstance(exc, UnsupportedChainError):
@@ -456,19 +426,6 @@ class _ApprovalBinding:
     verified: bool = False
 
 
-def _sign_permit(permit: dict[str, Any], key: bytes) -> str:
-    from eth_account import Account
-
-    types = {k: v for k, v in dict(permit.get("types") or {}).items() if k != "EIP712Domain"}
-    signed = Account.sign_typed_data(
-        key,
-        domain_data=dict(permit.get("domain") or {}),
-        message_types=types,
-        message_data=dict(permit.get("values") or {}),
-    )
-    return "0x" + bytes(signed.signature).hex()
-
-
 class TradingService:
     def __init__(
         self,
@@ -479,12 +436,10 @@ class TradingService:
         prices: PriceService | None = None,
         http: httpx.AsyncClient | None = None,
         evm_factory: Callable[[ChainSpec], EvmClient] | None = None,
-        uniswap_factory: Callable[[str], UniswapClient] | None = None,
         aggregator_factory: Callable[[str], AggregatorClient] | None = None,
         broadcast: Broadcast | None = None,
         now: Callable[[], float] = time.time,
         sign_tx: Callable[[dict[str, Any], bytes], str] = _sign_tx,
-        sign_permit: Callable[[dict[str, Any], bytes], str] = _sign_permit,
         background: bool = True,
         lp_env_factory: LpEnvFactory | None = None,
     ) -> None:
@@ -506,7 +461,6 @@ class TradingService:
             http=self._http, ttl_s=float(getattr(self.config, "price_ttl_seconds", 20))
         )
         self._evm_factory = evm_factory
-        self._uniswap_factory = uniswap_factory
         self._aggregator_factory = aggregator_factory
         self._aggregator: AggregatorClient | None = None
         self._aggregator_base = ""
@@ -520,12 +474,9 @@ class TradingService:
         self._broadcast = broadcast or _default_broadcast
         self._now = now
         self._sign_tx = sign_tx
-        self._sign_permit = sign_permit
         self._background = background
         self.lp_env_factory = lp_env_factory
         self._evm: dict[int, EvmClient] = {}
-        self._uniswap: UniswapClient | None = None
-        self._uniswap_key = ""
         self._task: asyncio.Task[None] | None = None
         # The wallet sync the loop last started; it runs beside the loop, not in it.
         self._sync_task: asyncio.Task[None] | None = None
@@ -606,29 +557,6 @@ class TradingService:
             self._evm[chain.chain_id] = client
         return client
 
-    def api_key(self) -> str:
-        resolver = getattr(self.config, "resolved_uniswap_api_key", None)
-        if callable(resolver):
-            return str(resolver() or "")
-        return str(getattr(self.config, "uniswap_api_key", "") or "")
-
-    def uniswap(self, api_key: str | None = None) -> UniswapClient:
-        key = api_key if api_key is not None else self.api_key()
-        if not key:
-            raise TradingError("trading.no_api_key", "No Uniswap API key configured")
-        if api_key is not None and api_key != self.api_key():
-            if self._uniswap_factory is not None:
-                return self._uniswap_factory(key)
-            return UniswapClient(key, http=self._http)
-        if self._uniswap is None or self._uniswap_key != key:
-            self._uniswap = (
-                self._uniswap_factory(key)
-                if self._uniswap_factory is not None
-                else UniswapClient(key, http=self._http)
-            )
-            self._uniswap_key = key
-        return self._uniswap
-
     def aggregator(self) -> AggregatorClient:
         base = str(getattr(self.config, "aggregator_base_url", "") or AGGREGATOR_BASE).strip()
         if self._aggregator is None or self._aggregator_base != base:
@@ -648,23 +576,17 @@ class TradingService:
         return self._aggregator
 
     def provider_id(self) -> str:
-        value = (
-            str(getattr(self.config, "provider", DEFAULT_PROVIDER_ID) or DEFAULT_PROVIDER_ID)
-            .strip()
-            .lower()
-        )
-        return value if value in PROVIDER_IDS else DEFAULT_PROVIDER_ID
+        """The swap provider: the AgentOS DEX, the only one there is."""
+        return DEFAULT_PROVIDER_ID
 
-    def provider(
-        self, provider_id: str | None = None, *, api_key: str | None = None
-    ) -> SwapProvider:
-        """The swap provider to use for this call (read from config every time)."""
-        chosen = (provider_id or "").strip().lower() or self.provider_id()
-        if chosen == "aggregator":
-            return AggregatorProvider(self.aggregator())
-        if chosen == "uniswap":
-            return UniswapProvider(self.uniswap(api_key))
-        raise TradingError("trading.invalid", f"unknown swap provider {chosen!r}")
+    def provider(self, provider_id: str | None = None) -> SwapProvider:
+        """The swap provider for this call.
+
+        ``provider_id`` is what an order row recorded. A row from before the
+        Uniswap Trading API provider was removed may still say ``uniswap``;
+        whatever it names, the order is priced and built by the AgentOS DEX.
+        """
+        return AggregatorProvider(self.aggregator())
 
     async def _is_stock_token(self, chain: ChainSpec, meta: TokenMeta) -> bool:
         """Whether ``meta`` is a tokenized stock: its own flag, or the chain's stock list.
@@ -736,57 +658,6 @@ class TradingService:
                 if _uniswap_source_refused(exc):
                     raise refused from exc
                 raise
-
-    async def _priced_routed(
-        self,
-        provider_id: str,
-        *,
-        chain: ChainSpec,
-        swapper: str,
-        meta_in: TokenMeta,
-        meta_out: TokenMeta,
-        amount_raw: int,
-        slippage_pct: float | None,
-        decision_origin: DecisionOrigin,
-    ) -> ProviderQuote:
-        """:meth:`_priced` through ``provider_id``, with the direct-Uniswap fallback.
-
-        The AgentOS DEX routes a tokenized stock through its own Uniswap
-        source (:meth:`_aggregator_quote`). When that source cannot take a
-        pair 0x refuses, the quote is retried once through the Uniswap
-        provider if a key is configured; without one the aggregator's error
-        is raised with :data:`STOCK_TOKEN_UNISWAP_HINT` appended. The returned
-        quote's ``provider`` says which provider actually answered.
-        """
-        provider = self.provider(provider_id)
-        kwargs: dict[str, Any] = {
-            "chain": chain,
-            "swapper": swapper,
-            "meta_in": meta_in,
-            "meta_out": meta_out,
-            "amount_raw": amount_raw,
-            "slippage_pct": slippage_pct,
-            "decision_origin": decision_origin,
-        }
-        try:
-            return await self._priced(provider, **kwargs)
-        except ProviderError as exc:
-            if provider.id != "aggregator" or not _uniswap_source_refused(exc):
-                raise
-            if not self.api_key():
-                raise ProviderError(
-                    exc.code,
-                    _with_hint(str(exc), STOCK_TOKEN_UNISWAP_HINT),
-                    retryable=exc.retryable,
-                    details=exc.details,
-                ) from exc
-            log.info(
-                "trading.stock_token_fallback",
-                chain=chain.chain_id,
-                token_in=meta_in.address,
-                token_out=meta_out.address,
-            )
-            return await self._priced(self.provider("uniswap"), **kwargs)
 
     def _configured_unlock_mode(self) -> str | None:
         """``[trading] unlock_mode`` as the operator has it now (config is edited in place)."""
@@ -928,10 +799,6 @@ class TradingService:
         if not self._trading_enabled():
             raise TradingError("trading.disabled", "Trading is disabled in config")
 
-    def _sign_permit_enabled(self, permit: dict[str, Any], key: bytes) -> str:
-        self._require_enabled()
-        return self._sign_permit(permit, key)
-
     @property
     def _relay(self) -> RelayClient:
         """The Relay client for the configured ``relay_base_url`` (rebuilt on change)."""
@@ -979,8 +846,6 @@ class TradingService:
         await self.stop()
         for client in self._evm.values():
             await client.aclose()
-        if self._uniswap is not None:
-            await self._uniswap.aclose()
         await self.prices.aclose()
         await self._http.aclose()
         self.ledger.close()
@@ -1116,14 +981,13 @@ class TradingService:
         vault = self.vault.status()
         providers = []
         for pid in PROVIDER_IDS:
-            needs_key = pid == "uniswap"
             prow: dict[str, Any] = {
                 "id": pid,
                 "label": provider_label(pid),
-                "needsKey": needs_key,
-                "keyConfigured": bool(self.api_key()) if needs_key else True,
+                "needsKey": False,
+                "keyConfigured": True,
                 "healthy": None,
-                "active": pid == self.provider_id(),
+                "active": True,
             }
             if check_rpc:
                 try:
@@ -1137,7 +1001,6 @@ class TradingService:
             "version": __version__,
             "provider": self.provider_id(),
             "providers": providers,
-            "apiKeyConfigured": bool(self.api_key()),
             "chains": chains,
             "limits": self._limits_dict(),
             "unlockMode": vault["unlockMode"],
@@ -1222,25 +1085,10 @@ class TradingService:
                 f"agent slippage {float(slippage):.2f}% is above the {ceiling:.2f}% ceiling",
             )
 
-    async def probe(
-        self, api_key: str | None = None, *, provider_id: str | None = None
-    ) -> dict[str, Any]:
-        chosen = (provider_id or "").strip().lower() or self.provider_id()
-        if chosen not in PROVIDER_IDS:
-            raise TradingError("trading.invalid", f"unknown swap provider {chosen!r}")
-        if chosen == "uniswap":
-            key = (api_key or "").strip() or self.api_key()
-            if not key:
-                return {
-                    "provider": chosen,
-                    "ok": False,
-                    "latencyMs": None,
-                    "error": "No Uniswap API key configured",
-                }
-            result = await self.provider("uniswap", api_key=key).probe(chain=self.chains()[0])
-        else:
-            result = await self.provider(chosen).probe(chain=self.chains()[0])
-        return {"provider": chosen, **result.to_dict()}
+    async def probe(self) -> dict[str, Any]:
+        """Is the AgentOS DEX reachable from here?"""
+        result = await self.provider().probe(chain=self.chains()[0])
+        return {"provider": DEFAULT_PROVIDER_ID, **result.to_dict()}
 
     # ── tokens ─────────────────────────────────────────────────────────
 
@@ -2757,8 +2605,8 @@ class TradingService:
         slippage = slippage_pct if slippage_pct is not None else self.config.default_slippage_pct
         self._check_agent_slippage(initiator, slippage)
         try:
-            quote = await self._priced_routed(
-                self.provider_id(),
+            quote = await self._priced(
+                self.provider(),
                 chain=chain,
                 swapper=record.address,
                 meta_in=meta_in,
@@ -4913,8 +4761,8 @@ class TradingService:
                 f"{format_amount(amount_raw, meta_in.decimals)}",
             )
         row_provider = str(row.get("provider") or "").strip().lower() or self.provider_id()
-        quote = await self._priced_routed(
-            row_provider,
+        quote = await self._priced(
+            self.provider(row_provider),
             chain=chain,
             swapper=record.address,
             meta_in=meta_in,
@@ -4924,9 +4772,8 @@ class TradingService:
             decision_origin=_origin(str(row["initiator"])),
         )
         if quote.provider != row_provider:
-            # The aggregator could not route a pair 0x refuses and the Uniswap
-            # provider answered instead: the row follows, so execution (now or after an
-            # approval) builds the swap through the provider that quoted it.
+            # A row written while the Uniswap provider existed: the AgentOS DEX
+            # priced it, and the row says so from here on.
             self.ledger.update_order(row["order_id"], provider=quote.provider)
             row["provider"] = quote.provider
         value = await self._order_value_usd(
@@ -5195,15 +5042,6 @@ class TradingService:
             tx = await provider.build(
                 quote,
                 deadline=int(self._now()) + 600,
-                sign_permit=lambda permit: self._sign_order_permit(
-                    permit,
-                    key,
-                    chain=chain,
-                    meta_in=meta_in,
-                    amount_raw=amount_raw,
-                    provider_id=provider.id,
-                    order_id=order_id,
-                ),
                 decision_origin=origin,
             )
             if quote.fetched_at != fetched_before:
@@ -5237,81 +5075,6 @@ class TradingService:
         await self._watch(
             order_id, tx_hash, {"in": pre_in, "out": pre_out, "native": pre_native}, wait=wait
         )
-
-    def _sign_order_permit(
-        self,
-        permit: Any,
-        key: bytes,
-        *,
-        chain: ChainSpec,
-        meta_in: TokenMeta,
-        amount_raw: int,
-        provider_id: str,
-        order_id: str,
-    ) -> str:
-        """Sign a provider's ``permitData`` only once it binds to this order (WAL-07).
-
-        :func:`permits.check_permit` decides; what is signed is its rebuilt
-        typed data, not the provider's object. A refusal fails the order
-        before anything is sent to the provider: the signature never exists.
-        Only Uniswap routes use permits, and only to a Universal Router
-        pinned for the chain.
-        """
-        spenders: frozenset[str] = (
-            UNIVERSAL_ROUTERS.get(chain.chain_id, frozenset())
-            if provider_id == "uniswap"
-            else frozenset()
-        )
-        try:
-            checked = permits.check_permit(
-                permit,
-                chain_id=chain.chain_id,
-                token=meta_in.address,
-                native=meta_in.native,
-                amount_raw=amount_raw,
-                spenders=frozenset(s.lower() for s in spenders),
-                now=int(self._now()),
-            )
-        except permits.PermitRefusedError as exc:
-            log.warning("trading.permit_refused", order=order_id, error=str(exc))
-            raise TradingError(
-                "trading.permit_refused", f"refused to sign the provider's permit: {exc}"
-            ) from exc
-        self._presign_order_check(order_id)
-        return self._sign_permit_enabled(checked, key)
-
-    def _presign_order_check(self, order_id: str) -> None:
-        """Seal, then approval binding, right before a permit signature (WAL-05, WAL-12).
-
-        The synchronous twin of the checks ``_send`` makes before a
-        transaction is signed: the permit callback runs inside the provider
-        call, after the row was checked in ``_execute`` but before anything
-        is sent, so the row is held to its seal and its approval once more.
-        """
-        row, verdict = self._check_sealed("order", order_id)
-        if row is None or verdict is None:
-            raise TradingError("wallet.locked", "Wallet vault is locked; the permit is not signed")
-        if verdict != "ok":
-            log.error("trading.integrity_violation", kind="order", id=order_id, verdict=verdict)
-            raise TradingError(
-                "trading.integrity",
-                f"order {order_id} was changed outside the engine; the permit is not signed",
-                details={"kind": "order", "id": order_id, "verdict": verdict},
-            )
-        bound = self._approval_bindings.get(order_id)
-        if bound is None:
-            if str(row.get("status")) == "approved":
-                raise TradingError(
-                    "trading.approval_changed",
-                    f"order {order_id} is marked approved but no approval of it is held; "
-                    "it is not signed",
-                )
-            return
-        if not bound.verified or binding.approval_digest([row]) != bound.digest:
-            raise TradingError(
-                "trading.approval_changed",
-                f"order {order_id} changed after it was approved; the permit is not signed",
-            )
 
     async def _enforce_floor(self, row: dict[str, Any], quote: ProviderQuote) -> bool:
         """Refuse or park an order whose fresh quote fell too far below the judged one.

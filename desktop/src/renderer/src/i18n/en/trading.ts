@@ -432,11 +432,6 @@ export const trading = {
   'trading.settings.enabled.help':
     'Off hides the desk and refuses every swap, including the agent’s.',
   'trading.provider.via': 'via',
-  'trading.provider.switch': 'Use AgentOS DEX',
-  'trading.provider.saved': 'Swaps now route through',
-  'trading.offDex.title': 'Swaps are set to another provider.',
-  'trading.offDex.body':
-    'This gateway was configured to swap through a provider other than the AgentOS DEX, which is the only route this app uses. Balances and history still work; switch back to quote and swap.',
   'trading.settings.provider': 'Swap provider',
   'trading.settings.provider.help':
     'Who finds the route and builds the transaction. Swaps go through the AgentOS DEX, which needs no key.',

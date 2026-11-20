@@ -27,7 +27,7 @@ from agentos.trading.chains import BASE, ROBINHOOD
 from agentos.trading.ledger import SCHEMA_VERSION, Ledger
 from agentos.trading.service import TradingError, TradingService
 from tests.test_trading.conftest import PASSWORD
-from tests.test_trading.fakes import USDC, WETH, FakeChain, FakePrices, FakeUniswap
+from tests.test_trading.fakes import USDC, WETH, FakeAggregator, FakeChain, FakePrices
 from tests.test_trading.test_service import _wire_swap_effects
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "dca_cards"
@@ -43,6 +43,9 @@ DAY = 86_400
 HOUR = 3_600
 # A fixed key so the wallet (and so every payload) is the same on every run.
 KEY = "0x" + "4c" * 32
+
+#: The AgentOS DEX's "no route right now": a 200 with every money field nulled.
+NO_ROUTE = (200, {"liquidityAvailable": False, "explanation": "No quotes available"})
 
 
 class Clock:
@@ -73,14 +76,14 @@ class World:
         self,
         service: TradingService,
         chain: FakeChain,
-        uniswap: FakeUniswap,
+        aggregator: FakeAggregator,
         prices: FakePrices,
         clock: Clock,
         wallet: str,
     ) -> None:
         self.service = service
         self.chain = chain
-        self.uniswap = uniswap
+        self.aggregator = aggregator
         self.prices = prices
         self.clock = clock
         self.wallet = wallet
@@ -93,7 +96,7 @@ class World:
             return
         self.prices.spot[("base", WETH)] = price
         out = int(usd / price * 10**18)
-        self.uniswap.amount_out = out
+        self.aggregator.amount_out = out
         _wire_swap_effects(self.chain, self.wallet, out_amount=out)
 
     def at(self, ts: float) -> None:
@@ -138,7 +141,7 @@ def ids(monkeypatch: pytest.MonkeyPatch) -> None:
 async def world(
     service: TradingService,
     base_chain: FakeChain,
-    fake_uniswap: FakeUniswap,
+    fake_aggregator: FakeAggregator,
     fake_prices: FakePrices,
     monkeypatch: pytest.MonkeyPatch,
     ids: None,
@@ -146,12 +149,11 @@ async def world(
     monkeypatch.setattr(service_module, "CHAIN_CATCHUP_POLL_S", 0.0)
     clock = Clock()
     service._now = clock
-    service.config.provider = "uniswap"
     service.vault.setup(PASSWORD, "auto")
     wallet = (await service.import_wallet("Key main", private_key=KEY))["address"]
     base_chain.set_native(wallet, 10**18)
     base_chain.set_erc20(USDC, wallet, 1_000 * 10**6)
-    return World(service, base_chain, fake_uniswap, fake_prices, clock, wallet)
+    return World(service, base_chain, fake_aggregator, fake_prices, clock, wallet)
 
 
 # ── pure planning ──────────────────────────────────────────────────────────
@@ -575,7 +577,7 @@ async def test_daily_cap_rejection_is_a_skip(world: World) -> None:
 
 
 async def test_failed_quote_is_a_failed_run(world: World) -> None:
-    world.uniswap.quote_error = (404, {"errorCode": "NO_ROUTE", "detail": "No quotes available"})
+    world.aggregator.quote_error = NO_ROUTE
     mandate_id = (await world.create())["mandate"]["id"]
     await world.due()
     run = world.runs(mandate_id)[0]

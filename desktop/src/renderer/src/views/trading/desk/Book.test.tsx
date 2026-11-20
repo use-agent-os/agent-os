@@ -98,7 +98,6 @@ function render(extra: Partial<React.ComponentProps<typeof Book>> = {}) {
       wallets={[WALLET, SECOND]}
       primary={WALLET.address}
       provider="aggregator"
-      providerReady
       unlocked
       collapsed={false}
       width={360}

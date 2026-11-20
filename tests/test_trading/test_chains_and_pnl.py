@@ -67,9 +67,8 @@ class TestChains:
         # Well-known constants stay valid through the same path.
         from agentos.trading.aggregator import ALLOWANCE_HOLDER, NATIVE_SENTINEL
         from agentos.trading.providers import PERMIT2
-        from agentos.trading.uniswap import PROXY_SPENDER
 
-        for address in (NATIVE_SENTINEL, PERMIT2, PROXY_SPENDER, ALLOWANCE_HOLDER):
+        for address in (NATIVE_SENTINEL, PERMIT2, ALLOWANCE_HOLDER):
             assert chains.normalize_address(address) == address.lower()
 
     def test_explorer_urls(self) -> None:

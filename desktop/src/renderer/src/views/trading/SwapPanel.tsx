@@ -46,7 +46,6 @@ import {
   type Token,
   type Wallet,
 } from './types'
-import { useDexProvider } from './useDexProvider'
 
 /** The AgentOS DEX fee on the swap, in the token it is paid in (the sell token). */
 export function DexFeeFact({ fee }: { fee: SwapFee }) {
@@ -95,7 +94,6 @@ export function SwapPanel({
   primary,
   selectedWallet,
   provider,
-  providerReady,
   unlocked,
   prefill,
   onSent,
@@ -106,8 +104,6 @@ export function SwapPanel({
   /** The rail's selection: an address, or 'all'. */
   selectedWallet: string
   provider: ProviderId
-  /** The gateway's swap provider is the AgentOS DEX, the only route the desk uses. */
-  providerReady: boolean
   unlocked: boolean
   prefill: SwapPrefill | null
   onSent: (orders: Order[]) => void
@@ -199,7 +195,6 @@ export function SwapPanel({
     tokenOut !== null &&
     !sameToken(tokenIn, tokenOut) &&
     isPositiveAmount(parsed) &&
-    providerReady &&
     unlocked &&
     slippageValid
 
@@ -214,7 +209,6 @@ export function SwapPanel({
       }
     : null
   const quote = useQuote(params)
-  const dex = useDexProvider()
   // The query keeps the previous params' price as a placeholder while the new
   // one loads. That price is about another swap: nothing on the ticket may
   // show it, and Review must not open on it.
@@ -241,23 +235,18 @@ export function SwapPanel({
 
   const ctaKey: MessageKey | null = !unlocked
     ? 'trading.swap.cta.locked'
-    : !providerReady
-      ? 'trading.provider.switch'
-      : !wallet
-        ? 'trading.swap.cta.noWallet'
-        : !tokenIn || !tokenOut
-          ? 'trading.swap.pick'
-          : sameToken(tokenIn, tokenOut)
-            ? 'trading.swap.cta.sameToken'
-            : !isPositiveAmount(parsed)
-              ? 'trading.swap.cta.noAmount'
-              : insufficient
-                ? 'trading.swap.cta.insufficient'
-                : null
+    : !wallet
+      ? 'trading.swap.cta.noWallet'
+      : !tokenIn || !tokenOut
+        ? 'trading.swap.pick'
+        : sameToken(tokenIn, tokenOut)
+          ? 'trading.swap.cta.sameToken'
+          : !isPositiveAmount(parsed)
+            ? 'trading.swap.cta.noAmount'
+            : insufficient
+              ? 'trading.swap.cta.insufficient'
+              : null
   const canReview = ctaKey === null && fresh !== null && !quote.isError
-  // A gate the ticket can open itself: the button does that instead of sitting
-  // dead. The only one is a gateway whose swaps were pointed away from the DEX.
-  const gateAction: (() => void) | null = unlocked && !providerReady ? dex.useDex : null
 
   function flip() {
     setTokenIn(tokenOut)
@@ -467,7 +456,7 @@ export function SwapPanel({
         <button
           type="button"
           className="trd-cta app-no-drag"
-          disabled={gateAction ? false : !canReview}
+          disabled={!canReview}
           data-testid="swap-review"
           data-fresh={ready && fresh && !countdown.expired ? 'true' : undefined}
           style={
@@ -475,7 +464,7 @@ export function SwapPanel({
               '--fresh': ready && fresh && !countdown.expired ? countdown.fraction : 0,
             } as CSSProperties
           }
-          onClick={gateAction ?? (() => setConfirm(true))}
+          onClick={() => setConfirm(true)}
         >
           {ctaKey ? t(ctaKey) : t('trading.swap.cta')}
         </button>

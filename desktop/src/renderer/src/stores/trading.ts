@@ -56,7 +56,6 @@ import type {
   OrderStatus,
   Portfolio,
   ProbeResult,
-  ProviderId,
   Quote,
   SearchToken,
   Token,
@@ -898,7 +897,6 @@ export const TRADING_WRITE_GATES: Readonly<Record<string, WriteGate>> = {
   'trading.unwrap': null,
   'trading.sync': null,
   'trading.tokens.hide': null,
-  'trading.setProvider': null,
   'trading.probe': null,
   'trading.lp.collect': null,
   'trading.lp.remove': null,
@@ -1173,26 +1171,11 @@ export function useWalletMutation<T = unknown>() {
   })
 }
 
-/** Make a provider the one that routes swaps (the toasts belong to the caller). */
-export function useSetProvider() {
-  const rpc = useRpc()
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (provider: ProviderId) =>
-      rpc.call<{ provider: ProviderId }>('trading.setProvider', { provider }),
-    onSettled: () => invalidateTrading(queryClient),
-  })
-}
-
-/** Try a provider: the configured one, or a named one, with an optional typed key. */
+/** Is the swap route (the AgentOS DEX) reachable from the gateway? */
 export function useProbe() {
   const rpc = useRpc()
   return useMutation({
-    mutationFn: (params: { provider?: ProviderId; apiKey?: string } = {}) =>
-      rpc.call<ProbeResult>('trading.probe', {
-        ...(params.provider ? { provider: params.provider } : {}),
-        ...(params.apiKey ? { apiKey: params.apiKey } : {}),
-      }),
+    mutationFn: () => rpc.call<ProbeResult>('trading.probe', {}),
   })
 }
 

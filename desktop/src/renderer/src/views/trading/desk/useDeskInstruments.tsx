@@ -18,7 +18,6 @@ import {
 import { useTradingUi, type BookTab } from '~/stores/trading-ui'
 import { useUi } from '~/stores/ui'
 import { errorText, isAwaitingApproval, sameAddress } from '../logic'
-import { OffDexNotice } from '../OffDexNotice'
 import { WalletSheet, type WalletSheetMode } from '../WalletSheet'
 import type { Bracket, Limits, Mandate, Order, Trigger, Wallet } from '../types'
 import { ApprovalsRegion } from './ApprovalsRegion'
@@ -57,11 +56,6 @@ const NO_BRACKETS: Bracket[] = []
 /** A settled ask stays in the region this long as a stamp. */
 const STAMP_TTL_MS = 10 * 60_000
 
-export interface DeskGate {
-  /** The gateway's swap provider is not the AgentOS DEX, the only route the desk uses. */
-  offDex: boolean
-}
-
 /** What the desk hands the chat when the open session is the desk's. */
 export interface DeskProps {
   /** The power-on is playing: the chat snaps its own layout instead of
@@ -71,7 +65,6 @@ export interface DeskProps {
   wallets: Wallet[]
   primary: string | null
   limits: Limits | null
-  gate: DeskGate
   /** The desk's missions, bound once by the frame (the strip reads them too). */
   missions: MissionsApi
   /** After the first send: files the session into the desk project. */
@@ -484,7 +477,6 @@ export function useDeskInstruments(
     ),
     dockAbove: (
       <div className="trd-dock">
-        {desk.gate.offDex ? <OffDexNotice testId="chat-use-dex" /> : null}
         <MissionStrip
           missions={missions.missions}
           running={missions.running}

@@ -109,11 +109,6 @@ def _catalog_for(ctx: RpcContext) -> dict[str, env_catalog.EnvVarSpec]:
     return env_catalog.build_catalog(getattr(ctx, "skill_loader", None), present_names=present)
 
 
-def _uniswap_key_env(ctx: RpcContext) -> str:
-    trading = getattr(getattr(ctx, "config", None), "trading", None)
-    return str(getattr(trading, "uniswap_api_key_env", "") or "").strip().upper()
-
-
 def _refuse_agent_write(ctx: RpcContext, name: str, action: str) -> None:
     """An agent's connection may write only an ``agent_settable`` catalog name.
 
@@ -124,12 +119,7 @@ def _refuse_agent_write(ctx: RpcContext, name: str, action: str) -> None:
     if binding is None:
         return
     spec = _catalog_for(ctx).get(name)
-    if (
-        spec is not None
-        and spec.agent_settable
-        and env_policy.agent_may_own(name)
-        and name.upper() != _uniswap_key_env(ctx)
-    ):
+    if spec is not None and spec.agent_settable and env_policy.agent_may_own(name):
         return
     log.warning("env.agent_write_refused", key=name, action=action, via=binding.via)
     raise RpcHandlerError(

@@ -46,12 +46,12 @@ from agentos.trading.chains import NATIVE_ADDRESS, ChainSpec, is_native, normali
 from agentos.trading.evm import USER_AGENT, EvmClient, is_unlimited
 from agentos.trading.providers import (
     PROVIDER_LABELS,
+    DecisionOrigin,
     ProbeResult,
     ProviderError,
     ProviderQuote,
     SwapFee,
 )
-from agentos.trading.uniswap import DecisionOrigin
 
 AGGREGATOR_BASE = "https://agg.useagentos.dev"
 #: What the aggregator calls the gas coin. Our own native address is the zero
@@ -595,13 +595,12 @@ class AggregatorProvider:
         quote: ProviderQuote,
         *,
         deadline: int,
-        sign_permit: Callable[[dict[str, Any]], str] | None,
         decision_origin: DecisionOrigin,
     ) -> dict[str, Any]:
         """The calldata from the quote, re-fetched if it has gone stale.
 
         The aggregator builds the transaction as part of the quote, so there
-        is nothing to sign here: no permit, no second call unless the
+        is nothing to sign here: no second call unless the
         30-second window lapsed while the approval was being mined.
         """
         parsed: AggregatorResponse = quote.raw

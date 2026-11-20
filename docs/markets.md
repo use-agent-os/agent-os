@@ -66,20 +66,18 @@ Swap button would be decoration. Two engine changes land with the feature:
    `/v1/quote` and executed through the same Router. So:
    - `quote`, `swap`, and every path that quotes for an order (DCA runs,
      trigger fires, bracket legs, the re-quote at execution) name that
-     source when the configured provider is the aggregator and either token
-     is a tokenized stock (`stock_token`). No Uniswap API key is needed, and
-     the quote dict and the order row keep `provider: "aggregator"`.
+     source when either token is a tokenized stock (`stock_token`). No
+     Uniswap API key is needed, and the quote dict and the order row say
+     `provider: "aggregator"`.
    - Every other pair is asked the way it always was, with no `source`,
      and answered by 0x.
    - If 0x still answers `token_not_tradeable` for a pair the flag missed,
      the engine asks the Uniswap source once for that quote.
    - If the Uniswap source cannot take the pair (the gateway's
-     `SOURCE_UNAVAILABLE`, or a gateway that predates the source) and a
-     Uniswap key is configured, the quote is retried through the Uniswap
-     provider and the row records `provider: "uniswap"`. Without a key the
-     error is raised with its message extended: *"The AgentOS DEX's Uniswap source could not take this pair. Retry later, or add a Uniswap API key (`agentos config set trading.uniswap_api_key <key>`) to route through Uniswap directly"* — the exact
-     wording lives in the engine, the desktop shows it verbatim.
-   - A configured `trading.provider = "uniswap"` is left alone.
+     `SOURCE_UNAVAILABLE`), the DEX's error is returned as it is for a
+     stock, and 0x's `token_not_tradeable` for a pair the flag missed. The
+     AgentOS DEX is the only swap provider: there is no other to fall back
+     to, and no Uniswap API key to configure.
 
 3. **Stock Token detection** (`trading/prices.py`, `trading/token_lists.py`).
    A row of a chain's stock list (`robinhood_stock_tokens.json`,
@@ -407,9 +405,9 @@ paragraph quoted above), `CHANGELOG.md` under *Unreleased / Added*.
 - `is_stock_token_name`: `"NVIDIA • Robinhood Token"` → true,
   `"International Business Machines • Robinhood Toke"` → true,
   `" NVIDIA Robinhood Token "` → false, `"memestock TSLA"` → false.
-- Provider routing: aggregator configured + Stock Token on either side +
-  Uniswap key → the quote carries `provider: "uniswap"`; no key → the
-  `token_not_tradeable` error carries the Uniswap hint.
+- Routing: a Stock Token on either side → the quote is asked with
+  `source=uniswap` and carries `provider: "aggregator"`; no Uniswap key
+  exists or is needed.
 - Markets: a recorded GeckoTerminal page set for NVDA (fixture) yields
   `AI/NVDA` in `sections.quote` with `dex.label = "Bankr"`, `NVDA/USDG` in
   `sections.base` with `feePct = 0.01`, `viaUniswap = true`; a 429 on page
