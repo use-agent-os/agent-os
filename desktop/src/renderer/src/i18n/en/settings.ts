@@ -398,6 +398,7 @@ export const settings = {
   'settings.router.directOnly':
     'This provider has no router profile. Turns go straight to the default model.',
   'settings.router.saved': 'Router saved',
+  'settings.router.unsaved': 'Unsaved changes',
   'settings.router.unknownModels': 'Saved, but not in the catalog:',
   'settings.router.nonVision': 'Saved, but the vision tier points at a model without vision:',
 

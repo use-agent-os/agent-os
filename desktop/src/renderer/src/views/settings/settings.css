@@ -2444,3 +2444,67 @@ button.stg-stat:focus-visible {
   gap: 8px;
   margin-top: 12px;
 }
+
+/* ── Save bar ────────────────────────────────────────────────────────────── */
+
+/* A page with one Save for several cards (Pilot Router): while anything is
+   unsaved, the bar rides the bottom of the sheet, so the change and its Save
+   are on screen together wherever the change was made. */
+.stg-savebar {
+  position: sticky;
+  bottom: 14px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px 9px 14px;
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--popover) 94%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
+  box-shadow:
+    0 0 0 0.5px var(--border),
+    inset 0 1px 0 color-mix(in srgb, var(--foreground) 5%, transparent),
+    0 12px 32px rgba(0, 0, 0, 0.28),
+    0 2px 6px rgba(0, 0, 0, 0.12);
+  animation: stg-savebar-in 160ms ease-out;
+}
+@keyframes stg-savebar-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stg-savebar {
+    animation: none;
+  }
+}
+.stg-savebar__dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 18%, transparent);
+}
+.stg-savebar__text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: baseline;
+  gap: 8px;
+  margin-left: 2px;
+  font-size: 12.5px;
+}
+.stg-savebar__title {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.stg-savebar__what {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted-foreground);
+}
