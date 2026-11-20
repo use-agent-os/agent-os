@@ -264,7 +264,7 @@ export const settings = {
   // Providers
   'settings.providers.pick': 'Providers',
   'settings.providers.state.active': 'Active',
-  'settings.providers.state.saved': 'Used before',
+  'settings.providers.state.noKey': 'No key needed',
   'settings.providers.state.local': 'Runs locally',
   'settings.providers.state.needsKey': 'Needs a key',
   'settings.providers.state.keyReady': 'Key ready',

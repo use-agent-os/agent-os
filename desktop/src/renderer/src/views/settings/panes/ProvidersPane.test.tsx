@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useConnection } from '@/stores/connection'
+import { useDraftStore } from '../memory/drafts'
 import { ProvidersPane } from './ProvidersPane'
 
 vi.mock('sonner', () => ({
@@ -61,7 +62,7 @@ function wire(config: Record<string, unknown>, keyedFromEnv: Record<string, stri
 }
 
 function renderPane(onSheetKey?: (key: string) => void) {
-  render(
+  return render(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
@@ -82,6 +83,7 @@ function tiles(): string[] {
 }
 
 beforeEach(() => {
+  useDraftStore.setState({ drafts: {} })
   rpcCall.mockReset()
   useConnection.setState({ state: 'connected' })
 })
@@ -191,5 +193,33 @@ describe('ProvidersPane', () => {
     await waitFor(() => expect(back).toHaveFocus())
     fireEvent.click(back)
     await waitFor(() => expect(screen.getByTestId('provider-tile-openai')).toHaveFocus())
+  })
+
+  it('says a provider used before still needs a key when no key is anywhere', async () => {
+    wire({
+      llm: { provider: 'surplus', model: 'gpt-6-luna' },
+      provider_profiles: { opencap: { model: 'gpt-5.6-luna', api_key_env: '' } },
+    })
+    renderPane()
+    const tile = await screen.findByTestId('provider-tile-opencap')
+    await waitFor(() => expect(rpcCall).toHaveBeenCalledWith('providers.status', {}))
+    expect(tile).toHaveTextContent('Needs a key')
+    expect(tile).not.toHaveTextContent('Used before')
+  })
+
+  it('keeps the open form and its edit when the page is left and opened again', async () => {
+    wire({ llm: { provider: 'surplus', model: 'gpt-6-luna' } })
+    const first = renderPane()
+    fireEvent.click(await screen.findByTestId('provider-tile-openai'))
+    const form = screen.getByRole('region', { name: 'OpenAI' })
+    fireEvent.change(within(form).getByLabelText('API key'), { target: { value: 'sk-typed' } })
+    first.unmount()
+
+    renderPane()
+    const again = await screen.findByRole('region', { name: 'OpenAI' })
+    expect(within(again).getByLabelText('API key')).toHaveValue('sk-typed')
+    // Back to the grid is leaving that provider: its edit goes with it.
+    fireEvent.click(screen.getByRole('button', { name: 'All providers' }))
+    expect(useDraftStore.getState().drafts).toEqual({})
   })
 })

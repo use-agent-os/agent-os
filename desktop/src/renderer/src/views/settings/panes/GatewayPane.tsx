@@ -28,8 +28,9 @@ import {
   switchGatewayMode,
   type GatewayDraft,
 } from '../logic'
+import { useDraft, useDraftStore } from '../memory/drafts'
 import { Card, Choices, Disclosure, Head, Notice, Row, Segmented, Value, type Tone } from '../parts'
-import { keepFocus, sheetOf } from './focus'
+import { keepFocus, sheetOf, useArrivalFocus } from './focus'
 
 function fill(key: MessageKey, vars: Record<string, string | number>): string {
   return Object.entries(vars).reduce(
@@ -53,6 +54,7 @@ const TONE: Record<GatewayState, Tone | undefined> = {
  * address fields fold away under one line.
  */
 export function GatewayPane() {
+  useArrivalFocus('gateway')
   const saved = useSettings((s) => s.settings.gateway)
   const loaded = useSettings((s) => s.loaded)
   const update = useSettings((s) => s.update)
@@ -207,6 +209,8 @@ export function onGatewayDefaults(gw: GatewaySettings): boolean {
   )
 }
 
+const GATEWAY_DRAFT_ID = 'gateway:connection'
+
 function ConnectionForm({
   saved,
   onSave,
@@ -214,7 +218,9 @@ function ConnectionForm({
   saved: GatewaySettings
   onSave: (next: GatewaySettings) => Promise<void>
 }) {
-  const [draft, setDraft] = useState<GatewayDraft>(() => draftFromGateway(saved))
+  // Parked outside the form, so leaving the section or closing the sheet
+  // keeps an unsaved address or token for when the page is opened again.
+  const { draft, setDraft, revert } = useDraft(GATEWAY_DRAFT_ID, draftFromGateway(saved))
   const [showToken, setShowToken] = useState(false)
   const ids = { host: useId(), port: useId(), token: useId(), cli: useId() }
   // The external endpoint as it was when the user switched away from it, so
@@ -378,7 +384,7 @@ function ConnectionForm({
             disabled={!dirty}
             onClick={(e) => {
               externalEndpoint.current = null
-              setDraft(draftFromGateway(saved))
+              revert()
               // Reverted, this button greys out; keep focus in the sheet.
               keepFocus(sheetOf(e))
             }}
@@ -391,6 +397,7 @@ function ConnectionForm({
             onClick={(e) => {
               // The saved form re-mounts with this button: keep focus in the sheet.
               const sheet = sheetOf(e)
+              useDraftStore.getState().drop(GATEWAY_DRAFT_ID)
               void onSave(gatewayFromDraft(draft)).then(() => keepFocus(sheet))
             }}
           >
