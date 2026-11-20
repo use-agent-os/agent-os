@@ -34,45 +34,45 @@ export const settings = {
   'settings.section.overview': 'Overview',
   'settings.section.overview.blurb': 'What is set up, and what is still missing.',
   'settings.section.overview.keywords':
-    'setup checklist status getting started onboarding ready progress next step todo',
+    'agent setup checklist status getting started onboarding ready progress next step todo what is missing',
   'settings.section.memory': 'Memory',
   'settings.section.memory.blurb':
     'What the agent remembers about you and your work, and how it finds it again.',
   'settings.section.memory.keywords':
-    'remember remembered facts memories recall forget embedding embeddings meaning semantic knowledge base documents files index MEMORY.md USER.md profile search local ollama openai',
+    'remember remembered facts memories recall forget embedding embeddings meaning semantic knowledge base documents files upload add files folder chunks index review learn conversations nudge compaction MEMORY.md USER.md profile limit characters space full usage search keyword cloud fallback local ollama openai',
   'settings.section.capabilities': 'Capabilities',
   'settings.section.capabilities.blurb':
     'Web search, search on X, image generation and voice: the services the agent reaches for.',
   'settings.section.capabilities.keywords':
-    'web search internet browse look up brave duckduckgo tavily exa perplexity results per search proxy x search on x twitter tweets posts grok xai supergrok image images generation picture draw gpt-image openai openrouter gemini voice audio speech tts stt text to speech transcribe transcription elevenlabs',
+    'web search internet browse look up brave duckduckgo tavily exa perplexity results per search proxy fallback test search x search on x twitter tweets posts grok xai supergrok login reasoning effort timeout retries image images generation picture draw gpt-image openai openrouter gemini voice audio speech tts stt text to speech transcribe transcription elevenlabs api key keys',
   'settings.section.providers.keywords':
-    'model models llm ai provider api key test key openai gpt chatgpt anthropic claude ollama local gemini google openrouter deepseek moonshot kimi dashscope qwen qianfan baidu zhipu glm z.ai volcengine opencap surplus bankr custom endpoint openai-compatible base url proxy credential',
+    'model models llm ai provider api key test key openai gpt chatgpt anthropic claude ollama local gemini google openrouter deepseek moonshot kimi dashscope qwen qianfan baidu zhipu glm z.ai volcengine opencap surplus bankr fallback default model usage quota billing credit custom endpoint openai-compatible base url proxy credential profile cloud direct connection catalog',
   'settings.section.router.keywords':
-    'pilot router routing tiers tier fast balanced strong frontier vision thinking reasoning cheap cost judge jev safety net translation default model',
+    'pilot router routing tiers tier fast balanced strong frontier vision thinking reasoning cheap cost judge jev typesafe risk floor safety net translation fine-tuning default model experimental fallback usage',
   'settings.section.skills.keywords':
-    'skills skill tools abilities catalog catalogs install library hub community partner plugins extensions',
+    'skills skill tools abilities catalog catalogs install installed library hub community partner plugins extensions needs setup',
   'settings.section.channels.keywords':
-    'telegram discord slack email mail bot bots messaging adapter pairing pair chat apps',
+    'telegram discord slack email mail bot bots messaging adapter pairing pair paired deny disconnect access allowed groups chat apps restart',
   'settings.section.environment.keywords':
-    'env environment variables variable secrets secret .env dotenv credentials credential api key keys import tokens',
+    'env environment variables variable secrets secret .env dotenv credentials credential api key keys import reveal shadowed missing unset source tokens',
   'settings.section.trading.keywords':
-    'trading trade swap swaps wallet wallets uniswap aggregator agentos dex vault unlock limits daily cap per swap guardrails networks network chains chain rpc base robinhood crypto tokens kyber kyberswap',
+    'trading trade swap swaps wallet wallets uniswap aggregator agentos dex vault password unlock lock slippage limits daily cap per swap guardrails networks network chains chain rpc base robinhood crypto tokens approvals kyber kyberswap usage',
   'settings.section.gateway.keywords':
-    'gateway port host token auth address url server managed external remote process start stop restart https tls tailscale command-line cli executable web console engine',
+    'gateway port host token auth address url server managed external remote process start stop restart running protocol https tls tailscale reconnect command-line cli executable web console engine',
   'settings.section.appearance.keywords':
-    'theme dark mode light mode night colour color palette ui scale zoom text size font size bigger smaller accent colours colors transparency translucent pet mascot petdex',
+    'theme dark mode light mode night auto colour color palette ui scale zoom text size font size bigger smaller accent colours colors transparency translucent window pet mascot petdex',
   'settings.section.notifications.keywords':
-    'notifications notification notify alerts alert sound sounds chime badge dock bounce banner mute do not disturb quiet permission',
+    'notifications notification notify alerts alert sound sounds chime badge dock bounce banner mute do not disturb quiet permission replies reply failures scheduled jobs swaps events delivery test',
   'settings.section.security.keywords':
-    'touch id touchid fingerprint biometrics lock unlock confirm approvals approval approve money spending keys export protect',
+    'touch id touchid fingerprint biometrics lock unlock confirm approvals approval approve money spending keys export protect high-risk risk prompt sensor',
   'settings.section.behaviour.keywords':
-    'behavior login open at login startup launch quit stop gateway on quit quick ask menu bar tray return enter send composer sidebar width',
+    'behavior login open at login startup launch quit stop gateway on quit quick ask global shortcut hotkey menu bar tray return enter send composer sidebar width home last session',
   'settings.section.shortcuts.keywords':
-    'keyboard shortcuts shortcut hotkeys hotkey keys keybindings key bindings commands zoom',
+    'keyboard shortcuts shortcut hotkeys hotkey keys keybindings key bindings commands zoom send new line newline slash stop abort',
   'settings.section.advanced.keywords':
-    'logs log diagnostics debug troubleshooting config configuration config.toml settings file files folder reset start over reinstall uninstall',
+    'logs log diagnostics debug troubleshooting config configuration config.toml settings file files folder copy diagnostics reset start over reinstall uninstall remove engine',
   'settings.section.about.keywords':
-    'version versions update updates upgrade release changelog engine electron build check for updates',
+    'version versions update updates upgrade release changelog engine electron chromium build check for updates download install license',
   'settings.section.providers': 'Providers',
   'settings.section.providers.blurb':
     'Who answers your messages, with which credentials, and the model it falls back to.',
