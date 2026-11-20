@@ -188,26 +188,56 @@
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
-/* Done rides the top of the scrolling column, so it never costs a whole bar. */
+/* A real bar, not a button floating over the page: content scrolls under it
+   and never under Done. At the top it is invisible; once the page scrolls it
+   frosts over and names the section, since the page title has left. */
 .stg-main__bar {
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 4;
   display: flex;
-  justify-content: flex-end;
-  height: 0;
-  padding-top: 16px;
-  margin-right: -16px;
-  pointer-events: none;
+  height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 -36px;
+  padding: 0 20px 0 36px;
+  border-bottom: 0.5px solid transparent;
+  transition:
+    background-color 140ms ease-out,
+    border-color 140ms ease-out;
 }
-.stg-main__bar > * {
-  pointer-events: auto;
+.stg-main__bar[data-scrolled='true'] {
+  border-bottom-color: var(--hairline);
+  background: var(--popover);
+}
+.stg-main__bar-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transform: translateY(3px);
+  transition:
+    opacity 140ms ease-out,
+    transform 140ms ease-out;
+}
+.stg-main__bar[data-scrolled='true'] .stg-main__bar-title {
+  opacity: 1;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stg-main__bar,
+  .stg-main__bar-title {
+    transition: none;
+  }
 }
 .stg-section {
   display: flex;
   max-width: 760px;
   margin: 0 auto;
-  padding-top: 26px;
   flex-direction: column;
   gap: 18px;
   animation: stg-section-in 180ms ease-out;
@@ -229,13 +259,6 @@
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 4px;
-  /* Clear the floating Done button. */
-  padding-right: 64px;
-}
-/* With a blurb the action sits low enough to clear Done: line it up with
-   the cards' right edge instead. */
-.stg-head:has(> div > p) {
-  padding-right: 0;
 }
 .stg-head h1 {
   font-size: 24px;
@@ -1589,7 +1612,7 @@
   margin-left: auto;
 }
 .env-toolbar {
-  /* Clear the floating Done button when a summary figure scrolls here. */
+  /* Clear the top bar when a summary figure scrolls here. */
   scroll-margin-top: 56px;
   display: flex;
   flex-wrap: wrap;

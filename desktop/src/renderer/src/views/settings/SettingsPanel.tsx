@@ -122,6 +122,12 @@ function SettingsBody({ titleId, onClose }: { titleId: string; onClose: () => vo
   const attention = useSectionAttention()
   const [query, setQuery] = useState('')
   const mainRef = useRef<HTMLDivElement>(null)
+  // Remembered with its section, so a new section starts unscrolled without
+  // waiting for a scroll event.
+  const [scrolledIn, setScrolledIn] = useState<SettingsSection | null>(null)
+  const scrolled = scrolledIn === section
+  // Which search result the arrow keys have moved to; Return opens it.
+  const [picked, setPicked] = useState(0)
 
   // Re-read from disk on open: main may have mirrored OS state meanwhile.
   useEffect(() => void load(), [load])
@@ -184,17 +190,20 @@ function SettingsBody({ titleId, onClose }: { titleId: string; onClose: () => vo
     const i = matches.indexOf(section)
     e.preventDefault()
     const step = e.key === 'ArrowDown' ? 1 : matches.length - 1
-    const next = fromSearch || i < 0 ? matches[0] : matches[(i + step) % matches.length]
+    const next = i < 0 ? matches[0] : matches[(i + step) % matches.length]
     if (next) {
       setSection(next)
+      setPicked(matches.indexOf(next))
+      // From the search field the keys preview results; typing carries on.
       if (!fromSearch) document.getElementById(`stg-rail-${next}`)?.focus()
     }
   }
 
   function onSearchKey(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter' && matches[0]) {
+    const target = matches[picked] ?? matches[0]
+    if (e.key === 'Enter' && target) {
       e.preventDefault()
-      go(matches[0])
+      go(target)
     } else if (e.key === 'Escape' && query) {
       // First Escape clears the search; the next one closes the sheet.
       e.preventDefault()
@@ -220,7 +229,10 @@ function SettingsBody({ titleId, onClose }: { titleId: string; onClose: () => vo
               aria-label={t('settings.search')}
               autoComplete="off"
               spellCheck={false}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQuery(e.target.value)
+                setPicked(0)
+              }}
               onKeyDown={onSearchKey}
             />
           </label>
@@ -262,8 +274,15 @@ function SettingsBody({ titleId, onClose }: { titleId: string; onClose: () => vo
             ) : null}
           </div>
         </nav>
-        <div className="stg-main" ref={mainRef}>
-          <div className="stg-main__bar">
+        <div
+          className="stg-main"
+          ref={mainRef}
+          onScroll={(e) => setScrolledIn(e.currentTarget.scrollTop > 36 ? section : null)}
+        >
+          <div className="stg-main__bar" data-scrolled={scrolled}>
+            <span className="stg-main__bar-title" aria-hidden>
+              {t(`settings.section.${section}`)}
+            </span>
             <Button variant="primary" onClick={onClose}>
               {t('settings.done')}
             </Button>
