@@ -45,6 +45,7 @@ import { providerKeyUrl } from '../provider-links'
 import { ProviderLogo } from '../ProviderLogo'
 import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
+import { clearOnEscape, keepFocus } from './focus'
 
 interface ConfigureResult {
   restartRequired?: boolean
@@ -64,6 +65,28 @@ interface ProbeResult {
 /** The slice of `providers.status` the form reads: does the gateway hold a key? */
 interface ProviderStatusResult {
   providers?: { providerId: string; apiKeyEnv?: string; apiKeyConfigured?: boolean }[]
+}
+
+/**
+ * Which providers' keys the gateway can see, every provider at once (the
+ * grid) or one (a form). Under one prefix so a write in Environment
+ * refreshes both.
+ */
+export const PROVIDER_KEYS_KEY = ['settings', 'providerKeys'] as const
+
+/**
+ * Provider id → the environment variable that holds its key, for each
+ * provider whose key the gateway's own environment has. The config only
+ * names a variable for providers set up through one, so a key exported in
+ * the gateway's `.env` is invisible to it; `providers.status` reads the
+ * gateway's environment.
+ */
+export function envKeyedProviders(res: ProviderStatusResult | undefined): Map<string, string> {
+  return new Map(
+    (res?.providers ?? [])
+      .filter((p) => p.apiKeyConfigured && p.apiKeyEnv && p.apiKeyEnv !== 'OAuth')
+      .map((p) => [p.providerId, p.apiKeyEnv ?? '']),
+  )
 }
 
 function errorText(err: unknown): string {
@@ -145,8 +168,19 @@ function ProvidersBody({
   const pickedSpec =
     picked && picked !== configured ? providers.find((p) => p.providerId === picked) : undefined
   const switchRef = useRef<HTMLDivElement>(null)
+  const backRef = useRef<HTMLButtonElement>(null)
+
+  // Keys in the gateway's environment, for the tiles' "Key ready".
+  const envKeys = useQuery({
+    queryKey: PROVIDER_KEYS_KEY,
+    staleTime: 30_000,
+    retry: false,
+    queryFn: () => rpc.call<ProviderStatusResult>('providers.status', {}),
+  })
+  const envKeyed = envKeyedProviders(envKeys.data)
 
   function pick(id: string | null) {
+    const from = picked
     setPicked(id)
     // The form takes the grid's place. When that place is scrolled past, or
     // sits at the very bottom of the sheet, bring its top into view so the
@@ -158,6 +192,15 @@ function ProvidersBody({
       const top = el.getBoundingClientRect().top - main.getBoundingClientRect().top
       if (top < 0 || top > main.clientHeight - 200) el.scrollIntoView?.({ block: 'start' })
     }, 0)
+    // The control that was clicked is gone with the grid (or the form): keep
+    // keyboard focus on the swap, on its way back, so Escape still works.
+    keepFocus(switchRef.current, () =>
+      id
+        ? backRef.current
+        : switchRef.current?.querySelector<HTMLElement>(
+            `[data-testid="provider-tile-${from ?? ''}"]`,
+          ),
+    )
   }
 
   const save = useMutation({
@@ -175,6 +218,7 @@ function ProvidersBody({
       for (const w of res?.warnings ?? []) toast.warning(w)
       setPicked(null)
       setFilter('')
+      keepFocus(switchRef.current)
       if (res?.restartRequired && managedGateway) {
         toast.success(t('settings.providers.savedRestarting'), { id: 'stg-provider' })
         await restartGateway()
@@ -185,6 +229,8 @@ function ProvidersBody({
         )
       }
       await reload()
+      // The saved form re-mounts on the new revision; keep focus in the sheet.
+      keepFocus(switchRef.current)
     },
     onError: (err) =>
       toast.error(`${t('settings.saveFailed')}: ${errorText(err)}`, { id: 'stg-provider-err' }),
@@ -241,8 +287,12 @@ function ProvidersBody({
               data-compact="true"
               aria-label={t('settings.models.thinking')}
               value={thinking}
-              disabled={setThinking.isPending || blocked}
-              onChange={(e) => setThinking.mutate(e.target.value || null)}
+              disabled={blocked}
+              aria-busy={setThinking.isPending || undefined}
+              onChange={(e) => {
+                // Not disabled while saving (that drops focus out of the sheet).
+                if (!setThinking.isPending) setThinking.mutate(e.target.value || null)
+              }}
             >
               <option value="">{t('settings.models.thinking.auto')}</option>
               {THINKING_LEVELS.map((level) => (
@@ -258,7 +308,12 @@ function ProvidersBody({
       <div className="prov-switch" ref={switchRef}>
         {pickedSpec ? (
           <>
-            <button type="button" className="prov-back app-no-drag" onClick={() => pick(null)}>
+            <button
+              ref={backRef}
+              type="button"
+              className="prov-back app-no-drag"
+              onClick={() => pick(null)}
+            >
               <ArrowLeft className="size-3.5" strokeWidth={2} aria-hidden />
               {t('settings.providers.back')}
             </button>
@@ -290,6 +345,7 @@ function ProvidersBody({
                   autoComplete="off"
                   spellCheck={false}
                   onChange={(e) => setFilter(e.target.value)}
+                  onKeyDown={(e) => clearOnEscape(e, filter, () => setFilter(''))}
                 />
               </label>
             }
@@ -312,6 +368,7 @@ function ProvidersBody({
                     spec={p}
                     config={config}
                     configured={configured}
+                    envKey={envKeyed.get(p.providerId)}
                     highlight={firstRun && p.providerId === RECOMMENDED_PROVIDER}
                     onPick={() => pick(p.providerId)}
                   />
@@ -329,12 +386,15 @@ function ProviderTile({
   spec,
   config,
   configured,
+  envKey,
   highlight,
   onPick,
 }: {
   spec: ProviderSpec
   config: SetupConfig
   configured: string
+  /** The variable holding this provider's key in the gateway's environment, when set. */
+  envKey?: string
   highlight: boolean
   onPick: () => void
 }) {
@@ -351,9 +411,11 @@ function ProviderTile({
         onClick={onPick}
       >
         <ProviderLogo id={spec.providerId} label={label} size={28} />
-        <span className="prov-tile__name">{label}</span>
+        <span className="prov-tile__name" title={label}>
+          {label}
+        </span>
         <span className="prov-tile__meta">
-          {recommended && (highlight || !state.profile) ? (
+          {recommended && highlight ? (
             <span className="prov-tile__state" data-tone="ok">
               <Star className="size-3" strokeWidth={2.25} aria-hidden />
               {t('settings.providers.state.recommended')}
@@ -362,6 +424,20 @@ function ProviderTile({
             <span className="prov-tile__state">
               <Check className="size-3" strokeWidth={2.5} aria-hidden />
               {t('settings.providers.state.saved')}
+            </span>
+          ) : envKey ? (
+            <span
+              className="prov-tile__state"
+              data-tone="ok"
+              title={fill('settings.providers.state.keyReady.title', { env: envKey })}
+            >
+              <Check className="size-3" strokeWidth={2.5} aria-hidden />
+              {t('settings.providers.state.keyReady')}
+            </span>
+          ) : recommended ? (
+            <span className="prov-tile__state" data-tone="ok">
+              <Star className="size-3" strokeWidth={2.25} aria-hidden />
+              {t('settings.providers.state.recommended')}
             </span>
           ) : spec.deployment === 'local' ? (
             <span className="prov-tile__state">{t('settings.providers.state.local')}</span>
@@ -417,7 +493,7 @@ export function ProviderForm({
   // ~/.agentos/.env) is invisible to it. Ask the gateway, which reads its
   // own environment, so that key is tried too.
   const keyStatus = useQuery({
-    queryKey: ['settings', 'providerKey', spec.providerId],
+    queryKey: [...PROVIDER_KEYS_KEY, spec.providerId],
     enabled: !custom && Boolean(spec.requiresApiKey),
     staleTime: 60_000,
     retry: false,

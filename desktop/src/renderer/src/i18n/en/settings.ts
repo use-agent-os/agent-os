@@ -267,6 +267,8 @@ export const settings = {
   'settings.providers.state.saved': 'Used before',
   'settings.providers.state.local': 'Runs locally',
   'settings.providers.state.needsKey': 'Needs a key',
+  'settings.providers.state.keyReady': 'Key ready',
+  'settings.providers.state.keyReady.title': '{env} is set on the gateway',
   'settings.providers.state.recommended': 'Recommended',
   'settings.providers.savedRestarting': 'Provider saved. Restarting the gateway…',
   'settings.providers.routerOk': 'Router profile',
@@ -411,6 +413,7 @@ export const settings = {
   'settings.router.directOnly':
     'This provider has no router profile. Turns go straight to the default model.',
   'settings.router.saved': 'Router saved',
+  'settings.router.unsaved': 'Unsaved changes',
   'settings.router.unknownModels': 'Saved, but not in the catalog:',
   'settings.router.nonVision': 'Saved, but the vision tier points at a model without vision:',
 
@@ -484,6 +487,18 @@ export const settings = {
   'settings.trading.key.notInUse': 'Not in use',
   'settings.trading.aggregator.check': 'AgentOS DEX connection',
   'settings.trading.aggregator.check.help': 'Checks that the AgentOS DEX answers from this Mac.',
+  'settings.trading.readOnly.title': 'Trading settings are read-only in this window.',
+  'settings.trading.readOnly.local':
+    'This window is connected to a gateway the app did not start, and the gateway takes trading changes only from the app that started it. To change them here, stop that gateway and let the app run it: Settings › Gateway › Managed.',
+  'settings.trading.readOnly.remote':
+    'A gateway on another machine takes trading changes only from a connection that proves its auth token. Add that token in Settings › Gateway (the gateway needs token auth on).',
+  'settings.trading.readOnly.open': 'Open Gateway settings',
+  'settings.trading.readOnly.reason':
+    'Read-only: the gateway does not take trading changes from this window.',
+  'settings.trading.readOnly.refused':
+    'Not saved: the gateway does not take trading changes from this window.',
+  'settings.trading.vault.needsVault': 'Create the vault first, on the Trading desk.',
+  'settings.trading.key.testNeedsKey': 'Paste a key to test it.',
 
   // Appearance
   'settings.appearance.mode': 'Light and dark',

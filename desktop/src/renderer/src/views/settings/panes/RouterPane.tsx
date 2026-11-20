@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { CircleOff, Gauge, LoaderCircle, Scale, ShieldAlert } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import {
@@ -19,9 +19,10 @@ import {
 } from '@/views/setup/logic'
 import type { SettingsSnapshot } from '@/views/settings/snapshot'
 import { Button } from '~/components/ui/button'
-import { t } from '~/i18n'
+import { t, type MessageKey } from '~/i18n'
 import {
   ROUTER_THINKING,
+  routerChanges,
   routerDirty,
   routerDraft,
   safetyNetValid,
@@ -32,6 +33,7 @@ import {
 import { Card, Choices, Disclosure, Head, Notice, Pill, Row } from '../parts'
 import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
+import { keepFocus } from './focus'
 
 interface ConfigureResult {
   restartRequired?: boolean
@@ -81,6 +83,7 @@ function RouterBody({
   const provider = configuredProvider(snapshot.status ?? {}, config)
   const spec = catalog.providers?.find((p) => p.providerId === provider)
   const profile = catalog.routerProfiles?.profiles?.find((p) => p.providerId === provider)
+  const formRef = useRef<HTMLDivElement>(null)
 
   const save = useMutation({
     mutationFn: (params: Record<string, unknown>) =>
@@ -92,6 +95,9 @@ function RouterBody({
         { id: 'stg-router' },
       )
       await reload()
+      // The save bar goes with the change, and the form re-mounts on the new
+      // revision: keep keyboard focus in the sheet.
+      keepFocus(formRef.current)
     },
     onError: (err) =>
       toast.error(`${t('settings.saveFailed')}: ${errorText(err)}`, { id: 'stg-router-err' }),
@@ -109,6 +115,7 @@ function RouterBody({
       ) : snapshot.pendingRestart ? (
         <PendingRestartNotice />
       ) : null}
+      <span ref={formRef} hidden />
       <RouterForm
         key={`${provider}:${snapshot.revision ?? ''}`}
         snapshot={snapshot}
@@ -200,6 +207,7 @@ function RouterForm({
   const safetyOk = draft.mode !== 'pilot-v1' || safetyNetValid(draft.safetyNet)
   const jevOk = draft.mode !== 'jev' || safetyNetValid(draft.jevHighRisk)
   const canSave = dirty && safetyOk && jevOk && !saving && !disabled
+  const changes = routerChanges(saved, draft)
 
   function submit() {
     const warnings = classifyRouterModels(
@@ -409,20 +417,7 @@ function RouterForm({
         </Disclosure>
       </Card>
 
-      <Card
-        title={t('settings.router.tiers')}
-        blurb={t('settings.router.tiers.blurb')}
-        foot={
-          <>
-            <Button disabled={!dirty || saving} onClick={() => setDraft(saved)}>
-              {t('settings.revert')}
-            </Button>
-            <Button variant="primary" disabled={!canSave} onClick={submit}>
-              {t('settings.save')}
-            </Button>
-          </>
-        }
-      >
+      <Card title={t('settings.router.tiers')} blurb={t('settings.router.tiers.blurb')}>
         <div className="stg-tiers" role="list">
           <div className="stg-tier stg-tier--head" aria-hidden>
             <span className="stg-tier__caption">{t('settings.router.tier.rung')}</span>
@@ -503,6 +498,80 @@ function RouterForm({
           })}
         </div>
       </Card>
+
+      {dirty ? (
+        <SaveBar
+          changes={changes.map((c) => t(CHANGE_LABEL[c]))}
+          saving={saving}
+          canSave={canSave}
+          blockedReason={disabled ? t('settings.writeBlocked') : null}
+          onRevert={() => setDraft(saved)}
+          onSave={submit}
+        />
+      ) : null}
     </>
+  )
+}
+
+const CHANGE_LABEL: Record<ReturnType<typeof routerChanges>[number], MessageKey> = {
+  mode: 'settings.router.mode',
+  tuning: 'settings.router.tuning',
+  tiers: 'settings.router.tiers',
+}
+
+/**
+ * The page's one Save: it rides the bottom of the sheet while anything on
+ * the page is unsaved, so the change and its Save are on screen together
+ * wherever the change was made (the routing mode at the top, a tier at the
+ * bottom). Nothing is shown while the page matches what is saved.
+ */
+function SaveBar({
+  changes,
+  saving,
+  canSave,
+  blockedReason,
+  onRevert,
+  onSave,
+}: {
+  /** What is unsaved, by card title. */
+  changes: string[]
+  saving: boolean
+  canSave: boolean
+  blockedReason: string | null
+  onRevert: () => void
+  onSave: () => void
+}) {
+  return (
+    <div className="stg-savebar" role="region" aria-label={t('settings.router.unsaved')}>
+      <span className="stg-savebar__dot" aria-hidden />
+      <span className="stg-savebar__text">
+        <span className="stg-savebar__title">{t('settings.router.unsaved')}</span>
+        {changes.length > 0 ? (
+          <span className="stg-savebar__what" data-testid="router-unsaved">
+            {changes.join(' · ')}
+          </span>
+        ) : null}
+      </span>
+      <Button
+        disabled={saving}
+        onClick={(e) => {
+          // The bar goes with the change it reverted: keep focus in the sheet.
+          const sheet = e.currentTarget.closest('[role="dialog"]')
+          onRevert()
+          keepFocus(sheet)
+        }}
+      >
+        {t('settings.revert')}
+      </Button>
+      <Button
+        variant="primary"
+        disabled={!canSave}
+        title={blockedReason ?? undefined}
+        onClick={onSave}
+      >
+        {saving ? <LoaderCircle className="stg-spin size-3.5" strokeWidth={2} aria-hidden /> : null}
+        {t('settings.save')}
+      </Button>
+    </div>
   )
 }

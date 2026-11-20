@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useConnection } from '@/stores/connection'
 import type { EnvListResponse, EnvVarRow } from '@/views/env/logic'
+import { jumpTo } from '../overview/jumps'
 import { EnvironmentPane } from './EnvironmentPane'
 
 const rpcCall = vi.fn()
@@ -63,12 +64,15 @@ const LISTING: EnvListResponse = {
   shadowedCount: 2,
 }
 
-function renderPane() {
+function renderPane(onSheetKey?: (key: string) => void) {
   render(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
-      <EnvironmentPane />
+      {/* Stands in for the Settings sheet: what reaches it would close it. */}
+      <div onKeyDown={(e) => onSheetKey?.(e.key)}>
+        <EnvironmentPane />
+      </div>
     </QueryClientProvider>,
   )
 }
@@ -248,5 +252,54 @@ describe('EnvironmentPane', () => {
     rpcCall.mockResolvedValue(LISTING)
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     await loaded()
+  })
+
+  it('shows every match of a search, including the unset ones the list folds away', async () => {
+    renderPane()
+    await loaded()
+    const providers = screen.getByRole('region', { name: 'LLM providers' })
+    expect(within(providers).queryByTestId('env-row-ANTHROPIC_API_KEY')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Search variables'), {
+      target: { value: 'anthropic' },
+    })
+    expect(screen.getByTestId('env-row-ANTHROPIC_API_KEY')).toBeInTheDocument()
+    // Nothing is folded while searching, so there is nothing to unfold.
+    expect(screen.queryByRole('button', { name: /Show \d+ unset/ })).toBeNull()
+  })
+
+  it('clears the search on the first Escape and lets the second one close the sheet', async () => {
+    const sheetKey = vi.fn()
+    renderPane(sheetKey)
+    await loaded()
+    const search = screen.getByLabelText('Search variables')
+    fireEvent.change(search, { target: { value: 'XAI' } })
+    fireEvent.keyDown(search, { key: 'Escape' })
+    expect(search).toHaveValue('')
+    expect(sheetKey).not.toHaveBeenCalled()
+    fireEvent.keyDown(search, { key: 'Escape' })
+    expect(sheetKey).toHaveBeenCalledWith('Escape')
+  })
+
+  it('closes an open value editor on Escape without closing the sheet', async () => {
+    const sheetKey = vi.fn()
+    renderPane(sheetKey)
+    await loaded()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit OPENAI_API_KEY' }))
+    const value = screen.getByLabelText('Value for OPENAI_API_KEY')
+    fireEvent.keyDown(value, { key: 'Escape' })
+    expect(screen.queryByLabelText('Value for OPENAI_API_KEY')).toBeNull()
+    expect(sheetKey).not.toHaveBeenCalled()
+  })
+
+  it('puts a jump’s variable in the search, on arrival and while already open', async () => {
+    jumpTo('environment', 'BRAVE_API_KEY')
+    renderPane()
+    expect(await screen.findByTestId('env-row-BRAVE_API_KEY')).toBeInTheDocument()
+    expect(screen.getByLabelText('Search variables')).toHaveValue('BRAVE_API_KEY')
+    expect(screen.queryByTestId('env-row-OPENAI_API_KEY')).toBeNull()
+
+    act(() => jumpTo('environment', 'ANTHROPIC_API_KEY'))
+    expect(screen.getByLabelText('Search variables')).toHaveValue('ANTHROPIC_API_KEY')
+    expect(screen.getByTestId('env-row-ANTHROPIC_API_KEY')).toBeInTheDocument()
   })
 })

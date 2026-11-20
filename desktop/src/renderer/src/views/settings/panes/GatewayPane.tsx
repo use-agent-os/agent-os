@@ -29,6 +29,7 @@ import {
   type GatewayDraft,
 } from '../logic'
 import { Card, Choices, Disclosure, Head, Notice, Row, Segmented, Value, type Tone } from '../parts'
+import { keepFocus, sheetOf } from './focus'
 
 function fill(key: MessageKey, vars: Record<string, string | number>): string {
   return Object.entries(vars).reduce(
@@ -375,9 +376,11 @@ function ConnectionForm({
         <>
           <Button
             disabled={!dirty}
-            onClick={() => {
+            onClick={(e) => {
               externalEndpoint.current = null
               setDraft(draftFromGateway(saved))
+              // Reverted, this button greys out; keep focus in the sheet.
+              keepFocus(sheetOf(e))
             }}
           >
             {t('settings.revert')}
@@ -385,7 +388,11 @@ function ConnectionForm({
           <Button
             variant="primary"
             disabled={!canSave}
-            onClick={() => void onSave(gatewayFromDraft(draft))}
+            onClick={(e) => {
+              // The saved form re-mounts with this button: keep focus in the sheet.
+              const sheet = sheetOf(e)
+              void onSave(gatewayFromDraft(draft)).then(() => keepFocus(sheet))
+            }}
           >
             {t('settings.save')}
           </Button>

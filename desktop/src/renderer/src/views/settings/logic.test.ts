@@ -21,6 +21,7 @@ import {
   customEndpointErrors,
   customEndpointPatch,
   customProviderSpec,
+  routerChanges,
   routerDirty,
   routerDraft,
   safetyNetValid,
@@ -387,6 +388,20 @@ describe('router form', () => {
     // Typing a key is what makes the form dirty; a reseed leaves it blank so
     // a save without touching it preserves the stored key.
     expect(routerDirty(saved, { ...saved, jevApiKey: 'ts-1' })).toBe(true)
+  })
+
+  it('names the parts of the page an edit touches, for the save bar', () => {
+    const d = routerDraft(CONFIG, CATALOG, 'opencap')
+    expect(routerChanges(d, d)).toEqual([])
+    expect(routerChanges(d, { ...d, mode: 'disabled' })).toEqual(['mode'])
+    expect(routerChanges(d, { ...d, jevApiKey: 'ts-1' })).toEqual(['mode'])
+    expect(routerChanges(d, { ...d, safetyNet: '0.9' })).toEqual(['tuning'])
+    expect(routerChanges(d, { ...d, defaultTier: 'c1', mode: 'llm_judge' })).toEqual([
+      'mode',
+      'tiers',
+    ])
+    const tiers = d.tiers.map((r, i) => (i === 0 ? { ...r, model: 'other' } : r))
+    expect(routerChanges(d, { ...d, tiers })).toEqual(['tiers'])
   })
 
   it('validates the safety net as a 0..1 number', () => {

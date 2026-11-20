@@ -22,8 +22,11 @@ import {
 import { Button } from '~/components/ui/button'
 import { t, type MessageKey } from '~/i18n'
 import { desktopApi, isDesktop } from '~/lib/desktop-api'
+import { registerJump, takeFocus } from '../overview/jumps'
 import { Card, Head, Notice, Pill, Segmented, Stat, Stats, Value } from '../parts'
 import { SNAPSHOT_KEY } from '../use-snapshot'
+import { clearOnEscape, keepFocus } from './focus'
+import { PROVIDER_KEYS_KEY } from './ProvidersPane'
 
 /** A revealed value hides itself again after this long. */
 const REVEAL_MS = 30_000
@@ -53,7 +56,9 @@ export function EnvironmentPane() {
   const queryClient = useQueryClient()
   const connected = useConnection((s) => s.state === 'connected')
   const [filter, setFilter] = useState<EnvFilter>('all')
-  const [query, setQuery] = useState('')
+  // A jump here names a variable (Capabilities' "Open Environment"): it goes
+  // in the search, so that variable is what the page shows.
+  const [query, setQuery] = useState(() => takeFocus('environment') ?? '')
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
@@ -64,6 +69,17 @@ export function EnvironmentPane() {
   const timers = useRef<number[]>([])
 
   useEffect(() => () => timers.current.forEach((id) => window.clearTimeout(id)), [])
+
+  // The same jump while this page is already open.
+  useEffect(
+    () =>
+      registerJump('environment', (focus) => {
+        if (!focus) return
+        setQuery(focus)
+        setFilter('all')
+      }),
+    [],
+  )
 
   const list = useQuery<EnvListResponse>({
     queryKey: ENV_QUERY_KEY,
@@ -83,14 +99,19 @@ export function EnvironmentPane() {
     [rows, filter, query],
   )
   const summary = useMemo(() => summarize(list.data), [list.data])
+  // A search shows every variable it matches: none folds away under "Show
+  // unset", or a hit could read as "0/1 set" with nothing to see.
+  const searching = query.trim() !== ''
   const envFilePath = list.data?.envFilePath ?? ''
 
   async function refresh() {
     // Provider keys live here too: the Providers section's "needs a key"
-    // state comes from the snapshot, so a write here must refresh both.
+    // state comes from the snapshot and from the gateway's environment
+    // (`providers.status`), so a write here must refresh all three.
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ENV_QUERY_KEY }),
       queryClient.invalidateQueries({ queryKey: SNAPSHOT_KEY }),
+      queryClient.invalidateQueries({ queryKey: PROVIDER_KEYS_KEY }),
     ])
   }
 
@@ -105,9 +126,13 @@ export function EnvironmentPane() {
       if (result?.restartRequired)
         toast.warning(fill('settings.env.toast.savedRestart', { name }), { id: 'stg-env' })
       else toast.success(fill('settings.env.toast.saved', { name }), { id: 'stg-env' })
+      focusRow(name)
       return null
     } catch (error) {
       toast.error(errorMessage(error), { id: 'stg-env' })
+      // The inline editor stays open with what was typed: back into it. (The
+      // Add dialog puts focus back in itself.)
+      if (editing === name) focusRow(name, 'value')
       return errorMessage(error)
     } finally {
       setBusy(null)
@@ -124,6 +149,7 @@ export function EnvironmentPane() {
       toast.error(errorMessage(error), { id: 'stg-env' })
     } finally {
       setBusy(null)
+      focusRow(name)
     }
   }
 
@@ -137,6 +163,9 @@ export function EnvironmentPane() {
       toast.error(errorMessage(error), { id: 'stg-env' })
     } finally {
       setBusy(null)
+      // A custom variable's row is gone with it, and its Remove button with
+      // it: keep focus in the sheet (the row's Set button when it stays).
+      focusRow(name)
     }
   }
 
@@ -160,6 +189,7 @@ export function EnvironmentPane() {
       toast.error(errorMessage(error), { id: 'stg-env' })
     } finally {
       setBusy(null)
+      focusRow(name, 'reveal')
     }
   }
 
@@ -173,6 +203,23 @@ export function EnvironmentPane() {
   }
 
   const toolbarRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * Back on the row once the control that held focus is gone (the inline
+   * editor, a Remove or Import button) or was greyed out while busy: its
+   * Edit/Set button, or the one named.
+   */
+  function focusRow(name: string, action: 'edit' | 'reveal' | 'value' = 'edit') {
+    keepFocus(toolbarRef.current, () => {
+      const row = toolbarRef.current
+        ?.closest('.stg-section')
+        ?.querySelector<HTMLElement>(`[data-testid="env-row-${name}"]`)
+      return (
+        row?.querySelector<HTMLElement>(`[data-env-action="${action}"]`) ??
+        row?.querySelector<HTMLElement>('[data-env-action="edit"]')
+      )
+    })
+  }
 
   /** A summary figure is also the way to its rows: set the filter, show the list. */
   function showOnly(next: EnvFilter) {
@@ -287,6 +334,7 @@ export function EnvironmentPane() {
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => clearOnEscape(e, query, () => setQuery(''))}
           placeholder={t('settings.env.search')}
           aria-label={t('settings.env.search')}
           autoComplete="off"
@@ -312,7 +360,7 @@ export function EnvironmentPane() {
       ) : (
         groups.map((group) => {
           const { primary, rest } = splitGroupRows(group)
-          const tailOpen = openTails.has(group.category)
+          const tailOpen = searching || openTails.has(group.category)
           const visible = tailOpen ? [...primary, ...rest] : primary
           return (
             <Card
@@ -340,14 +388,17 @@ export function EnvironmentPane() {
                     setEditing(editing === row.name ? null : row.name)
                     setDraft('')
                   }}
-                  onCancel={() => setEditing(null)}
+                  onCancel={() => {
+                    setEditing(null)
+                    focusRow(row.name)
+                  }}
                   onSave={() => void save(row.name, draft)}
                   onImport={(sourceId) => void importFrom(row.name, sourceId)}
                   onReveal={() => setConfirming({ kind: 'reveal', name: row.name })}
                   onRemove={() => setConfirming({ kind: 'unset', name: row.name })}
                 />
               ))}
-              {rest.length > 0 ? (
+              {rest.length > 0 && !searching ? (
                 <button
                   type="button"
                   className="env-tail app-no-drag"
@@ -476,6 +527,7 @@ function EnvRow({
               ) : null}
               <Button
                 disabled={busy}
+                data-env-action="edit"
                 aria-expanded={editing}
                 aria-label={`${row.isSet ? t('settings.env.edit') : t('settings.env.set')} ${row.name}`}
                 onClick={onEdit}
@@ -487,6 +539,7 @@ function EnvRow({
                   variant="ghost"
                   size="icon"
                   disabled={busy}
+                  data-env-action="reveal"
                   aria-label={fill('settings.env.reveal', { name: row.name })}
                   onClick={onReveal}
                 >
@@ -522,7 +575,15 @@ function EnvRow({
             data-mono="true"
             type={row.secret ? 'password' : 'text'}
             value={draft}
+            data-env-action="value"
             onChange={(e) => onDraft(e.target.value)}
+            onKeyDown={(e) => {
+              // Escape closes this editor, not the whole sheet.
+              if (e.key !== 'Escape') return
+              e.preventDefault()
+              e.stopPropagation()
+              onCancel()
+            }}
             aria-label={fill('settings.env.value', { name: row.name })}
             autoComplete="off"
             spellCheck={false}
@@ -558,6 +619,7 @@ function AddDialog({
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const nameRef = useRef<HTMLInputElement>(null)
 
   async function submit() {
     // Answered instantly for a typo; the server stays the authority and its
@@ -567,7 +629,10 @@ function AddDialog({
       setError(problem)
       return
     }
-    setError(await onSave(name.trim(), value))
+    const refused = await onSave(name.trim(), value)
+    setError(refused)
+    // Save greyed out while it ran, which dropped focus: back to the name.
+    if (refused) keepFocus(nameRef.current, () => nameRef.current)
   }
 
   return (
@@ -590,6 +655,7 @@ function AddDialog({
       >
         <label htmlFor={nameId}>{t('settings.env.addName')}</label>
         <input
+          ref={nameRef}
           id={nameId}
           className="mac-input"
           data-mono="true"

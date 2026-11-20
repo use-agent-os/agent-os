@@ -402,6 +402,30 @@ describe('ChannelsPane', () => {
     )
   })
 
+  it('closes on Escape, and after Keep editing focus is back where it was', async () => {
+    renderPane()
+    await loaded()
+    fireEvent.click(within(card('tg-main')).getByRole('button', { name: 'Configure' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Configure tg-main' })
+    const field = within(sheet).getByLabelText('Agent id')
+    field.focus()
+    fireEvent.change(field, { target: { value: 'ops' } })
+    fireEvent.keyDown(field, { key: 'Escape' })
+    const confirm = screen.getByRole('alertdialog', { name: 'Discard changes?' })
+    fireEvent.keyDown(within(confirm).getByRole('button', { name: 'Keep editing' }), {
+      key: 'Escape',
+    })
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Configure tg-main' })).toBeInTheDocument()
+    await waitFor(() => expect(field).toHaveFocus())
+    // Escape reaches the sheet again: it asks again rather than doing nothing.
+    fireEvent.keyDown(field, { key: 'Escape' })
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Configure tg-main' })).toBeNull(),
+    )
+  })
+
   it('reports a revision conflict and offers a reload', async () => {
     renderPane()
     await loaded()

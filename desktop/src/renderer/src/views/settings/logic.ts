@@ -504,6 +504,31 @@ export function routerDirty(saved: RouterDraft, draft: RouterDraft): boolean {
   return JSON.stringify(saved) !== JSON.stringify(draft)
 }
 
+/** The parts of the Router page an unsaved edit touches, in page order. */
+export type RouterChange = 'mode' | 'tuning' | 'tiers'
+
+export function routerChanges(saved: RouterDraft, draft: RouterDraft): RouterChange[] {
+  const changes: RouterChange[] = []
+  if (
+    saved.mode !== draft.mode ||
+    saved.judgeModel !== draft.judgeModel ||
+    draft.jevApiKey.trim() !== ''
+  )
+    changes.push('mode')
+  if (
+    saved.safetyNet !== draft.safetyNet ||
+    saved.jevHighRisk !== draft.jevHighRisk ||
+    saved.translateCeiling !== draft.translateCeiling
+  )
+    changes.push('tuning')
+  if (
+    saved.defaultTier !== draft.defaultTier ||
+    JSON.stringify(saved.tiers) !== JSON.stringify(draft.tiers)
+  )
+    changes.push('tiers')
+  return changes
+}
+
 /** The tiers a turn can be routed to, in cost order, for the default picker. */
 export function textTiers(draft: RouterDraft): TierRow[] {
   return draft.tiers.filter((row) => row.tier !== 'image_model')
