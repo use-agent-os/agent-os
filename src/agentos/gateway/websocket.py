@@ -271,7 +271,9 @@ class WsConnection:
             try:
                 wire = _event_wire_template(event, payload, meta)
             except Exception:  # noqa: BLE001 - one bad payload must not kill the writer
-                log.warning("gateway.ws_event_serialize_failed", conn_id=self.conn_id, event=event)
+                log.warning(
+                    "gateway.ws_event_serialize_failed", conn_id=self.conn_id, event_name=event
+                )
                 return
             classification = "lossy" if event in _LOSSY_EVENTS else "control"
             frame = _OutboundFrame(
@@ -732,7 +734,7 @@ class ConnectionRegistry:
             try:
                 await conn.send_event(event, payload)
             except Exception:
-                log.debug("ws.broadcast_control_failed", conn_id=conn.conn_id, event=event)
+                log.debug("ws.broadcast_control_failed", conn_id=conn.conn_id, event_name=event)
 
 
 class SubscriptionManager:

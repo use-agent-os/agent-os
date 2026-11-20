@@ -29,6 +29,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `provider: "aggregator"`. The Uniswap provider is used for such a pair only
   when the DEX's Uniswap source cannot take it and a key is configured.
 
+### Fixed
+- Gateway: a failure the gateway meant to log and move past no longer turns
+  into a `TypeError`. Seven log calls passed `event=` beside the log line's
+  own event name, which the logger refuses at every log level, so the error
+  each one sat behind escaped instead of being absorbed: one WebSocket
+  connection that could not be sent to stopped a session event or an approval
+  frame from reaching the connections after it, an event payload that could
+  not be serialized raised into the sender, one failing approval listener
+  kept the others from hearing about the change, and a trading event that
+  could not be broadcast failed the action that emitted it (always, when
+  `TradingService` is used with no transport wired). The field is now logged
+  as `event_name`.
+
 ## [2026.11.20] - 2026-11-20
 
 ### Added

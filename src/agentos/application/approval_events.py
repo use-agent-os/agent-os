@@ -45,7 +45,7 @@ def notify_approval_event(event_name: str, payload: dict[str, Any]) -> None:
         try:
             listener(event_name, dict(payload))
         except Exception:
-            log.warning("approval_events.listener_failed", event=event_name, exc_info=True)
+            log.warning("approval_events.listener_failed", event_name=event_name, exc_info=True)
 
 
 def approval_display_title(namespace: str, params: dict[str, Any] | None) -> str:
