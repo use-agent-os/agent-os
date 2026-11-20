@@ -126,6 +126,26 @@ function SettingsBody({ titleId, onClose }: { titleId: string; onClose: () => vo
   // Re-read from disk on open: main may have mirrored OS state meanwhile.
   useEffect(() => void load(), [load])
 
+  // When the focused control is removed or disabled (a row deleted, a button
+  // greyed out while saving) focus drops to <body>, outside every dialog, and
+  // Escape and Tab stop reaching the sheet. Hand such a key to the topmost
+  // dialog so it closes or traps as it would have.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' && e.key !== 'Tab') return
+      if (document.activeElement !== document.body) return
+      const top = Array.from(document.querySelectorAll<HTMLElement>('[aria-modal="true"]')).at(-1)
+      if (!top) return
+      top.focus()
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        top.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
   // A new section starts at its top, not where the last one was scrolled to.
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 })
