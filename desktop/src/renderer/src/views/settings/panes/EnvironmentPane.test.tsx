@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useConnection } from '@/stores/connection'
 import type { EnvListResponse, EnvVarRow } from '@/views/env/logic'
-import { jumpTo } from '../overview/jumps'
+import { FOCUS_TTL_MS, jumpTo, takeFocus } from '../overview/jumps'
 import { EnvironmentPane } from './EnvironmentPane'
 
 const rpcCall = vi.fn()
@@ -82,6 +82,8 @@ async function loaded() {
 }
 
 beforeEach(() => {
+  // A jump from an earlier test is still fresh for a moment: let it lapse.
+  takeFocus('environment', Date.now() + FOCUS_TTL_MS + 1)
   rpcCall.mockReset()
   openExternal.mockClear()
   showItemInFolder.mockClear()
@@ -301,5 +303,24 @@ describe('EnvironmentPane', () => {
     act(() => jumpTo('environment', 'ANTHROPIC_API_KEY'))
     expect(screen.getByLabelText('Search variables')).toHaveValue('ANTHROPIC_API_KEY')
     expect(screen.getByTestId('env-row-ANTHROPIC_API_KEY')).toBeInTheDocument()
+  })
+
+  it('gives focus back to Add variable when its dialog closes', async () => {
+    renderPane()
+    await loaded()
+    const add = screen.getByRole('button', { name: 'Add variable' })
+    add.focus()
+    fireEvent.click(add)
+    const dialog = screen.getByRole('dialog', { name: 'Add a variable' })
+    expect(within(dialog).getByLabelText('Name')).toHaveFocus()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(add).toHaveFocus()
+  })
+
+  it('takes the keyboard to the search a jump filled', async () => {
+    jumpTo('environment', 'BRAVE_API_KEY')
+    renderPane()
+    await screen.findByTestId('env-row-BRAVE_API_KEY')
+    await waitFor(() => expect(screen.getByLabelText('Search variables')).toHaveFocus())
   })
 })

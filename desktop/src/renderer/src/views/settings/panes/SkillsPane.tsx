@@ -9,6 +9,7 @@ import { useUi } from '~/stores/ui'
 import { PARTNER_LABEL, type PartnerBrand } from '~/views/skills/logic'
 import { BrandMark } from '~/views/skills/SkillMark'
 import { Card, Head, Notice, Stat, Stats } from '../parts'
+import { useArrivalFocus } from './focus'
 
 interface SkillsListResponse {
   skills?: RawSkill[]
@@ -36,6 +37,7 @@ function fill(key: MessageKey, vars: Record<string, string | number>): string {
  * ⌘⇧K), where lists, catalogs and install flows have the room they need.
  */
 export function SkillsPane() {
+  useArrivalFocus('skills')
   const rpc = useRpc()
   const connected = useConnection((s) => s.state === 'connected')
   const openSkills = useUi((s) => s.openSkills)

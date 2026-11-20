@@ -25,7 +25,7 @@ import { desktopApi, isDesktop } from '~/lib/desktop-api'
 import { registerJump, takeFocus } from '../overview/jumps'
 import { Card, Head, Notice, Pill, Segmented, Stat, Stats, Value } from '../parts'
 import { SNAPSHOT_KEY } from '../use-snapshot'
-import { clearOnEscape, keepFocus } from './focus'
+import { clearOnEscape, keepFocus, useArrivalFocus } from './focus'
 import { PROVIDER_KEYS_KEY } from './ProvidersPane'
 
 /** A revealed value hides itself again after this long. */
@@ -58,7 +58,18 @@ export function EnvironmentPane() {
   const [filter, setFilter] = useState<EnvFilter>('all')
   // A jump here names a variable (Capabilities' "Open Environment"): it goes
   // in the search, so that variable is what the page shows.
-  const [query, setQuery] = useState(() => takeFocus('environment') ?? '')
+  const [jumped] = useState(() => takeFocus('environment'))
+  const [query, setQuery] = useState(jumped ?? '')
+  const searchRef = useRef<HTMLInputElement>(null)
+  // Arriving by a jump that named a variable, the keyboard goes to the
+  // search that shows it, wherever it was (so Escape clears that search
+  // first); arriving any other way with focus lost, to the rail.
+  useArrivalFocus('environment')
+  useEffect(() => {
+    if (!jumped) return
+    const timer = window.setTimeout(() => searchRef.current?.focus({ preventScroll: true }), 0)
+    return () => window.clearTimeout(timer)
+  }, [jumped])
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
@@ -77,6 +88,9 @@ export function EnvironmentPane() {
         if (!focus) return
         setQuery(focus)
         setFilter('all')
+        // Into the search that now shows it, wherever focus was (a timer:
+        // the field may only render once the new query is in).
+        window.setTimeout(() => searchRef.current?.focus({ preventScroll: true }), 0)
       }),
     [],
   )
@@ -330,6 +344,7 @@ export function EnvironmentPane() {
 
       <div className="env-toolbar" ref={toolbarRef}>
         <input
+          ref={searchRef}
           className="mac-input"
           type="search"
           value={query}
@@ -666,7 +681,6 @@ function AddDialog({
           aria-describedby={error ? errorId : undefined}
           autoComplete="off"
           spellCheck={false}
-          autoFocus
         />
         <label htmlFor={valueId}>{t('settings.env.addValue')}</label>
         <input

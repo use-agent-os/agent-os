@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react'
+
 /**
  * Keyboard focus across a pane's own re-renders.
  *
@@ -41,6 +43,22 @@ export function keepFocus(
     }
     if (dialog?.isConnected) dialog.focus({ preventScroll: true })
   }, 0)
+}
+
+/**
+ * A pane that was jumped to (an Overview or Capabilities button) mounts after
+ * the button that sent it is gone, so focus is on <body>. Once mounted, put
+ * it on the pane's natural first stop, else on the section's rail item, as
+ * if that had been clicked. A rail click keeps focus on the rail: untouched.
+ */
+export function useArrivalFocus(
+  section: string,
+  preferred?: () => HTMLElement | null | undefined,
+): void {
+  const first = useRef(preferred)
+  useEffect(() => {
+    keepFocus(null, () => first.current?.() ?? document.getElementById(`stg-rail-${section}`))
+  }, [section])
 }
 
 /** The dialog an event happened in, captured before an async write lets its target go. */
