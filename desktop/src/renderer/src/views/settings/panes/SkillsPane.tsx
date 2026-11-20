@@ -41,6 +41,7 @@ export function SkillsPane() {
   const rpc = useRpc()
   const connected = useConnection((s) => s.state === 'connected')
   const openSkills = useUi((s) => s.openSkills)
+  const openNeedingSetup = useUi((s) => s.openSkillsNeedingSetup)
 
   const query = useQuery({
     queryKey: ['skills'],
@@ -92,7 +93,7 @@ export function SkillsPane() {
           hint={known && stats.needs > 0 ? t('settings.skills.needsSetup.help') : undefined}
           value={known ? stats.needs : '—'}
           tone={known && stats.needs > 0 ? 'warn' : undefined}
-          onClick={known && stats.needs > 0 ? openSkills : undefined}
+          onClick={known && stats.needs > 0 ? openNeedingSetup : undefined}
         />
         {computed ? (
           <Stat

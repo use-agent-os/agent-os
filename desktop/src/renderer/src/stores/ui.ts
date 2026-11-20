@@ -55,6 +55,8 @@ interface UiStore {
   jobsOpen: boolean
   /** Skills is the same kind of layer: browse, install, then back to the chat. */
   skillsOpen: boolean
+  /** A status filter the Skills sheet should open on; read once on open. */
+  skillsStatus: 'needs-setup' | null
   /** Settings is a sheet over the window too; remembers the section between opens. */
   settingsOpen: boolean
   settingsSection: SettingsSection
@@ -88,6 +90,8 @@ interface UiStore {
   closeJobs(): void
   toggleJobs(): void
   openSkills(): void
+  /** Open Skills already filtered to the ones that need setup. */
+  openSkillsNeedingSetup(): void
   closeSkills(): void
   toggleSkills(): void
   openSettings(section?: SettingsSection): void
@@ -112,6 +116,7 @@ export const useUi = create<UiStore>((set) => ({
   sessionQuery: '',
   jobsOpen: false,
   skillsOpen: false,
+  skillsStatus: null,
   settingsOpen: false,
   settingsSection: DEFAULT_SECTION,
   pendingPrompt: null,
@@ -134,8 +139,11 @@ export const useUi = create<UiStore>((set) => ({
   openJobs: () => set({ jobsOpen: true, skillsOpen: false, settingsOpen: false }),
   closeJobs: () => set({ jobsOpen: false }),
   toggleJobs: () => set((s) => ({ jobsOpen: !s.jobsOpen, skillsOpen: false, settingsOpen: false })),
-  openSkills: () => set({ skillsOpen: true, jobsOpen: false, settingsOpen: false }),
-  closeSkills: () => set({ skillsOpen: false }),
+  openSkills: () =>
+    set({ skillsOpen: true, skillsStatus: null, jobsOpen: false, settingsOpen: false }),
+  openSkillsNeedingSetup: () =>
+    set({ skillsOpen: true, skillsStatus: 'needs-setup', jobsOpen: false, settingsOpen: false }),
+  closeSkills: () => set({ skillsOpen: false, skillsStatus: null }),
   toggleSkills: () =>
     set((s) => ({ skillsOpen: !s.skillsOpen, jobsOpen: false, settingsOpen: false })),
   openSettings: (section) =>

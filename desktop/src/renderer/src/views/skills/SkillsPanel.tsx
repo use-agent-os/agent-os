@@ -192,7 +192,9 @@ function ConnectedSkills({ titleId, onClose }: { titleId: string; onClose: () =>
   const [source, setSource] = useState<SkillSource>('installed')
   const [selected, setSelected] = useState<Partial<Record<SkillSource, string | null>>>({})
   const [installedText, setInstalledText] = useState('')
-  const [installedStatus, setInstalledStatus] = useState<StatusFilter>('all')
+  const [installedStatus, setInstalledStatus] = useState<StatusFilter>(
+    () => useUi.getState().skillsStatus ?? 'all',
+  )
   const [robinhoodText, setRobinhoodText] = useState('')
   const [robinhoodStatus, setRobinhoodStatus] = useState<StatusFilter>('all')
   const [catalogText, setCatalogText] = useState<Record<RegistrySource, string>>({
