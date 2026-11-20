@@ -1,12 +1,18 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useConnection } from '@/stores/connection'
 import type { SettingsSnapshot } from '@/views/settings/snapshot'
 import { useUi } from '~/stores/ui'
 import { sectionAttention } from '../attention'
 import { takeFocus } from '../overview/jumps'
+import { forgetPastedKeys, useCapDrafts } from './drafts'
 import { CapabilitiesPane, scrollBehavior } from '../panes/CapabilitiesPane'
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() },
+}))
 
 const rpcCall = vi.fn()
 vi.mock('@/app/providers', () => ({
@@ -133,6 +139,9 @@ async function envLoaded() {
 }
 
 beforeEach(() => {
+  useCapDrafts.setState({ drafts: {} })
+  vi.mocked(toast.success).mockClear()
+  vi.mocked(toast.warning).mockClear()
   rpcCall.mockReset()
   openExternal.mockClear()
   useConnection.setState({ state: 'connected' })
@@ -336,16 +345,140 @@ describe('CapabilitiesPane', () => {
       limit: 3,
     })
 
-    answer = { ok: false, results: [], error: { kind: 'network', message: 'timed out' } }
+    // A failure is one plain sentence; the provider's own words wait behind Show details.
+    const raw =
+      "Client error '422 Unprocessable Entity' for url 'https://api.search.brave.com/res/v1/web/search?q=AgentOS'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422"
+    answer = { ok: false, results: [], error: { kind: 'http', message: raw } }
     fireEvent.click(within(search).getByRole('button', { name: 'Test search' }))
-    expect(await within(search).findByText('timed out')).toBeInTheDocument()
-    expect(within(search).getByText('DuckDuckGo did not answer:')).toBeInTheDocument()
+    expect(
+      await within(search).findByText(
+        'DuckDuckGo refused the request. That usually means the key is wrong or incomplete.',
+      ),
+    ).toBeInTheDocument()
+    expect(within(search).queryByText(/developer\.mozilla\.org/)).toBeNull()
+    fireEvent.click(within(search).getByRole('button', { name: 'Show details' }))
+    expect(within(search).getByText(/developer\.mozilla\.org/)).toBeInTheDocument()
+
+    answer = { ok: false, results: [], error: { kind: 'timeout', message: 'ReadTimeout' } }
+    fireEvent.click(within(search).getByRole('button', { name: 'Test search' }))
+    expect(
+      await within(search).findByText(
+        'DuckDuckGo did not answer in time. Check your connection, or the proxy under Advanced.',
+      ),
+    ).toBeInTheDocument()
+    // A new run folds the details again.
+    expect(within(search).queryByText('ReadTimeout')).toBeNull()
 
     // An unsaved change hides it: the test only speaks for what is saved.
     fireEvent.change(within(search).getByLabelText('Results per search'), {
       target: { value: '7' },
     })
     expect(within(search).queryByRole('button', { name: 'Test search' })).toBeNull()
+  })
+
+  it('an unsaved pick survives leaving for Environment, and saves once the key is set', async () => {
+    let braveSet = false
+    rpcCall.mockImplementation(async (method: string) => {
+      if (method === 'config.snapshot') return snapshot()
+      if (method === 'env.list') {
+        return { vars: [{ name: 'BRAVE_SEARCH_API_KEY', isSet: braveSet, url: '' }] }
+      }
+      if (method === 'auth.status') return { xai: {} }
+      return { restartRequired: false }
+    })
+    const first = mount()
+    await screen.findByRole('region', { name: 'Web search' })
+    await envLoaded()
+    fireEvent.click(within(card('Web search')).getByRole('radio', { name: /Brave Search/ }))
+    expect(within(card('Web search')).getByRole('button', { name: 'Save' })).toBeDisabled()
+    first.unmount()
+
+    // Back from Environment, where the key was set.
+    braveSet = true
+    mount()
+    const search = await screen.findByRole('region', { name: 'Web search' })
+    expect(within(search).getByRole('radio', { name: /Brave Search/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
+    await waitFor(() =>
+      expect(within(card('Web search')).getByRole('button', { name: 'Save' })).toBeEnabled(),
+    )
+    fireEvent.click(within(card('Web search')).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(rpcCall).toHaveBeenCalledWith(
+        'onboarding.search.configure',
+        expect.objectContaining({ providerId: 'brave', apiKeyEnv: 'BRAVE_SEARCH_API_KEY' }),
+      ),
+    )
+    await waitFor(() => expect(useCapDrafts.getState().drafts).toEqual({}))
+  })
+
+  it('Revert drops the parked edit and puts the keyboard on the chosen service', async () => {
+    mount()
+    const search = await screen.findByRole('region', { name: 'Web search' })
+    await envLoaded()
+    fireEvent.click(within(search).getByRole('radio', { name: /Brave Search/ }))
+    expect(useCapDrafts.getState().drafts.search?.providerId).toBe('brave')
+    const revert = within(search).getByRole('button', { name: 'Revert' })
+    revert.focus()
+    fireEvent.click(revert)
+    expect(useCapDrafts.getState().drafts).toEqual({})
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(card('Web search')).getByRole('radio', { name: /DuckDuckGo/ }),
+      ),
+    )
+  })
+
+  it('a pasted key is kept across sections, never past closing Settings', async () => {
+    mount()
+    const search = await screen.findByRole('region', { name: 'Web search' })
+    await envLoaded()
+    fireEvent.click(within(search).getByRole('radio', { name: /Brave Search/ }))
+    fireEvent.change(within(search).getByLabelText('API key'), { target: { value: 'sk-1' } })
+    expect(useCapDrafts.getState().drafts.search?.values.api_key).toBe('sk-1')
+    forgetPastedKeys()
+    expect(useCapDrafts.getState().drafts.search).toMatchObject({
+      providerId: 'brave',
+      values: { api_key: '' },
+    })
+  })
+
+  it('an emptied number is refused at the field, not saved as the default', async () => {
+    mount()
+    const search = await screen.findByRole('region', { name: 'Web search' })
+    fireEvent.change(within(search).getByLabelText('Results per search'), {
+      target: { value: '' },
+    })
+    expect(
+      within(search).getByText('Results per search must be between 1 and 20.'),
+    ).toBeInTheDocument()
+    expect(within(search).getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+
+  it('turning search on X off says it is off, not that no credential was found', async () => {
+    rpcCall.mockImplementation(async (method: string) => {
+      if (method === 'config.snapshot') return withX(snapshot())
+      if (method === 'env.list') return { vars: [{ name: 'XAI_API_KEY', isSet: false }] }
+      if (method === 'auth.status') return { xai: {} }
+      if (method === 'onboarding.x_search.configure') {
+        return {
+          restartRequired: false,
+          warnings: ['No xAI credential found: set XAI_API_KEY or paste a key.'],
+        }
+      }
+      return {}
+    })
+    mount()
+    const x = await screen.findByRole('region', { name: 'Search on X' })
+    await envLoaded()
+    fireEvent.click(within(x).getByRole('switch'))
+    fireEvent.click(within(x).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith('Search on X is off.', expect.anything()),
+    )
+    expect(toast.warning).not.toHaveBeenCalled()
   })
 
   it('a jump scrolls smoothly, or at once for reduced motion or a hidden window', () => {

@@ -635,6 +635,10 @@ export interface SetupSummary {
   toFix: number
   /** Recommended items simply not set up: fine to skip. */
   optional: number
+  /** The required items not done, in checklist order. */
+  requiredOpen: SetupItem[]
+  /** The recommended items that are on but broken, in checklist order. */
+  broken: SetupItem[]
   /** The one step the hero offers, or null when nothing is left. */
   next: SetupItem | null
 }
@@ -669,6 +673,8 @@ export function summarizeSetup(items: readonly SetupItem[]): SetupSummary {
     requiredLeft: requiredOpen.length,
     toFix: broken.length,
     optional,
+    requiredOpen,
+    broken,
   }
   if (gateway && gateway.state !== 'done') {
     return { ...base, phase: 'offline', next: gateway }

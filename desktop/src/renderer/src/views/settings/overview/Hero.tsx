@@ -2,6 +2,7 @@ import { ArrowRight, LoaderCircle, PartyPopper, ServerOff } from 'lucide-react'
 import type { GatewayState } from '@shared/gateway'
 import { Button } from '~/components/ui/button'
 import { t, type MessageKey } from '~/i18n'
+import { heroCopy, midSentence, type HeroCopy } from './hero-copy'
 import type { SetupItem, SetupSummary } from './setup-items'
 
 function fill(key: MessageKey, vars: Record<string, string | number>): string {
@@ -54,16 +55,10 @@ export function ProgressRing({
   )
 }
 
-interface HeroCopy {
-  title: string
-  body: string
-}
-
 function nextLabel(item: SetupItem): string {
   if (item.state === 'attention') {
     // Mid-sentence: "Fix web search", not "Fix Web search".
-    const title = item.title.charAt(0).toLowerCase() + item.title.slice(1)
-    return fill('settings.overview.fix', { title })
+    return fill('settings.overview.fix', { title: midSentence(item.title) })
   }
   return t(`settings.overview.next.${item.id}`)
 }
@@ -146,28 +141,7 @@ export function Hero({
     )
   }
 
-  const copy: HeroCopy =
-    summary.phase === 'blocked' && next
-      ? {
-          title: t('settings.overview.hero.blocked.title'),
-          body: fill('settings.overview.hero.blocked.body', { detail: next.detail }),
-        }
-      : summary.phase === 'attention' && next
-        ? {
-            title: fill('settings.overview.hero.attention.title', { title: next.title }),
-            body: fill('settings.overview.hero.attention.body', { detail: next.detail }),
-          }
-        : summary.phase === 'optional' && next
-          ? {
-              title: t('settings.overview.hero.optional.title'),
-              body: fill('settings.overview.hero.optional.body', {
-                suggest: t(`settings.overview.suggest.${next.id}` as MessageKey),
-              }),
-            }
-          : {
-              title: t('settings.overview.hero.complete.title'),
-              body: t('settings.overview.hero.complete.body'),
-            }
+  const copy = heroCopy(summary)
   const tone =
     summary.phase === 'complete'
       ? 'ok'

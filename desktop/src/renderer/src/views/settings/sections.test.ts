@@ -66,6 +66,27 @@ describe('rail search', () => {
     ['thinking', 'router'],
     ['.env', 'environment'],
     ['setup', 'overview'],
+    // Round two: words a tester typed and found nothing for.
+    ['fallback', 'capabilities'],
+    ['password', 'trading'],
+    ['slippage', 'trading'],
+    ['upload', 'memory'],
+    ['effort', 'capabilities'],
+    ['reasoning effort', 'capabilities'],
+    ['nudge', 'memory'],
+    ['usage', 'providers'],
+    ['brave key', 'capabilities'],
+    ['key brave', 'capabilities'],
+    ['agent', 'overview'],
+    ['global shortcut', 'behaviour'],
+    ['menu bar', 'behaviour'],
+    ['retries', 'capabilities'],
+    ['supergrok', 'capabilities'],
+    ['high-risk', 'security'],
+    ['reinstall', 'advanced'],
+    ['chromium', 'about'],
+    ['reveal', 'environment'],
+    ['deny', 'channels'],
   ])('%s → %s', (query, expected) => {
     expect(search(query)[0]).toBe(expected)
   })

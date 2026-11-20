@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { AlertTriangle, Check, ExternalLink, LoaderCircle } from 'lucide-react'
+import { ExternalLink, LoaderCircle } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
@@ -10,19 +10,14 @@ import { Switch } from '~/components/ui/switch'
 import { t, type MessageKey } from '~/i18n'
 import { desktopApi } from '~/lib/desktop-api'
 import { jumpTo } from '../overview/jumps'
-import {
-  Card,
-  Choices,
-  Disclosure,
-  Notice,
-  Pill,
-  Row,
-  type ChoiceOption,
-  type Tone,
-} from '../parts'
+import { Card, Choices, Disclosure, Notice, Pill, type ChoiceOption, type Tone } from '../parts'
 import { ProviderLogo } from '../ProviderLogo'
 import { withRevision } from '../use-snapshot'
+import { keepFocus } from '../panes/focus'
+import { cardHome } from './card-focus'
+import { useCapDraft } from './drafts'
 import { FieldRow, fieldLabel } from './FieldRow'
+import { SearchTest } from './SearchTest'
 import {
   buildParams,
   draftDirty,
@@ -38,7 +33,6 @@ import {
   switchProvider,
   visibleFields,
   type CapabilityDef,
-  type CapDraft,
   type CapStatus,
   type KeyContext,
   type SaveProblem,
@@ -83,7 +77,7 @@ function providerBlurb(def: CapabilityDef, spec: ProviderSpec): string {
   return key ? t(key) : (spec.whatYouNeed?.[0] ?? '')
 }
 
-export function problemText(problem: SaveProblem, def: CapabilityDef, spec: ProviderSpec): string {
+function problemText(problem: SaveProblem, def: CapabilityDef, spec: ProviderSpec): string {
   if (problem.kind === 'key') return t('settings.capabilities.problem.key')
   if (problem.kind === 'model-prefix') {
     return fill('settings.capabilities.problem.modelPrefix', { prefix: problem.prefix })
@@ -152,8 +146,11 @@ export function CapabilityCard({
 }) {
   const rpc = useRpc()
   const saved = useMemo(() => seedDraft(def, snapshot), [def, snapshot])
-  const [draft, setDraft] = useState<CapDraft>(saved)
+  // Parked per card: leaving the section (say, for Environment) keeps the edit.
+  const { draft, setDraft, revert, settle } = useCapDraft(def.id, saved)
   const [error, setError] = useState<string | null>(null)
+  /** The card's home control, looked up by id: the card remounts on a new revision. */
+  const home = () => cardHome(document.getElementById(`cap-${def.id}`))
   const specs = def.specs(snapshot)
   const spec = specs.find((s) => s.providerId === draft.providerId)
   const current = def.current(snapshot)
@@ -168,18 +165,27 @@ export function CapabilityCard({
   const save = useMutation({
     mutationFn: (params: Record<string, unknown>) =>
       rpc.call<ConfigureResult>(def.method, withRevision(snapshot, params)),
-    onSuccess: async (res) => {
+    onSuccess: async (res, params) => {
       setError(null)
-      for (const w of res?.warnings ?? []) toast.warning(w)
+      // Switched off, the gateway's key warnings ("no credential found…")
+      // describe a service nobody asked for any more: say it is off instead.
+      const off = def.toggles && params.enabled === false
+      if (!off) for (const w of res?.warnings ?? []) toast.warning(w)
       toast.success(
         res?.restartRequired
           ? t('settings.restartRequired')
-          : t(`settings.capabilities.saved.${def.id}`),
+          : t(
+              off
+                ? `settings.capabilities.turnedOff.${def.id}`
+                : `settings.capabilities.saved.${def.id}`,
+            ),
         { id: `stg-cap-${def.id}` },
       )
       // A typed key is sent once; the form forgets it as soon as it landed.
-      setDraft((d) => ({ ...d, values: { ...d.values, api_key: '' } }))
+      settle()
       await onSaved()
+      // The new revision remounts the card: keep the keyboard on it.
+      keepFocus(document.getElementById(`cap-${def.id}`), home)
     },
     onError: (err) => {
       const message = errorText(err)
@@ -344,8 +350,10 @@ export function CapabilityCard({
           <>
             <Button
               disabled={!dirty || save.isPending}
-              onClick={() => {
-                setDraft(saved)
+              onClick={(e) => {
+                // The foot goes with the edit: land on the card, not <body>.
+                keepFocus(e.currentTarget, home)
+                revert()
                 setError(null)
               }}
             >
@@ -354,7 +362,12 @@ export function CapabilityCard({
             <Button
               variant="primary"
               disabled={!dirty || !spec || Boolean(problem) || save.isPending || disabled}
-              onClick={() => spec && save.mutate(buildParams(def, spec, draft))}
+              onClick={(e) => {
+                if (!spec) return
+                // Save greys out while it runs, which drops focus.
+                keepFocus(e.currentTarget, home)
+                save.mutate(buildParams(def, spec, draft))
+              }}
             >
               {save.isPending ? (
                 <LoaderCircle className="stg-spin size-3.5" strokeWidth={1.75} aria-hidden />
@@ -413,106 +426,5 @@ export function CapabilityCard({
         </>
       )}
     </Card>
-  )
-}
-
-/** What the test asks: plain, harmless, and sure to have answers. */
-export const SEARCH_TEST_QUERY = 'AgentOS'
-
-interface SearchQueryResult {
-  ok?: boolean
-  results?: unknown[]
-  error?: { message?: string } | string | null
-  errorMessage?: string
-}
-
-function searchError(res: SearchQueryResult): string {
-  if (typeof res.error === 'string') return res.error
-  return res.error?.message || res.errorMessage || t('settings.capabilities.test.noAnswer')
-}
-
-/**
- * Web search's "does it work": one real search through the gateway with the
- * saved settings (`search.query`), the same path the agent's tool takes. Shown
- * while the card is saved: a pasted key is tested once it is saved.
- */
-function SearchTest({
-  providerId,
-  label,
-  disabled,
-}: {
-  providerId: string
-  label: string
-  disabled: boolean
-}) {
-  const rpc = useRpc()
-  const probe = useMutation({
-    mutationFn: async () => {
-      const started = performance.now()
-      const res = await rpc.call<SearchQueryResult>('search.query', {
-        query: SEARCH_TEST_QUERY,
-        provider: providerId,
-        limit: 3,
-      })
-      return { res, ms: Math.round(performance.now() - started) }
-    },
-  })
-  const data = probe.data
-  const verdict = probe.isPending
-    ? 'checking'
-    : probe.isError || (data && !data.res.ok)
-      ? 'bad'
-      : data
-        ? 'ok'
-        : 'idle'
-  const count = data?.res.results?.length ?? 0
-  const seconds = data ? (data.ms / 1000).toFixed(1) : '0'
-  return (
-    <Row
-      label={t('settings.capabilities.test.label')}
-      help={
-        verdict === 'idle' ? (
-          fill('settings.capabilities.test.help', { label })
-        ) : (
-          <span className="cap-test" data-verdict={verdict} data-testid="search-test-result">
-            {verdict === 'checking' ? (
-              <>
-                <LoaderCircle className="stg-spin size-3" strokeWidth={2} aria-hidden />
-                {t('settings.capabilities.test.running')}
-              </>
-            ) : verdict === 'ok' ? (
-              <>
-                <Check className="size-3" strokeWidth={2.5} aria-hidden />
-                {count > 0
-                  ? fill(
-                      count === 1
-                        ? 'settings.capabilities.test.okOne'
-                        : 'settings.capabilities.test.ok',
-                      { n: count, label, s: seconds },
-                    )
-                  : fill('settings.capabilities.test.empty', { label, s: seconds })}
-              </>
-            ) : (
-              <>
-                <AlertTriangle className="size-3" strokeWidth={2} aria-hidden />
-                <span>
-                  {fill('settings.capabilities.test.failed', { label })}{' '}
-                  <code>
-                    {probe.error ? errorText(probe.error) : data ? searchError(data.res) : ''}
-                  </code>
-                </span>
-              </>
-            )}
-          </span>
-        )
-      }
-      align="start"
-    >
-      <Button disabled={disabled || probe.isPending} onClick={() => probe.mutate()}>
-        {probe.isPending
-          ? t('settings.capabilities.test.running')
-          : t('settings.capabilities.test.button')}
-      </Button>
-    </Row>
   )
 }

@@ -496,10 +496,17 @@ export type FieldProblem =
 export type SaveProblem =
   { kind: 'key'; envKey: string } | { kind: 'model-prefix'; prefix: string } | FieldProblem
 
-/** What is wrong with one field's value as typed, or null. A blank number keeps the saved one. */
+/**
+ * What is wrong with one field's value as typed, or null. A blank bounded
+ * number is wrong too: the gateway would not keep the saved value but fall
+ * back to its own default, so the form would say one thing and save another.
+ */
 export function fieldProblem(field: FieldSpec, value: unknown): FieldProblem | null {
   const raw = str(value).trim()
-  if ((field.type === 'int' || field.type === 'float') && raw !== '') {
+  const numeric = field.type === 'int' || field.type === 'float'
+  const range = NUMBER_BOUNDS[field.name]
+  if (numeric && raw === '' && range) return { kind: 'range', field: field.name, ...range }
+  if (numeric && raw !== '') {
     const ok = field.type === 'int' ? /^-?\d+$/.test(raw) : Number.isFinite(Number(raw))
     if (!ok) return { kind: 'number', field: field.name }
     const bounds = NUMBER_BOUNDS[field.name]
@@ -613,4 +620,37 @@ export function capabilityStatus(
 /** "OpenRouter Images" → "OpenRouter": the short name for the stats strip. */
 export function shortLabel(label: string): string {
   return label.replace(/\s+(Images|Audio|Search)$/i, '').trim() || label
+}
+
+// ── the web search test ────────────────────────────────────────────────────
+
+/**
+ * What a failed test search most likely means, for one plain sentence. The
+ * gateway passes the provider's error kind and the HTTP client's raw text;
+ * the status code is read out of that text ("Client error '422 …'").
+ */
+export type SearchFailure =
+  'noKey' | 'rejected' | 'refused' | 'rateLimit' | 'timeout' | 'network' | 'server' | 'other'
+
+export function httpStatusOf(message: string): number | null {
+  const m =
+    /(?:error '|status(?: code)?[: ]+|HTTP )(\d{3})\b/i.exec(message) ??
+    /\b([45]\d{2})\b/.exec(message)
+  return m ? Number(m[1]) : null
+}
+
+export function searchFailure(error: { kind?: string; message?: string }): SearchFailure {
+  const kind = str(error.kind).toLowerCase()
+  const message = str(error.message)
+  const status = httpStatusOf(message)
+  if (kind === 'auth' && /not set|missing|no (api )?key/i.test(message)) return 'noKey'
+  if (status === 401 || status === 403 || (kind === 'auth' && status === null)) return 'rejected'
+  if (status === 400 || status === 422) return 'refused'
+  if (status === 429 || kind === 'rate_limit') return 'rateLimit'
+  if (kind === 'timeout' || /timed? ?out/i.test(message)) return 'timeout'
+  if (status !== null && status >= 500) return 'server'
+  if (kind === 'network' || /connect|network|unreachable|resolve|dns|refused/i.test(message)) {
+    return 'network'
+  }
+  return 'other'
 }

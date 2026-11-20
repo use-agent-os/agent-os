@@ -227,23 +227,14 @@ System Settings › Notifications and that no Focus mode is on.
 ## Settings
 
 Open Settings with ⌘, or the toolbar gear. Escape or **Done** closes it. The
-first time after the app starts, Settings opens on **Overview**, a setup
-checklist of what is set up and what is still missing; after that it reopens
-on the section you last used. The rail on the left lists every section with
-its icon. Type in its search field to narrow it: it matches section names and
-the words for what is on each page, such as "telegram", "dark mode", "text
-size", "uniswap", "grok" or "api key", every word in any order; the best match
-comes first and Return opens it. A dot marks a section that needs you: no
-provider yet, or something switched on that cannot work, such as a missing
-key.
-
-The Overview head says where setup stands in one line: how many required
-steps are left, else "Required setup done" with how many things need fixing
-or how many optional ones remain, and "All set" only when nothing is left.
-Its checklist covers the provider, routing, memory, web search, image
-generation, voice, search on X, channels, skills, environment variables, the
-trading wallet and updates; each row's button lands on the place that changes
-it.
+first time after the app starts, Settings opens on **Overview**; after that it
+reopens on the section you last used. The rail on the left lists every
+section with its icon. Type in its search field to narrow it: it matches
+section names and the words for what is on each page, such as "telegram",
+"dark mode", "text size", "uniswap", "slippage", "grok" or "api key", every
+word in any order ("brave key" works); the best match comes first and Return
+opens it. A dot marks a section that needs you: no provider yet, or something
+switched on that cannot work, such as a missing key.
 
 | Group | Sections |
 | --- | --- |
@@ -253,62 +244,120 @@ it.
 | More | Advanced, About |
 
 Each page starts with its state and its one main action; settings most
-people never change sit under a fold. Providers, Pilot Router, Memory and
-Capabilities edit the gateway's own configuration through the same guided
-setup the Web UI uses.
+people never change sit under a fold (**Advanced**, **Fine-tuning**).
+Providers, Pilot Router, Memory, Capabilities, Channels and Trading edit the
+gateway's own configuration through the same guided writes the Web UI uses.
+An unsaved edit in Memory or Capabilities stays in its form when you go to
+another section and come back; a key pasted into Capabilities is forgotten
+when Settings closes.
 
+- **Overview** is the setup checklist. Required: **Gateway running** and
+  **Provider and model**. Recommended: model routing, memory, web search,
+  image generation, voice, search on X, channels, skills, environment
+  variables, a trading wallet (while trading is on) and updates (once the app
+  has checked for them). Each row says what is in place now, and its button
+  (Set up, Fix, Review) lands on the place that changes it, with the keyboard
+  there too. The head says where setup stands in one line: how many required
+  steps are left, else "Required setup done" with how many things need fixing
+  or how many optional ones remain, and "All set" only when nothing is left.
+  The hero says the same thing in words: the required step first, else what
+  is broken (one is named with its fix; several are counted, the first one
+  leading), else a suggestion for the next optional step.
 - **Providers** leads with the active provider: its key, the **Test key**
-  result, the default model and the connection. A refused key is explained in
-  one sentence, with the provider's own message under it to copy. Below,
-  **Switch provider** lists the others with a filter; picking one opens its
-  setup in place, and nothing changes until you save. With no provider yet,
-  the list comes first with the recommended one marked.
-- **Pilot Router**: the routing mode as cards that each say what they do, the
-  tiers (model and thinking per tier, one of them the default), and the safety
-  net and translation cap under **Fine-tuning**.
+  result, the default model, the thinking level and the connection. A refused
+  key is explained in one sentence, with the provider's own message under it
+  to copy. Below, **Switch provider** lists the others with a filter; picking
+  one opens its setup in place, and nothing changes until you save. With no
+  provider yet, the list comes first with the recommended one marked.
+- **Pilot Router**: the routing mode as cards that each say what they do
+  (Pilot, LLM judge, Jev, Off) with the judge model or TypeSafe key a mode
+  needs, the tiers (model and thinking per tier, one of them the default),
+  and the safety net, high-risk floor and translation cap under
+  **Fine-tuning**. Changes wait in one save bar for the page.
 - **Memory** is where the agent's memory is set up, in four tabs: Remembered,
-  Knowledge, Try it and Setup. **Capabilities** sets up web search, search on
-  X (Grok, with an xAI key or a SuperGrok login), image generation and voice,
-  under a strip that says which service answers each one and whether its key
-  is in place. **Test search** runs one real search with the saved web search
-  settings. Numbers are checked against what the engine accepts (results per
-  search 1 to 20; X search timeouts and retries within their limits), and
-  **Open Environment** next to a missing key lands on that variable.
-- **Skills** and **Environment** open on a summary strip. In Skills,
-  **Needs setup** opens the Skills panel; in Environment, **Set** and
-  **Missing** filter the list to those variables.
+  Knowledge, Try it and Setup.
+- **Capabilities** sets up web search, search on X (Grok, with an xAI key or a
+  SuperGrok login), image generation and voice, under a strip that says which
+  service answers each one and whether its key is in place. **Test search**
+  runs one real search with the saved web search settings; a failure is said
+  in one sentence (key rejected, request refused, too many searches, no
+  answer in time, not reachable), with the service's own message behind
+  **Show details**. Numbers are checked against what the engine accepts
+  (results per search 1 to 20; X search timeouts 30 to 300 and 30 to 600
+  seconds, 0 to 5 retries), and an empty one is refused rather than saved as
+  a default. Switching a capability off says so ("Search on X is off.").
+- **Skills** opens on a summary strip (installed, ready, needs setup, offered
+  to the agent); **Needs setup** opens the Skills panel, and a card lists
+  where skills come from.
+- **Trading** carries its on/off switch in the page head and opens on a
+  summary strip: the swap provider, the wallets, the amount above which the
+  agent asks you, and the daily cap. Below: the swap provider (the AgentOS
+  DEX by default, with **Test connection**; Uniswap with its API key and
+  **Test key**), the networks and their RPC endpoints, the vault (where it
+  lives and whether it unlocks automatically or asks each time; changing that
+  asks for the vault password), and the agent's limits (ask-me-above amount,
+  daily cap, approval timeout, default slippage). When the gateway does not
+  take trading changes from this window, the page says so and is read-only.
 - **Gateway** shows whether the gateway runs and where, with Start, Stop and
-  Restart when the app manages it. The address and token fold away while a
-  managed gateway is on its defaults.
-- **Trading** and **Notifications** carry their on/off switch in the page
-  head. Trading opens on a summary of the swap provider, wallets and limits.
-- **Appearance** holds the theme (system/light/dark), the colour palette, UI
-  scale, reduced transparency and the optional pet mascot. **Behaviour** holds
-  open at login, what to open at launch, stopping the gateway on quit, the
-  Quick Ask shortcut, and Return vs ⌘Return to send.
+  Restart when the app manages it and a link to the web console. Run mode is
+  Managed (recommended) or External. The address (protocol, host, port) and
+  the auth token fold away while a managed gateway is on its defaults; the
+  command-line tool a managed gateway launches from is below them.
+- **Appearance** holds the theme (Auto, Light, Dark), the colour palette,
+  the UI scale (⌘ + and ⌘ − step it, ⌘ 0 resets), reduce transparency and
+  the optional pet mascot.
+- **Notifications** carries its master switch in the page head, with
+  **Send a test**. It holds what happens while the window is in front
+  (nothing, a banner in the app, or a system notification), Do not disturb,
+  whether notifications show details, which events notify (a reply finishes,
+  a reply fails, the agent needs approval, a scheduled job runs, a swap
+  settles, the gateway stops on its own), the sound, the Dock badge and
+  bounce, and a link to the macOS permission.
+- **Security** holds **Confirm with Touch ID**: Off, high-risk approvals, or
+  every approval (and every click that trades or may spend). With it on, the
+  desk asks for a fingerprint before it approves, trades or fires anything,
+  and cancelling the prompt sends nothing. It shows whether this Mac's sensor
+  is ready and has **Try the prompt**.
+- **Behaviour** holds open at login, what to open at launch (Home or the last
+  session), stopping the gateway on quit, Show in menu bar, Quick Ask (its
+  global shortcut on or off, and which keys), Return vs ⌘Return to send, and
+  the sidebar width (with a reset).
+- **Shortcuts** lists every key the app answers to.
+- **Advanced** has the app settings file, the app logs and the gateway
+  configuration file (open or show in Finder), **Copy diagnostics**, and
+  under **Start over** reset all app settings, reinstall the engine and remove
+  the engine, each of which asks first.
+- **About** has an **App** card and an **Engine** card (a **Gateway** card for
+  an external gateway, updated on its own host), and the runtime versions and
+  links.
 
 Channels is the Web UI's Channels screen inside the app: every messaging
-adapter the gateway is configured with (Telegram, Discord, Slack, Microsoft
-Teams, Email), its live status, when it connected and how often it has been
-restarted, under a summary strip whose **Needs attention** and **Pairing
-requests** figures jump to the channel they count. With no channel yet the
-page is one empty state with **Add channel**, which opens a sheet built from
-the gateway's adapter catalog: pick the adapter, paste what it needs, save;
-**Configure** reopens it for an existing channel with the adapter and name
-locked, and a secret left blank keeps the one already stored. Each card has
-an Enabled switch, Restart and Remove, and a Telegram card lists who is
-waiting to pair and who is in, with Pair, Deny and Disconnect. Changes to the
-configuration restart a gateway the app manages so they apply at once; with
-an external gateway the pane only says to restart it on its host, with no
-**Restart gateway** button (the app does not run that process). Providers and
-Router do the same.
+adapter the gateway is configured with (Telegram, Discord, Slack, Email), its
+live status, when it connected and how often it has been restarted, under a
+summary strip whose **Needs attention** and **Pairing requests** figures jump
+to the channel they count. With no channel yet the page is one empty state
+with **Add channel**, which opens a sheet built from the gateway's adapter
+catalog: pick the adapter, paste what it needs, save; **Configure** reopens
+it for an existing channel with the adapter and name locked, and a secret
+left blank keeps the one already stored. Each card has an Enabled switch,
+Restart and Remove, and a Telegram card lists who is waiting to pair and who
+is in, with Pair, Deny and Disconnect. Changes to the configuration restart a
+gateway the app manages so they apply at once; with an external gateway the
+pane only says to restart it on its host, with no **Restart gateway** button
+(the app does not run that process). Providers and Router do the same.
 
 Environment is the Web UI's Environment screen inside the app: every variable
-the gateway, its providers and your skills read, grouped by what uses it.
-Set, replace, import from a source that already holds the credential, or
-remove a variable in `~/.agentos/.env`; **Add variable** stores one of your
-own. Listings never carry a value. Showing a secret asks first, is rate
-limited by the gateway, and hides again after 30 seconds.
+the gateway, its providers and your skills read, grouped by what uses it,
+under a summary strip (set, missing, shadowed by the shell; **Set** and
+**Missing** filter the list to those variables), with a search field and an
+All / Missing / Set / Custom filter. Set, replace, import from a source that
+already holds the credential, or remove a variable in `~/.agentos/.env`;
+**Add variable** stores one of your own. Listings show a secret masked (its
+first and last four characters, or only dots when it is short) and a plain
+setting as it is. Showing a secret in full asks first, is rate limited by the
+gateway, and hides again after 30 seconds. **Open Environment** next to a
+missing key in Capabilities or Memory opens this page searched to that
+variable.
 
 ## Updates
 

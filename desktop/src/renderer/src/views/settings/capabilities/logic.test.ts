@@ -15,6 +15,7 @@ import {
   NUMBER_BOUNDS,
   saveProblem,
   searchDef,
+  searchFailure,
   seedDraft,
   shortLabel,
   switchProvider,
@@ -222,8 +223,9 @@ describe('search', () => {
     expect(problem('20')).toBeNull()
     expect(problem('x')).toEqual({ kind: 'number', field: 'max_results' })
     expect(problem('2.5')).toEqual({ kind: 'number', field: 'max_results' })
-    // Cleared: the gateway keeps its own value.
-    expect(problem('')).toBeNull()
+    // Cleared: the gateway would put its own default back, not the saved value.
+    expect(problem('')).toEqual(range)
+    expect(problem('  ')).toEqual(range)
   })
 
   it('status: on with no key needed', () => {
@@ -393,5 +395,30 @@ describe('helpers', () => {
     expect(shortLabel('OpenRouter Images')).toBe('OpenRouter')
     expect(shortLabel('ElevenLabs Audio')).toBe('ElevenLabs')
     expect(shortLabel('DuckDuckGo')).toBe('DuckDuckGo')
+  })
+})
+
+describe('search test failures', () => {
+  it.each([
+    [{ kind: 'auth', message: 'Brave search API key not set' }, 'noKey'],
+    [{ kind: 'auth', message: "Client error '401 Unauthorized' for url 'https://x'" }, 'rejected'],
+    [{ kind: 'auth', message: "Client error '403 Forbidden' for url 'https://x'" }, 'rejected'],
+    [
+      {
+        kind: 'http',
+        message:
+          "Client error '422 Unprocessable Entity' for url 'https://api.search.brave.com/res/v1/web/search?q=AgentOS&count=3'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422",
+      },
+      'refused',
+    ],
+    [{ kind: 'http', message: "Client error '400 Bad Request' for url 'https://x'" }, 'refused'],
+    [{ kind: 'rate_limit', message: "Client error '429 Too Many Requests'" }, 'rateLimit'],
+    [{ kind: 'timeout', message: 'ReadTimeout' }, 'timeout'],
+    [{ kind: 'network', message: 'All connection attempts failed' }, 'network'],
+    [{ kind: 'http', message: "Server error '502 Bad Gateway' for url 'https://x'" }, 'server'],
+    [{ kind: '', message: 'something odd' }, 'other'],
+    [{}, 'other'],
+  ] as const)('%j → %s', (error, expected) => {
+    expect(searchFailure(error)).toBe(expected)
   })
 })
