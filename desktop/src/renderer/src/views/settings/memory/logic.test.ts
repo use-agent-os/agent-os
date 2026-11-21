@@ -432,7 +432,7 @@ describe('facts, documents, recall records, forget', () => {
     const docs = [{ path: 'knowledge_base/notes.md' }, { path: 'knowledge_base/manuals/a.md' }]
     expect(replacedByUpload(['new.md', 'notes.md'], docs)).toEqual(['notes.md'])
     expect(replacedByPath('exports/notes.md', docs)).toEqual({ kind: 'file', name: 'notes.md' })
-    expect(replacedByPath('/Users/me/work/manuals/', docs)).toEqual({
+    expect(replacedByPath('/srv/work/manuals/', docs)).toEqual({
       kind: 'folder',
       name: 'manuals',
     })
