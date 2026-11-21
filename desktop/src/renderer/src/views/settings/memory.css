@@ -1,0 +1,679 @@
+/* Settings › memory. Shared vocabulary (.stg-*) lives in settings.css. */
+
+/* ── Frame ──────────────────────────────────────────────────────────────── */
+
+.mem-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.mem-panel[hidden] {
+  display: none;
+}
+.mem-tab-dot {
+  width: 7px;
+  height: 7px;
+  margin: 0 3px;
+  border-radius: var(--radius-pill);
+  background: var(--primary);
+}
+.mem-card-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: var(--radius-control);
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+.mem-card-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.mem-file,
+.mem-key {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+.mem-key {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  color: var(--muted-foreground);
+}
+.mem-quiet {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+.mem-fine {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--dim);
+}
+.mem-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+}
+.mem-problem {
+  color: var(--danger);
+}
+.mem-sub {
+  padding: 12px 18px 0;
+  border-top: 1px solid var(--hairline);
+  font-size: 13px;
+  font-weight: 500;
+}
+.mem-card-notice {
+  padding: 0 18px 14px;
+}
+.mem-card-notice:first-child {
+  padding-top: 4px;
+}
+.mem-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mem-inline .mac-input {
+  width: 220px;
+}
+.mem-unit {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.stg-row .mem-unit .mac-input {
+  width: 92px;
+  text-align: right;
+}
+.mem-unit-text {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.mem-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 240px;
+}
+.mem-field .mac-input {
+  width: 100%;
+}
+.mem-field__icon {
+  position: absolute;
+  left: 8px;
+  width: 13px;
+  height: 13px;
+  color: var(--dim);
+  pointer-events: none;
+}
+.mem-field__icon + .mac-input {
+  padding-left: 27px;
+}
+.mem-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.mem-check input {
+  accent-color: var(--primary);
+}
+.mem-danger-icon:hover:not(:disabled) svg {
+  color: var(--danger);
+}
+
+/* ── Remembered: two lists of facts ─────────────────────────────────────── */
+
+.mem-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 18px 16px;
+}
+.mem-filter {
+  height: 28px;
+}
+.mem-fact-list {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+  overflow: hidden;
+}
+.mem-fact {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 40px;
+  padding: 9px 8px 9px 12px;
+  transition: background-color 90ms ease-out;
+}
+.mem-fact + .mem-fact {
+  box-shadow: inset 0 0.5px 0 var(--hairline);
+}
+.mem-fact:hover,
+.mem-fact:focus-within {
+  background: color-mix(in srgb, var(--foreground) 3.5%, transparent);
+}
+.mem-fact[data-editing='true'] {
+  padding: 8px;
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
+}
+.mem-fact__text {
+  min-width: 0;
+  flex: 1;
+  padding-top: 2px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.mem-fact__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 90ms ease-out;
+}
+.mem-fact:hover .mem-fact__actions,
+.mem-fact:focus-within .mem-fact__actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .mem-fact__actions {
+    opacity: 1;
+  }
+}
+.mem-editor {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 8px;
+}
+.mem-editor .mac-textarea {
+  min-height: 64px;
+}
+.mem-editor__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mem-editor__hint {
+  margin-right: auto;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+.mem-editor__hint[data-tone='danger'] {
+  color: var(--danger);
+}
+.mem-quote {
+  display: -webkit-box;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  color: var(--foreground);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+}
+.mem-confirm {
+  width: 340px;
+}
+.mem-confirm__body {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+.mem-confirm__body > * + * {
+  margin-top: 6px;
+}
+.mem-confirm__list {
+  display: grid;
+  gap: 2px;
+  max-height: 120px;
+  padding: 6px 10px;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--foreground);
+  text-align: left;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+/* ── Knowledge ──────────────────────────────────────────────────────────── */
+
+.mem-drop {
+  position: relative;
+  border-radius: var(--radius-surface);
+}
+.mem-drop[data-dragging='true'] > .stg-card {
+  box-shadow:
+    0 0 0 1.5px var(--primary),
+    0 0 0 5px color-mix(in srgb, var(--primary) 16%, transparent);
+  background: color-mix(in srgb, var(--primary) 5%, var(--card));
+}
+.mem-docs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 18px 16px;
+}
+.mem-dropzone {
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--foreground) 2.5%, transparent);
+  border: 1px dashed var(--border);
+}
+.mem-drop[data-dragging='true'] .mem-dropzone {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 7%, transparent);
+}
+.mem-dropzone .stg-empty {
+  padding: 22px 24px 20px;
+}
+.mem-drop-hint {
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.mem-drop[data-dragging='true'] .mem-drop-hint {
+  color: var(--primary);
+  font-weight: 500;
+}
+.mem-files {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+  overflow: hidden;
+}
+.mem-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 6px 8px 6px 10px;
+}
+.mem-file-row + .mem-file-row {
+  box-shadow: inset 0 0.5px 0 var(--hairline);
+}
+.mem-file-row:hover {
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+}
+.mem-file-row__icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: var(--radius-control);
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+.mem-file-row__icon svg {
+  width: 14px;
+  height: 14px;
+}
+.mem-file-row__main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  text-align: left;
+}
+button.mem-file-row__main {
+  border-radius: var(--radius-control);
+}
+button.mem-file-row__main:hover .mem-file-row__name {
+  color: var(--primary);
+}
+button.mem-file-row__main:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.mem-file-row__name {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.mem-file-row__meta {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+.mem-pre {
+  max-height: 56vh;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.mem-pre:focus-visible {
+  outline: 2px solid var(--ring);
+}
+
+/* ── Try it ─────────────────────────────────────────────────────────────── */
+
+.mem-try {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 18px 16px;
+}
+.mem-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow:
+    0 0 0 0.5px var(--input),
+    inset 0 1px 1px rgba(0, 0, 0, 0.06);
+  color: var(--dim);
+  transition: box-shadow 100ms ease-out;
+}
+.mem-search:focus-within {
+  color: var(--foreground);
+  box-shadow:
+    0 0 0 0.5px var(--input),
+    0 0 0 3px color-mix(in srgb, var(--ring) 32%, transparent);
+}
+.mem-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  color: var(--foreground);
+}
+.mem-search input::placeholder {
+  color: var(--dim);
+}
+.mem-try__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.mem-try__count {
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.mem-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mem-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--foreground) 2.5%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+}
+.mem-result__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.mem-result__path {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.mem-result__lines {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+.mem-result__head > .stg-pill {
+  flex-shrink: 0;
+}
+.mem-score {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
+.mem-score__bar {
+  width: 44px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--foreground) 9%, transparent);
+  overflow: hidden;
+}
+.mem-score__bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+}
+.mem-result__snippet {
+  padding-left: 10px;
+  border-left: 2px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted-foreground);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
+}
+.mem-recall {
+  display: flex;
+  flex-direction: column;
+}
+.mem-recall__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 2px;
+  padding: 8px 0;
+}
+.mem-recall__row + .mem-recall__row {
+  border-top: 1px solid var(--hairline);
+}
+.mem-recall__session {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.mem-recall__meta {
+  grid-column: 2;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+
+/* ── Sheets ─────────────────────────────────────────────────────────────── */
+
+.mem-sheet__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 64px;
+  background: color-mix(in srgb, var(--background) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+.mem-sheet {
+  display: flex;
+  max-height: calc(100vh - 112px);
+  border-radius: var(--radius-dialog);
+  background: var(--popover);
+  box-shadow:
+    0 0 0 0.5px var(--border),
+    0 24px 60px rgba(0, 0, 0, 0.38),
+    0 2px 8px rgba(0, 0, 0, 0.18);
+  outline: none;
+  transform-origin: top center;
+}
+.mem-sheet__frame {
+  display: flex;
+  width: min(560px, calc(100vw - 48px));
+  min-height: 0;
+  flex-direction: column;
+}
+.mem-sheet__frame[data-wide='true'] {
+  width: min(720px, calc(100vw - 48px));
+}
+.mem-sheet__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 16px 12px 20px;
+}
+.mem-sheet__head h2 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.mem-sheet__head p {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.mem-sheet__path {
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+}
+.mem-sheet__body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 2px 20px 18px;
+}
+.mem-sheet__foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--hairline);
+}
+.mem-sheet__foot > .mem-quiet {
+  margin-right: auto;
+}
+.mem-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mem-form__label {
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.mem-form__label:not(:first-child) {
+  margin-top: 6px;
+}
+.mem-form__help {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--dim);
+}
+.mem-forget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mem-forget__group h3 {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+.mem-forget__group ul {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+}
+.mem-forget__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.mem-forget__item + .mem-forget__item {
+  border-top: 1px solid var(--hairline);
+}
+.mem-forget__item > span:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+}
+.mem-forget__path {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.mem-forget__mixed {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--warn);
+}
+
+/* An empty list inside a card is quieter than a page-level empty state. */
+.mem-facts > .stg-empty,
+.mem-try > .stg-empty {
+  padding: 14px 24px 8px;
+}

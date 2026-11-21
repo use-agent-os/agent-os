@@ -1,7 +1,7 @@
-/* Settings — a sheet over the window (the Scheduled jobs posture), holding a
-   quiet rail of text tabs on the left and one section at a time on the right
-   as soft cards. Big title, generous spacing, no icon tiles: the posture of
-   Raycast's or Linear's settings, in this app's palette. */
+/* Settings — a sheet over the window (the Scheduled jobs posture): a tinted
+   rail with search and one line icon per section on the left, one section at
+   a time on the right as soft cards. Big title, generous spacing: the posture
+   of Raycast's or Linear's settings, in this app's palette. */
 
 /* ── Sheet ───────────────────────────────────────────────────────────────── */
 
@@ -40,29 +40,13 @@
   flex-direction: column;
 }
 
-/* ── Sheet header ────────────────────────────────────────────────────────── */
-
-.stg-bar {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 20px 0 28px;
-}
-.stg-bar__title {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--dim);
-}
+/* ── Body: rail + section ────────────────────────────────────────────────── */
 
 .stg-body {
   display: grid;
   flex: 1;
   min-height: 0;
-  grid-template-columns: 188px minmax(0, 1fr);
+  grid-template-columns: 216px minmax(0, 1fr);
 }
 
 /* ── Rail ────────────────────────────────────────────────────────────────── */
@@ -71,8 +55,57 @@
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: 18px;
-  padding: 12px 16px 28px 28px;
+  padding: 18px 0 0;
+  background: color-mix(in srgb, var(--foreground) 2.5%, transparent);
+  box-shadow: inset -0.5px 0 0 var(--hairline);
+}
+.stg-rail__title {
+  padding: 0 22px 12px;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+.stg-rail__search {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  margin: 0 14px 10px;
+  padding: 0 9px;
+  border-radius: var(--radius-control);
+  color: var(--dim);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+  transition: box-shadow 100ms ease-out;
+}
+.stg-rail__search:focus-within {
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ring) 55%, transparent);
+}
+.stg-rail__search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--foreground);
+}
+.stg-rail__search input::placeholder {
+  color: var(--dim);
+}
+.stg-rail__search input::-webkit-search-cancel-button {
+  display: none;
+}
+.stg-rail__scroll {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  padding: 2px 14px 16px;
   overflow-y: auto;
 }
 .stg-rail__group {
@@ -81,18 +114,19 @@
   gap: 1px;
 }
 .stg-rail__label {
-  padding: 0 10px 6px;
+  padding: 0 8px 5px;
   font-size: 10.5px;
   font-weight: 600;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--dim);
 }
 .stg-rail__item {
   display: flex;
   align-items: center;
-  height: 30px;
-  padding: 0 10px;
+  gap: 9px;
+  height: 28px;
+  padding: 0 8px;
   border-radius: var(--radius-control);
   font-size: 13px;
   color: var(--muted-foreground);
@@ -101,6 +135,13 @@
     background-color 90ms ease-out,
     color 90ms ease-out;
 }
+.stg-rail__icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  color: var(--dim);
+  transition: color 90ms ease-out;
+}
 .stg-rail__item:hover {
   color: var(--foreground);
   background: color-mix(in srgb, var(--foreground) 5%, transparent);
@@ -108,7 +149,13 @@
 .stg-rail__item[aria-current='page'] {
   color: var(--foreground);
   font-weight: 500;
-  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  background: color-mix(in srgb, var(--foreground) 9%, transparent);
+}
+.stg-rail__item:hover .stg-rail__icon {
+  color: var(--muted-foreground);
+}
+.stg-rail__item[aria-current='page'] .stg-rail__icon {
+  color: var(--primary);
 }
 .stg-rail__item:focus-visible {
   outline: 2px solid var(--ring);
@@ -118,25 +165,99 @@
   margin-left: auto;
   width: 6px;
   height: 6px;
+  flex-shrink: 0;
   border-radius: var(--radius-pill);
   background: var(--warn);
+}
+.stg-rail__dot[data-tone='danger'] {
+  background: var(--danger);
+}
+.stg-rail__empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--dim);
 }
 
 /* ── Section column ──────────────────────────────────────────────────────── */
 
 .stg-main {
+  position: relative;
   min-width: 0;
   min-height: 0;
-  padding: 8px 40px 40px 28px;
+  padding: 0 36px 44px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+/* A real bar, not a button floating over the page: content scrolls under it
+   and never under Done. At the top it is invisible; once the page scrolls it
+   frosts over and names the section, since the page title has left. */
+.stg-main__bar {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 -36px;
+  padding: 0 20px 0 36px;
+  border-bottom: 0.5px solid transparent;
+  transition:
+    background-color 140ms ease-out,
+    border-color 140ms ease-out;
+}
+.stg-main__bar[data-scrolled='true'] {
+  border-bottom-color: var(--hairline);
+  background: var(--popover);
+}
+.stg-main__bar-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transform: translateY(3px);
+  transition:
+    opacity 140ms ease-out,
+    transform 140ms ease-out;
+}
+.stg-main__bar[data-scrolled='true'] .stg-main__bar-title {
+  opacity: 1;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stg-main__bar,
+  .stg-main__bar-title {
+    transition: none;
+  }
 }
 .stg-section {
   display: flex;
-  max-width: 720px;
+  max-width: 760px;
+  margin: 0 auto;
   flex-direction: column;
   gap: 18px;
+  animation: stg-section-in 180ms ease-out;
+}
+@keyframes stg-section-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stg-section {
+    animation: none;
+  }
 }
 .stg-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 4px;
 }
 .stg-head h1 {
@@ -149,6 +270,12 @@
   margin-top: 4px;
   font-size: 13px;
   color: var(--muted-foreground);
+}
+.stg-head__action {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Card: a soft slab with its own title inside. */
@@ -182,6 +309,8 @@
   font-size: 12px;
   color: var(--muted-foreground);
 }
+.stg-card > .stg-row:first-child,
+.stg-card > .stg-disclosure:first-child,
 .stg-card__head + .stg-row,
 .stg-card__head + .stg-tiers > .stg-tier:first-child,
 .stg-card__head + .stg-keys > .stg-keys__row:first-child {
@@ -189,6 +318,21 @@
 }
 .stg-card__body {
   padding: 4px 18px 16px;
+}
+/* A notice placed straight in a card sits inset, like the rows' text. */
+.stg-card > .stg-notice {
+  margin: 0 18px 14px;
+}
+.stg-card > .stg-row + .stg-notice,
+.stg-card > .stg-disclosure + .stg-notice {
+  margin-top: 2px;
+}
+/* A quiet paragraph under a card's control: the long form of a choice. */
+.stg-card__note {
+  padding: 0 18px 16px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
 }
 .stg-card__foot {
   display: flex;
@@ -204,12 +348,15 @@
   color: var(--muted-foreground);
 }
 
-/* Row: label column + control column. */
+/* Row: label column + control column. The control never shrinks to make
+   room for long help text: when both do not fit on one line, the control
+   drops under the label, still right-aligned. */
 .stg-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
+  gap: 8px 20px;
   min-height: 52px;
   padding: 10px 18px;
   border-top: 1px solid var(--hairline);
@@ -219,12 +366,19 @@
 }
 .stg-row[data-stack='true'] {
   flex-direction: column;
+  flex-wrap: nowrap;
   align-items: stretch;
   gap: 8px;
+}
+.stg-row[data-stack='true'] > .stg-row__label,
+.stg-row[data-stack='true'] > .stg-row__control {
+  flex: none;
+  margin-left: 0;
 }
 .stg-row__label {
   display: flex;
   min-width: 0;
+  flex: 1 1 280px;
   flex-direction: column;
   gap: 2px;
 }
@@ -241,14 +395,18 @@
 }
 .stg-row__control {
   display: flex;
-  flex-shrink: 0;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  max-width: 62%;
+  max-width: 100%;
+  margin-left: auto;
+}
+.stg-row__control > .mac-segmented {
+  white-space: nowrap;
 }
 .stg-row__control[data-wide='true'] {
-  flex: 1;
+  flex: 1 1 0%;
   max-width: none;
 }
 .stg-row[data-stack='true'] .stg-row__control {
@@ -408,6 +566,12 @@
 }
 .stg-notice > span {
   flex: 1;
+}
+/* A notice that needs two parts: what is wrong, then what to do about it. */
+.stg-notice__title {
+  display: block;
+  margin-bottom: 2px;
+  font-weight: 600;
 }
 .stg-notice > .mac-button {
   flex-shrink: 0;
@@ -635,41 +799,88 @@
   color: var(--dim);
 }
 
-/* ── Providers: the picker grid ──────────────────────────────────────────── */
+/* ── Providers: the catalog to switch from ─────────────────────────────── */
 
+.prov-switch {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scroll-margin-top: 56px;
+}
+.prov-back {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px 0 4px;
+  border-radius: var(--radius-control);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  transition:
+    color 90ms ease-out,
+    background-color 90ms ease-out;
+}
+.prov-back:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+}
+.prov-back:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 0;
+}
+.prov-filter {
+  width: 190px;
+  height: 28px;
+  flex-shrink: 0;
+}
+.prov-filter input::-webkit-search-cancel-button {
+  display: none;
+}
 .prov-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
+  gap: 8px;
+  padding: 6px 18px 18px;
+}
+.prov-cell {
+  display: flex;
+  min-width: 0;
 }
 .prov-tile {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 28px minmax(0, 1fr);
   grid-template-rows: auto auto;
-  column-gap: 12px;
-  row-gap: 2px;
+  column-gap: 10px;
+  row-gap: 1px;
   align-items: center;
-  padding: 12px 14px;
-  border-radius: var(--radius-surface);
+  /* A row stretched by a neighbour's two-line name keeps name and state together. */
+  align-content: center;
+  padding: 9px 11px;
+  border-radius: var(--radius);
   text-align: left;
-  background: color-mix(in srgb, var(--card) 72%, transparent);
-  box-shadow: 0 0 0 0.5px var(--hairline);
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
   transition:
     background-color 100ms ease-out,
     box-shadow 100ms ease-out,
     transform 100ms ease-out;
 }
 .prov-tile:hover {
-  background: color-mix(in srgb, var(--card) 100%, transparent);
-  box-shadow: 0 0 0 0.5px var(--border);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--border);
 }
 .prov-tile:active {
   transform: scale(0.99);
 }
-.prov-tile[aria-checked='true'] {
-  background: color-mix(in srgb, var(--primary) 7%, var(--card));
+/* First run: the recommended provider is the obvious first click. */
+.prov-tile[data-recommended='true'] {
+  background: color-mix(in srgb, var(--primary) 7%, transparent);
   box-shadow:
-    0 0 0 1.5px var(--primary),
+    inset 0 0 0 1.5px var(--primary),
     0 6px 18px color-mix(in srgb, var(--primary) 10%, transparent);
 }
 .prov-tile:focus-visible {
@@ -679,21 +890,28 @@
 .prov-tile > .prov-logo {
   grid-row: 1 / span 2;
 }
+/* A long name ("Surplus Intelligence", "Bankr LLM Gateway") takes a second
+   line rather than losing its end; past two lines it ends in an ellipsis,
+   and the full name is the tile's title. */
 .prov-tile__name {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.005em;
+  overflow-wrap: anywhere;
 }
 .prov-tile__meta {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px 6px;
+  gap: 4px;
   min-width: 0;
+  overflow: hidden;
   font-size: 11px;
+  white-space: nowrap;
   color: var(--muted-foreground);
 }
 .prov-tile__state {
@@ -709,21 +927,70 @@
 .prov-tile__state[data-tone='dim'] {
   color: var(--dim);
 }
-.prov-tile__tag {
-  height: 16px;
-  padding: 0 5px;
-  border-radius: 4px;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  line-height: 16px;
-  color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
+
+/* A failed key test: the sentence, then the provider's words, small. */
+.prov-check {
+  padding: 0 18px 14px;
 }
-.prov-tile__tag[data-tone='recommended'] {
-  color: var(--ok);
-  background: color-mix(in srgb, var(--ok) 14%, transparent);
+.prov-check > .stg-notice {
+  align-items: flex-start;
+}
+.prov-check > .stg-notice > svg {
+  margin-top: 2px;
+}
+.prov-fail {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+.prov-fail__title {
+  font-weight: 500;
+  line-height: 1.4;
+}
+/* The vertical inset is a transparent border, not padding: a clamped block
+   clips at its padding edge, so padding would show a sliver of line four. */
+.prov-fail__raw {
+  display: block;
+  max-height: 220px;
+  padding: 0 9px;
+  border-block: 7px solid transparent;
+  overflow: auto;
+  border-radius: var(--radius-control);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  user-select: text;
+}
+.prov-fail__raw[data-clamped='true'] {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.prov-fail__actions {
+  display: flex;
+  gap: 14px;
+}
+.prov-fail__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.prov-fail__link:hover {
+  color: var(--foreground);
+}
+.prov-fail__link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 3px;
 }
 
 /* Brand mark: a rounded plate so colour and mono logos sit at one weight. */
@@ -780,6 +1047,113 @@
   gap: 12px;
 }
 
+/* ── Gateway: the status hero ─────────────────────────────────────────── */
+
+.gw-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+}
+.gw-hero__mark {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+}
+.gw-hero__mark svg {
+  width: 21px;
+  height: 21px;
+}
+.gw-hero__mark[data-tone='ok'] {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--ok) 30%, transparent);
+}
+.gw-hero__mark[data-tone='warn'] {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.gw-hero__mark[data-tone='danger'] {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.gw-hero__text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+.gw-hero__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.gw-hero__title::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--dim);
+}
+.gw-hero__title[data-tone='ok']::before {
+  background: var(--ok);
+}
+.gw-hero__title[data-tone='warn']::before {
+  background: var(--warn);
+}
+.gw-hero__title[data-tone='danger']::before {
+  background: var(--danger);
+}
+.gw-hero__title[data-pulse='true']::before {
+  animation: mac-light-pulse 1.2s ease-in-out infinite;
+}
+.gw-hero__endpoint {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+}
+.gw-hero__endpoint > .stg-value {
+  min-width: 0;
+  margin-right: 4px;
+}
+.gw-hero__process {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.gw-hero__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+.gw-hero__actions .mac-button {
+  white-space: nowrap;
+}
+.gw-hero__notice {
+  padding: 0 18px 16px;
+}
+.gw-cli {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+}
+.gw-cli > .mac-input {
+  min-width: 0;
+  flex: 1;
+}
+
 /* ── Router: the tier ladder ─────────────────────────────────────────────── */
 
 .stg-tiers {
@@ -788,11 +1162,16 @@
 }
 .stg-tier {
   display: grid;
-  grid-template-columns: 128px minmax(0, 1fr) 150px;
+  grid-template-columns: 116px minmax(0, 1fr) 150px;
   align-items: start;
   gap: 14px;
   padding: 12px 18px;
   border-top: 1px solid var(--hairline);
+}
+/* Column captions once, above the ladder, instead of on every rung. */
+.stg-tier--head {
+  padding-top: 2px;
+  padding-bottom: 6px;
 }
 .stg-tier[data-default='true'] {
   background: color-mix(in srgb, var(--primary) 5%, transparent);
@@ -800,8 +1179,13 @@
 .stg-tier__rung {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-top: 3px;
+  gap: 6px;
+  padding-top: 6px;
+}
+.stg-tier__label {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
 }
 .stg-tier__code {
   display: inline-flex;
@@ -892,6 +1276,22 @@
   font-size: 12px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* ── Trading: the on/off switch in the page head ─────────────────────────── */
+
+.trd-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 28px;
+  padding: 0 4px 0 11px;
+  border-radius: var(--radius-pill);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
 }
 
 /* ── Shortcuts ───────────────────────────────────────────────────────────── */
@@ -1122,6 +1522,60 @@
   text-decoration: underline;
 }
 
+/* ── Skills: where skills come from ──────────────────────────────────────── */
+
+.skl-sources {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 6px 18px 18px;
+  list-style: none;
+}
+.skl-source {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+}
+.skl-source__glyph {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+.skl-source__glyph svg {
+  width: 14px;
+  height: 14px;
+}
+.skl-source__text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.skl-source__name {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.skl-source__hint {
+  font-size: 11px;
+  color: var(--dim);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* ── Environment ─────────────────────────────────────────────────────────── */
 
 .env-actions {
@@ -1132,7 +1586,34 @@
 .env-actions .mac-button {
   white-space: nowrap;
 }
+.env-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: -6px;
+  padding: 0 2px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.env-file > svg {
+  flex-shrink: 0;
+  color: var(--dim);
+}
+.env-file > .stg-path {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  word-break: normal;
+}
+.env-file > .mac-button {
+  flex-shrink: 0;
+  margin-left: auto;
+}
 .env-toolbar {
+  /* Clear the top bar when a summary figure scrolls here. */
+  scroll-margin-top: 56px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1319,6 +1800,13 @@
 }
 .chn-person__actions .mac-button {
   white-space: nowrap;
+}
+
+/* A channel card is a jump target for the summary's stats. */
+.chn-anchor {
+  scroll-margin-top: 56px;
+  border-radius: var(--radius-surface);
+  outline: none;
 }
 
 /* The raw runtime row, folded under the card like the installer log. */
@@ -1604,4 +2092,448 @@
 }
 .stg-preflight__reason {
   color: var(--danger);
+}
+
+/* ── Composed pages: stats, tabs, choices, meter, disclosure, empty ──────── */
+
+/* Summary strip: the page's figures in one row of cells. */
+.stg-stats {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  border-radius: var(--radius-surface);
+  background: color-mix(in srgb, var(--card) 72%, transparent);
+  box-shadow:
+    0 0 0 0.5px var(--hairline),
+    inset 0 1px 0 color-mix(in srgb, var(--foreground) 3%, transparent);
+  overflow: hidden;
+}
+.stg-stat {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+  padding: 13px 16px 12px;
+  text-align: left;
+}
+.stg-stat + .stg-stat {
+  box-shadow: inset 0.5px 0 0 var(--hairline);
+}
+button.stg-stat {
+  transition: background-color 90ms ease-out;
+}
+button.stg-stat:hover {
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+/* A figure that leads somewhere says so: a chevron after its label. */
+button.stg-stat .stg-stat__label::after {
+  content: ' ›';
+  color: var(--dim);
+  transition: color 90ms ease-out;
+}
+button.stg-stat:hover .stg-stat__label,
+button.stg-stat:hover .stg-stat__label::after {
+  color: var(--foreground);
+}
+button.stg-stat:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.stg-stat__value {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 20px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.stg-stat__value svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  color: var(--dim);
+}
+.stg-stat__value[data-tone='ok'] {
+  color: var(--ok);
+}
+.stg-stat__value[data-tone='warn'] {
+  color: var(--warn);
+}
+.stg-stat__value[data-tone='danger'] {
+  color: var(--danger);
+}
+.stg-stat__value[data-tone='primary'] {
+  color: var(--primary);
+}
+.stg-stat__label {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.stg-stat__hint {
+  font-size: 11.5px;
+  color: var(--dim);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* In-page tabs: an underlined row under the page head. */
+.stg-tabs {
+  display: flex;
+  gap: 2px;
+  box-shadow: inset 0 -1px 0 var(--hairline);
+}
+.stg-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 11px;
+  font-size: 13px;
+  color: var(--muted-foreground);
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  transition: color 90ms ease-out;
+}
+.stg-tab svg {
+  width: 14px;
+  height: 14px;
+}
+.stg-tab:hover {
+  color: var(--foreground);
+}
+.stg-tab[aria-selected='true'] {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.stg-tab[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  right: 9px;
+  bottom: 0;
+  left: 9px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--primary);
+}
+.stg-tab:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.stg-tab__count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 17px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+
+/* Choice cards: a radio group whose options explain themselves. */
+.stg-choices {
+  display: grid;
+  gap: 8px;
+  padding: 6px 18px 16px;
+}
+.stg-choices[data-columns='2'] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.stg-choices[data-columns='3'] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.stg-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: var(--radius);
+  text-align: left;
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+  transition:
+    background-color 100ms ease-out,
+    box-shadow 100ms ease-out;
+}
+.stg-choice:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+.stg-choice:disabled {
+  opacity: 0.5;
+}
+.stg-choice[aria-checked='true'] {
+  background: color-mix(in srgb, var(--primary) 7%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--primary);
+}
+.stg-choice:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.stg-choice__icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: var(--radius-control);
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+.stg-choice__icon svg {
+  width: 15px;
+  height: 15px;
+}
+.stg-choice[aria-checked='true'] .stg-choice__icon {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+}
+.stg-choice__text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+.stg-choice__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 550;
+}
+.stg-choice__tag {
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  font-size: 10.5px;
+  font-weight: 550;
+  line-height: 16px;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+.stg-choice__tag[data-tone='ok'] {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+}
+.stg-choice__tag[data-tone='warn'] {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 13%, transparent);
+}
+.stg-choice__tag[data-tone='primary'] {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+}
+.stg-choice__blurb {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+}
+.stg-choice__check {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  color: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.stg-choice[aria-checked='true'] .stg-choice__check {
+  color: var(--primary-foreground);
+  background: var(--primary);
+  box-shadow: none;
+}
+
+/* Meter: a thin budget bar with its caption. */
+.stg-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.stg-meter__text {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.stg-meter__caption {
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+.stg-meter__track {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--foreground) 9%, transparent);
+  overflow: hidden;
+}
+.stg-meter__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 240ms ease-out;
+}
+.stg-meter[data-tone='warn'] .stg-meter__fill {
+  background: var(--warn);
+}
+.stg-meter[data-tone='danger'] .stg-meter__fill {
+  background: var(--danger);
+}
+.stg-meter[data-tone='warn'] .stg-meter__caption {
+  color: var(--warn);
+}
+.stg-meter[data-tone='danger'] .stg-meter__caption {
+  color: var(--danger);
+}
+
+/* Disclosure: rarely needed rows under one line, inside a card. */
+.stg-disclosure {
+  border-top: 1px solid var(--hairline);
+}
+.stg-disclosure__summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  height: 40px;
+  padding: 0 18px 0 15px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  text-align: left;
+  transition: color 90ms ease-out;
+}
+.stg-disclosure__summary:hover {
+  color: var(--foreground);
+}
+.stg-disclosure__summary svg {
+  flex-shrink: 0;
+  transition: transform 120ms ease-out;
+}
+.stg-disclosure[data-open='true'] > .stg-disclosure__summary svg {
+  transform: rotate(90deg);
+}
+.stg-disclosure__summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.stg-disclosure__hint {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--dim);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Empty state: centred, quiet, with the way forward. */
+.stg-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 30px 24px 28px;
+  text-align: center;
+}
+.stg-empty__icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 8px;
+  place-items: center;
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+.stg-empty__icon svg {
+  width: 19px;
+  height: 19px;
+}
+.stg-empty__title {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.stg-empty__body {
+  max-width: 420px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+.stg-empty__action {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* ── Save bar ────────────────────────────────────────────────────────────── */
+
+/* A page with one Save for several cards (Pilot Router): while anything is
+   unsaved, the bar rides the bottom of the sheet, so the change and its Save
+   are on screen together wherever the change was made. */
+.stg-savebar {
+  position: sticky;
+  bottom: 14px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px 9px 14px;
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--popover) 94%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
+  box-shadow:
+    0 0 0 0.5px var(--border),
+    inset 0 1px 0 color-mix(in srgb, var(--foreground) 5%, transparent),
+    0 12px 32px rgba(0, 0, 0, 0.28),
+    0 2px 6px rgba(0, 0, 0, 0.12);
+  animation: stg-savebar-in 160ms ease-out;
+}
+@keyframes stg-savebar-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stg-savebar {
+    animation: none;
+  }
+}
+.stg-savebar__dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 18%, transparent);
+}
+.stg-savebar__text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: baseline;
+  gap: 8px;
+  margin-left: 2px;
+  font-size: 12.5px;
+}
+.stg-savebar__title {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.stg-savebar__what {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted-foreground);
 }

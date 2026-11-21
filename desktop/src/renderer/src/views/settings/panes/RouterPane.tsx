@@ -1,16 +1,14 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { LoaderCircle } from 'lucide-react'
-import { useId, useState } from 'react'
+import { CircleOff, Gauge, LoaderCircle, Scale, ShieldAlert } from 'lucide-react'
+import { useId, useRef } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import {
-  buildRouterConfigureParams,
   classifyRouterModels,
   configuredProvider,
   mergeModelOptions,
   modelOptionLabel,
   offlineTierModels,
-  resolveJudgeModelParam,
   TEXT_TIERS,
   type ModelListEntry,
   type ModelOption,
@@ -19,24 +17,26 @@ import {
 } from '@/views/setup/logic'
 import type { SettingsSnapshot } from '@/views/settings/snapshot'
 import { Button } from '~/components/ui/button'
-import { t } from '~/i18n'
+import { t, type MessageKey } from '~/i18n'
 import {
   ROUTER_THINKING,
+  routerChanges,
   routerDirty,
   routerDraft,
+  routerDraftId,
+  routerPatch,
   safetyNetValid,
-  textTiers,
-  type RouterDraft,
   type TierName,
   type TierRow,
 } from '../logic'
-import { Card, Head, Notice, Pill, Row, Segmented } from '../parts'
+import { useDraft, useDraftStore } from '../memory/drafts'
+import { Card, Choices, Disclosure, Head, Notice, Pill, Row } from '../parts'
 import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
+import { keepFocus, useArrivalFocus } from './focus'
 
-interface ConfigureResult {
+interface PatchResult {
   restartRequired?: boolean
-  warnings?: string[]
 }
 
 function errorText(err: unknown): string {
@@ -45,10 +45,11 @@ function errorText(err: unknown): string {
 
 /**
  * The Pilot Router: routing mode, default tier, the tier ladder. Written
- * through `onboarding.router.configure` with the console's own payload
- * builder, so a router saved here reads identically in the web console.
+ * through `config.patch` with the snapshot revision, carrying only the keys
+ * the edit changed (`routerPatch` says why not the guided write).
  */
 export function RouterPane() {
+  useArrivalFocus('router')
   const { connected, query, snapshot, reload } = useConfigSnapshot()
   return (
     <>
@@ -82,17 +83,22 @@ function RouterBody({
   const provider = configuredProvider(snapshot.status ?? {}, config)
   const spec = catalog.providers?.find((p) => p.providerId === provider)
   const profile = catalog.routerProfiles?.profiles?.find((p) => p.providerId === provider)
+  const formRef = useRef<HTMLDivElement>(null)
 
   const save = useMutation({
-    mutationFn: (params: Record<string, unknown>) =>
-      rpc.call<ConfigureResult>('onboarding.router.configure', withRevision(snapshot, params)),
+    mutationFn: (patch: Record<string, unknown>) =>
+      rpc.call<PatchResult>('config.patch', withRevision(snapshot, { patch })),
     onSuccess: async (res) => {
-      for (const w of res?.warnings ?? []) toast.warning(w)
+      // Saved: the next form is the file's, not the parked edit.
+      useDraftStore.getState().drop(routerDraftId(provider))
       toast.success(
         res?.restartRequired ? t('settings.restartRequired') : t('settings.router.saved'),
         { id: 'stg-router' },
       )
       await reload()
+      // The save bar goes with the change, and the form re-mounts on the new
+      // revision: keep keyboard focus in the sheet.
+      keepFocus(formRef.current)
     },
     onError: (err) =>
       toast.error(`${t('settings.saveFailed')}: ${errorText(err)}`, { id: 'stg-router-err' }),
@@ -110,6 +116,7 @@ function RouterBody({
       ) : snapshot.pendingRestart ? (
         <PendingRestartNotice />
       ) : null}
+      <span ref={formRef} hidden />
       <RouterForm
         key={`${provider}:${snapshot.revision ?? ''}`}
         snapshot={snapshot}
@@ -126,13 +133,6 @@ function RouterBody({
 function tierOptionLabel(o: ModelOption): string {
   const ctx = Number(o.contextWindow || 0)
   return ctx > 0 ? `${o.id}  ·  ${Math.round(ctx / 1000)}k` : o.id
-}
-
-const MODE_KEY: Record<RouterMode, 'pilot' | 'judge' | 'jev' | 'off'> = {
-  'pilot-v1': 'pilot',
-  llm_judge: 'judge',
-  jev: 'jev',
-  disabled: 'off',
 }
 
 function RouterForm({
@@ -154,7 +154,9 @@ function RouterForm({
   const router = config.agentos_router || {}
   const profile = catalog.routerProfiles?.profiles?.find((p) => p.providerId === provider)
   const saved = routerDraft(config, catalog, provider)
-  const [draft, setDraft] = useState<RouterDraft>(saved)
+  // Parked outside the form, so leaving the section or closing the sheet
+  // keeps the edit and its save bar for when the page is opened again.
+  const { draft, setDraft, revert } = useDraft(routerDraftId(provider), saved)
   const dirty = routerDirty(saved, draft)
   const ids = {
     safety: useId(),
@@ -167,7 +169,6 @@ function RouterForm({
   const judgeProfile = catalog.routerProfiles?.judge?.profiles?.[provider]
   const judgeModels = judgeProfile?.models ?? []
   const judgeAuto = judgeProfile?.autoModel ?? null
-  const judgeLoaded = router.judge_model || ''
   const judgeIsLocal = Boolean(router.judge_base_url)
 
   const hasImage = draft.tiers.some((row) => row.tier === 'image_model')
@@ -208,13 +209,18 @@ function RouterForm({
   const safetyOk = draft.mode !== 'pilot-v1' || safetyNetValid(draft.safetyNet)
   const jevOk = draft.mode !== 'jev' || safetyNetValid(draft.jevHighRisk)
   const canSave = dirty && safetyOk && jevOk && !saving && !disabled
+  const changes = routerChanges(saved, draft)
 
   function submit() {
-    const warnings = classifyRouterModels(
-      draft.tiers.map((row) => ({ tier: row.tier, model: row.model })),
-      textOptions,
-      visionOptions,
-    )
+    const patch = routerPatch(saved, draft, { judgeIsLocal })
+    if (!patch) return
+    const warnings = changes.includes('tiers')
+      ? classifyRouterModels(
+          draft.tiers.map((row) => ({ tier: row.tier, model: row.model })),
+          textOptions,
+          visionOptions,
+        )
+      : { unknown: [], nonVision: [] }
     if (warnings.unknown.length > 0) {
       toast.warning(`${t('settings.router.unknownModels')} ${warnings.unknown.join(', ')}`, {
         id: 'stg-router-unknown',
@@ -225,128 +231,87 @@ function RouterForm({
         id: 'stg-router-vision',
       })
     }
-    const params = buildRouterConfigureParams({
-      sel: draft.mode,
-      defaultTier: draft.defaultTier,
-      judgeModel: resolveJudgeModelParam(draft.judgeModel, judgeLoaded, judgeIsLocal),
-      pilotThresholdRaw: draft.safetyNet,
-      // Blank key → null → the gateway keeps the stored key / env fallback.
-      jevApiKeyRaw: draft.jevApiKey,
-      jevHighRiskThresholdRaw: draft.jevHighRisk,
-      translateCeilingEnabled: draft.translateCeiling !== 'off',
-      translateCeilingTier: draft.translateCeiling === 'off' ? 'c0' : draft.translateCeiling,
-      tiers: draft.tiers.map((row) => ({
-        tier: row.tier,
-        provider,
-        model: row.model,
-        thinkingLevel: row.thinkingLevel,
-        supportsImage: row.supportsImage,
-      })),
-    })
-    onSave(params as unknown as Record<string, unknown>)
+    onSave(patch)
   }
 
-  const modeHelp = t(`settings.router.mode.${MODE_KEY[draft.mode]}.help`)
   const routingOn = draft.mode !== 'disabled'
+  const providerLabel = catalog.providers?.find((p) => p.providerId === provider)?.label ?? provider
+  const tuning = [
+    draft.mode === 'pilot-v1'
+      ? `${t('settings.router.safetyNet')} ${Number(draft.safetyNet).toFixed(2)}`
+      : null,
+    draft.mode === 'jev'
+      ? `${t('settings.router.jevRisk')} ${Number(draft.jevHighRisk).toFixed(2)}`
+      : null,
+    `${t('settings.router.translate')} ${
+      draft.translateCeiling === 'off' ? t('settings.router.translate.off') : draft.translateCeiling
+    }`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <>
       <Card
         title={t('settings.router.mode')}
         blurb={t('settings.router.mode.blurb')}
-        action={<Pill tone={routingOn ? 'ok' : undefined}>{provider}</Pill>}
+        action={<Pill tone={routingOn ? 'ok' : undefined}>{providerLabel}</Pill>}
       >
-        <Row label={t('settings.router.modeRow')} help={modeHelp}>
-          <Segmented
-            label={t('settings.router.mode')}
-            value={draft.mode}
-            disabled={disabled}
-            options={[
-              { value: 'pilot-v1', label: t('settings.router.mode.pilot') },
-              { value: 'llm_judge', label: t('settings.router.mode.judge') },
-              { value: 'jev', label: t('settings.router.mode.jev') },
-              { value: 'disabled', label: t('settings.router.mode.off') },
-            ]}
-            onChange={(mode) => setDraft((d) => ({ ...d, mode }))}
-          />
-        </Row>
-        <Row label={t('settings.router.defaultTier')} help={t('settings.router.defaultTier.help')}>
-          <select
-            className="mac-select"
-            data-compact="true"
-            aria-label={t('settings.router.defaultTier')}
-            value={draft.defaultTier}
-            disabled={disabled}
-            onChange={(e) => setDraft((d) => ({ ...d, defaultTier: e.target.value }))}
-          >
-            {textTiers(draft).map((row) => (
-              <option key={row.tier} value={row.tier}>
-                {row.tier} · {t(`settings.router.tier.${row.tier}`)}
-              </option>
-            ))}
-          </select>
-        </Row>
-        {draft.mode === 'pilot-v1' ? (
-          <Row
-            label={t('settings.router.safetyNet')}
-            help={t('settings.router.safetyNet.help')}
-            htmlFor={ids.safety}
-          >
-            <span className="stg-slider">
-              <input
-                id={ids.safety}
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={safetyNetValid(draft.safetyNet) ? Number(draft.safetyNet) : 0.5}
-                disabled={disabled}
-                onChange={(e) => setDraft((d) => ({ ...d, safetyNet: e.target.value }))}
-              />
-              <output htmlFor={ids.safety}>{Number(draft.safetyNet).toFixed(2)}</output>
-            </span>
-          </Row>
-        ) : null}
+        <Choices<RouterMode>
+          label={t('settings.router.modeRow')}
+          value={draft.mode}
+          disabled={disabled}
+          options={[
+            {
+              value: 'pilot-v1',
+              title: t('settings.router.mode.pilot'),
+              blurb: t('settings.router.mode.pilot.help'),
+              icon: <Gauge strokeWidth={1.75} aria-hidden />,
+              tag: t('settings.router.mode.recommended'),
+              tagTone: 'ok',
+            },
+            {
+              value: 'llm_judge',
+              title: t('settings.router.mode.judge'),
+              blurb: t('settings.router.mode.judge.help'),
+              icon: <Scale strokeWidth={1.75} aria-hidden />,
+            },
+            {
+              value: 'jev',
+              title: t('settings.router.mode.jev'),
+              blurb: t('settings.router.mode.jev.help'),
+              icon: <ShieldAlert strokeWidth={1.75} aria-hidden />,
+              tag: t('settings.router.mode.experimental'),
+              tagTone: 'warn',
+            },
+            {
+              value: 'disabled',
+              title: t('settings.router.mode.off'),
+              blurb: t('settings.router.mode.off.help'),
+              icon: <CircleOff strokeWidth={1.75} aria-hidden />,
+            },
+          ]}
+          onChange={(mode) => setDraft((d) => ({ ...d, mode }))}
+        />
         {draft.mode === 'jev' ? (
-          <>
-            <Row
-              label={t('settings.router.jevKey')}
-              help={t('settings.router.jevKey.help')}
-              htmlFor={ids.jevKey}
-            >
-              <input
-                id={ids.jevKey}
-                className="mac-input"
-                data-mono="true"
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder={t('settings.router.jevKey.placeholder')}
-                value={draft.jevApiKey}
-                disabled={disabled}
-                onChange={(e) => setDraft((d) => ({ ...d, jevApiKey: e.target.value }))}
-              />
-            </Row>
-            <Row
-              label={t('settings.router.jevRisk')}
-              help={t('settings.router.jevRisk.help')}
-              htmlFor={ids.jevRisk}
-            >
-              <span className="stg-slider">
-                <input
-                  id={ids.jevRisk}
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={safetyNetValid(draft.jevHighRisk) ? Number(draft.jevHighRisk) : 0.7}
-                  disabled={disabled}
-                  onChange={(e) => setDraft((d) => ({ ...d, jevHighRisk: e.target.value }))}
-                />
-                <output htmlFor={ids.jevRisk}>{Number(draft.jevHighRisk).toFixed(2)}</output>
-              </span>
-            </Row>
-          </>
+          <Row
+            label={t('settings.router.jevKey')}
+            help={t('settings.router.jevKey.help')}
+            htmlFor={ids.jevKey}
+          >
+            <input
+              id={ids.jevKey}
+              className="mac-input"
+              data-mono="true"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={t('settings.router.jevKey.placeholder')}
+              value={draft.jevApiKey}
+              disabled={disabled}
+              onChange={(e) => setDraft((d) => ({ ...d, jevApiKey: e.target.value }))}
+            />
+          </Row>
         ) : null}
         {draft.mode === 'llm_judge' ? (
           <Row
@@ -373,44 +338,80 @@ function RouterForm({
             </select>
           </Row>
         ) : null}
-        <Row
-          label={t('settings.router.translate')}
-          help={t('settings.router.translate.help')}
-          htmlFor={ids.translate}
-        >
-          <select
-            id={ids.translate}
-            className="mac-select"
-            data-compact="true"
-            value={draft.translateCeiling}
-            disabled={disabled}
-            onChange={(e) => setDraft((d) => ({ ...d, translateCeiling: e.target.value }))}
+        <Disclosure title={t('settings.router.tuning')} hint={tuning}>
+          {draft.mode === 'pilot-v1' ? (
+            <Row
+              label={t('settings.router.safetyNet')}
+              help={t('settings.router.safetyNet.help')}
+              htmlFor={ids.safety}
+            >
+              <span className="stg-slider">
+                <input
+                  id={ids.safety}
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={safetyNetValid(draft.safetyNet) ? Number(draft.safetyNet) : 0.5}
+                  disabled={disabled}
+                  onChange={(e) => setDraft((d) => ({ ...d, safetyNet: e.target.value }))}
+                />
+                <output htmlFor={ids.safety}>{Number(draft.safetyNet).toFixed(2)}</output>
+              </span>
+            </Row>
+          ) : null}
+          {draft.mode === 'jev' ? (
+            <Row
+              label={t('settings.router.jevRisk')}
+              help={t('settings.router.jevRisk.help')}
+              htmlFor={ids.jevRisk}
+            >
+              <span className="stg-slider">
+                <input
+                  id={ids.jevRisk}
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={safetyNetValid(draft.jevHighRisk) ? Number(draft.jevHighRisk) : 0.7}
+                  disabled={disabled}
+                  onChange={(e) => setDraft((d) => ({ ...d, jevHighRisk: e.target.value }))}
+                />
+                <output htmlFor={ids.jevRisk}>{Number(draft.jevHighRisk).toFixed(2)}</output>
+              </span>
+            </Row>
+          ) : null}
+          <Row
+            label={t('settings.router.translate')}
+            help={t('settings.router.translate.help')}
+            htmlFor={ids.translate}
           >
-            <option value="off">{t('settings.router.translate.off')}</option>
-            {TEXT_TIERS.map((tier) => (
-              <option key={tier} value={tier}>
-                {tier} · {t(`settings.router.tier.${tier}`)}
-              </option>
-            ))}
-          </select>
-        </Row>
+            <select
+              id={ids.translate}
+              className="mac-select"
+              data-compact="true"
+              value={draft.translateCeiling}
+              disabled={disabled}
+              onChange={(e) => setDraft((d) => ({ ...d, translateCeiling: e.target.value }))}
+            >
+              <option value="off">{t('settings.router.translate.off')}</option>
+              {TEXT_TIERS.map((tier) => (
+                <option key={tier} value={tier}>
+                  {tier} · {t(`settings.router.tier.${tier}`)}
+                </option>
+              ))}
+            </select>
+          </Row>
+        </Disclosure>
       </Card>
 
-      <Card
-        title={t('settings.router.tiers')}
-        blurb={t('settings.router.tiers.blurb')}
-        foot={
-          <>
-            <Button disabled={!dirty || saving} onClick={() => setDraft(saved)}>
-              {t('settings.revert')}
-            </Button>
-            <Button variant="primary" disabled={!canSave} onClick={submit}>
-              {t('settings.save')}
-            </Button>
-          </>
-        }
-      >
+      <Card title={t('settings.router.tiers')} blurb={t('settings.router.tiers.blurb')}>
         <div className="stg-tiers" role="list">
+          <div className="stg-tier stg-tier--head" aria-hidden>
+            <span className="stg-tier__caption">{t('settings.router.tier.rung')}</span>
+            <span className="stg-tier__caption">{t('settings.router.tier.model')}</span>
+            <span className="stg-tier__caption">{t('settings.router.tier.thinking')}</span>
+          </div>
           {draft.tiers.map((row) => {
             const isImage = row.tier === 'image_model'
             const options = isImage ? visionOptions : textOptions
@@ -420,8 +421,10 @@ function RouterForm({
             return (
               <div key={row.tier} className="stg-tier" role="listitem" data-default={isDefault}>
                 <div className="stg-tier__rung">
-                  <span className="stg-tier__code">{row.tier}</span>
-                  <span className="stg-tier__name">{t(`settings.router.tier.${row.tier}`)}</span>
+                  <span className="stg-tier__label">
+                    <span className="stg-tier__code">{isImage ? 'img' : row.tier}</span>
+                    <span className="stg-tier__name">{t(`settings.router.tier.${row.tier}`)}</span>
+                  </span>
                   {!isImage ? (
                     <button
                       type="button"
@@ -438,7 +441,6 @@ function RouterForm({
                   ) : null}
                 </div>
                 <div className="stg-tier__model">
-                  <span className="stg-tier__caption">{t('settings.router.tier.model')}</span>
                   <select
                     className="mac-select"
                     aria-label={`${row.tier} ${t('settings.router.tier.model')}`}
@@ -463,7 +465,6 @@ function RouterForm({
                   ) : null}
                 </div>
                 <div className="stg-tier__think">
-                  <span className="stg-tier__caption">{t('settings.router.tier.thinking')}</span>
                   <select
                     className="mac-select"
                     aria-label={`${row.tier} ${t('settings.router.tier.thinking')}`}
@@ -485,6 +486,80 @@ function RouterForm({
           })}
         </div>
       </Card>
+
+      {dirty ? (
+        <SaveBar
+          changes={changes.map((c) => t(CHANGE_LABEL[c]))}
+          saving={saving}
+          canSave={canSave}
+          blockedReason={disabled ? t('settings.writeBlocked') : null}
+          onRevert={revert}
+          onSave={submit}
+        />
+      ) : null}
     </>
+  )
+}
+
+const CHANGE_LABEL: Record<ReturnType<typeof routerChanges>[number], MessageKey> = {
+  mode: 'settings.router.mode',
+  tuning: 'settings.router.tuning',
+  tiers: 'settings.router.tiers',
+}
+
+/**
+ * The page's one Save: it rides the bottom of the sheet while anything on
+ * the page is unsaved, so the change and its Save are on screen together
+ * wherever the change was made (the routing mode at the top, a tier at the
+ * bottom). Nothing is shown while the page matches what is saved.
+ */
+function SaveBar({
+  changes,
+  saving,
+  canSave,
+  blockedReason,
+  onRevert,
+  onSave,
+}: {
+  /** What is unsaved, by card title. */
+  changes: string[]
+  saving: boolean
+  canSave: boolean
+  blockedReason: string | null
+  onRevert: () => void
+  onSave: () => void
+}) {
+  return (
+    <div className="stg-savebar" role="region" aria-label={t('settings.router.unsaved')}>
+      <span className="stg-savebar__dot" aria-hidden />
+      <span className="stg-savebar__text">
+        <span className="stg-savebar__title">{t('settings.router.unsaved')}</span>
+        {changes.length > 0 ? (
+          <span className="stg-savebar__what" data-testid="router-unsaved">
+            {changes.join(' · ')}
+          </span>
+        ) : null}
+      </span>
+      <Button
+        disabled={saving}
+        onClick={(e) => {
+          // The bar goes with the change it reverted: keep focus in the sheet.
+          const sheet = e.currentTarget.closest('[role="dialog"]')
+          onRevert()
+          keepFocus(sheet)
+        }}
+      >
+        {t('settings.revert')}
+      </Button>
+      <Button
+        variant="primary"
+        disabled={!canSave}
+        title={blockedReason ?? undefined}
+        onClick={onSave}
+      >
+        {saving ? <LoaderCircle className="stg-spin size-3.5" strokeWidth={2} aria-hidden /> : null}
+        {t('settings.save')}
+      </Button>
+    </div>
   )
 }

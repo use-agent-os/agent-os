@@ -21,10 +21,17 @@ import {
   customEndpointErrors,
   customEndpointPatch,
   customProviderSpec,
+  routerChanges,
   routerDirty,
   routerDraft,
+  routerPatch,
+  providerTileState,
   safetyNetValid,
   textTiers,
+  filterProviders,
+  probeProblem,
+  isLongError,
+  ERROR_CLAMP_CHARS,
 } from './logic'
 import { isSettingsSection, SETTINGS_GROUPS, SETTINGS_SECTIONS } from './sections'
 import type { Catalog, SetupConfig } from '@/views/setup/logic'
@@ -343,6 +350,19 @@ describe('custom endpoint', () => {
   })
 })
 
+describe('provider tile state', () => {
+  const cloud = { providerId: 'opencap', requiresApiKey: true, deployment: 'cloud' }
+  it('says whether the key is there, not whether the provider was used before', () => {
+    expect(providerTileState(cloud, false)).toBe('needsKey')
+    expect(providerTileState(cloud, true)).toBe('keyReady')
+    expect(providerTileState({ ...cloud, deployment: 'local', requiresApiKey: false }, false)).toBe(
+      'local',
+    )
+    expect(providerTileState({ ...cloud, requiresApiKey: false }, false)).toBe('noKey')
+    expect(providerTileState({ ...cloud, providerId: 'vllm' }, false)).toBe('custom')
+  })
+})
+
 describe('router form', () => {
   it('lays saved tiers over the catalog profile, in ladder order', () => {
     const d = routerDraft(CONFIG, CATALOG, 'opencap')
@@ -383,6 +403,93 @@ describe('router form', () => {
     // Typing a key is what makes the form dirty; a reseed leaves it blank so
     // a save without touching it preserves the stored key.
     expect(routerDirty(saved, { ...saved, jevApiKey: 'ts-1' })).toBe(true)
+  })
+
+  it('names the parts of the page an edit touches, for the save bar', () => {
+    const d = routerDraft(CONFIG, CATALOG, 'opencap')
+    expect(routerChanges(d, d)).toEqual([])
+    expect(routerChanges(d, { ...d, mode: 'disabled' })).toEqual(['mode'])
+    expect(routerChanges(d, { ...d, jevApiKey: 'ts-1' })).toEqual(['mode'])
+    expect(routerChanges(d, { ...d, safetyNet: '0.9' })).toEqual(['tuning'])
+    expect(routerChanges(d, { ...d, defaultTier: 'c1', mode: 'llm_judge' })).toEqual([
+      'mode',
+      'tiers',
+    ])
+    const tiers = d.tiers.map((r, i) => (i === 0 ? { ...r, model: 'other' } : r))
+    expect(routerChanges(d, { ...d, tiers })).toEqual(['tiers'])
+  })
+
+  it('patches only what changed: a mode is its mode keys, never tiers or llm', () => {
+    const d = routerDraft(CONFIG, CATALOG, 'opencap')
+    expect(routerPatch(d, d)).toBeNull()
+    expect(routerPatch(d, { ...d, mode: 'disabled' })).toEqual({
+      agentos_router: { enabled: false },
+    })
+    expect(routerPatch(d, { ...d, mode: 'llm_judge' })).toEqual({
+      agentos_router: { enabled: true, strategy: 'llm_judge' },
+    })
+    const off = { ...d, mode: 'disabled' as const }
+    expect(routerPatch(off, { ...off, mode: 'pilot-v1' })).toEqual({
+      agentos_router: { enabled: true, strategy: 'pilot-v1' },
+    })
+    for (const mode of ['disabled', 'llm_judge', 'jev', 'pilot-v1'] as const) {
+      const patch = routerPatch(d, { ...d, mode }) ?? { agentos_router: {} }
+      expect(Object.keys(patch)).toEqual(['agentos_router'])
+      expect(patch.agentos_router).not.toHaveProperty('tiers')
+      expect(patch.agentos_router).not.toHaveProperty('tier_profile')
+    }
+  })
+
+  it('patches the judge, tuning and default tier by their own keys', () => {
+    const d = routerDraft(CONFIG, CATALOG, 'opencap')
+    expect(routerPatch(d, { ...d, judgeModel: 'gpt-x' })).toEqual({
+      agentos_router: { judge_model: 'gpt-x' },
+    })
+    const pinned = { ...d, judgeModel: 'gpt-x' }
+    expect(routerPatch(pinned, { ...pinned, judgeModel: '' })).toEqual({
+      agentos_router: { judge_model: null, judge_provider: null },
+    })
+    // A cloud pick over a local judge endpoint drops that endpoint.
+    expect(routerPatch(pinned, { ...pinned, judgeModel: '' }, { judgeIsLocal: true })).toEqual({
+      agentos_router: {
+        judge_model: null,
+        judge_provider: null,
+        judge_base_url: null,
+        judge_api_key: null,
+      },
+    })
+    expect(routerPatch(d, { ...d, safetyNet: '0.9' })).toEqual({
+      agentos_router: { pilot: { safety_net_threshold: 0.9 } },
+    })
+    expect(routerPatch(d, { ...d, jevApiKey: ' ts-1 ', jevHighRisk: '0.8' })).toEqual({
+      agentos_router: { jev: { api_key: 'ts-1', high_risk_threshold: 0.8 } },
+    })
+    expect(routerPatch(d, { ...d, translateCeiling: 'c1' })).toEqual({
+      agentos_router: { translate_ceiling_enabled: true, translate_ceiling_tier: 'c1' },
+    })
+    const capped = { ...d, translateCeiling: 'c1' }
+    expect(routerPatch(capped, { ...capped, translateCeiling: 'off' })).toEqual({
+      agentos_router: { translate_ceiling_enabled: false },
+    })
+    expect(routerPatch(d, { ...d, defaultTier: 'c3' })).toEqual({
+      agentos_router: { default_tier: 'c3' },
+    })
+  })
+
+  it('patches a tier edit as that tier’s changed fields alone', () => {
+    const d = routerDraft(CONFIG, CATALOG, 'opencap')
+    const tiers = d.tiers.map((r) =>
+      r.tier === 'c2'
+        ? { ...r, model: 'other-model' }
+        : r.tier === 'c1'
+          ? { ...r, thinkingLevel: '' }
+          : r,
+    )
+    expect(routerPatch(d, { ...d, tiers })).toEqual({
+      agentos_router: {
+        tiers: { c1: { thinking_level: null }, c2: { model: 'other-model' } },
+      },
+    })
   })
 
   it('validates the safety net as a 0..1 number', () => {
@@ -444,5 +551,59 @@ describe('orderProviders', () => {
     expect(
       orderProviders([{ providerId: 'a' }, { providerId: 'b' }]).map((p) => p.providerId),
     ).toEqual(['a', 'b'])
+  })
+})
+
+describe('filterProviders', () => {
+  const catalog = [
+    { providerId: 'opencap', label: 'OpenCAP' },
+    { providerId: 'openai', label: 'OpenAI' },
+    { providerId: 'zai', label: 'Zhipu (Z.AI)' },
+    { providerId: 'ollama', label: 'Ollama (local)' },
+  ]
+
+  it('keeps every provider, in order, for an empty query', () => {
+    expect(filterProviders(catalog, '  ').map((p) => p.providerId)).toEqual([
+      'opencap',
+      'openai',
+      'zai',
+      'ollama',
+    ])
+  })
+
+  it('matches the name or the id, in any case, every word', () => {
+    expect(filterProviders(catalog, 'OPEN').map((p) => p.providerId)).toEqual(['opencap', 'openai'])
+    expect(filterProviders(catalog, 'zhipu ai').map((p) => p.providerId)).toEqual(['zai'])
+    expect(filterProviders(catalog, 'local').map((p) => p.providerId)).toEqual(['ollama'])
+    expect(filterProviders(catalog, 'open local')).toEqual([])
+  })
+})
+
+describe('probeProblem', () => {
+  it('reads the provider’s message into one likely cause', () => {
+    expect(
+      probeProblem(
+        "403: Surplus Intelligence chat request failed (HTTP 403): This key is not scoped to use model 'gpt-6-luna'.",
+      ),
+    ).toBe('scope')
+    expect(probeProblem('unauthorized: Invalid API key')).toBe('auth')
+    expect(probeProblem('HTTP 401')).toBe('auth')
+    expect(probeProblem('429 Too Many Requests: rate limit reached')).toBe('quota')
+    expect(probeProblem('402: insufficient credits')).toBe('quota')
+    expect(probeProblem('404: model gpt-x not found')).toBe('model')
+    expect(probeProblem('fetch failed: ECONNREFUSED 127.0.0.1:8000')).toBe('network')
+    expect(probeProblem('request timed out after 30s')).toBe('network')
+    expect(probeProblem('something odd happened')).toBe('other')
+    expect(probeProblem('')).toBe('other')
+  })
+})
+
+describe('isLongError', () => {
+  it('folds a message past the character limit or three lines', () => {
+    expect(isLongError('short')).toBe(false)
+    expect(isLongError('x'.repeat(ERROR_CLAMP_CHARS))).toBe(false)
+    expect(isLongError('x'.repeat(ERROR_CLAMP_CHARS + 1))).toBe(true)
+    expect(isLongError('a\nb\nc')).toBe(false)
+    expect(isLongError('a\nb\nc\nd')).toBe(true)
   })
 })

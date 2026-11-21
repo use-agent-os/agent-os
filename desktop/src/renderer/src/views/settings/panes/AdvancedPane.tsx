@@ -134,16 +134,13 @@ export function AdvancedPane() {
         </Row>
       </Card>
 
-      <Card title={t('settings.advanced.diagnostics')}>
+      <Card title={t('settings.advanced.troubleshoot')}>
         <Row
           label={t('settings.advanced.copyDiagnostics')}
           help={t('settings.advanced.copyDiagnostics.help')}
         >
           <Button onClick={() => void copyDiagnostics()}>{t('settings.copy')}</Button>
         </Row>
-      </Card>
-
-      <Card title={t('settings.advanced.engine')} blurb={t('settings.advanced.engine.help')}>
         <Row label={t('settings.advanced.reinstall')} help={t('settings.advanced.reinstall.help')}>
           <Button
             disabled={!desktop || bootstrapPhase === 'running'}
@@ -152,6 +149,9 @@ export function AdvancedPane() {
             {t('settings.advanced.reinstall')}
           </Button>
         </Row>
+      </Card>
+
+      <Card title={t('settings.advanced.danger')} blurb={t('settings.advanced.danger.blurb')}>
         <Row label={t('settings.advanced.uninstall')} help={t('settings.advanced.uninstall.help')}>
           <Button
             variant="danger"
@@ -161,9 +161,6 @@ export function AdvancedPane() {
             {t('settings.advanced.uninstallConfirm.confirm')}
           </Button>
         </Row>
-      </Card>
-
-      <Card title={t('settings.advanced.reset')}>
         <Row label={t('settings.advanced.resetAll')} help={t('settings.advanced.resetAll.help')}>
           <Button variant="danger" onClick={() => setConfirming(true)}>
             {t('settings.advanced.resetConfirm.confirm')}

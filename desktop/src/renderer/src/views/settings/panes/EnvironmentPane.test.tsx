@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useConnection } from '@/stores/connection'
 import type { EnvListResponse, EnvVarRow } from '@/views/env/logic'
+import { FOCUS_TTL_MS, jumpTo, takeFocus } from '../overview/jumps'
 import { EnvironmentPane } from './EnvironmentPane'
 
 const rpcCall = vi.fn()
@@ -63,12 +64,15 @@ const LISTING: EnvListResponse = {
   shadowedCount: 2,
 }
 
-function renderPane() {
+function renderPane(onSheetKey?: (key: string) => void) {
   render(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
-      <EnvironmentPane />
+      {/* Stands in for the Settings sheet: what reaches it would close it. */}
+      <div onKeyDown={(e) => onSheetKey?.(e.key)}>
+        <EnvironmentPane />
+      </div>
     </QueryClientProvider>,
   )
 }
@@ -78,6 +82,8 @@ async function loaded() {
 }
 
 beforeEach(() => {
+  // A jump from an earlier test is still fresh for a moment: let it lapse.
+  takeFocus('environment', Date.now() + FOCUS_TTL_MS + 1)
   rpcCall.mockReset()
   openExternal.mockClear()
   showItemInFolder.mockClear()
@@ -117,6 +123,24 @@ describe('EnvironmentPane', () => {
     // A read-only row offers no write controls.
     const path = screen.getByTestId('env-row-PATH')
     expect(within(path).queryByRole('button', { name: /Edit|Remove/ })).toBeNull()
+  })
+
+  it('turns a summary figure into the filter it counts', async () => {
+    renderPane()
+    await loaded()
+    const summary = screen.getByRole('group', { name: 'Environment summary' })
+    fireEvent.click(within(summary).getByRole('button', { name: /Missing/ }))
+    expect(screen.getByRole('radio', { name: 'Missing' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.queryByTestId('env-row-OPENAI_API_KEY')).toBeNull()
+    expect(screen.getByTestId('env-row-BRAVE_API_KEY')).toBeInTheDocument()
+    // A group holding only optional unset variables needs nothing: not listed.
+    expect(screen.queryByRole('region', { name: 'LLM providers' })).toBeNull()
+    fireEvent.click(within(summary).getByRole('button', { name: /Set/ }))
+    expect(screen.getByRole('radio', { name: 'Set' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('env-row-OPENAI_API_KEY')).toBeInTheDocument()
+    expect(screen.queryByTestId('env-row-BRAVE_API_KEY')).toBeNull()
+    // Shadowed has no filter of its own: a figure, not a button.
+    expect(within(summary).queryByRole('button', { name: /Shadowed/ })).toBeNull()
   })
 
   it('filters and searches', async () => {
@@ -230,5 +254,73 @@ describe('EnvironmentPane', () => {
     rpcCall.mockResolvedValue(LISTING)
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     await loaded()
+  })
+
+  it('shows every match of a search, including the unset ones the list folds away', async () => {
+    renderPane()
+    await loaded()
+    const providers = screen.getByRole('region', { name: 'LLM providers' })
+    expect(within(providers).queryByTestId('env-row-ANTHROPIC_API_KEY')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Search variables'), {
+      target: { value: 'anthropic' },
+    })
+    expect(screen.getByTestId('env-row-ANTHROPIC_API_KEY')).toBeInTheDocument()
+    // Nothing is folded while searching, so there is nothing to unfold.
+    expect(screen.queryByRole('button', { name: /Show \d+ unset/ })).toBeNull()
+  })
+
+  it('clears the search on the first Escape and lets the second one close the sheet', async () => {
+    const sheetKey = vi.fn()
+    renderPane(sheetKey)
+    await loaded()
+    const search = screen.getByLabelText('Search variables')
+    fireEvent.change(search, { target: { value: 'XAI' } })
+    fireEvent.keyDown(search, { key: 'Escape' })
+    expect(search).toHaveValue('')
+    expect(sheetKey).not.toHaveBeenCalled()
+    fireEvent.keyDown(search, { key: 'Escape' })
+    expect(sheetKey).toHaveBeenCalledWith('Escape')
+  })
+
+  it('closes an open value editor on Escape without closing the sheet', async () => {
+    const sheetKey = vi.fn()
+    renderPane(sheetKey)
+    await loaded()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit OPENAI_API_KEY' }))
+    const value = screen.getByLabelText('Value for OPENAI_API_KEY')
+    fireEvent.keyDown(value, { key: 'Escape' })
+    expect(screen.queryByLabelText('Value for OPENAI_API_KEY')).toBeNull()
+    expect(sheetKey).not.toHaveBeenCalled()
+  })
+
+  it('puts a jump’s variable in the search, on arrival and while already open', async () => {
+    jumpTo('environment', 'BRAVE_API_KEY')
+    renderPane()
+    expect(await screen.findByTestId('env-row-BRAVE_API_KEY')).toBeInTheDocument()
+    expect(screen.getByLabelText('Search variables')).toHaveValue('BRAVE_API_KEY')
+    expect(screen.queryByTestId('env-row-OPENAI_API_KEY')).toBeNull()
+
+    act(() => jumpTo('environment', 'ANTHROPIC_API_KEY'))
+    expect(screen.getByLabelText('Search variables')).toHaveValue('ANTHROPIC_API_KEY')
+    expect(screen.getByTestId('env-row-ANTHROPIC_API_KEY')).toBeInTheDocument()
+  })
+
+  it('gives focus back to Add variable when its dialog closes', async () => {
+    renderPane()
+    await loaded()
+    const add = screen.getByRole('button', { name: 'Add variable' })
+    add.focus()
+    fireEvent.click(add)
+    const dialog = screen.getByRole('dialog', { name: 'Add a variable' })
+    expect(within(dialog).getByLabelText('Name')).toHaveFocus()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(add).toHaveFocus()
+  })
+
+  it('takes the keyboard to the search a jump filled', async () => {
+    jumpTo('environment', 'BRAVE_API_KEY')
+    renderPane()
+    await screen.findByTestId('env-row-BRAVE_API_KEY')
+    await waitFor(() => expect(screen.getByLabelText('Search variables')).toHaveFocus())
   })
 })

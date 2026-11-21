@@ -181,12 +181,14 @@ describe('ChannelsPane', () => {
     const disc = card('disc')
     expect(within(disc).getByText('stopped')).toBeInTheDocument()
     expect(within(disc).getByText('2')).toBeInTheDocument()
-    // Overview: 2 channels, 1 connected, 0 attention, 1 pairing request.
-    const overview = card('Overview')
-    const values = within(overview)
+    // Summary: 2 channels, 1 connected, 0 attention, 1 pairing request.
+    const summary = screen.getByRole('group', { name: 'Channel summary' })
+    const values = within(summary)
       .getAllByText(/^\d+$/)
       .map((el) => el.textContent)
     expect(values).toEqual(['2', '1', '0', '1'])
+    // One add action on the page, in its head.
+    expect(screen.getAllByRole('button', { name: 'Add channel' })).toHaveLength(1)
     // Still subscribed to the gateway's push for the section's lifetime.
     expect(rpcOn).toHaveBeenCalledWith('channel.status', expect.any(Function))
   })
@@ -210,11 +212,37 @@ describe('ChannelsPane', () => {
     await loaded()
   })
 
-  it('offers an empty state with the add action', async () => {
+  it('offers one empty state with the add action, and no row of zeros', async () => {
     wire({ channels: [], access: [] })
     renderPane()
-    const empty = await screen.findByRole('region', { name: 'No channels yet' })
+    const title = await screen.findByText('No channels yet')
+    const empty = title.closest('.stg-empty') as HTMLElement
     expect(within(empty).getByRole('button', { name: 'Add channel' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Add channel' })).toHaveLength(1)
+    expect(screen.queryByRole('group', { name: 'Channel summary' })).toBeNull()
+    fireEvent.click(within(empty).getByRole('button', { name: 'Add channel' }))
+    expect(await screen.findByRole('dialog', { name: 'Add channel' })).toBeInTheDocument()
+  })
+
+  it('jumps to the channel a summary figure counts', async () => {
+    const scrolled: string[] = []
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.getAttribute('data-channel') ?? '')
+    }
+    try {
+      wire({ channels: [TG, DISCORD, IRC] })
+      renderPane()
+      await loaded()
+      const summary = screen.getByRole('group', { name: 'Channel summary' })
+      // Nothing to jump to: the figure is not a button.
+      expect(within(summary).queryByRole('button', { name: /Connected/ })).toBeNull()
+      fireEvent.click(within(summary).getByRole('button', { name: /Needs attention/ }))
+      fireEvent.click(within(summary).getByRole('button', { name: /Pairing requests/ }))
+      expect(scrolled).toEqual(['irc-old', 'tg-main'])
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
   })
 
   it('pairs, denies and disconnects Telegram senders', async () => {
@@ -270,6 +298,8 @@ describe('ChannelsPane', () => {
     expect(rpcCall).not.toHaveBeenCalledWith('onboarding.channel.probe', expect.anything())
 
     const token = within(sheet).getByLabelText('Bot token *')
+    // A new channel has no stored secret to keep.
+    expect(token).not.toHaveAttribute('placeholder', 'Leave blank to keep the stored value')
     expect(token).toHaveAttribute('type', 'password')
     fireEvent.change(token, { target: { value: '123:abc' } })
     fireEvent.click(within(sheet).getByRole('switch', { name: 'Enabled' }))
@@ -326,6 +356,10 @@ describe('ChannelsPane', () => {
       within(sheet).getByText('The adapter cannot change once a channel exists.'),
     ).toBeInTheDocument()
     expect(within(sheet).getByLabelText('Bot token *')).toHaveValue('')
+    expect(within(sheet).getByLabelText('Bot token *')).toHaveAttribute(
+      'placeholder',
+      'Leave blank to keep the stored value',
+    )
     expect(within(sheet).getByRole('button', { name: 'Save changes' })).toBeDisabled()
     fireEvent.change(within(sheet).getByLabelText('Agent id'), { target: { value: 'ops' } })
     fireEvent.click(within(sheet).getByRole('button', { name: 'Save changes' }))
@@ -362,6 +396,30 @@ describe('ChannelsPane', () => {
     fireEvent.click(within(confirm).getByRole('button', { name: 'Keep editing' }))
     expect(screen.getByRole('dialog', { name: 'Configure tg-main' })).toBeInTheDocument()
     fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Configure tg-main' })).toBeNull(),
+    )
+  })
+
+  it('closes on Escape, and after Keep editing focus is back where it was', async () => {
+    renderPane()
+    await loaded()
+    fireEvent.click(within(card('tg-main')).getByRole('button', { name: 'Configure' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Configure tg-main' })
+    const field = within(sheet).getByLabelText('Agent id')
+    field.focus()
+    fireEvent.change(field, { target: { value: 'ops' } })
+    fireEvent.keyDown(field, { key: 'Escape' })
+    const confirm = screen.getByRole('alertdialog', { name: 'Discard changes?' })
+    fireEvent.keyDown(within(confirm).getByRole('button', { name: 'Keep editing' }), {
+      key: 'Escape',
+    })
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Configure tg-main' })).toBeInTheDocument()
+    await waitFor(() => expect(field).toHaveFocus())
+    // Escape reaches the sheet again: it asks again rather than doing nothing.
+    fireEvent.keyDown(field, { key: 'Escape' })
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: 'Configure tg-main' })).toBeNull(),

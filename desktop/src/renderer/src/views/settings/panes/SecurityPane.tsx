@@ -5,7 +5,8 @@ import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { desktopApi } from '~/lib/desktop-api'
 import { useSettings } from '~/stores/settings'
-import { Card, Head, Notice, Row, Segmented } from '../parts'
+import { Fingerprint, Hand, ShieldAlert } from 'lucide-react'
+import { Card, Choices, Head, Notice, Pill, Row } from '../parts'
 
 const TEST_TONE = {
   ok: 'ok',
@@ -71,20 +72,45 @@ export function SecurityPane() {
     <>
       <Head title={t('settings.section.security')} blurb={t('settings.section.security.blurb')} />
 
-      <Card title={t('settings.security.touchId')} blurb={t('settings.security.touchId.blurb')}>
-        <Row label={t('settings.security.mode')} help={t(`settings.security.mode.help.${mode}`)}>
-          <Segmented<TouchIdMode>
-            label={t('settings.security.mode')}
-            value={mode}
-            disabled={locked}
-            options={[
-              { value: 'off', label: t('settings.security.mode.off') },
-              { value: 'high', label: t('settings.security.mode.high') },
-              { value: 'all', label: t('settings.security.mode.all') },
-            ]}
-            onChange={(touchId) => void update({ security: { touchId } })}
-          />
-        </Row>
+      <Card
+        title={t('settings.security.touchId')}
+        blurb={t('settings.security.touchId.blurb')}
+        action={
+          available === null ? null : available ? (
+            <Pill tone="ok">{t('settings.security.ready')}</Pill>
+          ) : (
+            <Pill>{t('settings.security.noSensor')}</Pill>
+          )
+        }
+      >
+        <Choices<TouchIdMode>
+          label={t('settings.security.mode')}
+          value={mode}
+          disabled={locked}
+          columns={1}
+          options={[
+            {
+              value: 'off',
+              title: t('settings.security.mode.off'),
+              blurb: t('settings.security.mode.short.off'),
+              icon: <Hand strokeWidth={1.75} aria-hidden />,
+            },
+            {
+              value: 'high',
+              title: t('settings.security.mode.high'),
+              blurb: t('settings.security.mode.short.high'),
+              icon: <ShieldAlert strokeWidth={1.75} aria-hidden />,
+            },
+            {
+              value: 'all',
+              title: t('settings.security.mode.all'),
+              blurb: t('settings.security.mode.short.all'),
+              icon: <Fingerprint strokeWidth={1.75} aria-hidden />,
+            },
+          ]}
+          onChange={(touchId) => void update({ security: { touchId } })}
+        />
+        <p className="stg-card__note">{t(`settings.security.mode.help.${mode}`)}</p>
         {unavailable ? (
           <Notice tone="warn">
             {mode === 'off'

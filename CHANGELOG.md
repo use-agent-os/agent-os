@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- Desktop: Settings is rebuilt so every page shows its state and the next
+  step first. It opens on a new **Overview**, a setup checklist, and the rail
+  gains icons, a search field and a dot on any section that needs attention.
+  Two new sections: **Memory** sets up what the agent remembers (Remembered,
+  Knowledge, Try it, Setup) and **Capabilities** sets up web search, image
+  generation and voice. Providers now leads with the active provider and its
+  key test, explains a refused key in one plain sentence above the
+  provider's own message, and lists the others under a filterable **Switch
+  provider**. Channels, Environment, Skills and Trading open on a summary
+  whose figures jump to what they count, and an empty Channels page is a
+  single **Add channel**. Gateway leads with its state and Start, Stop and
+  Restart; routing modes, the gateway run mode and the
+  Touch ID level are cards that each say what they do; and knobs most
+  people never touch fold away.
+
 ## [2026.11.21] - 2026-11-21
 
 ### Changed

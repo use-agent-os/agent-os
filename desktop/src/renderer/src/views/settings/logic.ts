@@ -319,6 +319,77 @@ export function orderProviders<T extends { providerId: string }>(providers: read
   return [...first, ...rest]
 }
 
+/**
+ * The "Switch provider" filter: every word of the query must appear in the
+ * provider's name or id, in any case. Order is kept, so the recommended
+ * provider stays first among the matches.
+ */
+export function filterProviders<T extends { providerId: string; label?: string }>(
+  providers: readonly T[],
+  query: string,
+): T[] {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return [...providers]
+  return providers.filter((p) => {
+    const hay = `${p.label ?? ''} ${p.providerId}`.toLowerCase()
+    return words.every((w) => hay.includes(w))
+  })
+}
+
+/**
+ * What a failed key test most likely means, read from the provider's own
+ * message. Drives the one human sentence above the raw text; the raw text is
+ * always shown too, since it is what a support request needs.
+ */
+export type ProbeProblem = 'network' | 'auth' | 'scope' | 'quota' | 'model' | 'other'
+
+export function probeProblem(raw: string): ProbeProblem {
+  const text = raw.toLowerCase()
+  if (
+    /econn|enotfound|eai_again|getaddrinfo|fetch failed|timed? ?out|unreachable|network|connection (refused|reset)|certificate/.test(
+      text,
+    )
+  )
+    return 'network'
+  if (
+    /\b401\b|unauthori[sz]ed|invalid[ _-]?api[ _-]?key|incorrect api key|invalid key|authentication/.test(
+      text,
+    )
+  )
+    return 'auth'
+  if (/\b403\b|forbidden|not scoped|not allowed|permission/.test(text)) return 'scope'
+  if (/\b402\b|\b429\b|quota|insufficient|credit|billing|payment|rate.?limit/.test(text))
+    return 'quota'
+  if (/\b404\b|model.*(not found|does not exist|unknown)|unknown model|no such model/.test(text))
+    return 'model'
+  return 'other'
+}
+
+/** A provider message longer than this is folded to three lines behind "Show more". */
+export const ERROR_CLAMP_CHARS = 180
+
+export function isLongError(text: string): boolean {
+  return text.length > ERROR_CLAMP_CHARS || text.split('\n').length > 3
+}
+
+/**
+ * What a provider tile in Switch provider says about its key, and only that:
+ * whether picking it would work today. A saved profile (the provider was
+ * active once) says nothing about a key, since a profile never keeps one.
+ */
+export type ProviderTileState = 'custom' | 'local' | 'noKey' | 'keyReady' | 'needsKey'
+
+export function providerTileState(
+  spec: Pick<ProviderSpec, 'providerId' | 'requiresApiKey'> & { deployment?: unknown },
+  /** The gateway's environment holds this provider's key (`providers.status`). */
+  envKeyed: boolean,
+): ProviderTileState {
+  if (isCustomProvider(spec.providerId)) return 'custom'
+  if (spec.deployment === 'local') return 'local'
+  if (!spec.requiresApiKey) return 'noKey'
+  return envKeyed ? 'keyReady' : 'needsKey'
+}
+
 export interface ProviderState {
   /** The provider every turn goes through right now. */
   active: boolean
@@ -449,6 +520,105 @@ export function routerDraft(config: SetupConfig, catalog: Catalog, provider: str
 
 export function routerDirty(saved: RouterDraft, draft: RouterDraft): boolean {
   return JSON.stringify(saved) !== JSON.stringify(draft)
+}
+
+/** The Router page's unsaved edit, parked across section switches and sheet close. */
+export function routerDraftId(provider: string): string {
+  return `router:${provider}`
+}
+
+/**
+ * The `config.patch` for a Router page save: the `agentos_router` keys the
+ * edit changed, and nothing else.
+ *
+ * Not `onboarding.router.configure`: that guided write rewrites more than it
+ * is asked to. Every save with the router on copies the default tier's model
+ * into `llm.model` (the Default model the Providers page owns), and turning
+ * the router off drops `tier_profile`, which persists the OpenRouter default
+ * tiers under any provider (`onboarding.mutations.upsert_router`). The web
+ * console sends every tier on every save as well, which pins the profile's
+ * tiers into the file. A mode change here is the mode keys only; a tier edit
+ * is that tier's changed fields only; `llm.model` is never written.
+ *
+ * Returns null when nothing changed.
+ */
+export function routerPatch(
+  saved: RouterDraft,
+  draft: RouterDraft,
+  opts: { judgeIsLocal?: boolean } = {},
+): { agentos_router: Record<string, unknown> } | null {
+  const router: Record<string, unknown> = {}
+  if (draft.mode !== saved.mode) {
+    if (draft.mode === 'disabled') router.enabled = false
+    else {
+      router.enabled = true
+      router.strategy = draft.mode
+    }
+  }
+  if (draft.judgeModel !== saved.judgeModel) {
+    // Auto is no pin at all (the engine resolves the cheapest tier); a cloud
+    // pick replaces a local endpoint, as the guided write does. null deletes.
+    router.judge_model = draft.judgeModel || null
+    if (!draft.judgeModel) router.judge_provider = null
+    if (opts.judgeIsLocal) {
+      router.judge_base_url = null
+      router.judge_api_key = null
+    }
+  }
+  if (draft.safetyNet !== saved.safetyNet && safetyNetValid(draft.safetyNet)) {
+    router.pilot = { safety_net_threshold: Number.parseFloat(draft.safetyNet) }
+  }
+  const jev: Record<string, unknown> = {}
+  if (draft.jevApiKey.trim()) jev.api_key = draft.jevApiKey.trim()
+  if (draft.jevHighRisk !== saved.jevHighRisk && safetyNetValid(draft.jevHighRisk)) {
+    jev.high_risk_threshold = Number.parseFloat(draft.jevHighRisk)
+  }
+  if (Object.keys(jev).length > 0) router.jev = jev
+  if (draft.translateCeiling !== saved.translateCeiling) {
+    if (draft.translateCeiling === 'off') router.translate_ceiling_enabled = false
+    else {
+      router.translate_ceiling_enabled = true
+      router.translate_ceiling_tier = draft.translateCeiling
+    }
+  }
+  if (draft.defaultTier !== saved.defaultTier) router.default_tier = draft.defaultTier
+  const tiers: Record<string, Record<string, unknown>> = {}
+  for (const row of draft.tiers) {
+    const before = saved.tiers.find((r) => r.tier === row.tier)
+    const change: Record<string, unknown> = {}
+    if (!before || before.model !== row.model) change.model = row.model
+    // Blank is "the model's default": no level at all (null deletes the key).
+    if (!before || before.thinkingLevel !== row.thinkingLevel)
+      change.thinking_level = row.thinkingLevel || null
+    if (Object.keys(change).length > 0) tiers[row.tier] = change
+  }
+  if (Object.keys(tiers).length > 0) router.tiers = tiers
+  return Object.keys(router).length > 0 ? { agentos_router: router } : null
+}
+
+/** The parts of the Router page an unsaved edit touches, in page order. */
+export type RouterChange = 'mode' | 'tuning' | 'tiers'
+
+export function routerChanges(saved: RouterDraft, draft: RouterDraft): RouterChange[] {
+  const changes: RouterChange[] = []
+  if (
+    saved.mode !== draft.mode ||
+    saved.judgeModel !== draft.judgeModel ||
+    draft.jevApiKey.trim() !== ''
+  )
+    changes.push('mode')
+  if (
+    saved.safetyNet !== draft.safetyNet ||
+    saved.jevHighRisk !== draft.jevHighRisk ||
+    saved.translateCeiling !== draft.translateCeiling
+  )
+    changes.push('tuning')
+  if (
+    saved.defaultTier !== draft.defaultTier ||
+    JSON.stringify(saved.tiers) !== JSON.stringify(draft.tiers)
+  )
+    changes.push('tiers')
+  return changes
 }
 
 /** The tiers a turn can be routed to, in cost order, for the default picker. */

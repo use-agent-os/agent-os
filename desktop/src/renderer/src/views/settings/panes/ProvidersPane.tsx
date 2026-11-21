@@ -1,38 +1,53 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { AlertTriangle, Check, ExternalLink, Eye, EyeOff, LoaderCircle } from 'lucide-react'
-import { useEffect, useId, useState } from 'react'
+import {
+  ArrowLeft,
+  Check,
+  Copy,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  LoaderCircle,
+  Search,
+  Star,
+} from 'lucide-react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { configuredProvider, type ProviderSpec, type SetupConfig } from '@/views/setup/logic'
 import type { SettingsSnapshot } from '@/views/settings/snapshot'
 import { Button } from '~/components/ui/button'
-import { t } from '~/i18n'
+import { t, type MessageKey } from '~/i18n'
 import { desktopApi } from '~/lib/desktop-api'
-import { cn } from '~/lib/utils'
 import { useGateway } from '~/stores/gateway'
 import {
   customEndpointErrors,
   customEndpointPatch,
   customProviderSpec,
+  filterProviders,
   isCustomProvider,
+  isLongError,
   isThinkingLevel,
   modelOptions,
   orderProviders,
+  probeProblem,
   RECOMMENDED_PROVIDER,
   providerConfigurePayload,
   providerDirty,
   providerDraft,
   providerNeedsKey,
   providerState,
+  providerTileState,
   THINKING_LEVELS,
   type CatalogModel,
   type ProviderDraft,
 } from '../logic'
-import { Card, Head, Notice, Pill, Row, Value } from '../parts'
+import { useDraft, useDraftStore } from '../memory/drafts'
+import { Card, Disclosure, Empty, Head, Notice, Pill, Row, Value } from '../parts'
 import { providerKeyUrl } from '../provider-links'
 import { ProviderLogo } from '../ProviderLogo'
 import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
+import { clearOnEscape, keepFocus, useArrivalFocus } from './focus'
 
 interface ConfigureResult {
   restartRequired?: boolean
@@ -54,8 +69,42 @@ interface ProviderStatusResult {
   providers?: { providerId: string; apiKeyEnv?: string; apiKeyConfigured?: boolean }[]
 }
 
+/**
+ * Which providers' keys the gateway can see, every provider at once (the
+ * grid) or one (a form). Under one prefix so a write in Environment
+ * refreshes both.
+ */
+export const PROVIDER_KEYS_KEY = ['settings', 'providerKeys'] as const
+
+/** A provider form's unsaved edit, parked across section switches and sheet close. */
+const formDraftId = (providerId: string) => `provider:${providerId}`
+/** Which provider's form was open in place of the grid. */
+const PICKED_ID = 'providers:picked'
+
+/**
+ * Provider id → the environment variable that holds its key, for each
+ * provider whose key the gateway's own environment has. The config only
+ * names a variable for providers set up through one, so a key exported in
+ * the gateway's `.env` is invisible to it; `providers.status` reads the
+ * gateway's environment.
+ */
+export function envKeyedProviders(res: ProviderStatusResult | undefined): Map<string, string> {
+  return new Map(
+    (res?.providers ?? [])
+      .filter((p) => p.apiKeyConfigured && p.apiKeyEnv && p.apiKeyEnv !== 'OAuth')
+      .map((p) => [p.providerId, p.apiKeyEnv ?? '']),
+  )
+}
+
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+function fill(key: MessageKey, vars: Record<string, string | number>): string {
+  return Object.entries(vars).reduce(
+    (text, [name, value]) => text.replace(`{${name}}`, String(value)),
+    t(key),
+  )
 }
 
 /**
@@ -65,6 +114,7 @@ function errorText(err: unknown): string {
  * with the snapshot revision, exactly as the console's setup does.
  */
 export function ProvidersPane() {
+  useArrivalFocus('providers')
   const { connected, query, snapshot, reload } = useConfigSnapshot()
 
   return (
@@ -86,6 +136,14 @@ export function ProvidersPane() {
   )
 }
 
+/**
+ * The page answers "who answers, and does it work" first: the active
+ * provider's card (key, its test, the default model) leads, then the
+ * thinking level, then the catalog to switch from. Picking a provider in the
+ * catalog swaps the grid for that provider's setup form in the same place,
+ * with a way back. With nothing set up yet the catalog comes first, the
+ * recommended provider marked.
+ */
 function ProvidersBody({
   snapshot,
   reload,
@@ -112,8 +170,57 @@ function ProvidersBody({
   // A gateway this app spawned is ours to restart: do it, rather than
   // handing the person a "restart to apply" chore.
   const managedGateway = useGateway((s) => s.status.pid !== null)
-  const [selected, setSelected] = useState(configured)
-  const selectedSpec = providers.find((p) => p.providerId === selected)
+  const activeSpec = providers.find((p) => p.providerId === configured)
+  // The form that was open comes back with its edit when the page is opened
+  // again; one opened and left untouched does not.
+  const [picked, setPickedState] = useState<string | null>(() => {
+    const drafts = useDraftStore.getState().drafts
+    const id = drafts[PICKED_ID]
+    return typeof id === 'string' && formDraftId(id) in drafts ? id : null
+  })
+  function setPicked(id: string | null) {
+    setPickedState(id)
+    if (id) useDraftStore.getState().put(PICKED_ID, id)
+    else useDraftStore.getState().drop(PICKED_ID)
+  }
+  const [filter, setFilter] = useState('')
+  const pickedSpec =
+    picked && picked !== configured ? providers.find((p) => p.providerId === picked) : undefined
+  const switchRef = useRef<HTMLDivElement>(null)
+  const backRef = useRef<HTMLButtonElement>(null)
+
+  // Keys in the gateway's environment, for the tiles' "Key ready".
+  const envKeys = useQuery({
+    queryKey: PROVIDER_KEYS_KEY,
+    staleTime: 30_000,
+    retry: false,
+    queryFn: () => rpc.call<ProviderStatusResult>('providers.status', {}),
+  })
+  const envKeyed = envKeyedProviders(envKeys.data)
+
+  function pick(id: string | null) {
+    const from = picked
+    setPicked(id)
+    // The form takes the grid's place. When that place is scrolled past, or
+    // sits at the very bottom of the sheet, bring its top into view so the
+    // swap is seen; otherwise leave the page where it is.
+    window.setTimeout(() => {
+      const el = switchRef.current
+      const main = el?.closest('.stg-main')
+      if (!el || !main) return
+      const top = el.getBoundingClientRect().top - main.getBoundingClientRect().top
+      if (top < 0 || top > main.clientHeight - 200) el.scrollIntoView?.({ block: 'start' })
+    }, 0)
+    // The control that was clicked is gone with the grid (or the form): keep
+    // keyboard focus on the swap, on its way back, so Escape still works.
+    keepFocus(switchRef.current, () =>
+      id
+        ? backRef.current
+        : switchRef.current?.querySelector<HTMLElement>(
+            `[data-testid="provider-tile-${from ?? ''}"]`,
+          ),
+    )
+  }
 
   const save = useMutation({
     mutationFn: (draft: ProviderDraft) =>
@@ -128,7 +235,10 @@ function ProvidersBody({
           ),
     onSuccess: async (res, draft) => {
       for (const w of res?.warnings ?? []) toast.warning(w)
-      setSelected(draft.providerId)
+      useDraftStore.getState().drop(formDraftId(draft.providerId))
+      setPicked(null)
+      setFilter('')
+      keepFocus(switchRef.current)
       if (res?.restartRequired && managedGateway) {
         toast.success(t('settings.providers.savedRestarting'), { id: 'stg-provider' })
         await restartGateway()
@@ -139,6 +249,8 @@ function ProvidersBody({
         )
       }
       await reload()
+      // The saved form re-mounts on the new revision; keep focus in the sheet.
+      keepFocus(switchRef.current)
     },
     onError: (err) =>
       toast.error(`${t('settings.saveFailed')}: ${errorText(err)}`, { id: 'stg-provider-err' }),
@@ -159,6 +271,9 @@ function ProvidersBody({
 
   const thinking = isThinkingLevel(config.llm?.thinking) ? config.llm.thinking : ''
   const blocked = Boolean(snapshot.writeBlocked)
+  const others = providers.filter((p) => p.providerId !== configured)
+  const shown = filterProviders(others, filter)
+  const firstRun = !activeSpec
 
   return (
     <>
@@ -168,88 +283,199 @@ function ProvidersBody({
         <PendingRestartNotice />
       ) : null}
 
-      <div className="prov-grid" role="radiogroup" aria-label={t('settings.providers.pick')}>
-        {providers.map((p) => {
-          const state = providerState(p, config, configured)
-          const isSelected = p.providerId === selected
-          return (
-            <button
-              key={p.providerId}
-              type="button"
-              role="radio"
-              aria-checked={isSelected}
-              className={cn('prov-tile app-no-drag')}
-              data-active={state.active ? 'true' : undefined}
-              onClick={() => setSelected(p.providerId)}
-            >
-              <ProviderLogo id={p.providerId} label={p.label ?? p.providerId} />
-              <span className="prov-tile__name">{p.label ?? p.providerId}</span>
-              <span className="prov-tile__meta">
-                {state.active ? (
-                  <span className="prov-tile__state" data-tone="ok">
-                    <Check className="size-3" strokeWidth={2.5} aria-hidden />
-                    {t('settings.providers.state.active')}
-                  </span>
-                ) : state.profile ? (
-                  <span className="prov-tile__state">{t('settings.providers.state.saved')}</span>
-                ) : p.deployment === 'local' ? (
-                  <span className="prov-tile__state">{t('settings.providers.state.local')}</span>
-                ) : isCustomProvider(p.providerId) ? (
-                  <span className="prov-tile__state">{t('settings.providers.custom.state')}</span>
-                ) : (
-                  <span className="prov-tile__state" data-tone="dim">
-                    {t('settings.providers.state.needsKey')}
-                  </span>
-                )}
-                {p.providerId === RECOMMENDED_PROVIDER ? (
-                  <span className="prov-tile__tag" data-tone="recommended">
-                    {t('settings.providers.state.recommended')}
-                  </span>
-                ) : null}
-                {p.routerSupported ? (
-                  <span className="prov-tile__tag">{t('settings.providers.state.router')}</span>
-                ) : null}
-              </span>
-            </button>
-          )
-        })}
-      </div>
-
-      {selectedSpec ? (
-        // Keyed on the selection + revision so a save or a switch re-seeds the form.
+      {activeSpec ? (
+        // Keyed on the revision so a save re-seeds the form.
         <ProviderForm
-          key={`${selectedSpec.providerId}:${snapshot.revision ?? ''}`}
+          key={`${activeSpec.providerId}:${snapshot.revision ?? ''}`}
+          draftId={formDraftId(activeSpec.providerId)}
           config={config}
-          spec={selectedSpec}
+          spec={activeSpec}
           configured={configured}
           keyDetail={snapshot.status?.sectionDetails?.llm?.detail}
           saving={save.isPending}
           disabled={blocked}
           onSave={(draft) => save.mutate(draft)}
         />
+      ) : configured ? (
+        <Notice tone="info">{fill('settings.providers.unlisted', { provider: configured })}</Notice>
       ) : null}
 
-      <Card title={t('settings.models.thinking')} blurb={t('settings.models.thinking.help')}>
-        <Row label={t('settings.models.thinking')}>
-          <select
-            className="mac-select"
-            data-compact="true"
-            aria-label={t('settings.models.thinking')}
-            value={thinking}
-            disabled={setThinking.isPending || blocked}
-            onChange={(e) => setThinking.mutate(e.target.value || null)}
+      {activeSpec ? (
+        <Card>
+          <Row label={t('settings.models.thinking')} help={t('settings.models.thinking.help')}>
+            <select
+              className="mac-select"
+              data-compact="true"
+              aria-label={t('settings.models.thinking')}
+              value={thinking}
+              disabled={blocked}
+              aria-busy={setThinking.isPending || undefined}
+              onChange={(e) => {
+                // Not disabled while saving (that drops focus out of the sheet).
+                if (!setThinking.isPending) setThinking.mutate(e.target.value || null)
+              }}
+            >
+              <option value="">{t('settings.models.thinking.auto')}</option>
+              {THINKING_LEVELS.map((level) => (
+                <option key={level} value={level}>
+                  {t(`settings.models.thinking.${level}`)}
+                </option>
+              ))}
+            </select>
+          </Row>
+        </Card>
+      ) : null}
+
+      <div className="prov-switch" ref={switchRef}>
+        {pickedSpec ? (
+          <>
+            <button
+              ref={backRef}
+              type="button"
+              className="prov-back app-no-drag"
+              onClick={() => {
+                // Back to the grid leaves that provider unpicked: its edit goes too.
+                if (picked) useDraftStore.getState().drop(formDraftId(picked))
+                pick(null)
+              }}
+            >
+              <ArrowLeft className="size-3.5" strokeWidth={2} aria-hidden />
+              {t('settings.providers.back')}
+            </button>
+            <ProviderForm
+              key={`${pickedSpec.providerId}:${snapshot.revision ?? ''}`}
+              draftId={formDraftId(pickedSpec.providerId)}
+              config={config}
+              spec={pickedSpec}
+              configured={configured}
+              saving={save.isPending}
+              disabled={blocked}
+              onSave={(draft) => save.mutate(draft)}
+            />
+          </>
+        ) : (
+          <Card
+            title={firstRun ? t('settings.providers.choose') : t('settings.providers.switch')}
+            blurb={
+              firstRun ? t('settings.providers.choose.blurb') : t('settings.providers.switch.blurb')
+            }
+            action={
+              <label className="mac-search prov-filter">
+                <Search className="size-3.5" strokeWidth={2} aria-hidden />
+                <input
+                  type="search"
+                  className="app-no-drag"
+                  value={filter}
+                  placeholder={t('settings.providers.filter')}
+                  aria-label={t('settings.providers.filter')}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(e) => setFilter(e.target.value)}
+                  onKeyDown={(e) => clearOnEscape(e, filter, () => setFilter(''))}
+                />
+              </label>
+            }
           >
-            <option value="">{t('settings.models.thinking.auto')}</option>
-            {THINKING_LEVELS.map((level) => (
-              <option key={level} value={level}>
-                {t(`settings.models.thinking.${level}`)}
-              </option>
-            ))}
-          </select>
-        </Row>
-      </Card>
+            {shown.length === 0 ? (
+              <Empty
+                title={t('settings.providers.filter.empty')}
+                body={t('settings.providers.filter.empty.body')}
+                action={
+                  <Button onClick={() => setFilter('')}>
+                    {t('settings.providers.filter.clear')}
+                  </Button>
+                }
+              />
+            ) : (
+              <div className="prov-grid" role="list" aria-label={t('settings.providers.pick')}>
+                {shown.map((p) => (
+                  <ProviderTile
+                    key={p.providerId}
+                    spec={p}
+                    envKey={envKeyed.get(p.providerId)}
+                    highlight={firstRun && p.providerId === RECOMMENDED_PROVIDER}
+                    onPick={() => pick(p.providerId)}
+                  />
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
+      </div>
     </>
   )
+}
+
+function ProviderTile({
+  spec,
+  envKey,
+  highlight,
+  onPick,
+}: {
+  spec: ProviderSpec
+  /** The variable holding this provider's key in the gateway's environment, when set. */
+  envKey?: string
+  highlight: boolean
+  onPick: () => void
+}) {
+  const state = providerTileState(spec, Boolean(envKey))
+  const label = spec.label ?? spec.providerId
+  return (
+    <div role="listitem" className="prov-cell">
+      <button
+        type="button"
+        className="prov-tile app-no-drag"
+        data-recommended={highlight ? 'true' : undefined}
+        data-testid={`provider-tile-${spec.providerId}`}
+        onClick={onPick}
+      >
+        <ProviderLogo id={spec.providerId} label={label} size={28} />
+        <span className="prov-tile__name" title={label}>
+          {label}
+        </span>
+        <span className="prov-tile__meta" data-state={state}>
+          {highlight ? (
+            // First run: the one to start with. Its border says so too.
+            <span className="prov-tile__state" data-tone="ok">
+              <Star className="size-3" strokeWidth={2.25} aria-hidden />
+              {t('settings.providers.state.recommended')}
+            </span>
+          ) : state === 'keyReady' ? (
+            <span
+              className="prov-tile__state"
+              data-tone="ok"
+              title={fill('settings.providers.state.keyReady.title', { env: envKey ?? '' })}
+            >
+              <Check className="size-3" strokeWidth={2.5} aria-hidden />
+              {t('settings.providers.state.keyReady')}
+            </span>
+          ) : state === 'local' ? (
+            <span className="prov-tile__state">{t('settings.providers.state.local')}</span>
+          ) : state === 'custom' ? (
+            <span className="prov-tile__state">{t('settings.providers.custom.state')}</span>
+          ) : state === 'noKey' ? (
+            <span className="prov-tile__state">{t('settings.providers.state.noKey')}</span>
+          ) : (
+            <span className="prov-tile__state" data-tone="dim">
+              {t('settings.providers.state.needsKey')}
+            </span>
+          )}
+        </span>
+      </button>
+    </div>
+  )
+}
+
+/**
+ * A form's draft: parked under `id` when given (Settings keeps an edit across
+ * section switches and sheet close), plain component state otherwise (the
+ * first-run setup step, which saves or moves on).
+ */
+function useFormDraft<T>(id: string | undefined, saved: T) {
+  const parked = useDraft(id ?? '', saved)
+  const [local, setLocal] = useState<T>(saved)
+  if (id) return { draft: parked.draft, setDraft: parked.setDraft, revert: parked.revert }
+  return { draft: local, setDraft: setLocal, revert: () => setLocal(saved) }
 }
 
 export function ProviderForm({
@@ -261,7 +487,10 @@ export function ProviderForm({
   disabled,
   onSave,
   submitLabel,
+  draftId,
 }: {
+  /** Park unsaved edits under this id (Settings); without one the form keeps them itself. */
+  draftId?: string
   config: SetupConfig
   spec: ProviderSpec
   configured: string
@@ -275,7 +504,7 @@ export function ProviderForm({
   const rpc = useRpc()
   const ids = { key: useId(), env: useId(), url: useId(), proxy: useId(), model: useId() }
   const saved = providerDraft(config, spec)
-  const [draft, setDraft] = useState<ProviderDraft>(saved)
+  const { draft, setDraft, revert } = useFormDraft(draftId, saved)
   const [showKey, setShowKey] = useState(false)
   const label = spec.label ?? spec.providerId
   const switching = spec.providerId !== configured
@@ -291,7 +520,7 @@ export function ProviderForm({
   // ~/.agentos/.env) is invisible to it. Ask the gateway, which reads its
   // own environment, so that key is tried too.
   const keyStatus = useQuery({
-    queryKey: ['settings', 'providerKey', spec.providerId],
+    queryKey: [...PROVIDER_KEYS_KEY, spec.providerId],
     enabled: !custom && Boolean(spec.requiresApiKey),
     staleTime: 60_000,
     retry: false,
@@ -420,7 +649,7 @@ export function ProviderForm({
           <Button
             disabled={!providerDirty(saved, draft) || saving}
             onClick={() => {
-              setDraft(saved)
+              revert()
               setShowKey(false)
             }}
           >
@@ -476,25 +705,20 @@ export function ProviderForm({
               ) : keyHelp ? (
                 <span className={needsKey ? 'stg-error' : undefined}>{keyHelp}</span>
               ) : null}
-              {probeVerdict !== 'idle' ? (
+              {probeVerdict === 'checking' || probeVerdict === 'ok' ? (
                 <span className="prov-probe" data-verdict={probeVerdict} data-testid="key-probe">
                   {probeVerdict === 'checking' ? (
                     <>
                       <LoaderCircle className="stg-spin size-3" strokeWidth={2} aria-hidden />
                       {t('settings.providers.key.testing')}
                     </>
-                  ) : probeVerdict === 'ok' ? (
+                  ) : (
                     <>
                       <Check className="size-3" strokeWidth={2.5} aria-hidden />
                       {t('settings.providers.key.works')}
                       {probed?.models.length
                         ? ` ${probed.models.length} ${t('settings.providers.key.worksModels')}`
                         : ''}
-                    </>
-                  ) : (
-                    <>
-                      <AlertTriangle className="size-3" strokeWidth={2} aria-hidden />
-                      {t('settings.providers.key.failed')} <code>{probeError}</code>
                     </>
                   )}
                 </span>
@@ -551,6 +775,11 @@ export function ProviderForm({
           </Button>
         </Row>
       ) : null}
+      {probeVerdict === 'bad' ? (
+        <div className="prov-check" data-testid="key-probe" data-verdict="bad">
+          <ProbeFailure raw={probeError} />
+        </div>
+      ) : null}
 
       {custom ? (
         <Row
@@ -594,10 +823,12 @@ export function ProviderForm({
               <span>{t('settings.providers.model.help')}</span>
               {hasCatalog ? (
                 <span>
-                  {catalogModels.length} {t('settings.providers.catalog')}
-                  {providerModels.length > 0
-                    ? ` ${t('settings.providers.model.fromProvider')}`
-                    : ''}
+                  {fill(
+                    providerModels.length > 0
+                      ? 'settings.providers.catalog.live'
+                      : 'settings.providers.catalog',
+                    { n: catalogModels.length },
+                  )}
                 </span>
               ) : null}
             </>
@@ -623,17 +854,16 @@ export function ProviderForm({
         </Row>
       ) : null}
 
-      <details className="stg-details">
-        <summary className="stg-row stg-details__summary">
-          <span className="stg-row__label">
-            <span>{t('settings.providers.connection')}</span>
-            <span className="stg-row__help">
-              <Value>
-                {custom ? draft.proxy || '—' : draft.baseUrl || spec.defaultBaseUrl || '—'}
-              </Value>
-            </span>
-          </span>
-        </summary>
+      <Disclosure
+        title={t('settings.providers.connection')}
+        hint={
+          <Value>
+            {custom
+              ? draft.proxy || t('settings.providers.connection.direct')
+              : draft.baseUrl || spec.defaultBaseUrl || '—'}
+          </Value>
+        }
+      >
         {!custom ? (
           <Row label={t('settings.providers.baseUrl')} htmlFor={ids.url} stack>
             <input
@@ -685,7 +915,56 @@ export function ProviderForm({
             onChange={(e) => setDraft((d) => ({ ...d, proxy: e.target.value }))}
           />
         </Row>
-      </details>
+      </Disclosure>
     </Card>
+  )
+}
+
+/**
+ * A failed key test: one sentence saying what it most likely means, then
+ * the provider's own words in a small selectable block (folded to three
+ * lines when long), since that is what a support request needs.
+ */
+export function ProbeFailure({ raw }: { raw: string }) {
+  const [open, setOpen] = useState(false)
+  const long = isLongError(raw)
+  return (
+    <Notice tone="danger">
+      <span className="prov-fail">
+        <span className="prov-fail__title">
+          {t(`settings.providers.problem.${probeProblem(raw)}`)}
+        </span>
+        {raw ? (
+          <code className="prov-fail__raw" data-clamped={long && !open ? 'true' : undefined}>
+            {raw}
+          </code>
+        ) : null}
+        {raw ? (
+          <span className="prov-fail__actions">
+            {long ? (
+              <button
+                type="button"
+                className="prov-fail__link app-no-drag"
+                aria-expanded={open}
+                onClick={() => setOpen((v) => !v)}
+              >
+                {open ? t('settings.providers.problem.less') : t('settings.providers.problem.more')}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="prov-fail__link app-no-drag"
+              onClick={() => {
+                void navigator.clipboard?.writeText(raw)
+                toast.success(t('settings.copied'), { id: 'stg-copy' })
+              }}
+            >
+              <Copy className="size-3" strokeWidth={2} aria-hidden />
+              {t('settings.providers.problem.copy')}
+            </button>
+          </span>
+        ) : null}
+      </span>
+    </Notice>
   )
 }

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, ExternalLink, Eye, Lock, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Check, ExternalLink, Eye, FileText, Lock, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
@@ -22,8 +22,11 @@ import {
 import { Button } from '~/components/ui/button'
 import { t, type MessageKey } from '~/i18n'
 import { desktopApi, isDesktop } from '~/lib/desktop-api'
-import { Card, Head, Notice, Pill, Row, Segmented, Value } from '../parts'
+import { registerJump, takeFocus } from '../overview/jumps'
+import { Card, Head, Notice, Pill, Segmented, Stat, Stats, Value } from '../parts'
 import { SNAPSHOT_KEY } from '../use-snapshot'
+import { clearOnEscape, keepFocus, useArrivalFocus } from './focus'
+import { PROVIDER_KEYS_KEY } from './ProvidersPane'
 
 /** A revealed value hides itself again after this long. */
 const REVEAL_MS = 30_000
@@ -53,7 +56,20 @@ export function EnvironmentPane() {
   const queryClient = useQueryClient()
   const connected = useConnection((s) => s.state === 'connected')
   const [filter, setFilter] = useState<EnvFilter>('all')
-  const [query, setQuery] = useState('')
+  // A jump here names a variable (Capabilities' "Open Environment"): it goes
+  // in the search, so that variable is what the page shows.
+  const [jumped] = useState(() => takeFocus('environment'))
+  const [query, setQuery] = useState(jumped ?? '')
+  const searchRef = useRef<HTMLInputElement>(null)
+  // Arriving by a jump that named a variable, the keyboard goes to the
+  // search that shows it, wherever it was (so Escape clears that search
+  // first); arriving any other way with focus lost, to the rail.
+  useArrivalFocus('environment')
+  useEffect(() => {
+    if (!jumped) return
+    const timer = window.setTimeout(() => searchRef.current?.focus({ preventScroll: true }), 0)
+    return () => window.clearTimeout(timer)
+  }, [jumped])
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
@@ -65,6 +81,20 @@ export function EnvironmentPane() {
 
   useEffect(() => () => timers.current.forEach((id) => window.clearTimeout(id)), [])
 
+  // The same jump while this page is already open.
+  useEffect(
+    () =>
+      registerJump('environment', (focus) => {
+        if (!focus) return
+        setQuery(focus)
+        setFilter('all')
+        // Into the search that now shows it, wherever focus was (a timer:
+        // the field may only render once the new query is in).
+        window.setTimeout(() => searchRef.current?.focus({ preventScroll: true }), 0)
+      }),
+    [],
+  )
+
   const list = useQuery<EnvListResponse>({
     queryKey: ENV_QUERY_KEY,
     enabled: connected,
@@ -74,18 +104,28 @@ export function EnvironmentPane() {
 
   const rows = useMemo(() => list.data?.vars ?? [], [list.data])
   const groups = useMemo(
-    () => groupByCategory(filterVars(rows, filter, query)),
+    () =>
+      groupByCategory(filterVars(rows, filter, query)).filter(
+        // "Missing" is about what something needs: a group whose unset
+        // variables are all optional has nothing to show there.
+        (group) => filter !== 'missing' || splitGroupRows(group).primary.length > 0,
+      ),
     [rows, filter, query],
   )
   const summary = useMemo(() => summarize(list.data), [list.data])
+  // A search shows every variable it matches: none folds away under "Show
+  // unset", or a hit could read as "0/1 set" with nothing to see.
+  const searching = query.trim() !== ''
   const envFilePath = list.data?.envFilePath ?? ''
 
   async function refresh() {
     // Provider keys live here too: the Providers section's "needs a key"
-    // state comes from the snapshot, so a write here must refresh both.
+    // state comes from the snapshot and from the gateway's environment
+    // (`providers.status`), so a write here must refresh all three.
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ENV_QUERY_KEY }),
       queryClient.invalidateQueries({ queryKey: SNAPSHOT_KEY }),
+      queryClient.invalidateQueries({ queryKey: PROVIDER_KEYS_KEY }),
     ])
   }
 
@@ -100,9 +140,13 @@ export function EnvironmentPane() {
       if (result?.restartRequired)
         toast.warning(fill('settings.env.toast.savedRestart', { name }), { id: 'stg-env' })
       else toast.success(fill('settings.env.toast.saved', { name }), { id: 'stg-env' })
+      focusRow(name)
       return null
     } catch (error) {
       toast.error(errorMessage(error), { id: 'stg-env' })
+      // The inline editor stays open with what was typed: back into it. (The
+      // Add dialog puts focus back in itself.)
+      if (editing === name) focusRow(name, 'value')
       return errorMessage(error)
     } finally {
       setBusy(null)
@@ -119,6 +163,7 @@ export function EnvironmentPane() {
       toast.error(errorMessage(error), { id: 'stg-env' })
     } finally {
       setBusy(null)
+      focusRow(name)
     }
   }
 
@@ -132,6 +177,9 @@ export function EnvironmentPane() {
       toast.error(errorMessage(error), { id: 'stg-env' })
     } finally {
       setBusy(null)
+      // A custom variable's row is gone with it, and its Remove button with
+      // it: keep focus in the sheet (the row's Set button when it stays).
+      focusRow(name)
     }
   }
 
@@ -155,6 +203,7 @@ export function EnvironmentPane() {
       toast.error(errorMessage(error), { id: 'stg-env' })
     } finally {
       setBusy(null)
+      focusRow(name, 'reveal')
     }
   }
 
@@ -167,10 +216,60 @@ export function EnvironmentPane() {
     })
   }
 
+  const toolbarRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * Back on the row once the control that held focus is gone (the inline
+   * editor, a Remove or Import button) or was greyed out while busy: its
+   * Edit/Set button, or the one named.
+   */
+  function focusRow(name: string, action: 'edit' | 'reveal' | 'value' = 'edit') {
+    keepFocus(toolbarRef.current, () => {
+      const row = toolbarRef.current
+        ?.closest('.stg-section')
+        ?.querySelector<HTMLElement>(`[data-testid="env-row-${name}"]`)
+      return (
+        row?.querySelector<HTMLElement>(`[data-env-action="${action}"]`) ??
+        row?.querySelector<HTMLElement>('[data-env-action="edit"]')
+      )
+    })
+  }
+
+  /** A summary figure is also the way to its rows: set the filter, show the list. */
+  function showOnly(next: EnvFilter) {
+    setFilter(next)
+    setQuery('')
+    toolbarRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+  }
+
   const head = (
     <Head
       title={t('settings.section.environment')}
       blurb={t('settings.section.environment.blurb')}
+      action={
+        connected && !list.isError ? (
+          <>
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={list.isFetching}
+              aria-label={t('settings.env.refresh')}
+              title={t('settings.env.refresh')}
+              onClick={() => void refresh()}
+            >
+              <RefreshCw
+                className={list.isFetching ? 'size-3.5 stg-spin' : 'size-3.5'}
+                strokeWidth={2}
+                aria-hidden
+              />
+            </Button>
+            <Button variant="primary" onClick={() => setAdding(true)}>
+              <Plus className="size-3.5" strokeWidth={2} aria-hidden />
+              {t('settings.env.add')}
+            </Button>
+          </>
+        ) : undefined
+      }
     />
   )
 
@@ -202,67 +301,55 @@ export function EnvironmentPane() {
     <>
       {head}
 
-      <Card
-        title={t('settings.env.overview')}
-        action={
-          <div className="env-actions">
-            <Button disabled={list.isFetching} onClick={() => void refresh()}>
-              <RefreshCw
-                className={list.isFetching ? 'size-3.5 stg-spin' : 'size-3.5'}
-                strokeWidth={2}
-                aria-hidden
-              />
-              {t('settings.env.refresh')}
-            </Button>
-            <Button variant="primary" onClick={() => setAdding(true)}>
-              <Plus className="size-3.5" strokeWidth={2} aria-hidden />
-              {t('settings.env.add')}
-            </Button>
-          </div>
-        }
-      >
-        <Row label={t('settings.env.stat.set')}>
-          <Value tone={ready && summary.setCount > 0 ? 'ok' : undefined}>
-            {ready ? `${summary.setCount} / ${summary.totalCount}` : '—'}
-          </Value>
-        </Row>
-        <Row label={t('settings.env.stat.missing')} help={t('settings.env.stat.missing.help')}>
-          <Value tone={summary.missingCount > 0 ? 'warn' : undefined}>
-            {ready ? String(summary.missingCount) : '—'}
-          </Value>
-        </Row>
-        <Row label={t('settings.env.stat.shadowed')} help={t('settings.env.stat.shadowed.help')}>
-          <Value tone={summary.shadowedCount > 0 ? 'warn' : undefined}>
-            {ready ? String(summary.shadowedCount) : '—'}
-          </Value>
-        </Row>
-        <Row
-          label={t('settings.env.file')}
-          help={
-            <code className="stg-path" title={envFilePath || undefined}>
-              {envFilePath ? shortPath(envFilePath) : '…'}
-            </code>
-          }
+      <Stats label={t('settings.env.stats')}>
+        <Stat
+          label={t('settings.env.stat.set')}
+          value={ready ? `${summary.setCount} / ${summary.totalCount}` : '—'}
+          tone={ready && summary.setCount > 0 ? 'ok' : undefined}
+          onClick={ready ? () => showOnly('set') : undefined}
+        />
+        <Stat
+          label={t('settings.env.stat.missing')}
+          hint={t('settings.env.stat.missing.help')}
+          value={ready ? summary.missingCount : '—'}
+          tone={summary.missingCount > 0 ? 'warn' : undefined}
+          onClick={ready ? () => showOnly('missing') : undefined}
+        />
+        <Stat
+          label={t('settings.env.stat.shadowed')}
+          hint={t('settings.env.stat.shadowed.help')}
+          value={ready ? summary.shadowedCount : '—'}
+          tone={summary.shadowedCount > 0 ? 'warn' : undefined}
+        />
+      </Stats>
+
+      <div className="env-file">
+        <FileText className="size-3.5" strokeWidth={1.75} aria-hidden />
+        <span>{t('settings.env.file')}</span>
+        <code className="stg-path" title={envFilePath || undefined}>
+          {envFilePath ? shortPath(envFilePath) : '…'}
+        </code>
+        <Button
+          variant="ghost"
+          disabled={!isDesktop() || !envFilePath}
+          onClick={() => void desktopApi().app.showItemInFolder(envFilePath)}
         >
-          <Button
-            disabled={!isDesktop() || !envFilePath}
-            onClick={() => void desktopApi().app.showItemInFolder(envFilePath)}
-          >
-            {t('settings.reveal')}
-          </Button>
-        </Row>
-      </Card>
+          {t('settings.reveal')}
+        </Button>
+      </div>
 
       {summary.shadowedCount > 0 ? (
         <Notice tone="warn">{t('settings.env.shadowWarning')}</Notice>
       ) : null}
 
-      <div className="env-toolbar">
+      <div className="env-toolbar" ref={toolbarRef}>
         <input
+          ref={searchRef}
           className="mac-input"
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => clearOnEscape(e, query, () => setQuery(''))}
           placeholder={t('settings.env.search')}
           aria-label={t('settings.env.search')}
           autoComplete="off"
@@ -288,7 +375,7 @@ export function EnvironmentPane() {
       ) : (
         groups.map((group) => {
           const { primary, rest } = splitGroupRows(group)
-          const tailOpen = openTails.has(group.category)
+          const tailOpen = searching || openTails.has(group.category)
           const visible = tailOpen ? [...primary, ...rest] : primary
           return (
             <Card
@@ -316,14 +403,17 @@ export function EnvironmentPane() {
                     setEditing(editing === row.name ? null : row.name)
                     setDraft('')
                   }}
-                  onCancel={() => setEditing(null)}
+                  onCancel={() => {
+                    setEditing(null)
+                    focusRow(row.name)
+                  }}
                   onSave={() => void save(row.name, draft)}
                   onImport={(sourceId) => void importFrom(row.name, sourceId)}
                   onReveal={() => setConfirming({ kind: 'reveal', name: row.name })}
                   onRemove={() => setConfirming({ kind: 'unset', name: row.name })}
                 />
               ))}
-              {rest.length > 0 ? (
+              {rest.length > 0 && !searching ? (
                 <button
                   type="button"
                   className="env-tail app-no-drag"
@@ -452,6 +542,7 @@ function EnvRow({
               ) : null}
               <Button
                 disabled={busy}
+                data-env-action="edit"
                 aria-expanded={editing}
                 aria-label={`${row.isSet ? t('settings.env.edit') : t('settings.env.set')} ${row.name}`}
                 onClick={onEdit}
@@ -463,6 +554,7 @@ function EnvRow({
                   variant="ghost"
                   size="icon"
                   disabled={busy}
+                  data-env-action="reveal"
                   aria-label={fill('settings.env.reveal', { name: row.name })}
                   onClick={onReveal}
                 >
@@ -498,7 +590,15 @@ function EnvRow({
             data-mono="true"
             type={row.secret ? 'password' : 'text'}
             value={draft}
+            data-env-action="value"
             onChange={(e) => onDraft(e.target.value)}
+            onKeyDown={(e) => {
+              // Escape closes this editor, not the whole sheet.
+              if (e.key !== 'Escape') return
+              e.preventDefault()
+              e.stopPropagation()
+              onCancel()
+            }}
             aria-label={fill('settings.env.value', { name: row.name })}
             autoComplete="off"
             spellCheck={false}
@@ -534,6 +634,7 @@ function AddDialog({
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const nameRef = useRef<HTMLInputElement>(null)
 
   async function submit() {
     // Answered instantly for a typo; the server stays the authority and its
@@ -543,7 +644,10 @@ function AddDialog({
       setError(problem)
       return
     }
-    setError(await onSave(name.trim(), value))
+    const refused = await onSave(name.trim(), value)
+    setError(refused)
+    // Save greyed out while it ran, which dropped focus: back to the name.
+    if (refused) keepFocus(nameRef.current, () => nameRef.current)
   }
 
   return (
@@ -566,6 +670,7 @@ function AddDialog({
       >
         <label htmlFor={nameId}>{t('settings.env.addName')}</label>
         <input
+          ref={nameRef}
           id={nameId}
           className="mac-input"
           data-mono="true"
@@ -576,7 +681,6 @@ function AddDialog({
           aria-describedby={error ? errorId : undefined}
           autoComplete="off"
           spellCheck={false}
-          autoFocus
         />
         <label htmlFor={valueId}>{t('settings.env.addValue')}</label>
         <input

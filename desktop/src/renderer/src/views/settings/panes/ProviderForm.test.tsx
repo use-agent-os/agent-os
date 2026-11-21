@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProviderSpec } from '@/views/setup/logic'
 import { ProviderForm } from './ProvidersPane'
@@ -90,7 +90,7 @@ describe('ProviderForm · Test key', () => {
     const select = screen.getByLabelText('Default model') as HTMLSelectElement
     const ids = [...select.options].map((o) => o.value)
     expect(ids).toEqual(['', 'gpt-5.6-luna', 'deepseek-v4-flash', 'claude-fable-5.1'])
-    expect(screen.getByText(/Fetched from the provider just now/)).toBeInTheDocument()
+    expect(screen.getByText('3 models, fetched from the provider just now.')).toBeInTheDocument()
   })
 
   it('keeps the model menu usable when the probe answers before the catalog does', async () => {
@@ -126,7 +126,33 @@ describe('ProviderForm · Test key', () => {
     await waitFor(() =>
       expect(screen.getByTestId('key-probe')).toHaveAttribute('data-verdict', 'bad'),
     )
-    expect(screen.getByTestId('key-probe')).toHaveTextContent('Invalid API key')
+    const failure = screen.getByTestId('key-probe')
+    // One human sentence first, then the provider's own words, verbatim.
+    expect(failure).toHaveTextContent('The provider did not accept this key.')
+    expect(within(failure).getByText('unauthorized: Invalid API key')).toBeInTheDocument()
+    // Short enough to show whole: nothing to unfold.
+    expect(within(failure).queryByRole('button', { name: 'Show more' })).toBeNull()
+  })
+
+  it('folds a long rejection to three lines behind Show more', async () => {
+    const raw =
+      "403: Surplus Intelligence chat request failed (HTTP 403): This key is not scoped to use model 'gpt-6-luna'. Unusual bug? Email support@example.test with request id 01M7VDEVSZ4JK1H4JJ7QCBN4WZ and a description of what happened."
+    rpcCall.mockImplementation(async (method: string) =>
+      method === 'providers.probe' ? { ok: false, models: [], error: raw } : [],
+    )
+    renderForm()
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-scoped' } })
+    fireEvent.click(screen.getByTestId('key-probe-button'))
+    const failure = await screen.findByTestId('key-probe')
+    expect(failure).toHaveTextContent('The key is valid but not allowed to use this model.')
+    const message = within(failure).getByText(raw)
+    expect(message).toHaveAttribute('data-clamped', 'true')
+    fireEvent.click(within(failure).getByRole('button', { name: 'Show more' }))
+    expect(message).not.toHaveAttribute('data-clamped')
+    expect(within(failure).getByRole('button', { name: 'Show less' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
   })
 
   it('tries the key the gateway reads from its environment the moment the form opens', async () => {

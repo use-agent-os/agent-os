@@ -192,33 +192,22 @@ export function AboutPane() {
 
       <AppCard />
 
-      <Card title={t('settings.about.runtime')}>
-        <Row label={t('settings.about.electron')}>
-          <Value>{info?.electron || '—'}</Value>
-        </Row>
-        <Row label={t('settings.about.chrome')}>
-          <Value>{info?.chrome || '—'}</Value>
-        </Row>
-      </Card>
-
-      <Card title={t('settings.about.links')}>
-        {LINKS.map((link) => (
-          <Row key={link.url} label={t(link.label)}>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={t(link.label)}
-              title={link.url}
-              onClick={() => open(link.url)}
-            >
-              <ExternalLink
-                className="size-3.5 text-muted-foreground"
-                strokeWidth={1.75}
-                aria-hidden
-              />
-            </Button>
-          </Row>
+      <Card
+        title={t('settings.about.more')}
+        foot={LINKS.map((link) => (
+          <Button key={link.url} variant="ghost" title={link.url} onClick={() => open(link.url)}>
+            {t(link.label)}
+            <ExternalLink className="size-3 text-muted-foreground" strokeWidth={2} aria-hidden />
+          </Button>
         ))}
+      >
+        <Row label={t('settings.about.runtime')}>
+          <Value>
+            {info
+              ? `${t('settings.about.electron')} ${info.electron} · ${t('settings.about.chrome')} ${info.chrome}`
+              : '—'}
+          </Value>
+        </Row>
       </Card>
     </>
   )
