@@ -49,6 +49,9 @@ gateway RPC surface (`wallet.*`, `trading.*`).
   fails to answer leaves the stored amount alone and marks that wallet/chain
   read `partial` (`failed` when the node was unreachable), which
   `wallet.balances` reports per chain and the CLI prints under the table.
+  A token that has never answered is not asked again on every pass, only on
+  the hourly full read, a resync, or when it moves; the read stays `partial`
+  until it answers.
   `trading.status` and `trading.portfolio` carry `syncing` and `syncKind`,
   why the pass in flight runs: `background` (the loop's own clock),
   `requested` (a resync, a wallet import, a `--refresh`) or `initial` (a
@@ -69,9 +72,12 @@ gateway RPC surface (`wallet.*`, `trading.*`).
   final, and quoting or swapping a hidden token shows it again.
 - **History** — deposits, withdrawals, swaps (yours, the agent's, or
   external), approvals and gas, rebuilt from the chain itself: ERC-20
-  `Transfer` logs plus native balance reconciliation. No indexer is needed
-  for this; where one exists it only widens the set of tokens the sweep
-  reads. A full resync drops and rebuilds the ledger.
+  `Transfer` logs plus native balance reconciliation. After downtime the
+  sweep catches up window by window (100,000 blocks on Base, 30,000 on
+  Robinhood Chain) and keeps its place after each one, so a catch-up that is
+  interrupted resumes where it stopped instead of starting over. No indexer
+  is needed for this; where one exists it only widens the set of tokens the
+  sweep reads. A full resync drops and rebuilds the ledger.
 - **Swaps** — quote, approve (a plain ERC-20 approval to the provider's
   spender: the AgentOS Router or 0x's AllowanceHolder, no Permit2
   signatures: the engine signs transactions only, never typed data for a
@@ -216,7 +222,27 @@ public default. A custom RPC serves everything that needs a fresh answer (orders
 nonces, receipts, fees, the sync's block height, logs and native balance). The
 wallet sync's bulk ERC-20 balance read goes to the chain's public node first, as
 one Multicall3 call per wallet, and falls back to the custom RPC when the public
-node does not answer. Every `[trading]` key is also an environment variable with
+node does not answer.
+
+A change to `trading.rpc_urls` the gateway has applied (`agentos config set`,
+the desktop's Settings, `agentos config reload` after a file edit) or to the
+environment fallback takes effect on the engine's next request, with no restart;
+work already in flight (an order waiting for its receipt, an allowance scan)
+finishes on the old endpoint. `trading.status` reports per chain what the engine
+has sent since the gateway started (`rpcUsage`: requests, JSON-RPC calls by
+method, failed requests; `rpc` is the configured endpoint, `read` the public
+node the bulk balance read tries first), and the gateway logs one
+`trading.rpc_usage` line per chain about once an hour with what was sent since
+the last. A request counts as failed when it got no answer (timeout,
+connection error), an HTTP status of 400 or above, or a body that is not JSON;
+a JSON-RPC error inside an HTTP 200 is an answer and is not counted. An
+endpoint that refuses the credentials (HTTP 401/403) twice in a row is left
+alone by the background sync for 1, 2, 5, then every 15 minutes: its
+wallets read `failed` with the refusal as the reason, a resync still tries at
+once, and the first answer or a new URL ends the pause. Timeouts, rate limits
+(HTTP 429) and server errors never pause the sync.
+
+Every `[trading]` key is also an environment variable with
 the `AGENTOS_TRADING_` prefix (`AGENTOS_TRADING_DAILY_CAP_USD=250`). In
 `config.snapshot` and every public config view,
 `rpc_urls` values are shown as scheme and host only (`https://base.drpc.org/…`)
@@ -505,10 +531,10 @@ Every client goes through the same gateway methods:
 
 | Method | What it does |
 | --- | --- |
-| `trading.status`, `trading.limits`, `trading.probe`, `trading.network` | readiness (no `vaultPath` for an agent), the guardrails and today's spend, whether the AgentOS DEX is reachable, head block / gas / RPC latency per chain |
+| `trading.status`, `trading.limits`, `trading.probe`, `trading.network` | readiness (no `vaultPath` for an agent; per chain `rpcUsage`, what the engine sent that chain's RPC since start), the guardrails and today's spend, whether the AgentOS DEX is reachable, head block / gas / RPC latency per chain |
 | `trading.tokens.search`, `trading.tokens.resolve`, `trading.tokens.hide` | search a chain's tokens; resolve one address to its metadata (symbol, decimals, verification, price); hide or show a token (operator-only) |
 | `trading.quote`, `trading.swap`, `trading.send`, `trading.unwrap` | price a swap; place one (per wallet, several, or all); send a token to one or many recipients as one batch; unwrap WETH delivered by a swap (operator-only). `swap` and `send` take `clientOrderId` (idempotency: the same id returns the same order) and a `note` that is sanitised (control/bidi characters, 240 chars) |
-| `trading.allowances.list`, `trading.allowances.revoke` | live ERC-20 allowances with exposure; `approve(spender, 0)` |
+| `trading.allowances.list`, `trading.allowances.revoke` | live ERC-20 allowances with exposure; `approve(spender, 0)`. Every listed amount is read live; the wallet's Approval logs, which find the pairs, are re-read at most once a minute per wallet and chain (`full` rescans at once, and an approval the engine sent shows at once). `trading.changed` (`reason: "allowances"`) goes out when a pair was added or a catch-up ended |
 | `trading.orders.list`, `trading.orders.get`, `trading.orders.wait`, `trading.orders.batch` | orders (filter by status, wallet, `kind`); one order; block until it settles; every leg of a multisend by `batchId`. An order awaiting approval carries `approval`: what one approve releases (`orderIds`, `legCount`; for a batch leg also `totalRaw`/`total`/`totalUsd` and `unpriced`). A single order's `approval.digest` is on the order itself; a batch's only on `trading.orders.batch` (`approval`, with every leg's `recipient` and amount) |
 | `trading.orders.approve`, `trading.orders.reject` | the user's decision on a parked order (operator-only). `approve` takes `approvalDigest`, the `approval.digest` the order (or its batch) showed: **required for a multisend** (without it: `trading.approval_binding_required`; one approve runs every awaiting leg) and checked when given for a single order; a digest that no longer matches — a leg changed, added or dropped since it was shown — is refused with `trading.approval_changed`. The digest covers chain, wallet, tokens, raw amounts, recipients, provider, slippage, the approved floor, the plan and the expiry of every leg; the engine holds each leg to it again where the transaction is built and signed, and a send or revoke to its exact `to`/`value`/`data`, so a parked order changed after the approval is failed, not signed |
 | `trading.decode` | explain a transaction hash or raw calldata |

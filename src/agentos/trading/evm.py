@@ -27,7 +27,8 @@ log = structlog.get_logger(__name__)
 USER_AGENT = f"agentos-trading/{__version__}"
 
 #: How long ``sealed_receipt`` waits for the block after a receipt's own
-#: (Base and Robinhood Chain make one every 2 s; the cap covers a slow node).
+#: (Base and Robinhood Chain make several a second, measured 2026-11-22; the
+#: cap covers a slow node).
 SEAL_TIMEOUT_S = 15.0
 SEAL_INTERVAL_S = 1.0
 
@@ -62,7 +63,25 @@ class EvmRpcError(RuntimeError):
 
 
 class EvmTransportError(RuntimeError):
-    """HTTP/transport failure talking to the node."""
+    """HTTP/transport failure talking to the node.
+
+    ``status`` is the HTTP status when the node answered with one of 400 or
+    above, ``None`` when there was no such answer (timeout, connection error,
+    a body that is not JSON). A 401/403 is a refused key, which no retry fixes.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+# A refused key (401/403) or a rate limit (429) is not about the block range:
+# a narrower window is refused the same way. ``transfer_logs`` and
+# ``approval_logs`` raise these at once instead of halving down to the node's
+# span, which for a 100k-block window cost seven requests where one says it
+# all; the caller's saved cursor resumes on the next pass. A 400/500 (the
+# "range too large" of a load-balanced gateway) and a timeout still halve.
+NO_HALVING_STATUSES = frozenset({401, 403, 429})
 
 
 # ── ABI helpers ────────────────────────────────────────────────────────────
@@ -266,6 +285,72 @@ READ_LANE_TIMEOUT_S = 5.0
 READ_LANE_COOLDOWN_S = 60.0
 
 
+class RpcLaneUsage:
+    """What one lane sent: HTTP requests, JSON-RPC calls by method, failed requests.
+
+    A metered endpoint bills every call, and each item of a batch array is a
+    call of its own; a Multicall3 aggregate is one ``eth_call``. ``calls``
+    counts what was sent, so a refused request is in it as well as in ``failed``.
+    ``failed`` counts transport failures only: a timeout or connection error,
+    HTTP 400 or above, a body that is not JSON. A JSON-RPC error carried by an
+    HTTP 200 (a revert, a range the node refuses that way) is an answer here.
+    """
+
+    __slots__ = ("calls", "failed", "requests")
+
+    def __init__(self) -> None:
+        self.requests = 0
+        self.failed = 0
+        self.calls: dict[str, int] = {}
+
+    def count(self, payload: Any) -> None:
+        self.requests += 1
+        calls = self.calls
+        for item in payload if isinstance(payload, list) else (payload,):
+            method = item.get("method") if isinstance(item, dict) else None
+            key = method if isinstance(method, str) else "?"
+            calls[key] = calls.get(key, 0) + 1
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "requests": self.requests,
+            "calls": sum(self.calls.values()),
+            "failed": self.failed,
+            "methods": dict(self.calls),
+        }
+
+
+class RpcUsage:
+    """A client's traffic since ``since``: the configured RPC and the public read lane."""
+
+    __slots__ = ("_mark", "read", "rpc", "since")
+
+    def __init__(self) -> None:
+        self.since = time.time()
+        self.rpc = RpcLaneUsage()
+        self.read = RpcLaneUsage()
+        self._mark: dict[str, Any] | None = None
+
+    def snapshot(self) -> dict[str, Any]:
+        return {"since": self.since, "rpc": self.rpc.snapshot(), "read": self.read.snapshot()}
+
+    def window(self) -> dict[str, Any]:
+        """What each lane was sent since the last ``window`` call (the first: since ``since``)."""
+        now = self.snapshot()
+        mark, self._mark = self._mark, now
+        if mark is None:
+            return {"rpc": now["rpc"], "read": now["read"]}
+        out: dict[str, Any] = {}
+        for lane in ("rpc", "read"):
+            cur, old = now[lane], mark[lane]
+            methods = {m: n - old["methods"].get(m, 0) for m, n in cur["methods"].items()}
+            out[lane] = {
+                **{k: cur[k] - old[k] for k in ("requests", "calls", "failed")},
+                "methods": {m: n for m, n in methods.items() if n},
+            }
+        return out
+
+
 class EvmClient:
     """One node, one URL. Safe to share across tasks."""
 
@@ -298,10 +383,17 @@ class EvmClient:
         self.max_priority_fee_wei = max(1, int(max_priority_fee_wei))
         self.max_fee_per_gas_wei = max(self.max_priority_fee_wei, int(max_fee_per_gas_wei))
         self._next_id = 1
+        # Every request is counted in ``_post``. The service hands this on to the
+        # client that replaces this one, so a chain's count survives a new URL.
+        self.rpc_usage = RpcUsage()
 
     async def aclose(self) -> None:
         if self._own_http:
             await self._http.aclose()
+
+    def usage(self) -> dict[str, Any]:
+        """Requests, calls by method and transport failures per lane since counting started."""
+        return self.rpc_usage.snapshot()
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -315,13 +407,18 @@ class EvmClient:
     ) -> Any:
         target = url or self.url
         display_url = self.display_url if url is None else redact_rpc_url(url)
+        # The one place a request leaves: ``url`` is only ever the read lane.
+        lane = self.rpc_usage.rpc if url is None else self.rpc_usage.read
+        lane.count(payload)
         try:
             response = await self._http.post(
                 target, json=payload, headers=self._headers(), timeout=timeout or self._timeout
             )
         except httpx.HTTPError as exc:
+            lane.failed += 1
             raise EvmTransportError(f"{display_url}: {exc}") from exc
         if response.status_code >= 400:
+            lane.failed += 1
             detail = ""
             try:
                 body = response.json()
@@ -330,10 +427,14 @@ class EvmClient:
                     detail = f" ({str(err['message'])[:160]})"
             except ValueError:
                 pass
-            raise EvmTransportError(f"{display_url}: HTTP {response.status_code}{detail}")
+            raise EvmTransportError(
+                f"{display_url}: HTTP {response.status_code}{detail}",
+                status=response.status_code,
+            )
         try:
             return response.json()
         except ValueError as exc:
+            lane.failed += 1
             raise EvmTransportError(f"{display_url}: invalid JSON response") from exc
 
     @staticmethod
@@ -638,7 +739,9 @@ class EvmClient:
         refuses an oversized range with an HTTP 500, not a JSON-RPC error,
         so a transport error halves the span too — down to
         ``self.max_log_span``, which every node accepts; below that it is a
-        real outage and is raised (same rule as :meth:`approval_logs`).
+        real outage and is raised (same rule as :meth:`approval_logs`). A
+        refused key or a rate limit (``NO_HALVING_STATUSES``) is raised at
+        once: no narrower range fixes it.
         """
         if to_block < from_block:
             return []
@@ -661,8 +764,8 @@ class EvmClient:
                     raise
                 span = max(1, span // 2)
                 continue
-            except EvmTransportError:
-                if span <= floor:
+            except EvmTransportError as exc:
+                if span <= floor or exc.status in NO_HALVING_STATUSES:
                     raise
                 span = max(floor, span // 2)
                 continue
@@ -691,8 +794,9 @@ class EvmClient:
         an HTTP 500 and a sentence, not a JSON-RPC error, so a transport
         error also halves the span — down to ``self.max_log_span``, which
         every node accepts; below that the error is a real outage and is
-        raised. Only the grant side is scanned: what this wallet let others
-        spend is the question an allowance review asks.
+        raised. A refused key or a rate limit (``NO_HALVING_STATUSES``) is
+        raised at once, as there. Only the grant side is scanned: what this
+        wallet let others spend is the question an allowance review asks.
         """
         if to_block < from_block:
             return []
@@ -712,8 +816,8 @@ class EvmClient:
                     raise
                 span = max(1, span // 2)
                 continue
-            except EvmTransportError:
-                if span <= floor:
+            except EvmTransportError as exc:
+                if span <= floor or exc.status in NO_HALVING_STATUSES:
                     raise
                 span = max(floor, span // 2)
                 continue

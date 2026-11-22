@@ -7,7 +7,7 @@ it at its block time, and keep the FIFO lots current. Native ETH has no
 logs, so a change in the native balance that the ledger cannot explain is
 booked as a deposit or withdrawal.
 
-Three rules keep the ledger honest:
+These rules keep the ledger honest:
 
 * **Entries are the truth; lots are derived.** A position's lots and realized
   rows can be replayed from its entries at any time (:meth:`_replay_lots`).
@@ -20,6 +20,11 @@ Three rules keep the ledger honest:
   tables (``rebuild_logs``/``rebuild_state``) while the live ledger keeps
   serving; the swap-in happens in one transaction; an interrupted sweep
   resumes from where it stopped.
+* **A catch-up is resumable too.** A gap wider than one window (the gateway
+  was off) is swept window by window, and the cursor only moves past a
+  window once its transfers are booked, so an error or a restart costs one
+  window, not the gap. Balances and openings are reconciled only by a pass
+  whose sweep reached the head.
 * **A failed read is not a zero.** A ``balanceOf`` the node did not answer
   leaves the stored balance as it was and marks the wallet/chain read
   ``partial`` (``chain_reads``), so a flaky RPC can neither empty a holding
@@ -62,12 +67,10 @@ READ_OK = "ok"
 READ_PARTIAL = "partial"
 READ_FAILED = "failed"
 
-# An imported wallet's first sweep: about a day on Base, an hour on Robinhood.
+# An imported wallet's first sweep: about three hours on Base, under two on
+# Robinhood Chain (0.2 s and 0.12 s blocks, measured 2026-11-22).
 DEFAULT_INITIAL_LOOKBACK = 50_000
 DEFAULT_FULL_LOOKBACK = 2_000_000
-# A rebuild sweeps backwards in windows this many node-spans wide, so
-# progress is persisted often enough that an interruption costs little.
-REBUILD_WINDOW_SPANS = 10
 # Ignore native dust drift below this (gas of a tx we did not see).
 NATIVE_DUST_WEI = 10**13
 # An incremental pass re-reads this many blocks below the last synced one.
@@ -91,7 +94,8 @@ class BalanceRead:
 
     # Some stored ``raw`` moved.
     changed: bool = False
-    # Tokens the node did not answer for; their rows were left as they were.
+    # Tokens whose balance is unknown: the node did not answer for them, now or
+    # on the last pass that asked. Their rows were left as they were.
     failed: list[str] = field(default_factory=list)
 
 
@@ -139,6 +143,10 @@ class WalletSyncer:
         self.rebuild_progress: dict[str, Any] | None = None
         # Whether the pass in flight reads hidden (junk) tokens too.
         self.include_hidden = False
+        # (chain id, wallet key) -> tokens whose last balance read failed. One that
+        # never answered is left out of ordinary passes (``_live_tokens``); memory
+        # only, so a restart reads it once more.
+        self._unreadable: dict[tuple[int, str], set[str]] = {}
 
     # ── public ─────────────────────────────────────────────────────────
 
@@ -163,6 +171,14 @@ class WalletSyncer:
         wallet's first pass, ``include_hidden`` and ``read_all`` read them all,
         which is what bounds how long a balance that moved without a log (a
         non-standard token, a log the node served late) can stay wrong.
+
+        A gap wider than one window is swept by :meth:`_sweep`, which saves
+        the cursor as it goes. If it raises, so does the pass, before the
+        native, balance and opening reconciliation: those compare the chain's
+        balance *now* with what the sweep has booked, and a sweep that stopped
+        short has not booked what moved since. The ledger is then what a pass
+        that failed after booking leaves (transfers in, balances last-good),
+        and the service reports it as a failed read.
         """
         self.include_hidden = include_hidden
         address = wallet.key
@@ -188,9 +204,9 @@ class WalletSyncer:
         changed = False
         moved: set[str] = set()
         if start <= latest:
-            logs = await evm.transfer_logs(address, from_block=start, to_block=latest)
-            moved = {log.token for log in logs}
-            changed = await self._record_transfers(wallet, chain, logs) or changed
+            changed, moved = await self._sweep(
+                wallet, chain, evm, start, latest, oldest=oldest, resumable=state is not None
+            )
         changed = await self._reconcile_native(wallet, chain, evm) or changed
         read_every_token = read_all or include_hidden or state is None
         read = await self._refresh_balances(
@@ -203,8 +219,72 @@ class WalletSyncer:
         self._record_read(chain, address, read)
         return changed
 
+    async def _sweep(
+        self,
+        wallet: WalletRecord,
+        chain: ChainSpec,
+        evm: EvmClient,
+        start: int,
+        latest: int,
+        *,
+        oldest: int | None,
+        resumable: bool,
+    ) -> tuple[bool, set[str]]:
+        """Book every Transfer in ``start..latest``: (the ledger moved, the tokens that moved).
+
+        A gap within the node's own span (every steady pass) is one
+        ``transfer_logs`` call, the same call as ever. A wider one is read in
+        :func:`sweep_span` windows, oldest first, each booked before the next
+        is read; with ``resumable`` the cursor is saved after each window but
+        the last, which the pass itself writes. An error in window k is raised
+        with windows 1..k-1 booked and the cursor at the end of k-1, and the
+        next pass resumes there, re-reading ``SYNC_OVERLAP_BLOCKS`` of it that
+        the entries dedupe. Booking comes before saving, so a crash between
+        the two re-reads a window and never skips one.
+
+        A first sweep is not resumable: its cursor is what marks the
+        wallet/chain swept (``ensure_opening`` books no opening before it, the
+        service reports the pass as ``initial`` until it exists), so only the
+        pass writes it, at the head. For an imported wallet that sweep is
+        ``initial_lookback`` blocks, one or two windows.
+        """
+        address = wallet.key
+        window = sweep_span(chain, evm)
+        blocks = latest - start + 1
+        if blocks > window:
+            log.info(
+                "trading.sync_catch_up",
+                chain=chain.key,
+                wallet=address,
+                blocks=blocks,
+                windows=(blocks + window - 1) // window,
+            )
+        changed = False
+        moved: set[str] = set()
+        cursor = start
+        while cursor <= latest:
+            end = min(latest, cursor + window - 1)
+            # Within the node's span the call is the steady pass's own: an
+            # outage fails it at once, as it always has, instead of halving.
+            wide = end - cursor + 1 > evm.max_log_span
+            logs = await evm.transfer_logs(
+                address, from_block=cursor, to_block=end, max_span=window if wide else None
+            )
+            moved.update(t.token for t in logs)
+            changed = await self._record_transfers(wallet, chain, logs) or changed
+            if resumable and end < latest:
+                self.ledger.set_sync_state(
+                    chain.chain_id, address, last_block=end, oldest_block=oldest
+                )
+            cursor = end + 1
+        return changed, moved
+
     def _record_read(self, chain: ChainSpec, wallet: str, read: BalanceRead) -> None:
+        # What the recorded read left unknown is what the next ordinary pass
+        # knows to be unreadable; a rebuild's full read resets it here too.
+        key = (chain.chain_id, wallet.lower())
         if read.failed:
+            self._unreadable[key] = set(read.failed)
             self.ledger.set_chain_read(
                 chain.chain_id,
                 wallet,
@@ -212,6 +292,7 @@ class WalletSyncer:
                 f"{len(read.failed)} token balance(s) could not be read",
             )
         else:
+            self._unreadable.pop(key, None)
             self.ledger.set_chain_read(chain.chain_id, wallet, READ_OK)
 
     def record_failure(self, chain: ChainSpec, wallet: str, reason: str) -> None:
@@ -219,7 +300,12 @@ class WalletSyncer:
         self.ledger.set_chain_read(chain.chain_id, wallet, READ_FAILED, reason[:200])
 
     async def rebuild(self, wallet: WalletRecord, chain: ChainSpec) -> bool:
-        """Rebuild one wallet/chain from the chain: sweep into the shadow, then swap in."""
+        """Rebuild one wallet/chain from the chain: sweep into the shadow, then swap in.
+
+        The sweep walks backwards in :func:`sweep_span` windows (two
+        ``eth_getLogs`` each) and saves its place after every one, so an
+        interruption costs a window.
+        """
         evm = self._evm_for(chain)
         address = wallet.key
         state = self.ledger.rebuild_state(chain.chain_id, address)
@@ -244,13 +330,15 @@ class WalletSyncer:
             target_from = int(state["target_from"])
             scanned_down_to = int(state["scanned_down_to"])
 
-        window = max(1, evm.max_log_span) * REBUILD_WINDOW_SPANS
+        window = sweep_span(chain, evm)
         total = max(1, latest + 1 - target_from)
         try:
             while scanned_down_to > target_from:
                 lo = max(target_from, scanned_down_to - window)
                 self._progress(chain, address, latest, target_from, scanned_down_to, "sweep")
-                logs = await evm.transfer_logs(address, from_block=lo, to_block=scanned_down_to - 1)
+                logs = await evm.transfer_logs(
+                    address, from_block=lo, to_block=scanned_down_to - 1, max_span=window
+                )
                 self.ledger.add_rebuild_logs(
                     chain.chain_id,
                     address,
@@ -1205,6 +1293,14 @@ class WalletSyncer:
         moves, so a zero only needs reading again once it does. A token with no
         row has never been read for this wallet, and an open position that
         reads zero is a disagreement worth re-checking, so both are kept.
+
+        Except a token with no row whose last read failed: it never answered,
+        and asking again costs a call on the configured (metered) RPC per wallet
+        per pass, forever. Measured 2026-11-22: a steady pass for 2 wallets x 2
+        chains cost 18 billed calls, 2 of them one such token's ``balanceOf``.
+        The passes that read everything retry it, and so does any pass that saw
+        it move. A held token whose read failed has a row and is still read
+        every pass: that failure is most likely a flaky node, and clears at once.
         """
         known = {
             str(row["token"]): int(row["raw"])
@@ -1213,7 +1309,16 @@ class WalletSyncer:
         positions = {
             pos.token for pos in self.ledger.positions(wallet) if pos.chain_id == chain.chain_id
         }
-        return [t for t in tokens if known.get(t) != 0 or t in moved or t in positions]
+        unreadable = self._unreadable.get((chain.chain_id, wallet.lower()), set())
+
+        def live(token: str) -> bool:
+            if token in moved:
+                return True
+            if token not in known:
+                return token not in unreadable
+            return known[token] != 0 or token in positions
+
+        return [t for t in tokens if live(t)]
 
     async def _refresh_balances(
         self, wallet: WalletRecord, chain: ChainSpec, evm: EvmClient, *, moved: set[str] | None
@@ -1222,28 +1327,35 @@ class WalletSyncer:
 
         ``moved`` is what this pass's sweep saw move, which narrows the read to
         :meth:`_live_tokens`; ``None`` reads every token of interest.
+
+        ``failed`` is every token of interest whose balance is unknown after the
+        pass: what failed now, and what is known to be unreadable and was left
+        out. Reporting only the first would turn the read ``ok`` on every pass
+        that skips the token and ``partial`` again on each one that retries it.
         """
         read = BalanceRead()
-        tokens = await self.tokens_of_interest(wallet.key, chain)
-        if moved is not None:
-            tokens = self._live_tokens(wallet.key, chain, tokens, moved)
-        if not tokens:
-            return read
-        balances = await evm.erc20_balances(wallet.address, tokens)
+        wanted = await self.tokens_of_interest(wallet.key, chain)
+        tokens = wanted if moved is None else self._live_tokens(wallet.key, chain, wanted, moved)
+        unknown = self._unreadable.get((chain.chain_id, wallet.key), set()) & set(wanted)
+        failed_now = 0
+        balances = await evm.erc20_balances(wallet.address, tokens) if tokens else {}
         for token, raw in balances.items():
             if raw is None:
-                read.failed.append(token)
+                unknown.add(token)
+                failed_now += 1
                 continue
+            unknown.discard(token)
             before = self.ledger.get_balance(chain.chain_id, wallet.key, token)
             if before != raw:
                 read.changed = True
             self.ledger.set_balance(chain.chain_id, wallet.key, token, raw)
-        if read.failed:
+        read.failed = sorted(unknown)
+        if failed_now:
             log.warning(
                 "trading.balance_read_incomplete",
                 chain=chain.key,
                 wallet=wallet.address,
-                failed=len(read.failed),
+                failed=failed_now,
                 scanned=len(tokens),
             )
         return read
@@ -1436,6 +1548,11 @@ def swap_value(
 
 def _pick(table: dict[Any, Any] | None, key: Any) -> Any:
     return table.get(key) if table else None
+
+
+def sweep_span(chain: ChainSpec, evm: EvmClient) -> int:
+    """Blocks per Transfer sweep window: the chain's measured span, never below the node's."""
+    return max(evm.max_log_span, int(chain.transfer_log_span))
 
 
 def summarize_transfers(logs: list[TransferLog], wallet: str) -> dict[str, dict[str, int]]:

@@ -1149,7 +1149,7 @@ agentos wallet export <addr> --private-key   # prints the raw key; always asks t
 agentos wallet list / rename <addr> <label> / primary <addr> / remove <addr> --yes|-y   # remove also stops the wallet's DCA mandates, triggers and brackets (re-importing the key revives none)
 agentos wallet balances [<addr>] [--chain base|robinhood] [--refresh] [--hidden] [--json]   # ledger view; --refresh re-reads the chain first (throttled to once per 10 s per wallet); --hidden lists junk tokens too
 
-agentos trade status                        # swap route, chains, limits, vault state; --json adds syncKind (why a sync runs: background, requested, initial) and ledgerRepair ("full sync required") after a ledger repair migration
+agentos trade status                        # swap route, chains, limits, vault state; --json adds syncKind (why a sync runs: background, requested, initial), ledgerRepair ("full sync required") after a ledger repair migration, and per chain rpcUsage: what the engine sent that chain since the gateway started (since in ms; per lane requests, calls, failed (no answer, HTTP >= 400 or a non-JSON body; a JSON-RPC error is not counted), methods = calls by method; rpc = the configured endpoint, read = the public node the bulk balance read tries first; null until the engine has used the chain; never a URL)
 agentos trade probe                         # is the swap route (the AgentOS DEX) reachable? (--json exits 1 when not ok)
 agentos trade tokens --chain robinhood AAPL # search; verified Stock Tokens are marked ✓
 agentos trade quote --chain base --in ETH --out USDC (--amount 0.01 | --usd 5) [--wallet <addr>] [--slippage <pct>]
@@ -1165,7 +1165,7 @@ agentos trade approve <id> [--yes] [--json]   # operator-only: shows the order i
 agentos trade send --chain base --token USDC --to <addr> --amount 25 [--wallet <addr>] [--note <text>] [--client-id <id>] [--wait] [--wait-seconds 1..900] [--as-agent]
 agentos trade send --chain base --token ETH --to <a> --to <b> --usd 5        # multisend: one batch, $5 of ETH to each
 agentos trade send --chain base --token USDC --to <a>=10 --to <b>=20 --file recipients.txt   # ADDR=AMOUNT per --to; file lines 'ADDR' or 'ADDR,AMOUNT'
-agentos trade allowances [--chain base|robinhood] [--wallet <addr>] [--full] [--wait/--no-wait] [--wait-seconds 1..3600]   # live ERC-20 allowances, spender labels, exposure; --wait polls until the scan has caught up
+agentos trade allowances [--chain base|robinhood] [--wallet <addr>] [--full] [--wait/--no-wait] [--wait-seconds 1..3600]   # live ERC-20 allowances, spender labels, exposure; every listed amount is read live; the Approval logs that find the pairs are re-read at most once a minute per wallet and chain (--full rescans from the wallet's start at once); --wait polls until the scan has caught up
 agentos trade revoke --chain base --token <addr> --spender <addr> [--wallet <addr>] [--note <text>] [--wait] [--wait-seconds 1..900]   # approve(spender, 0)
 agentos trade bridge quote  --chain base --to-chain robinhood --token ETH (--amount 0.01 | --usd 20 | --pct 50) [--wallet <addr>] [--json]   # Relay: what arrives on the other chain, fees, whether it would wait
 agentos trade bridge create --chain base --to-chain robinhood --token USDC --amount 25 [--wallet <addr>] [--note <text>] [--client-id <id>] [--wait] [--wait-seconds 1..900] [--as-agent] [--json]   # ETH↔ETH or USDC↔USDG, both directions; from an agent it always waits for approval; confirmed = funds landed on the destination

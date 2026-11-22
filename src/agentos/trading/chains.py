@@ -44,10 +44,21 @@ class ChainSpec:
     weth: str | None
     dexscreener_slug: str
     coingecko_platform: str | None
-    # Block time hint (seconds) for receipt polling and log chunking.
+    # Seconds per block, for display: ``network()`` reports it as
+    # ``blockTimeS``. Nothing schedules or chunks by it.
     block_time_s: float = 2.0
     # Largest eth_getLogs span the public RPC tolerates per call.
     max_log_span: int = 2000
+    # Span for the wallet sync's Transfer sweeps (a catch-up after downtime,
+    # a first sweep, a rebuild): one wallet's topic, no address, so the answer
+    # grows with that wallet's activity, not the chain's. Measured on dRPC
+    # 2026-11-22: Base took 2k, 10k, 100k (~1 s) and 1M blocks; Robinhood
+    # Chain took 40k and refused 50k with an HTTP 500 ("200000 addresses ×
+    # blocks"), and its public node caps the same query at 30k with a
+    # JSON-RPC error. Ceilings within what was measured, not promises:
+    # ``transfer_logs`` halves a refused window. An unmeasured chain sweeps
+    # at ``max_log_span``.
+    transfer_log_span: int = 2000
     # Span for a *sparse* topic filter (one wallet's Approval logs), where
     # the answer is a handful of rows however wide the window. Measured on
     # dRPC 2026-09-20: Base takes 100k blocks in ~7 s and refuses 1M with an
@@ -102,9 +113,18 @@ BASE = ChainSpec(
     weth="0x4200000000000000000000000000000000000006",
     dexscreener_slug="base",
     coingecko_platform="base",
-    block_time_s=2.0,
+    # About five blocks a second (measured 2026-11-22; it was 2 s at launch).
+    block_time_s=0.2,
     max_log_span=2000,
     approval_log_span=100_000,
+    # The widest span with a measured answer time: most 100k windows answer in
+    # about 1 s, but on real history (2026-11-22) a few ran into the client's
+    # 10 s timeout: 2 of 13 in a rebuild, 0 of 288 in a catch-up, 1 of 86 in
+    # the allowance scan at the same span. Each such window costs the timeout
+    # and one halving, and the sweep still completes. 1M was accepted too, but
+    # how long it takes, and how big the answer gets for a busy wallet, was not
+    # measured.
+    transfer_log_span=100_000,
     aliases=("base-mainnet", "8453"),
     blockscout_url="https://base.blockscout.com",
     multicall3=MULTICALL3,
@@ -128,6 +148,9 @@ ROBINHOOD = ChainSpec(
     block_time_s=0.1,
     max_log_span=2000,
     approval_log_span=40_000,
+    # The public node's cap, which the paid endpoint's 40k also covers: no
+    # window is refused on either, so none costs a wasted call and a halving.
+    transfer_log_span=30_000,
     aliases=("robinhood-chain", "hood", "4663"),
     # robinhoodchain.blockscout.com answers every non-browser request with a
     # Cloudflare challenge (403, checked 2026-09-15, any User-Agent), so there

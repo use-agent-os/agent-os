@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import sqlite3
 
 import httpx
@@ -616,11 +617,13 @@ class TestLedgerRules:
         wallet = _wallet(created_block=None)
         syncer.initial_lookback = 100
         syncer.full_lookback = 4_000
-        evm.max_log_span = 100  # rebuild windows of 1_000 blocks -> 4 windows
+        # Rebuild windows are the chain's sweep span: 1_000 blocks -> 4 windows (and a 1-block one).
+        spec = dataclasses.replace(BASE, transfer_log_span=1_000)
+        evm.max_log_span = 100
         chain.add_transfer(token=USDC, sender=OTHER, recipient=WALLET, amount=7, block=6_500)
         chain.add_transfer(token=USDC, sender=OTHER, recipient=WALLET, amount=5, block=9_950)
         chain.set_erc20(USDC, WALLET, 12)
-        await syncer.sync(wallet, BASE)
+        await syncer.sync(wallet, spec)
         before = ledger.list_entries(wallet=WALLET)
         live_ids = {e["id"] for e in before}
 
@@ -637,7 +640,7 @@ class TestLedgerRules:
 
         evm.transfer_logs = flaky  # type: ignore[method-assign]
         with pytest.raises(ConnectionError):
-            await syncer.sync(wallet, BASE, full=True)
+            await syncer.sync(wallet, spec, full=True)
         assert {e["id"] for e in ledger.list_entries(wallet=WALLET)} == live_ids
         state = ledger.rebuild_state(8453, WALLET)
         assert state is not None and state["scanned_down_to"] == 10_001 - 2_000
@@ -645,7 +648,7 @@ class TestLedgerRules:
 
         # A plain sync resumes the pending rebuild and finishes it.
         evm.transfer_logs = original  # type: ignore[method-assign]
-        await syncer.sync(wallet, BASE)
+        await syncer.sync(wallet, spec)
         assert ledger.rebuild_state(8453, WALLET) is None
         assert ledger.rebuild_logs(8453, WALLET) == []
         deposits = ledger.list_entries(wallet=WALLET, kind="deposit")

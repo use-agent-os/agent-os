@@ -156,8 +156,14 @@ LP_FEE_GROWTH_TOLERANCE_DIV = 10
 # A submitted transaction with no receipt after this long is treated as
 # dropped. Until then ``tick`` keeps polling for it.
 SUBMITTED_GIVE_UP_S = 6 * 3600.0
-# One receipt poll per housekeeping pass for recovered orders.
-RECOVER_POLL_S = 5.0
+# One receipt poll per housekeeping pass for recovered orders: a zero window
+# is exactly one eth_getTransactionReceipt (the receipt wait checks its
+# deadline after the poll). It was 5 s, which at the wait's 1.5 s cadence was
+# about five polls per stuck order per pass, for up to six hours, and held
+# the DCA and trigger clock about 6 s per stuck order. A receipt that is there
+# is settled in full on that one poll: the sealed-receipt wait after it (an
+# L1-fee chain's re-read once the head is past the block) keeps its own bound.
+RECOVER_POLL_S = 0.0
 # A load-balanced RPC endpoint does not answer from one node. Measured on
 # Base on 2026-09-19: a receipt came back from a node that had the block
 # while the very next eth_getBalance and eth_call were served by one that
@@ -180,6 +186,21 @@ MANUAL_SYNC_MIN_S = 10.0
 # Hidden (junk) tokens leave the sync's fast lane; their balances and
 # openings are still brought up to date this often.
 HIDDEN_RESCAN_S = 3600.0
+# An endpoint that refuses the credentials (a deactivated or wrong key) refuses
+# them again a minute later: one gateway sent about 24,700 refused requests in a
+# week, one per wallet x chain per pass, and logged each. After this many refusals
+# in a row the background sync leaves the chain alone for the next of these
+# delays (the last repeats); an answer or a new URL ends the pause, and a
+# requested sync always tries. A refusal while a pause runs (a requested pass,
+# a later wallet of the same pass) does not lengthen it: in a live test
+# (2026-11-22) one resync with two wallets moved a 2-minute pause to 15, so the
+# pause takes one step per expiry. Timeouts and 5xx never count: they say
+# nothing about the key, and one bad minute must not blind the sync.
+AUTH_REFUSED_STATUSES = frozenset({401, 403})
+AUTH_REFUSALS_BEFORE_PAUSE = 2
+AUTH_PAUSE_S = (60.0, 120.0, 300.0, 900.0)
+# The engine loop logs what each chain's RPC was sent about this often.
+RPC_USAGE_LOG_S = 3600.0
 # ``syncKind`` vocabulary: why the pass in flight runs. A client shows a
 # "syncing" state for the last two only; the background pass is the engine
 # keeping figures fresh, and with many wallets it runs most of the time.
@@ -194,6 +215,29 @@ SEL_WETH_DEPOSIT = "0xd0e30db0"
 MAX_SEND_RECIPIENTS = 200
 # ``network`` re-reads the chains at most this often; the strip polls faster.
 NETWORK_TTL_S = 10.0
+# The fee history behind the strip's priority tip is re-read at most this
+# often per chain. The head block alone gives the number, its age and the base
+# fee; only the displayed tip needs eth_feeHistory, and a median over ten
+# blocks barely moves in a minute. The desktop polls every 20 s, past the
+# 10 s cache, so every poll used to cost two calls per chain; now it is one
+# most of the time. Signing never reads this: ``_send`` asks ``fee_data``.
+NETWORK_FEE_TTL_S = 60.0
+# An allowance review re-reads the wallet's Approval logs at most this often
+# per wallet and chain (a full rescan, a ``wait``, a first pass and an
+# approval this engine sent are not held back; a pass that failed waits it out
+# too). Every list call used to start a top-up scan, and its end broadcast
+# ``trading.changed``, which makes clients re-read the list: on a 0.1-0.2 s
+# chain the head has always moved, so an open view re-read itself as fast as
+# the client debounces, 250-600 billed calls a minute. A grant made elsewhere
+# shows within a minute, the pace the desktop polls the list at anyway; a
+# revoke is gone at once (every listed amount is read live, zeros dropped).
+ALLOWANCE_RESCAN_S = 60.0
+# A token whose contract answers but names no symbol is served from the
+# ledger this long before its metadata is read again (a 3-call batch plus
+# eth_getCode). It is almost always junk or a non-token contract, and every
+# holdings read paid those four calls again for it. The token list can still
+# name it at any time; a contract upgraded to gain a symbol shows within this.
+NAMELESS_TOKEN_TTL_S = 3_600.0
 # A head block older than this means the endpoint is behind or the chain is
 # stalled; either way a read from it is not to be trusted.
 STALE_HEAD_S = 60.0
@@ -426,6 +470,20 @@ class _ApprovalBinding:
     verified: bool = False
 
 
+@dataclass
+class _AuthPause:
+    """A chain whose RPC refused the credentials, and when the background sync asks again."""
+
+    # The URL that refused (memory only, never shown); a different one is tried at once.
+    url: str
+    refusals: int = 0
+    # Pauses so far: picks the next delay from ``AUTH_PAUSE_S``. Only a
+    # refusal after ``until`` starts the next one.
+    pauses: int = 0
+    until: float = 0.0
+    reason: str = ""
+
+
 class TradingService:
     def __init__(
         self,
@@ -477,6 +535,11 @@ class TradingService:
         self._background = background
         self.lp_env_factory = lp_env_factory
         self._evm: dict[int, EvmClient] = {}
+        # The RPC URL each cached client was made for: ``evm`` rebuilds on a change.
+        self._evm_urls: dict[int, str] = {}
+        # Chain id -> the background sync's pause after refused credentials.
+        self._auth_pauses: dict[int, _AuthPause] = {}
+        self._rpc_usage_logged_at = now()
         self._task: asyncio.Task[None] | None = None
         # The wallet sync the loop last started; it runs beside the loop, not in it.
         self._sync_task: asyncio.Task[None] | None = None
@@ -527,6 +590,19 @@ class TradingService:
         self._lp_book: LpBook | None = None
         self._network_cache: dict[str, Any] | None = None
         self._network_cache_at = 0.0
+        # chain id -> (read at, maxFeePerGas, tip): the strip's fee figures
+        # (``NETWORK_FEE_TTL_S``); signing reads its own.
+        self._network_fees: dict[int, tuple[float, int, int]] = {}
+        # (chain id, token) -> until when a token that names no symbol is
+        # served from the ledger (``NAMELESS_TOKEN_TTL_S``).
+        self._nameless_until: dict[tuple[int, str], float] = {}
+        # (chain id, wallet) -> (when the review last looked at the chain, the
+        # scan cursor it saw then): ``ALLOWANCE_RESCAN_S``.
+        self._allowance_looked: dict[tuple[int, str], tuple[float, int | None]] = {}
+        # (chain id, wallet) -> the head the running pass scans to.
+        self._allowance_targets: dict[tuple[int, str], int] = {}
+        # chain id -> the head an allowance review last read.
+        self._allowance_heads: dict[int, int] = {}
         # One Approval-log scan per wallet/chain at a time; a review call
         # returns what is cached and reports that the scan is still running.
         self._allowance_scans: dict[tuple[int, str], asyncio.Task[None]] = {}
@@ -536,26 +612,46 @@ class TradingService:
     def chains(self) -> list[ChainSpec]:
         return list(CHAINS.values())
 
+    def _rpc_url(self, chain: ChainSpec) -> str:
+        """The chain's RPC URL as configured now: ``trading.rpc_urls``, the env, the default."""
+        return rpc_url_for(chain, dict(getattr(self.config, "rpc_urls", {}) or {}))
+
     def evm(self, chain: ChainSpec) -> EvmClient:
+        """The chain's client, made again whenever its configured RPC URL changes.
+
+        The URL is resolved on every call, as the LP reads do, so writing
+        ``trading.rpc_urls`` (or changing the env fallback) reaches the sync
+        loop, orders and the network strip at once. The first client used to be
+        kept until a restart while LP reads switched: two endpoints at once.
+        Whatever still holds the old client (a confirm task waiting for its
+        receipt, an allowance scan) finishes on it, so it is not closed here;
+        there is nothing to close anyway, its ``http`` is the service's own.
+        """
+        url = self._rpc_url(chain)
         client = self._evm.get(chain.chain_id)
-        if client is None:
-            if self._evm_factory is not None:
-                client = self._evm_factory(chain)
-            else:
-                url = rpc_url_for(chain, dict(getattr(self.config, "rpc_urls", {}) or {}))
-                client = EvmClient(
-                    url,
-                    http=self._http,
-                    max_log_span=chain.max_log_span,
-                    max_priority_fee_wei=chain.max_priority_fee_wei,
-                    max_fee_per_gas_wei=chain.max_fee_per_gas_wei,
-                    multicall3=chain.multicall3,
-                    # A custom RPC is for what must be fresh (it may be metered);
-                    # the sync's bulk balance read goes to the public node first.
-                    read_url=chain.rpc_url if url != chain.rpc_url else None,
-                )
-            self._evm[chain.chain_id] = client
-        return client
+        if client is not None and self._evm_urls.get(chain.chain_id) == url:
+            return client
+        if self._evm_factory is not None:
+            fresh = self._evm_factory(chain)
+        else:
+            fresh = EvmClient(
+                url,
+                http=self._http,
+                max_log_span=chain.max_log_span,
+                max_priority_fee_wei=chain.max_priority_fee_wei,
+                max_fee_per_gas_wei=chain.max_fee_per_gas_wei,
+                multicall3=chain.multicall3,
+                # A custom RPC is for what must be fresh (it may be metered);
+                # the sync's bulk balance read goes to the public node first.
+                read_url=chain.rpc_url if url != chain.rpc_url else None,
+            )
+        if client is not None:
+            # The usage count is the chain's since start, whichever URL served it.
+            fresh.rpc_usage = client.rpc_usage
+            log.info("trading.rpc_url_changed", chain=chain.key, rpc=redact_rpc_url(url))
+        self._evm[chain.chain_id] = fresh
+        self._evm_urls[chain.chain_id] = url
+        return fresh
 
     def aggregator(self) -> AggregatorClient:
         base = str(getattr(self.config, "aggregator_base_url", "") or AGGREGATOR_BASE).strip()
@@ -870,6 +966,7 @@ class TradingService:
             except Exception as exc:  # pragma: no cover - defensive
                 log.warning("trading.loop_error", error=str(exc))
             self._kick_sync()
+            self._log_rpc_usage()
             await asyncio.sleep(interval)
 
     def _kick_sync(self) -> None:
@@ -973,10 +1070,9 @@ class TradingService:
             row = chain.to_dict()
             # Provider keys live in the URL path (dRPC, Alchemy, Infura): never send
             # them to a client.
-            row["rpcUrl"] = redact_rpc_url(
-                rpc_url_for(chain, dict(getattr(self.config, "rpc_urls", {}) or {}))
-            )
+            row["rpcUrl"] = redact_rpc_url(self._rpc_url(chain))
             row["healthy"] = healthy
+            row["rpcUsage"] = self._rpc_usage(chain)
             chains.append(row)
         vault = self.vault.status()
         providers = []
@@ -1013,6 +1109,51 @@ class TradingService:
             "lastSyncAt": int(self.last_sync_at * 1000) if self.last_sync_at else None,
             "ledgerRepair": self._ledger_repair(),
         }
+
+    def _rpc_usage(self, chain: ChainSpec) -> dict[str, Any] | None:
+        """What the engine sent this chain since start; ``None`` before it sent anything.
+
+        ``rpc`` is the endpoint ``rpcUrl`` names, the one that may be metered;
+        ``read`` is the chain's public node, which the bulk balance read tries
+        first when a custom RPC is set. Per lane: ``requests`` (HTTP),
+        ``calls`` (JSON-RPC calls, each batch item one, as a provider bills
+        them), ``failed`` (requests that failed in transport: a timeout or
+        connection error, HTTP 400 or above, a body that is not JSON; a
+        JSON-RPC error in an HTTP 200 is an answer and not counted) and
+        ``methods`` (calls by method). ``since`` is when counting started (ms).
+        No URL.
+        """
+        client = self._evm.get(chain.chain_id)
+        if client is None:
+            return None
+        usage = client.usage()
+        return {"since": int(usage["since"] * 1000), "rpc": usage["rpc"], "read": usage["read"]}
+
+    def _log_rpc_usage(self) -> None:
+        """About once an hour, one line per chain: what it was sent since the last line."""
+        now = self._now()
+        elapsed = now - self._rpc_usage_logged_at
+        if elapsed < RPC_USAGE_LOG_S:
+            return
+        self._rpc_usage_logged_at = now
+        for chain in self.chains():
+            client = self._evm.get(chain.chain_id)
+            if client is None:
+                continue
+            window = client.rpc_usage.window()
+            rpc, read = window["rpc"], window["read"]
+            if rpc["requests"] or read["requests"]:
+                log.info(
+                    "trading.rpc_usage",
+                    chain=chain.key,
+                    minutes=round(elapsed / 60),
+                    rpc_calls=rpc["calls"],
+                    rpc_requests=rpc["requests"],
+                    rpc_failed=rpc["failed"],
+                    read_calls=read["calls"],
+                    read_failed=read["failed"],
+                    methods=rpc["methods"],
+                )
 
     def _ledger_repair(self) -> str | None:
         """What the ledger says it needs (``"full sync required"``), or ``None``."""
@@ -1126,7 +1267,16 @@ class TradingService:
         key = normalize_address(address)
         row, seal = self.ledger.sealed_token(chain.chain_id, key)
         cached: TokenMeta | None = None
-        if row and (row["symbol"] or row["verified"]):
+        # A row the chain was asked for lately and that names no symbol: the
+        # answer would be the same four calls for the same empty name.
+        until = self._nameless_until.get((chain.chain_id, key), 0.0)
+        nameless = (
+            row is not None
+            and not row["symbol"]
+            and not row["verified"]
+            and 0.0 < until - self._now() <= NAMELESS_TOKEN_TTL_S
+        )
+        if row and (row["symbol"] or row["verified"] or nameless):
             cached = TokenMeta(
                 chain_id=chain.chain_id,
                 address=key,
@@ -1141,18 +1291,26 @@ class TradingService:
             # judge: used as cached only when the engine's seal still holds.
             # Locked (``None``), nothing can sign; the next unlocked use checks.
             verdict = self.sealer.check(integrity.TOKEN_KIND, row, seal)
-            if verdict in (None, "ok"):
+            if verdict in (None, "ok") and not nameless:
                 return cached
             if verdict == "mismatch":
                 log.warning("trading.token_seal_mismatch", chain=chain.chain_id, token=key)
+            if verdict not in (None, "ok"):
+                nameless = False  # a row whose seal failed is read again
         known = await self.prices.known_token(chain, key)
         if known is not None:
+            # The list learnt it: its name wins over the empty one at once.
+            self._nameless_until.pop((chain.chain_id, key), None)
             self._remember_token(known)
             return known
+        if nameless and cached is not None:
+            return cached
         symbol, name, decimals = "", "", 18
+        answered = True
         try:
             symbol, name, decimals = await self.evm(chain).erc20_metadata(key)
         except (EvmRpcError, EvmTransportError):
+            answered = False
             if cached is not None:
                 # The chain could not be asked: keep the cached row rather than
                 # overwrite it with a guess (nothing can be quoted from an
@@ -1175,6 +1333,11 @@ class TradingService:
                     f"No contract at {key} on {chain.name}",
                     details={"address": key, "chainId": chain.chain_id},
                 )
+            if answered and code:
+                # The node answered both questions: a contract that names
+                # nothing. Not asked again for a while (``NAMELESS_TOKEN_TTL_S``);
+                # a guess made while the node was down is retried next time.
+                self._nameless_until[(chain.chain_id, key)] = self._now() + NAMELESS_TOKEN_TTL_S
         meta = TokenMeta(chain.chain_id, key, symbol, name, decimals)
         self._remember_token(meta)
         return meta
@@ -2352,6 +2515,14 @@ class TradingService:
                     self._hidden_sync_at = self._now()
                 for record in wallets:
                     for chain in chains or self.chains():
+                        paused = self._auth_paused(chain)
+                        if paused is not None:
+                            # Nothing is asked of a node that refused the key; the
+                            # wallet's read still says why it is not fresh.
+                            self.syncer.record_failure(
+                                chain, record.key, f"paused, key refused: {paused.reason}"
+                            )
+                            continue
                         self._sync_first_sweep = (
                             full
                             or self.ledger.sync_state(chain.chain_id, record.key) is None
@@ -2377,12 +2548,71 @@ class TradingService:
                                 error=str(exc),
                             )
                             self.syncer.record_failure(chain, record.key, str(exc))
+                            self._auth_refused(chain, exc)
+                        else:
+                            self._auth_answered(chain)
                 self.last_sync_at = self._now()
             finally:
                 self.syncing = False
                 self._sync_first_sweep = False
                 self._sync_pass_kind = SYNC_BACKGROUND
             return changed
+
+    def _auth_paused(self, chain: ChainSpec) -> _AuthPause | None:
+        """The chain's pause, when the pass in flight is to leave the chain alone.
+
+        Only the engine's own pass waits. Someone who asked (the resync button,
+        a ``--refresh``) is answered at once, also when the request was folded
+        into a background pass already running (``_sync_pass_kind``).
+        """
+        pause = self._auth_pause(chain)
+        if pause is None or self._sync_pass_kind != SYNC_BACKGROUND:
+            return None
+        return pause if self._now() < pause.until else None
+
+    def _auth_pause(self, chain: ChainSpec) -> _AuthPause | None:
+        """The chain's pause record, dropped once the URL it was counted against is replaced."""
+        pause = self._auth_pauses.get(chain.chain_id)
+        if pause is None or pause.url == self._rpc_url(chain):
+            return pause
+        # A new endpoint or key is worth asking at once. Nothing is known of it
+        # yet, so this is not ``rpc_key_accepted``: the pause just ends.
+        del self._auth_pauses[chain.chain_id]
+        if pause.pauses:
+            log.info("trading.rpc_key_pause_ended", chain=chain.key, reason="rpc_url_changed")
+        return None
+
+    def _auth_refused(self, chain: ChainSpec, exc: Exception) -> None:
+        """Count a refused key (HTTP 401/403) towards the chain's pause; nothing else counts."""
+        if not isinstance(exc, EvmTransportError) or exc.status not in AUTH_REFUSED_STATUSES:
+            return
+        pause = self._auth_pause(chain)
+        if pause is None:
+            pause = self._auth_pauses[chain.chain_id] = _AuthPause(url=self._rpc_url(chain))
+        pause.refusals += 1
+        pause.reason = str(exc)
+        if pause.refusals < AUTH_REFUSALS_BEFORE_PAUSE or self._now() < pause.until:
+            # Not yet two in a row, or the pause is running and this refusal only
+            # confirms it: a requested pass and later wallets of a pass still ask.
+            return
+        delay = AUTH_PAUSE_S[min(pause.pauses, len(AUTH_PAUSE_S) - 1)]
+        pause.pauses += 1
+        pause.until = self._now() + delay
+        if pause.pauses == 1:
+            log.warning(
+                "trading.rpc_key_refused",
+                chain=chain.key,
+                status=exc.status,
+                refusals=pause.refusals,
+                retry_in_s=int(delay),
+                error=pause.reason[:200],
+            )
+
+    def _auth_answered(self, chain: ChainSpec) -> None:
+        """The chain answered a sync: any pause ends."""
+        pause = self._auth_pauses.pop(chain.chain_id, None)
+        if pause is not None and pause.pauses:
+            log.info("trading.rpc_key_accepted", chain=chain.key, refusals=pause.refusals)
 
     @property
     def sync_kind(self) -> str | None:
@@ -4162,12 +4392,16 @@ class TradingService:
         chain is millions of blocks — and saves its place after every
         window, so this returns at once with what is known and
         ``scanning: True``; ``wait`` blocks until the pass is done. Every
-        window that adds a pair, and the end of the pass, broadcast
-        ``trading.changed`` with ``reason: "allowances"``.
+        window that adds a pair, and the end of a catch-up longer than one
+        window, broadcast ``trading.changed`` with ``reason: "allowances"``.
+
+        The logs are looked at again at most every ``ALLOWANCE_RESCAN_S``
+        per wallet and chain (see ``_allowance_due``); in between a call
+        reads only the live amounts, and ``head`` is the last head the review
+        read. ``full`` and ``wait`` always look, up to the head now.
         """
         record = self.vault.resolve(wallet)
         evm = self.evm(chain)
-        latest = await evm.block_number()
         key = (chain.chain_id, record.key)
         if full:
             # A pass still running would write its next window's cursor over
@@ -4178,8 +4412,19 @@ class TradingService:
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await running
             self.ledger.clear_allowance_scan(chain.chain_id, record.key)
+        task = self._allowance_scans.get(key)
         scan = self.ledger.allowance_scan(chain.chain_id, record.key)
-        if scan is None:
+        cursor = int(scan["last_block"]) if scan else None
+        now = self._now()
+        due = (task is None or task.done()) and self._allowance_due(
+            chain, record, cursor, now, full=full, wait=wait
+        )
+        latest = self._allowance_heads.get(chain.chain_id)
+        if due or latest is None:
+            latest = self._allowance_heads[chain.chain_id] = await evm.block_number()
+        if due:
+            self._allowance_looked[key] = (now, cursor)
+        if cursor is None:
             created = record.created_block.get(str(chain.chain_id))
             state = self.ledger.sync_state(chain.chain_id, record.key)
             if created is not None:
@@ -4189,20 +4434,24 @@ class TradingService:
             else:
                 start = max(0, latest - self.syncer.initial_lookback)
         else:
-            start = int(scan["last_block"]) + 1
+            start = cursor + 1
+        # Looked up again after the head read: a call that ran beside this one
+        # may have started the pass in the meantime.
         task = self._allowance_scans.get(key)
-        if start <= latest and (task is None or task.done()):
+        if due and start <= latest and (task is None or task.done()):
             task = asyncio.get_running_loop().create_task(
                 self._scan_allowances(chain, record, start, latest),
                 name=f"trading-allowances-{chain.chain_id}-{record.key[:10]}",
             )
             self._allowance_scans[key] = task
+            self._allowance_targets[key] = latest
         if wait and task is not None and not task.done():
             await task
         # "Scanning" is a catch-up worth telling the user about — more than
-        # one window still to read. The few hundred blocks since the last
-        # look are read in one call and are not a reason to say "partial".
-        behind = latest - start + 1
+        # one window still to read before the running pass reaches its head.
+        # The few hundred blocks since the last look are read in one call and
+        # are not a reason to say "partial".
+        behind = self._allowance_targets.get(key, latest) - start + 1
         scanning = task is not None and not task.done() and behind > int(chain.approval_log_span)
         scan = self.ledger.allowance_scan(chain.chain_id, record.key)
         rows = self.ledger.allowances(chain.chain_id, record.key)
@@ -4276,6 +4525,40 @@ class TradingService:
             "head": latest,
         }
 
+    def _allowance_due(
+        self,
+        chain: ChainSpec,
+        record: WalletRecord,
+        cursor: int | None,
+        now: float,
+        *,
+        full: bool,
+        wait: bool,
+    ) -> bool:
+        """Whether a review call looks at the Approval logs again (``ALLOWANCE_RESCAN_S``).
+
+        Always for ``full`` and ``wait``, for the first look in this process
+        (a first pass is never held back, nor the catch-up after a restart),
+        when the scan cursor was cleared since the last look (the wallet was
+        removed and added back), and after an approval this engine sent since
+        then: its pair should show now, not in a minute. Otherwise only once
+        the interval has passed since the last look, or since a pass failed.
+        """
+        if full or wait:
+            return True
+        looked = self._allowance_looked.get((chain.chain_id, record.key))
+        if looked is None:
+            return True
+        at, seen = looked
+        if cursor is None and seen is not None:
+            return True
+        if not 0.0 <= now - at < ALLOWANCE_RESCAN_S:
+            return True
+        granted = self.ledger.list_entries(
+            wallet=record.key, chain_id=chain.chain_id, kind="approval", limit=1
+        )
+        return bool(granted) and float(granted[0]["ts"]) >= at
+
     async def _scan_allowances(
         self, chain: ChainSpec, record: WalletRecord, start: int, latest: int
     ) -> None:
@@ -4283,11 +4566,20 @@ class TradingService:
 
         Progress is written after every window, so a gateway restart (or a
         node outage half-way) resumes where it stopped instead of starting
-        over. A window that fails ends the pass; the next review call picks
-        it up from the last saved block.
+        over. A window that fails ends the pass; a review call after
+        ``ALLOWANCE_RESCAN_S`` picks it up from the last saved block (sooner
+        would re-send a refused window on every call).
+
+        ``trading.changed`` goes out when clients have something to learn: a
+        window that added a pair, and the end (or failure) of a catch-up
+        longer than one window, the pass a review reports as ``scanning``. A
+        top-up that found nothing says nothing: the re-read it would cause
+        brings the list clients already have, and used to start the next
+        top-up — a loop as fast as the client debounces on a 0.1 s chain.
         """
         evm = self.evm(chain)
         window = max(1, int(chain.approval_log_span))
+        catch_up = latest - start + 1 > window
         cursor = start
         while cursor <= latest:
             end = min(latest, cursor + window - 1)
@@ -4303,9 +4595,15 @@ class TradingService:
                     block=cursor,
                     error=str(exc),
                 )
-                await self._emit(
-                    "trading.changed", {"reason": "allowances", "wallet": record.address}
+                saved = self.ledger.allowance_scan(chain.chain_id, record.key)
+                self._allowance_looked[(chain.chain_id, record.key)] = (
+                    self._now(),
+                    int(saved["last_block"]) if saved else None,
                 )
+                if catch_up:
+                    await self._emit(
+                        "trading.changed", {"reason": "allowances", "wallet": record.address}
+                    )
                 return
             added = 0
             for entry in logs:
@@ -4326,7 +4624,8 @@ class TradingService:
                     "trading.changed", {"reason": "allowances", "wallet": record.address}
                 )
             cursor = end + 1
-        await self._emit("trading.changed", {"reason": "allowances", "wallet": record.address})
+        if catch_up:
+            await self._emit("trading.changed", {"reason": "allowances", "wallet": record.address})
 
     # ── decode ─────────────────────────────────────────────────────────
 
@@ -4460,7 +4759,9 @@ class TradingService:
         The age is the number that matters: a load-balanced endpoint that
         answers from a node a few blocks behind (see ``_native_after``) shows
         up here as a head older than the chain's block time, which is what a
-        person needs to see before trusting a balance.
+        person needs to see before trusting a balance. The head block is read
+        on every uncached call; the fee history behind the tip only every
+        ``NETWORK_FEE_TTL_S``. ``fresh`` re-reads both.
         """
         now = self._now()
         if (
@@ -4498,10 +4799,16 @@ class TradingService:
                 row["blockNumber"] = number
                 row["blockAgeS"] = max(0, int(now - ts)) if ts else None
                 base_fee = decode_uint(str(block.get("baseFeePerGas") or "0x0"))
-                try:
-                    max_fee, tip = await evm.fee_data()
-                except (EvmRpcError, EvmTransportError):
-                    max_fee, tip = 0, 0
+                fees = self._network_fees.get(chain.chain_id)
+                if not fresh and fees is not None and now - fees[0] < NETWORK_FEE_TTL_S:
+                    _, max_fee, tip = fees
+                else:
+                    try:
+                        max_fee, tip = await evm.fee_data()
+                    except (EvmRpcError, EvmTransportError):
+                        max_fee, tip = 0, 0
+                    else:
+                        self._network_fees[chain.chain_id] = (now, max_fee, tip)
                 if not base_fee and max_fee:
                     base_fee = max(0, (max_fee - tip) // 2)
                 row["baseFeeGwei"] = base_fee / 1e9 if base_fee else None
@@ -8468,16 +8775,23 @@ class TradingService:
     ) -> int | None:
         """The wallet's balance of ``address`` for a live trigger's card.
 
-        Read from the chain, from the ledger's cache when the read fails. A
-        terminal card shows no balance (``triggers.trigger_json``).
+        The ledger's figure, which the sync keeps current and every fill
+        refreshes; the chain only when the ledger has no row for it. The card
+        is display: a fire reads the balance it sizes from the chain itself
+        (``_trigger_fire``). Every list used to send one balance read per live
+        trigger (two per bracket), and the desktop lists both every 30 s and
+        on every ``trading.changed``. A terminal card shows no balance
+        (``triggers.trigger_json``).
         """
         cached = self.ledger.get_balance(chain.chain_id, str(row["wallet"]), address)
+        if cached is not None:
+            return cached
         try:
             record = self.vault.get(str(row["wallet"]))
             meta = await self.token_meta(chain, address)
             return await self._balance_raw(chain, record, meta)
         except Exception:  # a card never fails for a balance it could not read
-            return cached
+            return None
 
     async def _trigger_build(self, row: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         """The ``Trigger`` payload object and the card's warnings."""
