@@ -13,6 +13,7 @@ import {
   type LpAction,
   lpActions,
   lpStatusTone,
+  mcapRange,
   positionTag,
   rangeMarker,
 } from './liquidity-logic'
@@ -70,7 +71,7 @@ export function Liquidity({
   /** The position (by id) whose action is on its way to the engine. */
   acting?: string | null
   /**
-   * `table` is the full desk's six columns. `cards` is for a rail too narrow
+   * `table` is the full desk's seven columns. `cards` is for a rail too narrow
    * for them (the BOOK beside the chat): one stacked card per position.
    */
   layout?: 'table' | 'cards'
@@ -245,6 +246,7 @@ export function Liquidity({
           <tr>
             <th className="trd-col--asset">{t('trading.liquidity.col.pool')}</th>
             <th className="trd-col--range">{t('trading.liquidity.col.range')}</th>
+            <th className="trd-col--mcap">{t('trading.liquidity.col.mcap')}</th>
             <th className="trd-col--amounts">{t('trading.liquidity.col.amounts')}</th>
             <th className="trd-col--earned">{t('trading.liquidity.col.earned')}</th>
             <th className="trd-col--value">{t('trading.liquidity.col.value')}</th>
@@ -264,6 +266,9 @@ export function Liquidity({
                   </td>
                   <td className="trd-col--range">
                     <Skeleton width={120} />
+                  </td>
+                  <td className="trd-col--mcap">
+                    <Skeleton width={110} />
                   </td>
                   <td className="trd-col--amounts">
                     <Skeleton width={90} />
@@ -443,6 +448,14 @@ function Earned({ position }: { position: LpPosition }) {
   )
 }
 
+/** What the market-cap figure is, or why a ranged position has none. */
+function mcapTitle(position: LpPosition): string | undefined {
+  if (!position.range) return undefined
+  return mcapRange(position) === null
+    ? t('trading.liquidity.mcap.none')
+    : `${t('trading.liquidity.mcap.help')}: ${position.token.symbol}`
+}
+
 function earnedTitle(position: LpPosition): string | undefined {
   return position.fees === null && !position.rewards ? t('trading.liquidity.noFees') : undefined
 }
@@ -493,6 +506,13 @@ function Row(props: RowProps) {
       <td className="trd-col--range">
         <RangeCell position={position} share={formatShare(position.share)} />
       </td>
+      <td
+        className={cn('trd-col--mcap', mcapRange(position) === null && 'trd-cell--muted')}
+        title={mcapTitle(position)}
+        data-testid="lp-mcap"
+      >
+        {mcapRange(position) ?? '—'}
+      </td>
       <td className="trd-col--amounts" title={title(formatUsd(position.principal.usd))}>
         <Deposited position={position} />
       </td>
@@ -532,6 +552,15 @@ function Card(props: RowProps) {
       </div>
       <RangeCell position={position} share={formatShare(position.share)} />
       <dl className="trd-lpcard__figs">
+        {position.range ? (
+          <div
+            className={cn(mcapRange(position) === null && 'trd-cell--muted')}
+            title={mcapTitle(position)}
+          >
+            <dt>{t('trading.liquidity.col.mcap')}</dt>
+            <dd data-testid="lp-mcap">{mcapRange(position) ?? '—'}</dd>
+          </div>
+        ) : null}
         <div title={title(formatUsd(position.principal.usd))}>
           <dt>{t('trading.liquidity.col.amounts')}</dt>
           <dd>

@@ -1,3 +1,4 @@
+import { formatUsd } from './logic'
 import type { LpPosition, LpStatus } from './types'
 
 /**
@@ -53,6 +54,39 @@ export function formatRate(value: number | null | undefined): string {
   const zeros = digits.search(/[1-9]/)
   if (zeros < 0) return '0'
   return `0.0${subscript(zeros)}${digits.slice(zeros, zeros + 4).replace(/0+$/, '')}`
+}
+
+// Three significant figures, not the one decimal of a compact balance: the
+// two ends of a narrow range ($5.12M – $5.34M) must not print as one figure.
+const mcapCompact = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  notation: 'compact',
+  minimumFractionDigits: 0,
+  maximumSignificantDigits: 3,
+})
+
+/**
+ * A market cap at a glance: `$3.83M` from a hundred thousand up, whole
+ * dollars under it (the cents of a market cap are noise).
+ */
+export function formatMcap(value: number | null | undefined): string {
+  if (!isPositive(value)) return '—'
+  if (value >= 100_000) return mcapCompact.format(value)
+  if (value < 1) return formatUsd(value)
+  return `$${Math.round(value).toLocaleString('en-US')}`
+}
+
+/**
+ * The market caps (USD) of the base token between which a position provides
+ * liquidity: `$2.1M – $9.8M`. `null` when the position has no range (a pair)
+ * or the engine could not price a bound (no supply, no quote price).
+ */
+export function mcapRange(position: LpPosition): string | null {
+  const lower = position.range?.mcapLower
+  const upper = position.range?.mcapUpper
+  if (!isPositive(lower) || !isPositive(upper)) return null
+  return `${formatMcap(Math.min(lower, upper))} – ${formatMcap(Math.max(lower, upper))}`
 }
 
 const SUBSCRIPTS = '₀₁₂₃₄₅₆₇₈₉'

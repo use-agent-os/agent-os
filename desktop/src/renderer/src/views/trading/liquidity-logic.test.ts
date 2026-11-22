@@ -6,6 +6,8 @@ import {
   hasClaimable,
   lpActions,
   lpStatusTone,
+  formatMcap,
+  mcapRange,
   positionTag,
   rangeMarker,
 } from './liquidity-logic'
@@ -124,6 +126,34 @@ describe('rows', () => {
     expect(lpStatusTone('above-range')).toBe('warn')
     expect(lpStatusTone('below-range')).toBe('warn')
     expect(lpStatusTone('closed')).toBe('dim')
+  })
+})
+
+describe('mcapRange', () => {
+  const ranged = (mcapLower: number | null, mcapUpper: number | null) =>
+    position({ range: { priceLower: 2000, priceUpper: 3125, mcapLower, mcapUpper } })
+
+  it('prints the market caps a range spans, low to high', () => {
+    expect(mcapRange(ranged(2_100_000, 9_800_000))).toBe('$2.1M – $9.8M')
+    expect(mcapRange(ranged(9_800_000, 2_100_000))).toBe('$2.1M – $9.8M')
+    expect(mcapRange(ranged(51_760.4, 1_234_000_000))).toBe('$51,760 – $1.23B')
+  })
+
+  it('has nothing to print without both bounds', () => {
+    // A pair has no range; an unpriced quote or an unknown supply has no market cap.
+    expect(mcapRange(position({ range: null }))).toBeNull()
+    expect(mcapRange(ranged(null, 9_800_000))).toBeNull()
+    expect(mcapRange(ranged(0, 9_800_000))).toBeNull()
+    // An older gateway sends the prices alone.
+    expect(mcapRange(position())).toBeNull()
+  })
+
+  it('drops the cents of a market cap', () => {
+    expect(formatMcap(99_999.6)).toBe('$100,000')
+    // A narrow range keeps its two ends apart.
+    expect(mcapRange(ranged(5_123_000, 5_336_000))).toBe('$5.12M – $5.34M')
+    expect(formatMcap(812.4)).toBe('$812')
+    expect(formatMcap(null)).toBe('—')
   })
 })
 

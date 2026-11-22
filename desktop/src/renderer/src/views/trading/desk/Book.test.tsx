@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTradingUi } from '~/stores/trading-ui'
@@ -208,13 +208,16 @@ describe('Book · Liquidity', () => {
     expect(rpcCall).toHaveBeenCalledWith('trading.lp.book', {})
     expect(rows).toHaveLength(1)
     expect(rows[0]).toHaveTextContent('WETH / USDC')
-    // The rail is too narrow for the desk's six columns: each position is a
+    // The rail is too narrow for the desk's seven columns: each position is a
     // stacked card (range, deposit, unclaimed, value), never a table row.
     expect(screen.getByTestId('lp-cards')).toBeInTheDocument()
     expect(rows[0]?.tagName).toBe('LI')
     expect(screen.queryByRole('table')).toBeNull()
     expect(rows[0]).toHaveTextContent('Above range')
     expect(rows[0]).toHaveTextContent('$1,304.00')
+    // The market caps the range spans, as a labelled line on the card.
+    expect(rows[0]).toHaveTextContent('Market cap range (USD)')
+    expect(within(rows[0]!).getByTestId('lp-mcap')).toHaveTextContent('$2.1M – $9.8M')
     // The refresh asks the engine to read the chain now.
     fireEvent.click(screen.getByTestId('lp-refresh'))
     await waitFor(() => expect(rpcCall).toHaveBeenCalledWith('trading.lp.book', { refresh: true }))

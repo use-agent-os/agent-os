@@ -3506,7 +3506,7 @@ button:disabled > .trd-hero__spin {
 
 /* Rows are two lines tall: a position is a pair, a range and two amounts. */
 .trd-lptable {
-  min-width: 880px;
+  min-width: 1030px;
 }
 .trd-lptable .trd-col--asset {
   min-width: 280px;
@@ -3520,6 +3520,10 @@ button:disabled > .trd-hero__spin {
 .trd-lptable .trd-col--range {
   min-width: 190px;
   text-align: left;
+}
+.trd-lptable .trd-col--mcap {
+  min-width: 150px;
+  white-space: nowrap;
 }
 .trd-lptable .trd-col--amounts {
   min-width: 130px;
@@ -3650,7 +3654,7 @@ button:disabled > .trd-hero__spin {
   background: var(--warn);
 }
 
-/* The same book for a rail too narrow for six columns (the BOOK beside the
+/* The same book for a rail too narrow for seven columns (the BOOK beside the
    chat): one card per position. Who and how much, the range across the full
    width, then the figures as labelled lines. It is its own scroller. */
 .trd-lpcards {

@@ -312,6 +312,9 @@ describe('TradingView · Markets and the ticket', () => {
     expect(rows[0]).toHaveTextContent('WETH / USDC')
     expect(rows[0]).toHaveTextContent('Uniswap V3 · 0.05% · #77')
     expect(rows[0]).toHaveTextContent('Above range')
+    // Its own column: the market caps the position's range spans.
+    expect(screen.getByRole('columnheader', { name: 'Market cap range (USD)' })).toBeInTheDocument()
+    expect(within(rows[0]!).getByTestId('lp-mcap')).toHaveTextContent('$2.1M – $9.8M')
     expect(rows[1]).toHaveTextContent('Aero Slipstream')
     expect(rows[1]).toHaveTextContent('Staked')
     expect(rows[1]).toHaveTextContent('12.5 xAERO')
