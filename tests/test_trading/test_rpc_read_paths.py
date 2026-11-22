@@ -3,6 +3,7 @@
 Every JSON-RPC item is billed on a metered endpoint, so these count the items
 the fake nodes receive (``FakeChain.calls``) on a pinned clock:
 
+- trigger and bracket cards: one balance read per live trigger on every list;
 - ``recover_submitted``: about five receipt polls per stuck order per pass;
 - the network strip: ``eth_feeHistory`` on every uncached call.
 """
@@ -16,13 +17,88 @@ import pytest
 from agentos.trading import service as service_module
 from agentos.trading.chains import BASE
 from agentos.trading.service import NETWORK_FEE_TTL_S, TradingService
-from tests.test_trading.fakes import USDC, WETH, FakeChain
+from tests.test_trading.conftest import PASSWORD
+from tests.test_trading.fakes import USDC, WETH, FakeAggregator, FakeChain, FakePrices
+from tests.test_trading.test_brackets import protect
 from tests.test_trading.test_service import _wire_swap_effects
-from tests.test_trading.test_triggers import T0, Clock
+from tests.test_trading.test_triggers import KEY, T0, Clock, World
 
 
 def _rpc(chain: FakeChain, method: str) -> int:
     return sum(1 for call in chain.calls if call["method"] == method)
+
+
+# ── B: trigger and bracket cards ───────────────────────────────────────────
+
+
+@pytest.fixture
+async def world(
+    service: TradingService,
+    base_chain: FakeChain,
+    fake_aggregator: FakeAggregator,
+    fake_prices: FakePrices,
+    monkeypatch: pytest.MonkeyPatch,
+) -> World:
+    monkeypatch.setattr(service_module, "CHAIN_CATCHUP_POLL_S", 0.0)
+    clock = Clock()
+    service._now = clock
+    service.vault.setup(PASSWORD, "auto")
+    wallet = (await service.import_wallet("Key main", private_key=KEY))["address"]
+    base_chain.set_native(wallet, 10**18)
+    base_chain.set_erc20(USDC, wallet, 1_000 * 10**6)
+    base_chain.set_erc20(WETH, wallet, 10**17)  # 0.1 WETH
+    return World(service, base_chain, fake_aggregator, fake_prices, clock, wallet)
+
+
+def _balance_calls(chain: FakeChain) -> int:
+    return len(chain.balance_reads()) + _rpc(chain, "eth_getBalance")
+
+
+async def test_cards_show_the_ledgers_balance_without_a_chain_read(world: World) -> None:
+    service, chain = world.service, world.chain
+    trigger_id = (await world.create())["trigger"]["id"]  # sell 50 % of WETH under $1,900
+    bracket_id = (await protect(world))["bracket"]["id"]
+    # What the sync saw last; the chain says 0.1, so the figure shows where it came from.
+    service.ledger.set_balance(BASE.chain_id, world.wallet, WETH, 3 * 10**16)
+    chain.calls.clear()
+    triggers = await service.trigger_list()
+    brackets = await service.bracket_list()
+    assert _balance_calls(chain) == 0
+    (card,) = [t for t in triggers["triggers"] if t["id"] == trigger_id]
+    assert card["market"]["balance"]["human"] == "0.03"
+    (bracket,) = [b for b in brackets["brackets"] if b["id"] == bracket_id]
+    assert bracket["takeProfit"]["market"]["balance"]["human"] == "0.03"
+    assert bracket["stopLoss"]["market"]["balance"]["human"] == "0.03"
+
+
+async def test_cards_read_the_chain_when_the_ledger_has_no_row(world: World) -> None:
+    service, chain = world.service, world.chain
+    await world.create()
+    await protect(world)
+    assert service.ledger.get_balance(BASE.chain_id, world.wallet, WETH) is None
+    chain.calls.clear()
+    triggers = await service.trigger_list()
+    assert chain.balance_reads() == [WETH]
+    assert triggers["triggers"][0]["market"]["balance"]["human"] == "0.1"
+    chain.calls.clear()
+    await service.bracket_list()
+    assert chain.balance_reads() == [WETH, WETH]  # one per leg
+
+
+async def test_a_fire_sizes_from_the_chain_not_the_card(world: World) -> None:
+    service, chain = world.service, world.chain
+    trigger_id = (await world.create())["trigger"]["id"]
+    # The ledger still says 0.1 WETH; the wallet holds 0.04 when the trigger fires.
+    service.ledger.set_balance(BASE.chain_id, world.wallet, WETH, 10**17)
+    chain.set_erc20(WETH, world.wallet, 4 * 10**16)
+    assert (await service.trigger_list())["triggers"][0]["market"]["balance"]["human"] == "0.1"
+    chain.calls.clear()
+    await world.check(1890)
+    await world.check(1880)
+    assert WETH in chain.balance_reads()
+    (row,) = service.ledger.orders_for_trigger(trigger_id)
+    order = service.get_order(str(row["order_id"]))
+    assert order["status"] == "confirmed" and order["amountIn"] == "0.02"  # 50 % of 0.04
 
 
 # ── D: recovering submitted orders ─────────────────────────────────────────

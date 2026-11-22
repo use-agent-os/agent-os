@@ -8642,16 +8642,23 @@ class TradingService:
     ) -> int | None:
         """The wallet's balance of ``address`` for a live trigger's card.
 
-        Read from the chain, from the ledger's cache when the read fails. A
-        terminal card shows no balance (``triggers.trigger_json``).
+        The ledger's figure, which the sync keeps current and every fill
+        refreshes; the chain only when the ledger has no row for it. The card
+        is display: a fire reads the balance it sizes from the chain itself
+        (``_trigger_fire``). Every list used to send one balance read per live
+        trigger (two per bracket), and the desktop lists both every 30 s and
+        on every ``trading.changed``. A terminal card shows no balance
+        (``triggers.trigger_json``).
         """
         cached = self.ledger.get_balance(chain.chain_id, str(row["wallet"]), address)
+        if cached is not None:
+            return cached
         try:
             record = self.vault.get(str(row["wallet"]))
             meta = await self.token_meta(chain, address)
             return await self._balance_raw(chain, record, meta)
         except Exception:  # a card never fails for a balance it could not read
-            return cached
+            return None
 
     async def _trigger_build(self, row: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         """The ``Trigger`` payload object and the card's warnings."""
