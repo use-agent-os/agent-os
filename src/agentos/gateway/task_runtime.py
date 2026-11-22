@@ -242,7 +242,10 @@ def _parent_session_of(task: _RuntimeTask) -> str | None:
     return parent if isinstance(parent, str) and parent else None
 
 
-@dataclass
+# ``eq=False``: a task is itself, not its field values. ``_remove_pending``
+# finds it in a session's queue by identity, instead of building and
+# comparing a tuple of every field for each queued task it passes.
+@dataclass(eq=False)
 class _RuntimeTask:
     task_id: str
     envelope: RouteEnvelope
