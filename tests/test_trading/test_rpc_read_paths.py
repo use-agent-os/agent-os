@@ -3,7 +3,8 @@
 Every JSON-RPC item is billed on a metered endpoint, so these count the items
 the fake nodes receive (``FakeChain.calls``) on a pinned clock:
 
-- ``recover_submitted``: about five receipt polls per stuck order per pass.
+- ``recover_submitted``: about five receipt polls per stuck order per pass;
+- the network strip: ``eth_feeHistory`` on every uncached call.
 """
 
 from __future__ import annotations
@@ -14,9 +15,10 @@ import pytest
 
 from agentos.trading import service as service_module
 from agentos.trading.chains import BASE
-from agentos.trading.service import TradingService
+from agentos.trading.service import NETWORK_FEE_TTL_S, TradingService
 from tests.test_trading.fakes import USDC, WETH, FakeChain
 from tests.test_trading.test_service import _wire_swap_effects
+from tests.test_trading.test_triggers import T0, Clock
 
 
 def _rpc(chain: FakeChain, method: str) -> int:
@@ -100,3 +102,62 @@ async def test_a_mined_order_is_settled_by_that_one_poll_from_its_sealed_receipt
     assert row is not None and row["gas_wei"] == str(100_000 * 10**8 + final)
     # The one poll, then the sealed re-read once the head is past the block.
     assert _rpc(base_chain, "eth_getTransactionReceipt") == 2
+
+
+# ── E: the network strip ───────────────────────────────────────────────────
+
+
+async def test_the_network_strip_reads_the_fee_history_once_a_minute(
+    service: TradingService, base_chain: FakeChain, robinhood_chain: FakeChain
+) -> None:
+    clock = Clock(T0)
+    service._now = clock
+    chains = (base_chain, robinhood_chain)
+
+    def billed() -> dict[str, int]:
+        out: dict[str, int] = {}
+        for chain in chains:
+            for call in chain.calls:
+                out[call["method"]] = out.get(call["method"], 0) + 1
+            chain.calls.clear()
+        return out
+
+    first = await service.network()
+    assert billed() == {"eth_getBlockByNumber": 2, "eth_feeHistory": 2}
+    clock.now += 20  # the desktop's poll, past the 10 s cache
+    second = await service.network()
+    assert billed() == {"eth_getBlockByNumber": 2}
+    for a, b in zip(first["chains"], second["chains"], strict=True):
+        assert b["priorityFeeGwei"] == a["priorityFeeGwei"] is not None
+        assert b["baseFeeGwei"] == a["baseFeeGwei"] is not None
+    clock.now += 20
+    await service.network(fresh=True)
+    assert billed() == {"eth_getBlockByNumber": 2, "eth_feeHistory": 2}
+    clock.now += NETWORK_FEE_TTL_S
+    await service.network()
+    assert billed() == {"eth_getBlockByNumber": 2, "eth_feeHistory": 2}
+
+
+async def test_signing_reads_its_own_fee_history(
+    funded_service: TradingService, base_chain: FakeChain
+) -> None:
+    service = funded_service
+    wallet = service.test_wallet  # type: ignore[attr-defined]
+    _wire_swap_effects(base_chain, wallet)
+    await service.network()
+    base_chain.calls.clear()
+    orders = await service.swap(
+        chain=BASE,
+        wallets=None,
+        token_in="USDC",
+        token_out="WETH",
+        amount_in="10",
+        amount_pct=None,
+        slippage_pct=None,
+        initiator="manual",
+        session_key=None,
+        note=None,
+        wait=True,
+    )
+    assert orders[0]["status"] == "confirmed"
+    assert _rpc(base_chain, "eth_feeHistory") >= 1

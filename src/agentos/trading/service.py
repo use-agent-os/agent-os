@@ -212,6 +212,13 @@ SEL_WETH_DEPOSIT = "0xd0e30db0"
 MAX_SEND_RECIPIENTS = 200
 # ``network`` re-reads the chains at most this often; the strip polls faster.
 NETWORK_TTL_S = 10.0
+# The fee history behind the strip's priority tip is re-read at most this
+# often per chain. The head block alone gives the number, its age and the base
+# fee; only the displayed tip needs eth_feeHistory, and a median over ten
+# blocks barely moves in a minute. The desktop polls every 20 s, past the
+# 10 s cache, so every poll used to cost two calls per chain; now it is one
+# most of the time. Signing never reads this: ``_send`` asks ``fee_data``.
+NETWORK_FEE_TTL_S = 60.0
 # A head block older than this means the endpoint is behind or the chain is
 # stalled; either way a read from it is not to be trusted.
 STALE_HEAD_S = 60.0
@@ -563,6 +570,9 @@ class TradingService:
         self._lp_book: LpBook | None = None
         self._network_cache: dict[str, Any] | None = None
         self._network_cache_at = 0.0
+        # chain id -> (read at, maxFeePerGas, tip): the strip's fee figures
+        # (``NETWORK_FEE_TTL_S``); signing reads its own.
+        self._network_fees: dict[int, tuple[float, int, int]] = {}
         # One Approval-log scan per wallet/chain at a time; a review call
         # returns what is cached and reports that the scan is still running.
         self._allowance_scans: dict[tuple[int, str], asyncio.Task[None]] = {}
@@ -4616,7 +4626,9 @@ class TradingService:
         The age is the number that matters: a load-balanced endpoint that
         answers from a node a few blocks behind (see ``_native_after``) shows
         up here as a head older than the chain's block time, which is what a
-        person needs to see before trusting a balance.
+        person needs to see before trusting a balance. The head block is read
+        on every uncached call; the fee history behind the tip only every
+        ``NETWORK_FEE_TTL_S``. ``fresh`` re-reads both.
         """
         now = self._now()
         if (
@@ -4654,10 +4666,16 @@ class TradingService:
                 row["blockNumber"] = number
                 row["blockAgeS"] = max(0, int(now - ts)) if ts else None
                 base_fee = decode_uint(str(block.get("baseFeePerGas") or "0x0"))
-                try:
-                    max_fee, tip = await evm.fee_data()
-                except (EvmRpcError, EvmTransportError):
-                    max_fee, tip = 0, 0
+                fees = self._network_fees.get(chain.chain_id)
+                if not fresh and fees is not None and now - fees[0] < NETWORK_FEE_TTL_S:
+                    _, max_fee, tip = fees
+                else:
+                    try:
+                        max_fee, tip = await evm.fee_data()
+                    except (EvmRpcError, EvmTransportError):
+                        max_fee, tip = 0, 0
+                    else:
+                        self._network_fees[chain.chain_id] = (now, max_fee, tip)
                 if not base_fee and max_fee:
                     base_fee = max(0, (max_fee - tip) // 2)
                 row["baseFeeGwei"] = base_fee / 1e9 if base_fee else None
