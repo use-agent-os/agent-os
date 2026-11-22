@@ -27,7 +27,8 @@ log = structlog.get_logger(__name__)
 USER_AGENT = f"agentos-trading/{__version__}"
 
 #: How long ``sealed_receipt`` waits for the block after a receipt's own
-#: (Base and Robinhood Chain make one every 2 s; the cap covers a slow node).
+#: (Base and Robinhood Chain make several a second, measured 2026-11-22; the
+#: cap covers a slow node).
 SEAL_TIMEOUT_S = 15.0
 SEAL_INTERVAL_S = 1.0
 
@@ -72,6 +73,15 @@ class EvmTransportError(RuntimeError):
     def __init__(self, message: str, *, status: int | None = None) -> None:
         super().__init__(message)
         self.status = status
+
+
+# A refused key (401/403) or a rate limit (429) is not about the block range:
+# a narrower window is refused the same way. ``transfer_logs`` and
+# ``approval_logs`` raise these at once instead of halving down to the node's
+# span, which for a 100k-block window cost seven requests where one says it
+# all; the caller's saved cursor resumes on the next pass. A 400/500 (the
+# "range too large" of a load-balanced gateway) and a timeout still halve.
+NO_HALVING_STATUSES = frozenset({401, 403, 429})
 
 
 # ── ABI helpers ────────────────────────────────────────────────────────────
@@ -726,7 +736,9 @@ class EvmClient:
         refuses an oversized range with an HTTP 500, not a JSON-RPC error,
         so a transport error halves the span too — down to
         ``self.max_log_span``, which every node accepts; below that it is a
-        real outage and is raised (same rule as :meth:`approval_logs`).
+        real outage and is raised (same rule as :meth:`approval_logs`). A
+        refused key or a rate limit (``NO_HALVING_STATUSES``) is raised at
+        once: no narrower range fixes it.
         """
         if to_block < from_block:
             return []
@@ -749,8 +761,8 @@ class EvmClient:
                     raise
                 span = max(1, span // 2)
                 continue
-            except EvmTransportError:
-                if span <= floor:
+            except EvmTransportError as exc:
+                if span <= floor or exc.status in NO_HALVING_STATUSES:
                     raise
                 span = max(floor, span // 2)
                 continue
@@ -779,8 +791,9 @@ class EvmClient:
         an HTTP 500 and a sentence, not a JSON-RPC error, so a transport
         error also halves the span — down to ``self.max_log_span``, which
         every node accepts; below that the error is a real outage and is
-        raised. Only the grant side is scanned: what this wallet let others
-        spend is the question an allowance review asks.
+        raised. A refused key or a rate limit (``NO_HALVING_STATUSES``) is
+        raised at once, as there. Only the grant side is scanned: what this
+        wallet let others spend is the question an allowance review asks.
         """
         if to_block < from_block:
             return []
@@ -800,8 +813,8 @@ class EvmClient:
                     raise
                 span = max(1, span // 2)
                 continue
-            except EvmTransportError:
-                if span <= floor:
+            except EvmTransportError as exc:
+                if span <= floor or exc.status in NO_HALVING_STATUSES:
                     raise
                 span = max(floor, span // 2)
                 continue
