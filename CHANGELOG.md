@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.23] - 2026-11-23
+
 ### Changed
 - Trading: bridges between Base and Robinhood Chain now go through the
   **AgentOS DEX** (`/v1/bridge/*` at `trading.aggregator_base_url`) instead of
