@@ -15,7 +15,7 @@ from .ollama import OllamaProvider
 from .openai import OpenAIProvider
 from .openai_responses import OpenAIResponsesProvider
 from .protocol import LLMProvider, ProviderPlugin, resolve_failover_chain
-from .registry import UnknownProviderError, get_provider_spec
+from .registry import UnknownProviderError, get_provider_spec, openrouter_url_refusal
 from .retry_after import DEFAULT_RETRY_AFTER_CAP_SECONDS
 
 
@@ -30,6 +30,9 @@ class ProviderConfig:
     org_id: str = ""
     proxy: str = ""  # explicit HTTP proxy URL
     provider_routing: dict[str, str] = field(default_factory=dict)
+    #: Provider whose credential ``api_key`` is, when not ``provider`` itself:
+    #: a router tier naming another provider runs on the primary's key.
+    credential_provider: str = ""
 
 
 @dataclass
@@ -63,6 +66,13 @@ def _build_provider(cfg: ProviderConfig) -> LLMProvider:
         raise ProviderBuildError(_unsupported_runtime_message(cfg.provider))
 
     base_url = cfg.base_url or spec.default_base_url
+
+    # A key (and the conversation) goes only where its provider serves it:
+    # never another provider's to OpenRouter, as an OpenRouter base_url left
+    # in place after the provider changed would. Checked before any client.
+    refusal = openrouter_url_refusal(cfg.credential_provider or spec.provider_id, base_url)
+    if refusal:
+        raise ProviderBuildError(refusal)
 
     if not base_url and spec.provider_id in {"azure", "vllm"}:
         raise ProviderBuildError(_missing_base_url_message(cfg.provider))
@@ -288,15 +298,7 @@ class ModelSelector:
         otherwise one turn's tier fallbacks would leak into every later clone.
         """
         if model and model != self._chain[0].model:
-            self._chain[0] = ProviderConfig(
-                provider=self._chain[0].provider,
-                model=model,
-                api_key=self._chain[0].api_key,
-                base_url=self._chain[0].base_url,
-                org_id=self._chain[0].org_id,
-                proxy=self._chain[0].proxy,
-                provider_routing=self._chain[0].provider_routing,
-            )
+            self._chain[0] = replace(self._chain[0], model=model)
         if fallbacks is not None:
             previous = self._chain
             self._config = replace(self._config, fallbacks=list(fallbacks))
@@ -371,6 +373,7 @@ def build_provider(
     api_key: str = "",
     base_url: str = "",
     org_id: str = "",
+    credential_provider: str = "",
 ) -> LLMProvider:
     """Convenience factory: build a single provider directly."""
     return _build_provider(
@@ -380,5 +383,6 @@ def build_provider(
             api_key=api_key,
             base_url=base_url,
             org_id=org_id,
+            credential_provider=credential_provider,
         )
     )

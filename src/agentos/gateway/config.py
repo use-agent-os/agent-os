@@ -467,6 +467,23 @@ class LlmProviderConfig(BaseSettings):
     repetition_guard: LlmRepetitionGuardConfig = Field(default_factory=LlmRepetitionGuardConfig)
 
     @model_validator(mode="after")
+    def _default_base_url_follows_provider(self) -> LlmProviderConfig:
+        """An unset ``base_url`` is the configured provider's own endpoint.
+
+        The field default is OpenRouter's, the default provider's. Kept for
+        any other provider, it sent that provider's key to OpenRouter.
+        """
+        if "base_url" in self.model_fields_set:
+            return self
+        from agentos.provider.registry import default_base_url_for
+
+        self.base_url = default_base_url_for(self.provider)
+        # Still a default, not a choice: a copy validated again follows its
+        # provider too.
+        self.__pydantic_fields_set__.discard("base_url")
+        return self
+
+    @model_validator(mode="after")
     def _normalize_direct_deepseek_model(self) -> LlmProviderConfig:
         if str(self.provider or "").strip().lower() != "deepseek":
             return self

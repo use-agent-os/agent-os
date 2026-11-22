@@ -67,6 +67,14 @@ agentos configure provider --provider ollama --model llama3.1
 Prefer environment-variable references for API keys so secrets are not written
 directly into configuration files.
 
+Leave `base_url` out of `[llm]` to use the provider's own endpoint (the one
+`agentos providers list` shows); set it only for a self-hosted or regional
+endpoint. A key is sent only to its own provider's host: with a provider other
+than `openrouter`, a `base_url` on `openrouter.ai` (for example one left behind
+after changing `provider`) is refused, and the turn fails with a message that
+says what to change, before any request is made. `agentos configure provider`
+replaces such a saved URL with the provider's endpoint.
+
 Once a provider has a key or key reference configured, switch the active
 provider and model without prompts:
 
