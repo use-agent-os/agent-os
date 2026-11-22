@@ -318,10 +318,14 @@ wave → waiting → run → review → idle).
   (`pet.json` + its sheet, checked before a byte is copied).
 - Built-in pets live in `resources/pets/<slug>/` and ship with the app
   (`extraResources` → `Contents/Resources/pets`). `PetStore.seedBundled`
-  adopts each one once on launch, so the gallery has AgentOS' own mascot
-  before anyone reaches petdex.dev — and with no network at all. The slugs
-  it seeded are recorded in `userData/pets/.bundled.json`, so a built-in pet
-  you remove stays removed.
+  adopts each one once on launch, so the gallery has AgentOS' own mascot,
+  Luma (slug `agentos`), before anyone reaches petdex.dev — and with no
+  network at all. The slugs it seeded are recorded in
+  `userData/pets/.bundled.json`, so a built-in pet you remove stays removed.
+  On later launches a seeded pet whose sheet is still the bundled one takes
+  the bundle's current name and description; one the user replaced under
+  the same slug is left alone. The slug stays `agentos`: petdex.dev already
+  has a `luma`, and a changed slug would orphan installs and saved settings.
 
 ## Touch ID
 

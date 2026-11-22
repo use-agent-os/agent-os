@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -84,8 +84,73 @@ describe('PetStore.seedBundled', () => {
 
     expect(await store.seedBundled(shipped)).toContain('agentos')
     expect(await store.installed()).toContainEqual(
-      expect.objectContaining({ slug: 'agentos', displayName: 'AgentOS' }),
+      expect.objectContaining({ slug: 'agentos', displayName: 'Luma' }),
     )
+  })
+
+  it('renames a built-in pet an earlier release seeded', async () => {
+    writePet(bundled, 'agentos', 'AgentOS')
+    const store = new PetStore(root)
+    await store.seedBundled(bundled)
+    writePet(bundled, 'agentos', 'Luma')
+
+    expect(await store.seedBundled(bundled)).toEqual([])
+    expect(await store.installed()).toEqual([
+      expect.objectContaining({ slug: 'agentos', displayName: 'Luma' }),
+    ])
+  })
+
+  it('renames the AgentOS mascot a release before Luma seeded', async () => {
+    const shipped = path.resolve(process.cwd(), 'resources/pets')
+    const old = path.join(bundled, 'agentos')
+    mkdirSync(old, { recursive: true })
+    writeFileSync(
+      path.join(old, 'pet.json'),
+      JSON.stringify({ id: 'agentos', displayName: 'AgentOS', description: 'old' }),
+      'utf8',
+    )
+    copyFileSync(
+      path.join(shipped, 'agentos', 'spritesheet.webp'),
+      path.join(old, 'spritesheet.webp'),
+    )
+    const store = new PetStore(root)
+    await store.seedBundled(bundled)
+
+    await store.seedBundled(shipped)
+    expect(await store.installed()).toEqual([
+      expect.objectContaining({
+        slug: 'agentos',
+        displayName: 'Luma',
+        description: expect.stringContaining('Luma'),
+      }),
+    ])
+  })
+
+  it('keeps the name of a pet the user put under a built-in slug', async () => {
+    writePet(bundled, 'agentos', 'AgentOS')
+    const store = new PetStore(root)
+    await store.seedBundled(bundled)
+    writeFileSync(path.join(root, 'agentos', 'spritesheet.webp'), webpHeader(8 * 192, 11 * 208))
+    writeFileSync(
+      path.join(root, 'agentos', 'pet.json'),
+      JSON.stringify({ id: 'agentos', displayName: 'Mine' }),
+      'utf8',
+    )
+    writePet(bundled, 'agentos', 'Luma')
+
+    await store.seedBundled(bundled)
+    expect(await store.installed()).toEqual([expect.objectContaining({ displayName: 'Mine' })])
+  })
+
+  it('does not bring back a renamed built-in pet the user removed', async () => {
+    writePet(bundled, 'agentos', 'AgentOS')
+    const store = new PetStore(root)
+    await store.seedBundled(bundled)
+    await store.remove('agentos')
+    writePet(bundled, 'agentos', 'Luma')
+
+    expect(await store.seedBundled(bundled)).toEqual([])
+    expect(await store.installed()).toEqual([])
   })
 
   it('skips a bundled folder that is not a pet, and survives no bundle at all', async () => {
