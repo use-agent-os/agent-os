@@ -924,7 +924,10 @@ async def test_call_timeout_does_not_run_while_queued_for_readmission() -> None:
         now = loop.time()
     await other_task
 
-    assert resumed is not None and 0 < resumed - now <= 0.03
+    # ``resumed - now`` is the full 0.03 s when the loop clock did not tick in
+    # between (common on Windows, ~15.6 ms ticks), and ``(t + 0.03) - t``
+    # rounds to 0.030000000000001137 in floating point.
+    assert resumed is not None and 0 < resumed - now <= 0.03 + 1e-9
     admission.release()
 
 
