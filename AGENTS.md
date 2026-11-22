@@ -21,15 +21,57 @@ npm --prefix frontend ci                                       # Node 22+; React
 
 ## Quality gate — run before every commit / PR
 
-Run these in order; all must pass. This mirrors CI (`.github/workflows/ci.yml`):
+Run these in order; all must pass. CI (`.github/workflows/ci.yml`) runs the
+same checks, but splits the test suite across runners (see below):
 
 ```sh
 python scripts/build_control_ui.py build        # clean, build, license, verify React dist
 npm --prefix frontend run check                 # tsc, eslint, prettier, vitest
 uv run ruff check src tests                    # lint (E, F, I, N, W, UP; line-length 100)
 uv run mypy src/agentos --show-error-codes     # type check
-uv run pytest -q -n auto                       # full test suite, parallel (pytest-xdist)
+uv run pytest -q -n auto -m "not slow"         # full test suite, parallel (pytest-xdist)
+uv run pytest -q -m slow                       # slow/benchmark tests, serially
 uv build --wheel                               # packaging must not break
+```
+
+On a high-core machine `-n auto` starts one worker per core and can exhaust
+RAM; cap it with `-n <k>` (e.g. `-n 6`).
+
+### CI layout
+
+- `ubuntu-quality` (ruff, mypy, metric-name and leak smoke checks, wheel
+  build), `frontend-check` (`npm --prefix frontend run check`),
+  `release-packaging`, and `workflow-lint` run as separate jobs.
+- Tests run as timing-balanced shards: 3 on Ubuntu (`--shard 1/3` … `3/3`)
+  and 4 on Windows (`1/4` … `4/4`, pull requests only), each with
+  `-n auto -m "not slow"`, plus one serial `-m slow` runner per OS.
+  Docs-only changes skip the test jobs.
+- **`CI result` is the single required gate.** It fails if any job failed, and
+  runs `scripts/ci_test_timings.py check` on the shards' reports to prove they
+  partition the suite exactly: every test ran, in exactly one shard.
+
+`--shard=I/N` (`tests/ci_shard.py`) runs only the test files assigned to
+shard `I` of `N`, longest first onto the least-loaded shard, using the
+per-file seconds in `.github/ci-test-timings.json`. The split depends only on
+the collected files and that table, so a shard reproduces locally:
+
+```sh
+uv run pytest tests -q -n 6 -m "not slow" --shard=2/3 --shard-report=/tmp/shard-2.json
+```
+
+The table is keyed by `platform.system()`; an OS without its own table
+(currently Windows) falls back to another's, so `--shard=I/4` picks the same
+files as Windows shard `I`.
+
+**Shard timings.** Adding, removing or renaming a test file needs no timing
+update: a file missing from the table costs the average, and stale entries
+only hurt balance, never coverage. When shards drift out of balance, download
+a CI run's `shard-report-*` artifacts and refit (per-OS tables the reports do
+not cover are kept):
+
+```sh
+python scripts/ci_test_timings.py fit <shard-report.json>...   # rewrites .github/ci-test-timings.json
+python scripts/ci_test_timings.py check --require Linux <shard-report.json>...  # what CI result runs
 ```
 
 Fast inner loop while iterating:
@@ -50,6 +92,17 @@ uv run ruff format src tests                       # autofix formatting
   `llm`, `llm_smoke`, `llm_costly`, `llm_tools`, `llm_gateway`, `llm_image`,
   `webui_browser`, `live_channel`, etc. Run a marker group explicitly, e.g.
   `uv run pytest -m llm_smoke`. Skip them all with `-m "not llm"`.
+- **Keep tests fast and clock-independent:**
+  - No real sleeps or waits on wall-clock timers. Inject or fake the clock,
+    and clamp a poll wait to the remaining deadline in `src` rather than
+    sleeping a full interval past it.
+  - No real network dials — not even to an unroutable address, which hangs
+    until the connect timeout. Stub the probe.
+  - Vault/crypto tests use the fast test KDF (`FAST_KDF` in
+    `tests/test_trading/conftest.py`), never the production KDF cost.
+  - Mark genuinely slow or serial-only tests `@pytest.mark.slow`; they run
+    on their own runner, outside the shards.
+  - Check a new test's cost with `--durations=25` (CI prints it per shard).
 - Add or update a **public regression test** for every behavior change or bugfix.
 - Private/maintainer-only fixtures live under `tests/_private/` (excluded from
   collection and from the public tree). Never commit real transcripts,
