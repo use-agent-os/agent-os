@@ -180,6 +180,8 @@ MANUAL_SYNC_MIN_S = 10.0
 # Hidden (junk) tokens leave the sync's fast lane; their balances and
 # openings are still brought up to date this often.
 HIDDEN_RESCAN_S = 3600.0
+# The engine loop logs what each chain's RPC was sent about this often.
+RPC_USAGE_LOG_S = 3600.0
 # ``syncKind`` vocabulary: why the pass in flight runs. A client shows a
 # "syncing" state for the last two only; the background pass is the engine
 # keeping figures fresh, and with many wallets it runs most of the time.
@@ -477,6 +479,9 @@ class TradingService:
         self._background = background
         self.lp_env_factory = lp_env_factory
         self._evm: dict[int, EvmClient] = {}
+        # The RPC URL each cached client was made for: ``evm`` rebuilds on a change.
+        self._evm_urls: dict[int, str] = {}
+        self._rpc_usage_logged_at = now()
         self._task: asyncio.Task[None] | None = None
         # The wallet sync the loop last started; it runs beside the loop, not in it.
         self._sync_task: asyncio.Task[None] | None = None
@@ -536,26 +541,46 @@ class TradingService:
     def chains(self) -> list[ChainSpec]:
         return list(CHAINS.values())
 
+    def _rpc_url(self, chain: ChainSpec) -> str:
+        """The chain's RPC URL as configured now: ``trading.rpc_urls``, the env, the default."""
+        return rpc_url_for(chain, dict(getattr(self.config, "rpc_urls", {}) or {}))
+
     def evm(self, chain: ChainSpec) -> EvmClient:
+        """The chain's client, made again whenever its configured RPC URL changes.
+
+        The URL is resolved on every call, as the LP reads do, so writing
+        ``trading.rpc_urls`` (or changing the env fallback) reaches the sync
+        loop, orders and the network strip at once. The first client used to be
+        kept until a restart while LP reads switched: two endpoints at once.
+        Whatever still holds the old client (a confirm task waiting for its
+        receipt, an allowance scan) finishes on it, so it is not closed here;
+        there is nothing to close anyway, its ``http`` is the service's own.
+        """
+        url = self._rpc_url(chain)
         client = self._evm.get(chain.chain_id)
-        if client is None:
-            if self._evm_factory is not None:
-                client = self._evm_factory(chain)
-            else:
-                url = rpc_url_for(chain, dict(getattr(self.config, "rpc_urls", {}) or {}))
-                client = EvmClient(
-                    url,
-                    http=self._http,
-                    max_log_span=chain.max_log_span,
-                    max_priority_fee_wei=chain.max_priority_fee_wei,
-                    max_fee_per_gas_wei=chain.max_fee_per_gas_wei,
-                    multicall3=chain.multicall3,
-                    # A custom RPC is for what must be fresh (it may be metered);
-                    # the sync's bulk balance read goes to the public node first.
-                    read_url=chain.rpc_url if url != chain.rpc_url else None,
-                )
-            self._evm[chain.chain_id] = client
-        return client
+        if client is not None and self._evm_urls.get(chain.chain_id) == url:
+            return client
+        if self._evm_factory is not None:
+            fresh = self._evm_factory(chain)
+        else:
+            fresh = EvmClient(
+                url,
+                http=self._http,
+                max_log_span=chain.max_log_span,
+                max_priority_fee_wei=chain.max_priority_fee_wei,
+                max_fee_per_gas_wei=chain.max_fee_per_gas_wei,
+                multicall3=chain.multicall3,
+                # A custom RPC is for what must be fresh (it may be metered);
+                # the sync's bulk balance read goes to the public node first.
+                read_url=chain.rpc_url if url != chain.rpc_url else None,
+            )
+        if client is not None:
+            # The usage count is the chain's since start, whichever URL served it.
+            fresh.rpc_usage = client.rpc_usage
+            log.info("trading.rpc_url_changed", chain=chain.key, rpc=redact_rpc_url(url))
+        self._evm[chain.chain_id] = fresh
+        self._evm_urls[chain.chain_id] = url
+        return fresh
 
     def aggregator(self) -> AggregatorClient:
         base = str(getattr(self.config, "aggregator_base_url", "") or AGGREGATOR_BASE).strip()
@@ -870,6 +895,7 @@ class TradingService:
             except Exception as exc:  # pragma: no cover - defensive
                 log.warning("trading.loop_error", error=str(exc))
             self._kick_sync()
+            self._log_rpc_usage()
             await asyncio.sleep(interval)
 
     def _kick_sync(self) -> None:
@@ -973,10 +999,9 @@ class TradingService:
             row = chain.to_dict()
             # Provider keys live in the URL path (dRPC, Alchemy, Infura): never send
             # them to a client.
-            row["rpcUrl"] = redact_rpc_url(
-                rpc_url_for(chain, dict(getattr(self.config, "rpc_urls", {}) or {}))
-            )
+            row["rpcUrl"] = redact_rpc_url(self._rpc_url(chain))
             row["healthy"] = healthy
+            row["rpcUsage"] = self._rpc_usage(chain)
             chains.append(row)
         vault = self.vault.status()
         providers = []
@@ -1013,6 +1038,48 @@ class TradingService:
             "lastSyncAt": int(self.last_sync_at * 1000) if self.last_sync_at else None,
             "ledgerRepair": self._ledger_repair(),
         }
+
+    def _rpc_usage(self, chain: ChainSpec) -> dict[str, Any] | None:
+        """What the engine sent this chain since start; ``None`` before it sent anything.
+
+        ``rpc`` is the endpoint ``rpcUrl`` names, the one that may be metered;
+        ``read`` is the chain's public node, which the bulk balance read tries
+        first when a custom RPC is set. Per lane: ``requests`` (HTTP),
+        ``calls`` (JSON-RPC calls, each batch item one, as a provider bills
+        them), ``failed`` (requests without a usable answer) and ``methods``
+        (calls by method). ``since`` is when counting started (ms). No URL.
+        """
+        client = self._evm.get(chain.chain_id)
+        if client is None:
+            return None
+        usage = client.usage()
+        return {"since": int(usage["since"] * 1000), "rpc": usage["rpc"], "read": usage["read"]}
+
+    def _log_rpc_usage(self) -> None:
+        """About once an hour, one line per chain: what it was sent since the last line."""
+        now = self._now()
+        elapsed = now - self._rpc_usage_logged_at
+        if elapsed < RPC_USAGE_LOG_S:
+            return
+        self._rpc_usage_logged_at = now
+        for chain in self.chains():
+            client = self._evm.get(chain.chain_id)
+            if client is None:
+                continue
+            window = client.rpc_usage.window()
+            rpc, read = window["rpc"], window["read"]
+            if rpc["requests"] or read["requests"]:
+                log.info(
+                    "trading.rpc_usage",
+                    chain=chain.key,
+                    minutes=round(elapsed / 60),
+                    rpc_calls=rpc["calls"],
+                    rpc_requests=rpc["requests"],
+                    rpc_failed=rpc["failed"],
+                    read_calls=read["calls"],
+                    read_failed=read["failed"],
+                    methods=rpc["methods"],
+                )
 
     def _ledger_repair(self) -> str | None:
         """What the ledger says it needs (``"full sync required"``), or ``None``."""

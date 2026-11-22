@@ -532,12 +532,14 @@ class TestAtomicSettlement:
         def broken(*args: object, **kwargs: object) -> None:
             raise sqlite3.OperationalError("disk I/O error")
 
-        monkeypatch.setattr(service.ledger, "add_daily_spend", broken)
-        order = await _swap(service, initiator="agent")
+        # Only this patch is undone: ``monkeypatch.undo()`` would also bring back an
+        # RPC_BASE_URL the conftest removed, and the engine follows a changed URL.
+        with monkeypatch.context() as patch:
+            patch.setattr(service.ledger, "add_daily_spend", broken)
+            order = await _swap(service, initiator="agent")
         assert order["status"] == "submitted", order
         assert (order["reason"] or "").startswith("settling:")
         assert service.ledger.spent_today(wallet) == 0.0
-        monkeypatch.undo()
         await service.recover_submitted()
         recovered = service.get_order(order["orderId"])
         assert recovered["status"] == "confirmed"
