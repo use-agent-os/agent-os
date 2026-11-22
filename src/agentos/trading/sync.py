@@ -94,7 +94,8 @@ class BalanceRead:
 
     # Some stored ``raw`` moved.
     changed: bool = False
-    # Tokens the node did not answer for; their rows were left as they were.
+    # Tokens whose balance is unknown: the node did not answer for them, now or
+    # on the last pass that asked. Their rows were left as they were.
     failed: list[str] = field(default_factory=list)
 
 
@@ -142,6 +143,10 @@ class WalletSyncer:
         self.rebuild_progress: dict[str, Any] | None = None
         # Whether the pass in flight reads hidden (junk) tokens too.
         self.include_hidden = False
+        # (chain id, wallet key) -> tokens whose last balance read failed. One that
+        # never answered is left out of ordinary passes (``_live_tokens``); memory
+        # only, so a restart reads it once more.
+        self._unreadable: dict[tuple[int, str], set[str]] = {}
 
     # ── public ─────────────────────────────────────────────────────────
 
@@ -275,7 +280,11 @@ class WalletSyncer:
         return changed, moved
 
     def _record_read(self, chain: ChainSpec, wallet: str, read: BalanceRead) -> None:
+        # What the recorded read left unknown is what the next ordinary pass
+        # knows to be unreadable; a rebuild's full read resets it here too.
+        key = (chain.chain_id, wallet.lower())
         if read.failed:
+            self._unreadable[key] = set(read.failed)
             self.ledger.set_chain_read(
                 chain.chain_id,
                 wallet,
@@ -283,6 +292,7 @@ class WalletSyncer:
                 f"{len(read.failed)} token balance(s) could not be read",
             )
         else:
+            self._unreadable.pop(key, None)
             self.ledger.set_chain_read(chain.chain_id, wallet, READ_OK)
 
     def record_failure(self, chain: ChainSpec, wallet: str, reason: str) -> None:
@@ -1283,6 +1293,14 @@ class WalletSyncer:
         moves, so a zero only needs reading again once it does. A token with no
         row has never been read for this wallet, and an open position that
         reads zero is a disagreement worth re-checking, so both are kept.
+
+        Except a token with no row whose last read failed: it never answered,
+        and asking again costs a call on the configured (metered) RPC per wallet
+        per pass, forever. Measured 2026-11-22: a steady pass for 2 wallets x 2
+        chains cost 18 billed calls, 2 of them one such token's ``balanceOf``.
+        The passes that read everything retry it, and so does any pass that saw
+        it move. A held token whose read failed has a row and is still read
+        every pass: that failure is most likely a flaky node, and clears at once.
         """
         known = {
             str(row["token"]): int(row["raw"])
@@ -1291,7 +1309,16 @@ class WalletSyncer:
         positions = {
             pos.token for pos in self.ledger.positions(wallet) if pos.chain_id == chain.chain_id
         }
-        return [t for t in tokens if known.get(t) != 0 or t in moved or t in positions]
+        unreadable = self._unreadable.get((chain.chain_id, wallet.lower()), set())
+
+        def live(token: str) -> bool:
+            if token in moved:
+                return True
+            if token not in known:
+                return token not in unreadable
+            return known[token] != 0 or token in positions
+
+        return [t for t in tokens if live(t)]
 
     async def _refresh_balances(
         self, wallet: WalletRecord, chain: ChainSpec, evm: EvmClient, *, moved: set[str] | None
@@ -1300,28 +1327,35 @@ class WalletSyncer:
 
         ``moved`` is what this pass's sweep saw move, which narrows the read to
         :meth:`_live_tokens`; ``None`` reads every token of interest.
+
+        ``failed`` is every token of interest whose balance is unknown after the
+        pass: what failed now, and what is known to be unreadable and was left
+        out. Reporting only the first would turn the read ``ok`` on every pass
+        that skips the token and ``partial`` again on each one that retries it.
         """
         read = BalanceRead()
-        tokens = await self.tokens_of_interest(wallet.key, chain)
-        if moved is not None:
-            tokens = self._live_tokens(wallet.key, chain, tokens, moved)
-        if not tokens:
-            return read
-        balances = await evm.erc20_balances(wallet.address, tokens)
+        wanted = await self.tokens_of_interest(wallet.key, chain)
+        tokens = wanted if moved is None else self._live_tokens(wallet.key, chain, wanted, moved)
+        unknown = self._unreadable.get((chain.chain_id, wallet.key), set()) & set(wanted)
+        failed_now = 0
+        balances = await evm.erc20_balances(wallet.address, tokens) if tokens else {}
         for token, raw in balances.items():
             if raw is None:
-                read.failed.append(token)
+                unknown.add(token)
+                failed_now += 1
                 continue
+            unknown.discard(token)
             before = self.ledger.get_balance(chain.chain_id, wallet.key, token)
             if before != raw:
                 read.changed = True
             self.ledger.set_balance(chain.chain_id, wallet.key, token, raw)
-        if read.failed:
+        read.failed = sorted(unknown)
+        if failed_now:
             log.warning(
                 "trading.balance_read_incomplete",
                 chain=chain.key,
                 wallet=wallet.address,
-                failed=len(read.failed),
+                failed=failed_now,
                 scanned=len(tokens),
             )
         return read
