@@ -291,6 +291,9 @@ class RpcLaneUsage:
     A metered endpoint bills every call, and each item of a batch array is a
     call of its own; a Multicall3 aggregate is one ``eth_call``. ``calls``
     counts what was sent, so a refused request is in it as well as in ``failed``.
+    ``failed`` counts transport failures only: a timeout or connection error,
+    HTTP 400 or above, a body that is not JSON. A JSON-RPC error carried by an
+    HTTP 200 (a revert, a range the node refuses that way) is an answer here.
     """
 
     __slots__ = ("calls", "failed", "requests")
@@ -389,7 +392,7 @@ class EvmClient:
             await self._http.aclose()
 
     def usage(self) -> dict[str, Any]:
-        """Requests, calls by method and failures per lane since counting started."""
+        """Requests, calls by method and transport failures per lane since counting started."""
         return self.rpc_usage.snapshot()
 
     def _headers(self) -> dict[str, str]:

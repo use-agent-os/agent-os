@@ -233,8 +233,11 @@ has sent since the gateway started (`rpcUsage`: requests, JSON-RPC calls by
 method, failed requests; `rpc` is the configured endpoint, `read` the public
 node the bulk balance read tries first), and the gateway logs one
 `trading.rpc_usage` line per chain about once an hour with what was sent since
-the last. An endpoint that refuses the credentials (HTTP 401/403) twice in a row
-is left alone by the background sync for 1, 2, 5, then every 15 minutes: its
+the last. A request counts as failed when it got no answer (timeout,
+connection error), an HTTP status of 400 or above, or a body that is not JSON;
+a JSON-RPC error inside an HTTP 200 is an answer and is not counted. An
+endpoint that refuses the credentials (HTTP 401/403) twice in a row is left
+alone by the background sync for 1, 2, 5, then every 15 minutes: its
 wallets read `failed` with the refusal as the reason, a resync still tries at
 once, and the first answer or a new URL ends the pause. Timeouts, rate limits
 (HTTP 429) and server errors never pause the sync.

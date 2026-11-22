@@ -12,8 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   as `rpcUsage`: HTTP requests, JSON-RPC calls by method and failed requests,
   for the configured endpoint (`rpc`) and for the public node the bulk
   balance read tries first (`read`). A batch counts each of its items, as a
-  metered provider bills them; no URL is included, and a chain the engine
-  has not used yet reads `null`. The gateway also logs one
+  metered provider bills them. A request counts as failed when it got no
+  answer (timeout, connection error), an HTTP status of 400 or above, or a
+  body that is not JSON; a JSON-RPC error inside an HTTP 200 is an answer
+  and is not counted. No URL is included, and a chain the engine has not
+  used yet reads `null`. The gateway also logs one
   `trading.rpc_usage` line per chain about once an hour with what was sent
   since the last one.
 

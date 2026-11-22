@@ -1117,8 +1117,11 @@ class TradingService:
         ``read`` is the chain's public node, which the bulk balance read tries
         first when a custom RPC is set. Per lane: ``requests`` (HTTP),
         ``calls`` (JSON-RPC calls, each batch item one, as a provider bills
-        them), ``failed`` (requests without a usable answer) and ``methods``
-        (calls by method). ``since`` is when counting started (ms). No URL.
+        them), ``failed`` (requests that failed in transport: a timeout or
+        connection error, HTTP 400 or above, a body that is not JSON; a
+        JSON-RPC error in an HTTP 200 is an answer and not counted) and
+        ``methods`` (calls by method). ``since`` is when counting started (ms).
+        No URL.
         """
         client = self._evm.get(chain.chain_id)
         if client is None:

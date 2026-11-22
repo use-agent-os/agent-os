@@ -117,9 +117,13 @@ BASE = ChainSpec(
     block_time_s=0.2,
     max_log_span=2000,
     approval_log_span=100_000,
-    # The widest span with a measured answer time (~1 s, a tenth of the
-    # client's timeout). 1M was accepted too, but how long it takes, and how
-    # big the answer gets for a busy wallet, was not measured.
+    # The widest span with a measured answer time: most 100k windows answer in
+    # about 1 s, but on real history (2026-11-22) a few ran into the client's
+    # 10 s timeout: 2 of 13 in a rebuild, 0 of 288 in a catch-up, 1 of 86 in
+    # the allowance scan at the same span. Each such window costs the timeout
+    # and one halving, and the sweep still completes. 1M was accepted too, but
+    # how long it takes, and how big the answer gets for a busy wallet, was not
+    # measured.
     transfer_log_span=100_000,
     aliases=("base-mainnet", "8453"),
     blockscout_url="https://base.blockscout.com",
