@@ -219,6 +219,16 @@ NETWORK_TTL_S = 10.0
 # 10 s cache, so every poll used to cost two calls per chain; now it is one
 # most of the time. Signing never reads this: ``_send`` asks ``fee_data``.
 NETWORK_FEE_TTL_S = 60.0
+# An allowance review re-reads the wallet's Approval logs at most this often
+# per wallet and chain (a full rescan, a ``wait``, a first pass and an
+# approval this engine sent are not held back; a pass that failed waits it out
+# too). Every list call used to start a top-up scan, and its end broadcast
+# ``trading.changed``, which makes clients re-read the list: on a 0.1-0.2 s
+# chain the head has always moved, so an open view re-read itself as fast as
+# the client debounces, 250-600 billed calls a minute. A grant made elsewhere
+# shows within a minute, the pace the desktop polls the list at anyway; a
+# revoke is gone at once (every listed amount is read live, zeros dropped).
+ALLOWANCE_RESCAN_S = 60.0
 # A token whose contract answers but names no symbol is served from the
 # ledger this long before its metadata is read again (a 3-call batch plus
 # eth_getCode). It is almost always junk or a non-token contract, and every
@@ -582,6 +592,13 @@ class TradingService:
         # (chain id, token) -> until when a token that names no symbol is
         # served from the ledger (``NAMELESS_TOKEN_TTL_S``).
         self._nameless_until: dict[tuple[int, str], float] = {}
+        # (chain id, wallet) -> (when the review last looked at the chain, the
+        # scan cursor it saw then): ``ALLOWANCE_RESCAN_S``.
+        self._allowance_looked: dict[tuple[int, str], tuple[float, int | None]] = {}
+        # (chain id, wallet) -> the head the running pass scans to.
+        self._allowance_targets: dict[tuple[int, str], int] = {}
+        # chain id -> the head an allowance review last read.
+        self._allowance_heads: dict[int, int] = {}
         # One Approval-log scan per wallet/chain at a time; a review call
         # returns what is cached and reports that the scan is still running.
         self._allowance_scans: dict[tuple[int, str], asyncio.Task[None]] = {}
@@ -4359,12 +4376,16 @@ class TradingService:
         chain is millions of blocks — and saves its place after every
         window, so this returns at once with what is known and
         ``scanning: True``; ``wait`` blocks until the pass is done. Every
-        window that adds a pair, and the end of the pass, broadcast
-        ``trading.changed`` with ``reason: "allowances"``.
+        window that adds a pair, and the end of a catch-up longer than one
+        window, broadcast ``trading.changed`` with ``reason: "allowances"``.
+
+        The logs are looked at again at most every ``ALLOWANCE_RESCAN_S``
+        per wallet and chain (see ``_allowance_due``); in between a call
+        reads only the live amounts, and ``head`` is the last head the review
+        read. ``full`` and ``wait`` always look, up to the head now.
         """
         record = self.vault.resolve(wallet)
         evm = self.evm(chain)
-        latest = await evm.block_number()
         key = (chain.chain_id, record.key)
         if full:
             # A pass still running would write its next window's cursor over
@@ -4375,8 +4396,19 @@ class TradingService:
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await running
             self.ledger.clear_allowance_scan(chain.chain_id, record.key)
+        task = self._allowance_scans.get(key)
         scan = self.ledger.allowance_scan(chain.chain_id, record.key)
-        if scan is None:
+        cursor = int(scan["last_block"]) if scan else None
+        now = self._now()
+        due = (task is None or task.done()) and self._allowance_due(
+            chain, record, cursor, now, full=full, wait=wait
+        )
+        latest = self._allowance_heads.get(chain.chain_id)
+        if due or latest is None:
+            latest = self._allowance_heads[chain.chain_id] = await evm.block_number()
+        if due:
+            self._allowance_looked[key] = (now, cursor)
+        if cursor is None:
             created = record.created_block.get(str(chain.chain_id))
             state = self.ledger.sync_state(chain.chain_id, record.key)
             if created is not None:
@@ -4386,20 +4418,24 @@ class TradingService:
             else:
                 start = max(0, latest - self.syncer.initial_lookback)
         else:
-            start = int(scan["last_block"]) + 1
+            start = cursor + 1
+        # Looked up again after the head read: a call that ran beside this one
+        # may have started the pass in the meantime.
         task = self._allowance_scans.get(key)
-        if start <= latest and (task is None or task.done()):
+        if due and start <= latest and (task is None or task.done()):
             task = asyncio.get_running_loop().create_task(
                 self._scan_allowances(chain, record, start, latest),
                 name=f"trading-allowances-{chain.chain_id}-{record.key[:10]}",
             )
             self._allowance_scans[key] = task
+            self._allowance_targets[key] = latest
         if wait and task is not None and not task.done():
             await task
         # "Scanning" is a catch-up worth telling the user about — more than
-        # one window still to read. The few hundred blocks since the last
-        # look are read in one call and are not a reason to say "partial".
-        behind = latest - start + 1
+        # one window still to read before the running pass reaches its head.
+        # The few hundred blocks since the last look are read in one call and
+        # are not a reason to say "partial".
+        behind = self._allowance_targets.get(key, latest) - start + 1
         scanning = task is not None and not task.done() and behind > int(chain.approval_log_span)
         scan = self.ledger.allowance_scan(chain.chain_id, record.key)
         rows = self.ledger.allowances(chain.chain_id, record.key)
@@ -4473,6 +4509,40 @@ class TradingService:
             "head": latest,
         }
 
+    def _allowance_due(
+        self,
+        chain: ChainSpec,
+        record: WalletRecord,
+        cursor: int | None,
+        now: float,
+        *,
+        full: bool,
+        wait: bool,
+    ) -> bool:
+        """Whether a review call looks at the Approval logs again (``ALLOWANCE_RESCAN_S``).
+
+        Always for ``full`` and ``wait``, for the first look in this process
+        (a first pass is never held back, nor the catch-up after a restart),
+        when the scan cursor was cleared since the last look (the wallet was
+        removed and added back), and after an approval this engine sent since
+        then: its pair should show now, not in a minute. Otherwise only once
+        the interval has passed since the last look, or since a pass failed.
+        """
+        if full or wait:
+            return True
+        looked = self._allowance_looked.get((chain.chain_id, record.key))
+        if looked is None:
+            return True
+        at, seen = looked
+        if cursor is None and seen is not None:
+            return True
+        if not 0.0 <= now - at < ALLOWANCE_RESCAN_S:
+            return True
+        granted = self.ledger.list_entries(
+            wallet=record.key, chain_id=chain.chain_id, kind="approval", limit=1
+        )
+        return bool(granted) and float(granted[0]["ts"]) >= at
+
     async def _scan_allowances(
         self, chain: ChainSpec, record: WalletRecord, start: int, latest: int
     ) -> None:
@@ -4480,11 +4550,20 @@ class TradingService:
 
         Progress is written after every window, so a gateway restart (or a
         node outage half-way) resumes where it stopped instead of starting
-        over. A window that fails ends the pass; the next review call picks
-        it up from the last saved block.
+        over. A window that fails ends the pass; a review call after
+        ``ALLOWANCE_RESCAN_S`` picks it up from the last saved block (sooner
+        would re-send a refused window on every call).
+
+        ``trading.changed`` goes out when clients have something to learn: a
+        window that added a pair, and the end (or failure) of a catch-up
+        longer than one window, the pass a review reports as ``scanning``. A
+        top-up that found nothing says nothing: the re-read it would cause
+        brings the list clients already have, and used to start the next
+        top-up — a loop as fast as the client debounces on a 0.1 s chain.
         """
         evm = self.evm(chain)
         window = max(1, int(chain.approval_log_span))
+        catch_up = latest - start + 1 > window
         cursor = start
         while cursor <= latest:
             end = min(latest, cursor + window - 1)
@@ -4500,9 +4579,15 @@ class TradingService:
                     block=cursor,
                     error=str(exc),
                 )
-                await self._emit(
-                    "trading.changed", {"reason": "allowances", "wallet": record.address}
+                saved = self.ledger.allowance_scan(chain.chain_id, record.key)
+                self._allowance_looked[(chain.chain_id, record.key)] = (
+                    self._now(),
+                    int(saved["last_block"]) if saved else None,
                 )
+                if catch_up:
+                    await self._emit(
+                        "trading.changed", {"reason": "allowances", "wallet": record.address}
+                    )
                 return
             added = 0
             for entry in logs:
@@ -4523,7 +4608,8 @@ class TradingService:
                     "trading.changed", {"reason": "allowances", "wallet": record.address}
                 )
             cursor = end + 1
-        await self._emit("trading.changed", {"reason": "allowances", "wallet": record.address})
+        if catch_up:
+            await self._emit("trading.changed", {"reason": "allowances", "wallet": record.address})
 
     # ── decode ─────────────────────────────────────────────────────────
 
