@@ -781,8 +781,9 @@ async def _trading_send(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
 # ── trading.bridge.* (docs/bridge.md) ───────────────────────────────────────
 #
 # A bridge moves ETH or the USD stable between Base and Robinhood Chain through
-# Relay. An agent may quote and create (its order always parks for approval,
-# like a send); the operator approves through ``trading.orders.approve``.
+# the AgentOS DEX (which deposits into Relay or Across). An agent may quote and
+# create (its order always parks for approval, like a send); the operator
+# approves through ``trading.orders.approve``.
 
 
 def _bridge_chains(p: dict[str, Any]) -> tuple[ChainSpec, ChainSpec]:
@@ -867,7 +868,7 @@ async def _trading_bridge_create(params: dict | None, ctx: RpcContext) -> dict[s
 
 @_d.method("trading.bridge.status")
 async def _trading_bridge_status(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
-    """A bridge order by ``orderId`` or Relay ``requestId``, its fill refreshed when in flight."""
+    """A bridge order by ``orderId`` or the bridge's ``requestId``, its fill refreshed in flight."""
     p = _params(params)
     order_id = _str(p, "orderId")
     request_id = _str(p, "requestId")

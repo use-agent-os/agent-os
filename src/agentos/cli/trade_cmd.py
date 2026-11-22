@@ -373,6 +373,7 @@ def _print_order(order: dict[str, Any]) -> None:
         ("price impact", percent(order.get("priceImpactPct"))),
         ("gas", money(order.get("gasUsd"))),
         ("fees", money(bridge.get("feesUsd")) if bridge else None),
+        ("bridge", _bridge_source_text(bridge) if bridge else None),
         ("initiator", order.get("initiator")),
         ("request", bridge.get("requestId")),
         ("fill", bridge.get("fillStatus")),
@@ -1732,13 +1733,14 @@ lp_app = typer.Typer(
 app.add_typer(lp_app, name="lp")
 
 
-# ── bridge (Base ⇄ Robinhood Chain through Relay; docs/bridge.md) ─────────────
+# ── bridge (Base ⇄ Robinhood Chain through AgentOS DEX; docs/bridge.md) ──────
 
 bridge_app = typer.Typer(
     cls=_JsonUsageGroup,
     help=(
         "Bridge ETH or the USD stable (USDC ⇄ USDG) between Base and Robinhood Chain "
-        "through Relay. From an agent a bridge always waits for your approval; the order "
+        "through AgentOS DEX (Relay or Across, whichever delivers more). From an agent a "
+        "bridge always waits for your approval; the order "
         "is confirmed only once the funds have landed on the destination chain."
     ),
 )
@@ -1749,6 +1751,7 @@ _BRIDGE_USAGE_CODES = frozenset(
     {
         "trading.invalid",
         "trading.bridge.unsupported_route",
+        "trading.bridge.no_route",
         "trading.unpriced",
         "trading.unknown_token",
         "trading.insufficient_balance",
@@ -1837,6 +1840,16 @@ def _bridge_call(
         raise typer.Exit(2) from exc
 
 
+def _bridge_source_text(block: dict[str, Any]) -> str | None:
+    """The bridge a quote or an order runs through, and a refund it does not promise."""
+    label = block.get("sourceLabel") or block.get("providerLabel")
+    if not label:
+        return None
+    if block.get("refundGuaranteed") is False:
+        return f"{label} (a refund is not guaranteed if the transfer fails)"
+    return str(label)
+
+
 def _print_bridge_quote(quote: dict[str, Any]) -> None:
     table = Table(title="Bridge quote", show_header=False)
     table.add_column("Field", style=ACCENT)
@@ -1855,6 +1868,7 @@ def _print_bridge_quote(quote: dict[str, Any]) -> None:
         ("min out", quote.get("minOut")),
         ("rate", quote.get("rate")),
         ("fees", money(quote.get("feesUsd"))),
+        ("bridge", _bridge_source_text(quote)),
         ("value", money(quote.get("valueUsd"))),
         (
             "time",
@@ -1956,14 +1970,14 @@ def trade_bridge_create(
         )
     elif order.get("status") == "submitted":
         console.print(
-            "The deposit is on chain; the funds land on the destination once Relay fills it "
+            "The deposit is on chain; the funds land on the destination once the bridge fills it "
             f"(agentos trade bridge status {order.get('orderId')})."
         )
 
 
 @bridge_app.command("status")
 def trade_bridge_status(
-    reference: str = typer.Argument(..., help="Order id, or Relay request id (0x…)"),
+    reference: str = typer.Argument(..., help="Order id, or the bridge's request id (0x…)"),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     """Where a bridge stands: the deposit, the fill on the other chain, the final status."""

@@ -32,8 +32,8 @@ const timeFmt = new Intl.DateTimeFormat(undefined, {
 /**
  * The only door a manual bridge leaves through: the swap's confirm sheet,
  * with a chain on each leg. The quote is frozen when the sheet opens and
- * only a refresh replaces it. The engine asks Relay again before it signs
- * and holds that answer to its own 1% floor (docs/bridge.md).
+ * only a refresh replaces it. The engine asks the same bridge again before
+ * it signs and holds that answer to its own 1% floor (docs/bridge.md).
  */
 export function ConfirmBridge({
   quote: liveQuote,
@@ -234,6 +234,12 @@ export function ConfirmBridge({
         </div>
       </div>
 
+      {quote.refundGuaranteed === false ? (
+        <div className="trd-warn" data-tone="warn" role="status" data-testid="confirm-refund-warn">
+          <TriangleAlert className="size-3.5" strokeWidth={2} aria-hidden />
+          <span>{t('trading.bridge.refundNotGuaranteed')}</span>
+        </div>
+      ) : null}
       {stale ? (
         <div className="trd-warn" data-tone="warn" role="status" data-testid="confirm-stale">
           <TriangleAlert className="size-3.5" strokeWidth={2} aria-hidden />

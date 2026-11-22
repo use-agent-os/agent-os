@@ -665,7 +665,7 @@ export function bridgeDestinationName(order: Pick<Order, 'bridge'>): string {
 
 /**
  * The bridge facts, in the order the card lists them: the two chains, what
- * leaves the origin, what Relay expects to land (what landed, once
+ * leaves the origin, what the bridge expects to land (what landed, once
  * confirmed), and what the route keeps. `chain` above them is the origin.
  */
 function bridgeFacts(order: Order, labels: Record<string, string>): Fact[] {
@@ -696,8 +696,8 @@ function bridgeFacts(order: Order, labels: Record<string, string>): Fact[] {
     const parts = bridge.fees
       ? [
           ['gas', bridge.fees.gasUsd],
-          ['relayer', bridge.fees.relayerUsd],
-          ['app', bridge.fees.appUsd],
+          ['bridge', bridge.fees.relayerUsd],
+          ['AgentOS', bridge.fees.appUsd],
         ]
           .filter((p): p is [string, number] => typeof p[1] === 'number' && p[1] > 0)
           .map(([k, v]) => `${k} ${formatUsd(v)}`)

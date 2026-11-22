@@ -39,7 +39,7 @@ def _order(status: str, **extra: Any) -> dict[str, Any]:
         "receivedOut": "24.93" if status == "confirmed" else None,
         "valueUsd": 25.0,
         "recipient": SOLVER,
-        "recipientLabel": "Relay solver",
+        "recipientLabel": "AgentOS Bridge",
         "provider": "relay",
         "providerLabel": "Relay",
         "reason": None,
@@ -51,6 +51,9 @@ def _order(status: str, **extra: Any) -> dict[str, Any]:
             "destinationChainId": 4663,
             "destinationChain": {"chainId": 4663, "name": "Robinhood Chain"},
             "asset": "USD",
+            "source": "relay",
+            "sourceLabel": "Relay",
+            "refundGuaranteed": True,
             "requestId": REQUEST,
             "fillStatus": "success" if status == "confirmed" else None,
             "feesUsd": 0.03,
@@ -65,9 +68,16 @@ def _order(status: str, **extra: Any) -> dict[str, Any]:
 
 
 class _Client:
-    def __init__(self, *, final: str = "confirmed", error: GatewayRPCError | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        final: str = "confirmed",
+        error: GatewayRPCError | None = None,
+        quote: dict[str, Any] | None = None,
+    ) -> None:
         self.final = final
         self.error = error
+        self.quote = quote or {}
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     async def call(self, method: str, params: dict | None = None) -> Any:
@@ -92,7 +102,13 @@ class _Client:
                     "timeEstimateSeconds": 1,
                     "balance": "1000",
                     "guard": {"decision": "needs_approval", "reason": "it waits for you"},
-                    "requestId": REQUEST,
+                    "requestId": None,
+                    "provider": "relay",
+                    "providerLabel": "Relay",
+                    "source": "relay",
+                    "sourceLabel": "Relay",
+                    "refundGuaranteed": True,
+                    **self.quote,
                 }
             }
         if method == "trading.bridge.create":
@@ -172,6 +188,43 @@ def test_quote_renders_a_table(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.exit_code == 0, result.output
     assert "Bridge quote" in result.output and "USDG" in result.output
     assert "needs_approval" in result.output
+    # The bridge AgentOS DEX chose is named; a guaranteed refund needs no remark.
+    assert "Relay" in result.output and "not guaranteed" not in result.output
+
+
+def test_quote_says_when_the_bridge_does_not_promise_a_refund(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use(
+        monkeypatch,
+        _Client(quote={"source": "across", "sourceLabel": "Across", "refundGuaranteed": False}),
+    )
+    result = runner.invoke(
+        trade_cmd.app,
+        ["bridge", "quote", "--chain", "base", "--to-chain", "robinhood", "--token", "USDC"]
+        + ["--usd", "25"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Across (a refund is not guaranteed if the transfer fails)" in result.output
+
+
+def test_an_amount_no_bridge_carries_is_a_usage_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    error = GatewayRPCError(
+        "trading.bridge.quote",
+        code="trading.bridge.no_route",
+        message="no bridge has a route for this transfer at this amount",
+        data={"routes": [{"source": "relay", "available": False, "reason": "NO_ROUTE"}]},
+    )
+    _use(monkeypatch, _Client(error=error))
+    result = runner.invoke(
+        trade_cmd.app,
+        ["bridge", "quote", "--chain", "base", "--to-chain", "robinhood", "--token", "ETH"]
+        + ["--amount", "0.000001", "--json"],
+    )
+    assert result.exit_code == 2, result.output
+    payload = json.loads(result.output.strip().splitlines()[-1])
+    assert payload["error"]["code"] == "trading.bridge.no_route"
+    assert payload["error"]["details"]["routes"][0]["reason"] == "NO_ROUTE"
 
 
 def test_create_passes_note_client_id_and_waits_for_the_fill(

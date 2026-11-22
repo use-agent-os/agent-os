@@ -64,8 +64,8 @@ ENTRY_KINDS = (
 # sets an ERC-20 allowance back to zero. Sends in one multisend share a
 # batch_id and are decided together. The lp_* kinds are Uniswap V4 position
 # writes (docs/lp-write.md): their plan lives in quote_json. A bridge moves
-# one token to the other chain through Relay: the row is the origin side
-# (chain_id, token_in/out, recipient = the Relay solver) and the destination
+# one token to the other chain through AgentOS DEX: the row is the origin side
+# (chain_id, token_in/out, recipient = the bridge contract) and the destination
 # side, quote and fill live in quote_json (docs/bridge.md).
 LP_ORDER_KINDS = ("lp_collect", "lp_remove", "lp_add")
 ORDER_KINDS = ("swap", "send", "revoke", "bridge", *LP_ORDER_KINDS)

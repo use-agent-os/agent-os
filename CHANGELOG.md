@@ -7,6 +7,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Changed
+- Trading: bridges between Base and Robinhood Chain now go through the
+  **AgentOS DEX** (`/v1/bridge/*` at `trading.aggregator_base_url`) instead of
+  calling Relay directly. This covers the desktop Bridge ticket, `agentos
+  trade bridge` and the `wallet-trading` skill. The gateway asks Relay and
+  Across and quotes whichever delivers more; the wallet signs one call to the
+  `AgentOSBridge` contract, which takes a 5 bps fee and deposits the rest into
+  the chosen bridge. The engine decodes that call and checks it against the
+  order before signing, and encodes its own exact approval. A quote and an
+  order now name the bridge (`provider` is `relay` or `across`) and carry
+  `refundGuaranteed`; the desktop, the CLI and the desk agent say so when a
+  bridge does not promise a refund. `minOut` is now the bridge's own committed
+  floor less the 1% re-quote tolerance. A `failed` fill status only fails the
+  order after it has lasted two minutes, since Relay may still retry or refund.
+  New error `trading.bridge.no_route` (exit 2) when neither bridge carries the
+  amount. `trading.relay_base_url` is no longer used; a config file that still
+  sets it keeps loading. Orders parked before the upgrade still run. See
+  [`docs/bridge.md`](docs/bridge.md).
 - Desktop: the built-in pet is now called **Luma** (Settings › Appearance ›
   Pet) instead of AgentOS. An install seeded by an earlier release picks up
   the new name on the next launch; a pet you placed under the same slug keeps

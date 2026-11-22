@@ -121,7 +121,8 @@ gateway RPC surface (`wallet.*`, `trading.*`).
 | Robinhood Chain | 4663 | robin.etherscan.io | Router 2.1.1 only; public RPC needs a `User-Agent` and has no archive data |
 
 Only these two chains are enabled. Funds move between them only through
-`agentos trade bridge` (Relay): ETH↔ETH and USDC↔USDG, both directions; a
+`agentos trade bridge` (the AgentOS DEX, over Relay or Across): ETH↔ETH and
+USDC↔USDG, both directions; a
 bridge from an agent always waits for approval, and the order is
 `confirmed` only once the fill has landed on the destination chain
 ([`../bridge.md`](../bridge.md)). Native ETH is `0x0000…0000` in the API.
@@ -252,8 +253,9 @@ URL. `aggregator_base_url` must be `https`; `http` is accepted only for
 `127.0.0.1`, `localhost` or `::1`.
 
 `aggregator_trusted_spenders` adds contracts an aggregator quote may name as
-the approval spender and send the swap to, on top of the two the engine pins
-itself (the AgentOS Router and 0x's AllowanceHolder). It is for when the
+the approval spender and send the swap or the bridge call to, on top of the
+ones the engine pins itself (the AgentOS Router, 0x's AllowanceHolder and the
+AgentOS bridge contract). It is for when the
 gateway moves to a contract this build does not know yet: rather than waiting
 for a release, the operator verifies the new address and adds it:
 
@@ -466,7 +468,7 @@ Code-enforced, and applied to agent-initiated swaps only.
 | Unpriced order | — | treated as above threshold (fails closed). An agent swap whose **sell** side has no usable feed price (none, zero or non-finite) is unpriced even when the buy side has one: the token you receive never sizes the order on its own. The order shows its value as unknown, not $0 |
 | Approval TTL | 15 min | `expired`; agent is told |
 | LP writes (`trade lp collect/remove/add`) | — | **always** park as `awaiting_approval`, from the agent and from you; an agent's `add` counts toward the daily cap (over it: `rejected`), `collect`/`remove` never do; on approval a pool that moved past the approved bounds fails the order with `trading.price_moved` |
-| Bridges (`trade bridge create`) | — | judged like a send: an agent's **always** parks as `awaiting_approval` and counts toward the daily cap (over it, or with the cap at 0: `rejected`; unpriced: waits); on approval Relay is quoted again, and a fill below the approved floor (1 %) sends the order back for approval (a manual one fails `trading.price_moved`) |
+| Bridges (`trade bridge create`) | — | judged like a send: an agent's **always** parks as `awaiting_approval` and counts toward the daily cap (over it, or with the cap at 0: `rejected`; unpriced: waits); on approval the same bridge is quoted again, and an answer below the approved floors (1 %) sends the order back for approval (a manual one fails `trading.price_moved`) |
 
 Manual swaps from the app or CLI are your own decision: they never queue
 and do not count toward the agent's cap; if the price moved more than twice
@@ -541,7 +543,7 @@ Every client goes through the same gateway methods:
 | `trading.lp.pool`, `trading.lp.ranges`, `trading.lp.position`, `trading.lp.positions` | Uniswap V4 read-outs (read-only, allowed for an agent): a token's deepest pool, its liquidity distribution, one position NFT, every position of the vault's (or given) wallets; each echoes `request: {kind, params}` so a card can re-read itself. Payloads: [`../lp-cards.md`](../lp-cards.md) |
 | `trading.lp.book` | every LP position of the vault's wallets across Uniswap V2/V3/V4, Aero and Aerodrome, from the engine's cache (read-only, allowed for an agent). Params: `wallet`, `chainId`, `refresh`. Answers at once and refreshes behind the answer when the cache is stale; `trading.changed` (`reason: "lp"`) says when. Contract: [`../lp-book.md`](../lp-book.md) |
 | `trading.lp.collect`, `trading.lp.remove`, `trading.lp.add` | Uniswap V4 writes (allowed for an agent: they only create an order, which always parks for approval). Params mirror the CLI in camelCase — `chainId`, `tokenId`, `pct`, `slippagePct`, `token`, `usd`, `amountBase`, `amountQuote`, `range`, `toPosition`, `wallet`, `note`, `clientOrderId`; the answer is `{"order": …}` with `plan`. Contract: [`../lp-write.md`](../lp-write.md) |
-| `trading.bridge.quote`, `trading.bridge.create`, `trading.bridge.status`, `trading.bridge.routes` | bridge ETH or USDC↔USDG between Base and Robinhood Chain through Relay (allowed for an agent: `create` only creates an order, which always parks for approval). `chainId`/`chain` is the origin, `toChainId`/`toChain` the destination, `token`, exactly one of `amount` / `amountUsd` / `amountPct`, `wallet`, `note`, `clientOrderId`, `wait`; `status` takes `orderId` or Relay's `requestId`. The order stays `submitted` until the fill lands, then `confirmed`. Contract: [`../bridge.md`](../bridge.md) |
+| `trading.bridge.quote`, `trading.bridge.create`, `trading.bridge.status`, `trading.bridge.routes` | bridge ETH or USDC↔USDG between Base and Robinhood Chain through the AgentOS DEX (allowed for an agent: `create` only creates an order, which always parks for approval). `chainId`/`chain` is the origin, `toChainId`/`toChain` the destination, `token`, exactly one of `amount` / `amountUsd` / `amountPct`, `wallet`, `note`, `clientOrderId`, `wait`; `status` takes `orderId` or the bridge's `requestId`. The order stays `submitted` until the fill lands, then `confirmed`. Contract: [`../bridge.md`](../bridge.md) |
 | `trading.dca.create`, `trading.dca.get`, `trading.dca.list` | DCA mandates (agent-callable; an agent's `create` parks as `awaiting_approval`): propose a recurring buy, read one, list live ones (`all` for finished). Every answer is a full card payload with `request` echoed. Contract: [`../dca.md`](../dca.md) |
 | `trading.dca.approve`, `trading.dca.reject`, `trading.dca.pause`, `trading.dca.resume`, `trading.dca.stop`, `trading.dca.run`, `trading.dca.update` | the user's decisions on a mandate (operator-only): start it, pause/resume, stop for good, buy now, change cap / size / cadence / max price |
 | `trading.history`, `trading.portfolio`, `trading.chart`, `trading.sync`, `trading.lot.setCost` | the ledger; holdings with PnL; price history for a token (GeckoTerminal on Base, the engine's own snapshots on Robinhood Chain); re-read the chain (`full`, a rebuild, is operator-only); correct a lot's cost basis (operator-only) |
@@ -561,7 +563,7 @@ history is unavailable). A holding's cost can be corrected by hand with
 difference to proceeds is realized PnL. Gas is booked per entry and shown
 separately in totals. A bridge is two entries under one order: a
 `withdraw` on the origin chain when the deposit mines, and a `deposit` on
-the destination chain when Relay's fill lands.
+the destination chain when the bridge's fill lands.
 
 Charts come from GeckoTerminal on Base; on Robinhood Chain the engine
 serves its own price snapshots (one per held token per sync).

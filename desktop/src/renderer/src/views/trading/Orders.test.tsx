@@ -383,12 +383,12 @@ describe('Orders · bridge rows', () => {
     expect(to).toHaveTextContent('est. 0.0099 ETH')
     expect(to).toHaveAttribute('data-estimate', 'true')
     expect(el).toHaveTextContent('Needs approval')
-    // The Relay solver address is the deposit target, not a recipient to read.
-    expect(el).not.toHaveTextContent('0xa5f5')
+    // The bridge contract is the deposit target, not a recipient to read.
+    expect(el).not.toHaveTextContent('0xe7b1')
     expect(screen.queryByTestId('order-bridge-fill')).toBeNull()
   })
 
-  it('a submitted bridge wears Relay’s fill status until the funds land', () => {
+  it('a submitted bridge wears the bridge’s fill status until the funds land', () => {
     row(
       bridgeOrder({
         status: 'submitted',
