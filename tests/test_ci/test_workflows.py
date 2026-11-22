@@ -369,16 +369,28 @@ def test_browser_smoke_uses_one_exact_lockfile_pinned_playwright_installation() 
         assert '"install"' not in text
 
 
-def test_ubuntu_quality_runs_frontend_source_gate_without_rebuilding() -> None:
-    data = _workflow("ci.yml")
-    steps = data["jobs"]["ubuntu-quality"]["steps"]
-    commands = [step.get("run") for step in steps if isinstance(step, dict)]
+def test_frontend_source_gate_runs_in_its_own_node_only_job() -> None:
+    """The frontend check reads only frontend/, so it needs npm, not Python or a build."""
+    jobs = _workflow("ci.yml")["jobs"]
+    frontend = jobs["frontend-check"]
+    steps = _steps("ci.yml", "frontend-check")
+    commands = [step.get("run") for step in steps]
+    uses = [str(step.get("uses", "")) for step in steps]
 
+    assert frontend["if"] == "needs.classify-changes.outputs.frontend_changed == 'true'"
+    assert commands.count("npm --prefix frontend ci") == 1
     assert commands.count("npm --prefix frontend run check") == 1
-    assert commands.count("python scripts/build_control_ui.py build") == 1
+    assert "python scripts/build_control_ui.py build" not in commands
+    assert not any(u.startswith(("actions/setup-python", "astral-sh/setup-uv")) for u in uses)
 
-    check = next(step for step in steps if step.get("run") == "npm --prefix frontend run check")
-    assert check["if"] == "needs.classify-changes.outputs.frontend_changed == 'true'"
+    quality = [step.get("run") for step in _steps("ci.yml", "ubuntu-quality")]
+    assert "npm --prefix frontend run check" not in quality
+    assert quality.count("python scripts/build_control_ui.py build") == 1
+
+
+# The suite is split into timing-balanced shards; each matrix also has one
+# runner for the serial `slow` tests.
+TEST_SHARD_JOBS = {"ubuntu-tests": 3, "windows-compat": 4}
 
 
 def test_ci_runs_slow_tests_serially_outside_xdist() -> None:
@@ -387,14 +399,57 @@ def test_ci_runs_slow_tests_serially_outside_xdist() -> None:
     ``test_pilot_benchmark`` asserts a 50 ms warm p50; on a 4-vCPU runner with
     four busy workers it measured 111 ms and failed main after #3920.
     """
-    for job in ("ubuntu-quality", "windows-compat"):
-        commands = [str(step.get("run", "")) for step in _steps("ci.yml", job)]
+    for job in TEST_SHARD_JOBS:
+        steps = _steps("ci.yml", job)
+        commands = [str(step.get("run", "")) for step in steps]
         parallel = [c for c in commands if c.startswith("uv run pytest tests") and "-n auto" in c]
         serial = [c for c in commands if c.startswith("uv run pytest tests") and "-m slow" in c]
 
         assert len(parallel) == 1, job
         assert '-m "not slow"' in parallel[0], f"{job} must keep slow tests out of xdist"
         assert serial == ["uv run pytest tests -q -m slow"], f"{job} must run slow tests serially"
+
+        by_run = {str(step.get("run", "")): step for step in steps}
+        assert by_run[parallel[0]]["if"] == "matrix.shard != 'slow'", job
+        assert by_run[serial[0]]["if"] == "matrix.shard == 'slow'", job
+
+
+def test_ci_shards_cover_the_suite_and_prove_it() -> None:
+    """Each test matrix lists shards 1..N once, and CI result checks the reports.
+
+    A missing shard would silently drop part of the suite, so the gate does not
+    trust the matrix alone: every shard uploads a report, and
+    ``scripts/ci_test_timings.py check`` fails unless the reports partition
+    the collected tests.
+    """
+    jobs = _workflow("ci.yml")["jobs"]
+    for job, count in TEST_SHARD_JOBS.items():
+        matrix = jobs[job]["strategy"]["matrix"]["shard"]
+        assert matrix == [f"{i}/{count}" for i in range(1, count + 1)] + ["slow"], job
+        assert jobs[job]["strategy"]["fail-fast"] is False, job
+
+        steps = _steps("ci.yml", job)
+        test = next(step for step in steps if step.get("name") == "Test")
+        assert test["env"]["SHARD"] == "${{ matrix.shard }}", job
+        assert '--shard="${SHARD}"' in test["run"], job
+        assert '--shard-report="${RUNNER_TEMP}/shard-report.json"' in test["run"], job
+        upload = next(step for step in steps if step.get("name") == "Upload shard report")
+        assert upload["if"] == "matrix.shard != 'slow'", job
+        assert upload["with"]["name"].startswith("shard-report-"), job
+        assert upload["with"]["overwrite"] is True, f"{job}: a re-run must replace its report"
+
+    result = jobs["ci-result"]
+    assert result["name"] == "CI result"
+    assert result["if"] == "always()"
+    assert set(result["needs"]) == set(jobs) - {"ci-result"}, "CI result must need every job"
+
+    gate = next(step for step in result["steps"] if step.get("name") == "Check required CI results")
+    script = gate["run"]
+    assert '"${docs_only}" != "true" && "${ubuntu_tests_result}" != "success"' in script
+    assert '"${frontend_changed}" == "true" && "${frontend_result}" != "success"' in script
+    assert '"${release_changed}" == "true" && "${release_result}" != "success"' in script
+    assert "python3 scripts/ci_test_timings.py check" in script
+    assert "--require Linux" in script and "--require Windows" in script
 
 
 def test_ci_routes_expensive_jobs_by_event_and_change_class() -> None:
@@ -477,7 +532,7 @@ def test_live_release_e2e_workflow_is_manual_and_separates_private_inputs() -> N
     assert "tests/private" not in text
 
 
-LFS_CACHE_JOBS = ("ubuntu-quality", "windows-compat", "release-packaging")
+LFS_CACHE_JOBS = ("ubuntu-quality", "ubuntu-tests", "windows-compat", "release-packaging")
 
 
 def _steps(workflow: str, job: str) -> list[dict]:
@@ -486,7 +541,7 @@ def _steps(workflow: str, job: str) -> list[dict]:
 
 
 def test_ci_restores_git_lfs_objects_from_cache_instead_of_refetching() -> None:
-    """The three jobs that need the ONNX weights must not re-download them.
+    """The jobs that need the ONNX weights must not re-download them.
 
     The bundle is ~45 MB (bge + MiniLM + pilot) and every CI run checked it
     out three times, which is what exhausted the account's Git LFS bandwidth.

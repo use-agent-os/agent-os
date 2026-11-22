@@ -74,8 +74,11 @@ jobs:
       - name: Run actionlint
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -color=false
 
+  # Lint, type check, the packaging smoke checks and the wheel build. The
+  # suite itself runs in the sharded test jobs below, so this job is no longer
+  # on the critical path.
   ubuntu-quality:
-    name: Lint, test, and build (ubuntu-latest, 3.12)
+    name: Lint, type check, and build (ubuntu-latest, 3.12)
     needs: classify-changes
     if: needs.classify-changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
@@ -93,7 +96,7 @@ jobs:
           lfs: false
 
       # The bundled ONNX weights are ~45 MB and every CI run needs them in
-      # three jobs. Fetching them from Git LFS each time burns the account's
+      # several jobs. Fetching them from Git LFS each time burns the account's
       # LFS bandwidth quota; the Actions cache is free and not billed as LFS
       # bandwidth, so the network fetch only happens when the weights change.
       - name: Compute Git LFS cache key
@@ -154,7 +157,17 @@ jobs:
         with:
           python-version: "3.12"
 
+      # The built Control UI depends only on frontend/, the build script and
+      # the Node major, so a cache hit skips Node and npm entirely.
+      - name: Restore Control UI build cache
+        id: control-ui-cache
+        uses: actions/cache@v4
+        with:
+          path: src/agentos/gateway/static/dist
+          key: control-ui-${{ runner.os }}-node22-${{ hashFiles('frontend/**', 'scripts/build_control_ui.py') }}
+
       - name: Set up Node
+        if: steps.control-ui-cache.outputs.cache-hit != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -167,13 +180,14 @@ jobs:
           enable-cache: true
 
       - name: Build and verify packaged Control UI
+        if: steps.control-ui-cache.outputs.cache-hit != 'true'
         shell: bash
         run: python scripts/build_control_ui.py build
 
-      - name: Check frontend source
-        if: needs.classify-changes.outputs.frontend_changed == 'true'
+      - name: Verify cached Control UI
+        if: steps.control-ui-cache.outputs.cache-hit == 'true'
         shell: bash
-        run: npm --prefix frontend run check
+        run: python scripts/build_control_ui.py verify
 
       - name: Install dependencies
         shell: bash
@@ -181,24 +195,11 @@ jobs:
 
       - name: Lint
         shell: bash
-        run: uv run ruff check src tests
+        run: uv run ruff check src tests scripts/ci_test_timings.py
 
       - name: Type check
         shell: bash
         run: uv run mypy src/agentos --show-error-codes
-
-      # The suite is mostly I/O wait (about 1/2 CPU serially), so xdist
-      # workers cut wall time ~3x; tests/conftest.py gives each worker its own
-      # state dir. --durations keeps the slow tail visible in the log.
-      # `slow` tests (latency benchmarks) run alone in the next step: sharing
-      # the runner's CPUs with busy workers doubles their measured p50.
-      - name: Test
-        shell: bash
-        run: uv run pytest tests -q -n auto -m "not slow" --durations=25
-
-      - name: Test (slow, serial)
-        shell: bash
-        run: uv run pytest tests -q -m slow
 
       - name: Verify metric counter names unchanged
         shell: bash
@@ -223,14 +224,54 @@ jobs:
           uv build --wheel
           python scripts/build_control_ui.py verify-archive dist/*.whl
 
-  windows-compat:
-    name: Lint, test, and build (windows-latest, 3.12)
+  # The frontend source gate (tsc, eslint, prettier, vitest) reads nothing
+  # outside frontend/ and needs only its npm install, not Python or a build.
+  frontend-check:
+    name: Frontend source check
     needs: classify-changes
-    if: >-
-      needs.classify-changes.outputs.docs_only != 'true'
-      && github.event_name != 'push'
-    runs-on: windows-latest
-    timeout-minutes: 30
+    if: needs.classify-changes.outputs.frontend_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        shell: bash
+        run: npm --prefix frontend ci
+
+      - name: Check frontend source
+        shell: bash
+        run: npm --prefix frontend run check
+
+  # The suite is split into timing-balanced shards (tests/ci_shard.py, timings
+  # in .github/ci-test-timings.json), one runner each. Within a shard it is
+  # mostly I/O wait, so xdist workers still cut wall time ~3x;
+  # tests/conftest.py gives each worker its own state dir. `slow` tests
+  # (latency benchmarks) get a runner of their own and run serially: sharing
+  # the runner's CPUs with busy workers doubles their measured p50.
+  # A new test file just lands at the average cost. To rebalance, download a
+  # run's shard-report-* artifacts and run
+  # `python scripts/ci_test_timings.py fit <reports>`.
+  ubuntu-tests:
+    name: Test (ubuntu-latest, 3.12, ${{ matrix.shard }})
+    needs: classify-changes
+    if: needs.classify-changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/3", "2/3", "3/3", "slow"]
 
     env:
       UV_PYTHON: "3.12"
@@ -243,10 +284,6 @@ jobs:
         with:
           lfs: false
 
-      # The bundled ONNX weights are ~45 MB and every CI run needs them in
-      # three jobs. Fetching them from Git LFS each time burns the account's
-      # LFS bandwidth quota; the Actions cache is free and not billed as LFS
-      # bandwidth, so the network fetch only happens when the weights change.
       - name: Compute Git LFS cache key
         id: lfs-key
         shell: bash
@@ -270,17 +307,11 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${CACHE_HIT}" = "true" ]; then
-            # Objects are already in .git/lfs/objects — materialize the working
-            # tree from them without touching the network.
             git lfs checkout
           else
             git lfs pull
           fi
 
-      # A cache that restored the wrong or an empty object store would leave
-      # pointer files in place. Those are ~130 bytes and still satisfy the
-      # `.is_file()` guards in the pilot encoder tests, so the suite would not
-      # skip — it would fail much later with an opaque ONNX parse error.
       - name: Verify Git LFS hydration
         shell: bash
         run: |
@@ -305,7 +336,15 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Restore Control UI build cache
+        id: control-ui-cache
+        uses: actions/cache@v4
+        with:
+          path: src/agentos/gateway/static/dist
+          key: control-ui-${{ runner.os }}-node22-${{ hashFiles('frontend/**', 'scripts/build_control_ui.py') }}
+
       - name: Set up Node
+        if: steps.control-ui-cache.outputs.cache-hit != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -318,20 +357,175 @@ jobs:
           enable-cache: true
 
       - name: Build and verify packaged Control UI
+        if: steps.control-ui-cache.outputs.cache-hit != 'true'
         shell: bash
         run: python scripts/build_control_ui.py build
+
+      - name: Verify cached Control UI
+        if: steps.control-ui-cache.outputs.cache-hit == 'true'
+        shell: bash
+        run: python scripts/build_control_ui.py verify
+
+      - name: Install dependencies
+        shell: bash
+        run: uv sync --extra dev --extra recommended --frozen
+
+      # --durations keeps the slow tail visible in the log.
+      - name: Test
+        if: matrix.shard != 'slow'
+        shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: uv run pytest tests -q -n auto -m "not slow" --durations=25 --shard="${SHARD}" --shard-report="${RUNNER_TEMP}/shard-report.json"
+
+      - name: Test (slow, serial)
+        if: matrix.shard == 'slow'
+        shell: bash
+        run: uv run pytest tests -q -m slow
+
+      - name: Upload shard report
+        if: matrix.shard != 'slow'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-report-${{ runner.os }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/shard-report.json
+          if-no-files-found: error
+          # A re-run of a shard replaces the report of the attempt it repeats.
+          overwrite: true
+          retention-days: 14
+
+  windows-compat:
+    name: Test (windows-latest, 3.12, ${{ matrix.shard }})
+    needs: classify-changes
+    if: >-
+      needs.classify-changes.outputs.docs_only != 'true'
+      && github.event_name != 'push'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/4", "2/4", "3/4", "4/4", "slow"]
+
+    env:
+      UV_PYTHON: "3.12"
+      PYTHONPATH: ${{ github.workspace }}
+      AGENTOS_TURN_CALL_LOG: "0"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Compute Git LFS cache key
+        id: lfs-key
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs install --local
+          oids=$(git lfs ls-files -l | awk '{print $1}' | sort | sha256sum | cut -d' ' -f1)
+          printf 'oids=%s\n' "${oids}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Git LFS objects cache
+        id: lfs-cache
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs/objects
+          key: git-lfs-${{ runner.os }}-${{ steps.lfs-key.outputs.oids }}
+
+      - name: Hydrate Git LFS objects
+        shell: bash
+        env:
+          CACHE_HIT: ${{ steps.lfs-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          if [ "${CACHE_HIT}" = "true" ]; then
+            git lfs checkout
+          else
+            git lfs pull
+          fi
+
+      - name: Verify Git LFS hydration
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=0
+          for path in $(git lfs ls-files -n); do
+            if head -c 42 "${path}" | grep -q "git-lfs.github.com/spec/v1"; then
+              echo "ERROR: ${path} is still a Git LFS pointer, not the real object"
+              status=1
+            fi
+          done
+          exit "${status}"
+
+      - name: Configure runtime directories
+        shell: bash
+        run: |
+          printf 'AGENTOS_STATE_DIR=%s/agentos-state\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'AGENTOS_LOG_DIR=%s/agentos-logs\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore Control UI build cache
+        id: control-ui-cache
+        uses: actions/cache@v4
+        with:
+          path: src/agentos/gateway/static/dist
+          key: control-ui-${{ runner.os }}-node22-${{ hashFiles('frontend/**', 'scripts/build_control_ui.py') }}
+
+      - name: Set up Node
+        if: steps.control-ui-cache.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Build and verify packaged Control UI
+        if: steps.control-ui-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: python scripts/build_control_ui.py build
+
+      - name: Verify cached Control UI
+        if: steps.control-ui-cache.outputs.cache-hit == 'true'
+        shell: bash
+        run: python scripts/build_control_ui.py verify
 
       - name: Install dependencies
         shell: bash
         run: uv sync --extra dev --extra recommended --frozen
 
       - name: Test
+        if: matrix.shard != 'slow'
         shell: bash
-        run: uv run pytest tests -q -n auto -m "not slow"
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: uv run pytest tests -q -n auto -m "not slow" --durations=25 --shard="${SHARD}" --shard-report="${RUNNER_TEMP}/shard-report.json"
 
       - name: Test (slow, serial)
+        if: matrix.shard == 'slow'
         shell: bash
         run: uv run pytest tests -q -m slow
+
+      - name: Upload shard report
+        if: matrix.shard != 'slow'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-report-${{ runner.os }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/shard-report.json
+          if-no-files-found: error
+          # A re-run of a shard replaces the report of the attempt it repeats.
+          overwrite: true
+          retention-days: 14
 
   release-packaging:
     name: Release packaging contracts
@@ -352,7 +546,7 @@ jobs:
           lfs: false
 
       # The bundled ONNX weights are ~45 MB and every CI run needs them in
-      # three jobs. Fetching them from Git LFS each time burns the account's
+      # several jobs. Fetching them from Git LFS each time burns the account's
       # LFS bandwidth quota; the Actions cache is free and not billed as LFS
       # bandwidth, so the network fetch only happens when the weights change.
       - name: Compute Git LFS cache key
@@ -446,12 +640,32 @@ jobs:
       - classify-changes
       - workflow-lint
       - ubuntu-quality
+      - frontend-check
+      - ubuntu-tests
       - windows-compat
       - release-packaging
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # A matrix job's result is success only if every shard succeeded, so the
+      # checks below already require all shards. The shard reports add the
+      # proof that those shards together ran the whole suite exactly once.
+      - name: Check out shard checker
+        if: needs.classify-changes.outputs.docs_only != 'true'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/ci_test_timings.py
+          sparse-checkout-cone-mode: false
+
+      - name: Download shard reports
+        if: needs.classify-changes.outputs.docs_only != 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shard-report-*
+          path: ${{ runner.temp }}/shard-reports
+
       - name: Check required CI results
         shell: bash
         env:
@@ -462,6 +676,8 @@ jobs:
           classify_result="${{ needs.classify-changes.result }}"
           workflow_lint_result="${{ needs.workflow-lint.result }}"
           ubuntu_result="${{ needs.ubuntu-quality.result }}"
+          frontend_result="${{ needs.frontend-check.result }}"
+          ubuntu_tests_result="${{ needs.ubuntu-tests.result }}"
           windows_result="${{ needs.windows-compat.result }}"
           release_result="${{ needs.release-packaging.result }}"
           docs_only="${{ needs.classify-changes.outputs.docs_only }}"
@@ -475,6 +691,8 @@ jobs:
           printf 'classify-changes: %s\n' "${classify_result}"
           printf 'workflow-lint: %s\n' "${workflow_lint_result}"
           printf 'ubuntu-quality: %s\n' "${ubuntu_result}"
+          printf 'frontend-check: %s\n' "${frontend_result}"
+          printf 'ubuntu-tests: %s\n' "${ubuntu_tests_result}"
           printf 'windows-compat: %s\n' "${windows_result}"
           printf 'release-packaging: %s\n' "${release_result}"
           printf 'event=%s docs_only=%s runtime_changed=%s test_changed=%s ci_changed=%s dependency_changed=%s release_changed=%s frontend_changed=%s\n' \
@@ -495,6 +713,16 @@ jobs:
             exit 1
           fi
 
+          if [[ "${frontend_changed}" == "true" && "${frontend_result}" != "success" ]]; then
+            echo "Frontend source check must succeed for frontend changes."
+            exit 1
+          fi
+
+          if [[ "${docs_only}" != "true" && "${ubuntu_tests_result}" != "success" ]]; then
+            echo "Ubuntu test shards must all succeed for non-documentation changes."
+            exit 1
+          fi
+
           if [[ "${docs_only}" != "true" && "${EVENT_NAME}" != "push" && "${windows_result}" != "success" ]]; then
             echo "Windows compatibility tests must succeed for non-documentation changes."
             exit 1
@@ -503,4 +731,15 @@ jobs:
           if [[ "${release_changed}" == "true" && "${release_result}" != "success" ]]; then
             echo "Release packaging contracts must succeed for release-surface changes."
             exit 1
+          fi
+
+          if [[ "${docs_only}" != "true" ]]; then
+            require=(--require Linux)
+            if [[ "${EVENT_NAME}" != "push" ]]; then
+              require+=(--require Windows)
+            fi
+            shopt -s nullglob
+            reports=("${RUNNER_TEMP}"/shard-reports/*/shard-report.json)
+            echo "Checking ${#reports[@]} shard reports."
+            python3 scripts/ci_test_timings.py check "${require[@]}" "${reports[@]}"
           fi
