@@ -1,11 +1,12 @@
 """JSON-RPC calls that buy nothing (issue #3976), and seeing what the engine sends.
 
 On a metered endpoint every JSON-RPC call is billed, each item of a batch array
-on its own. Around the sync loop's client:
+on its own. Four things around the sync loop's client:
 
 * a token whose ``balanceOf`` never answers is not asked again on every pass;
 * every request is counted, by lane and method, and ``trading.status`` shows it;
 * a changed ``trading.rpc_urls`` reaches the engine without a restart;
+* an endpoint that refuses the key is left alone by the background sync for a while.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from agentos.trading.chains import BASE, MULTICALL3, NATIVE_ADDRESS, ROBINHOOD
 from agentos.trading.evm import EvmClient, EvmTransportError
 from agentos.trading.ledger import Ledger
 from agentos.trading.prices import PriceService, TokenMeta, native_token
-from agentos.trading.service import TradingService
+from agentos.trading.service import SYNC_REQUESTED, TradingService
 from agentos.trading.sync import WalletSyncer
 from agentos.trading.vault import Vault, WalletRecord
 from tests.test_trading.fakes import (
@@ -569,3 +570,165 @@ class TestRpcUrlChange:
             assert made[1].usage()["rpc"]["methods"] == {"eth_blockNumber": 1}
         finally:
             await service.stop()
+
+
+# ── D: refused credentials ─────────────────────────────────────────────────
+
+
+@pytest.fixture
+def clock(funded_service: TradingService, monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    now = [time.time()]
+    monkeypatch.setattr(funded_service, "_now", lambda: now[0])
+    return now
+
+
+class TestRefusedKey:
+    async def test_two_refused_passes_pause_the_chain(
+        self, funded_service: TradingService, gate: Gate
+    ) -> None:
+        service = funded_service
+        await service.sync_all()
+        gate.refuse[BASE_HOST] = 403
+        with capture_logs() as logs:
+            for expected in (1, 1, 0, 0):
+                gate.seen.clear()
+                await service.sync_all()
+                assert gate.hits(BASE_HOST) == expected
+                assert gate.hits(RH_HOST) > 0  # the other chain keeps syncing
+        events = [e["event"] for e in logs if e["event"].startswith("trading.rpc_key")]
+        assert events == ["trading.rpc_key_refused"]
+        refused = _read(service, 8453)
+        assert refused["status"] == "failed"
+        assert "key refused" in refused["reason"] and "HTTP 403" in refused["reason"]
+        assert _read(service, 4663)["status"] == "ok"
+
+    async def test_a_requested_sync_still_tries_and_a_success_ends_the_pause(
+        self, funded_service: TradingService, gate: Gate
+    ) -> None:
+        service = funded_service
+        await service.sync_all()
+        gate.refuse[BASE_HOST] = 401
+        await service.sync_all()
+        await service.sync_all()
+        gate.seen.clear()
+        await service.sync_all(kind=SYNC_REQUESTED)  # the resync button
+        assert gate.hits(BASE_HOST) == 1
+        del gate.refuse[BASE_HOST]
+        with capture_logs() as logs:
+            await service.sync_all(kind=SYNC_REQUESTED)
+        assert [e["event"] for e in logs if e["event"].startswith("trading.rpc_key")] == [
+            "trading.rpc_key_accepted"
+        ]
+        assert _read(service, 8453)["status"] == "ok"
+        gate.seen.clear()
+        await service.sync_all()
+        assert gate.hits(BASE_HOST) > 0
+
+    async def test_the_pause_grows_to_a_cap(
+        self, funded_service: TradingService, gate: Gate, clock: list[float]
+    ) -> None:
+        service = funded_service
+        await service.sync_all()
+        gate.refuse[BASE_HOST] = 403
+        await service.sync_all()
+        await service.sync_all()  # paused for a minute
+        tried = []
+        for step in (59, 2, 119, 2, 299, 2, 899, 2, 899, 2):
+            clock[0] += step
+            gate.seen.clear()
+            await service.sync_all()
+            tried.append(gate.hits(BASE_HOST))
+        # 1, 2, 5, then 15 minutes, and 15 minutes from then on.
+        assert tried == [0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+
+    async def test_a_success_after_the_pause_resets_its_growth(
+        self, funded_service: TradingService, gate: Gate, clock: list[float]
+    ) -> None:
+        service = funded_service
+        await service.sync_all()
+        gate.refuse[BASE_HOST] = 403
+        for _ in range(3):
+            await service.sync_all()
+            clock[0] += 61  # paused for 1, then 2 minutes
+        del gate.refuse[BASE_HOST]
+        clock[0] += 120
+        await service.sync_all()
+        assert _read(service, 8453)["status"] == "ok"
+        gate.refuse[BASE_HOST] = 403
+        await service.sync_all()
+        await service.sync_all()  # paused again, from the first step
+        clock[0] += 61
+        gate.seen.clear()
+        await service.sync_all()
+        assert gate.hits(BASE_HOST) == 1
+
+    @pytest.mark.parametrize("rule", [500, 502, 429, "timeout"])
+    async def test_a_server_error_or_a_timeout_never_pauses(
+        self, funded_service: TradingService, gate: Gate, rule: int | str
+    ) -> None:
+        service = funded_service
+        await service.sync_all()
+        gate.refuse[BASE_HOST] = rule
+        for _ in range(4):
+            gate.seen.clear()
+            await service.sync_all()
+            assert gate.hits(BASE_HOST) == 1
+        assert _read(service, 8453)["status"] == "failed"
+
+    async def test_with_many_wallets_one_pass_is_enough_and_the_rest_are_not_asked(
+        self, funded_service: TradingService, gate: Gate
+    ) -> None:
+        service = funded_service
+        await service.import_wallet("Second", private_key="0x" + "22" * 32)
+        await service.import_wallet("Third", private_key="0x" + "33" * 32)
+        await service.sync_all()
+        gate.refuse[BASE_HOST] = 403
+        gate.seen.clear()
+        await service.sync_all()
+        assert gate.hits(BASE_HOST) == 2  # two refusals in a row; the third is spared
+        reads = [r for r in service.chain_reads() if r["chainId"] == 8453]
+        assert len(reads) == 3 and {r["status"] for r in reads} == {"failed"}
+        # The one not asked still says why its figures are not fresh.
+        assert sorted(r["reason"].startswith("paused, key refused") for r in reads) == [
+            False,
+            False,
+            True,
+        ]
+        gate.seen.clear()
+        await service.sync_all()
+        assert gate.hits(BASE_HOST) == 0
+
+    async def test_a_new_url_is_tried_at_once(
+        self, funded_service: TradingService, gate: Gate
+    ) -> None:
+        service = funded_service
+        await service.sync_all()
+        gate.refuse[BASE_HOST] = 401
+        await service.sync_all()
+        await service.sync_all()
+        service.config.rpc_urls = {"8453": CUSTOM_BASE}
+        gate.seen.clear()
+        await service.sync_all()
+        assert gate.hits(CUSTOM_HOST) > 0
+        assert _read(service, 8453)["status"] == "ok"
+
+    async def test_housekeeping_is_never_held_by_the_pause(
+        self, funded_service: TradingService, gate: Gate, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service = funded_service
+        await service.sync_all()
+        gate.refuse[BASE_HOST] = 403
+        await service.sync_all()
+        await service.sync_all()
+        ran: list[str] = []
+
+        async def dca() -> None:
+            ran.append("dca")
+
+        async def triggers() -> None:
+            ran.append("triggers")
+
+        monkeypatch.setattr(service, "dca_run_due", dca)
+        monkeypatch.setattr(service, "trigger_check", triggers)
+        await service.housekeep()
+        assert ran == ["dca", "triggers"]

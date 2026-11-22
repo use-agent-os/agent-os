@@ -180,6 +180,16 @@ MANUAL_SYNC_MIN_S = 10.0
 # Hidden (junk) tokens leave the sync's fast lane; their balances and
 # openings are still brought up to date this often.
 HIDDEN_RESCAN_S = 3600.0
+# An endpoint that refuses the credentials (a deactivated or wrong key) refuses
+# them again a minute later: one gateway sent about 24,700 refused requests in a
+# week, one per wallet x chain per pass, and logged each. After this many refusals
+# in a row the background sync leaves the chain alone for the next of these
+# delays (the last repeats); an answer or a new URL ends the pause, and a
+# requested sync always tries. Timeouts and 5xx never count: they say nothing
+# about the key, and one bad minute must not blind the sync.
+AUTH_REFUSED_STATUSES = frozenset({401, 403})
+AUTH_REFUSALS_BEFORE_PAUSE = 2
+AUTH_PAUSE_S = (60.0, 120.0, 300.0, 900.0)
 # The engine loop logs what each chain's RPC was sent about this often.
 RPC_USAGE_LOG_S = 3600.0
 # ``syncKind`` vocabulary: why the pass in flight runs. A client shows a
@@ -428,6 +438,19 @@ class _ApprovalBinding:
     verified: bool = False
 
 
+@dataclass
+class _AuthPause:
+    """A chain whose RPC refused the credentials, and when the background sync asks again."""
+
+    # The URL that refused (memory only, never shown); a different one is tried at once.
+    url: str
+    refusals: int = 0
+    # Pauses so far: picks the next delay from ``AUTH_PAUSE_S``.
+    pauses: int = 0
+    until: float = 0.0
+    reason: str = ""
+
+
 class TradingService:
     def __init__(
         self,
@@ -481,6 +504,8 @@ class TradingService:
         self._evm: dict[int, EvmClient] = {}
         # The RPC URL each cached client was made for: ``evm`` rebuilds on a change.
         self._evm_urls: dict[int, str] = {}
+        # Chain id -> the background sync's pause after refused credentials.
+        self._auth_pauses: dict[int, _AuthPause] = {}
         self._rpc_usage_logged_at = now()
         self._task: asyncio.Task[None] | None = None
         # The wallet sync the loop last started; it runs beside the loop, not in it.
@@ -2419,6 +2444,14 @@ class TradingService:
                     self._hidden_sync_at = self._now()
                 for record in wallets:
                     for chain in chains or self.chains():
+                        paused = self._auth_paused(chain)
+                        if paused is not None:
+                            # Nothing is asked of a node that refused the key; the
+                            # wallet's read still says why it is not fresh.
+                            self.syncer.record_failure(
+                                chain, record.key, f"paused, key refused: {paused.reason}"
+                            )
+                            continue
                         self._sync_first_sweep = (
                             full
                             or self.ledger.sync_state(chain.chain_id, record.key) is None
@@ -2444,12 +2477,62 @@ class TradingService:
                                 error=str(exc),
                             )
                             self.syncer.record_failure(chain, record.key, str(exc))
+                            self._auth_refused(chain, exc)
+                        else:
+                            self._auth_answered(chain)
                 self.last_sync_at = self._now()
             finally:
                 self.syncing = False
                 self._sync_first_sweep = False
                 self._sync_pass_kind = SYNC_BACKGROUND
             return changed
+
+    def _auth_paused(self, chain: ChainSpec) -> _AuthPause | None:
+        """The chain's pause, when the pass in flight is to leave the chain alone.
+
+        Only the engine's own pass waits. Someone who asked (the resync button,
+        a ``--refresh``) is answered at once, also when the request was folded
+        into a background pass already running (``_sync_pass_kind``).
+        """
+        pause = self._auth_pauses.get(chain.chain_id)
+        if pause is None or self._sync_pass_kind != SYNC_BACKGROUND:
+            return None
+        if pause.url != self._rpc_url(chain):
+            # A new endpoint or key is worth asking at once.
+            del self._auth_pauses[chain.chain_id]
+            return None
+        return pause if self._now() < pause.until else None
+
+    def _auth_refused(self, chain: ChainSpec, exc: Exception) -> None:
+        """Count a refused key (HTTP 401/403) towards the chain's pause; nothing else counts."""
+        if not isinstance(exc, EvmTransportError) or exc.status not in AUTH_REFUSED_STATUSES:
+            return
+        url = self._rpc_url(chain)
+        pause = self._auth_pauses.get(chain.chain_id)
+        if pause is None or pause.url != url:
+            pause = self._auth_pauses[chain.chain_id] = _AuthPause(url=url)
+        pause.refusals += 1
+        pause.reason = str(exc)
+        if pause.refusals < AUTH_REFUSALS_BEFORE_PAUSE:
+            return
+        delay = AUTH_PAUSE_S[min(pause.pauses, len(AUTH_PAUSE_S) - 1)]
+        pause.pauses += 1
+        pause.until = self._now() + delay
+        if pause.pauses == 1:
+            log.warning(
+                "trading.rpc_key_refused",
+                chain=chain.key,
+                status=exc.status,
+                refusals=pause.refusals,
+                retry_in_s=int(delay),
+                error=pause.reason[:200],
+            )
+
+    def _auth_answered(self, chain: ChainSpec) -> None:
+        """The chain answered a sync: any pause ends."""
+        pause = self._auth_pauses.pop(chain.chain_id, None)
+        if pause is not None and pause.pauses:
+            log.info("trading.rpc_key_accepted", chain=chain.key, refusals=pause.refusals)
 
     @property
     def sync_kind(self) -> str | None:
