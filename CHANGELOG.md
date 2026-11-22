@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Trading: `trading.status` (and `agentos trade status --json`) reports per
+  chain what the engine has sent that chain's RPC since the gateway started,
+  as `rpcUsage`: HTTP requests, JSON-RPC calls by method and failed requests,
+  for the configured endpoint (`rpc`) and for the public node the bulk
+  balance read tries first (`read`). A batch counts each of its items, as a
+  metered provider bills them; no URL is included, and a chain the engine
+  has not used yet reads `null`. The gateway also logs one
+  `trading.rpc_usage` line per chain about once an hour with what was sent
+  since the last one.
+
 ### Changed
 - Desktop: Settings is rebuilt so every page shows its state and the next
   step first. It opens on a new **Overview**, a setup checklist, and the rail
@@ -21,6 +32,71 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Restart; routing modes, the gateway run mode and the
   Touch ID level are cards that each say what they do; and knobs most
   people never touch fold away.
+
+### Fixed
+- Trading: the wallet sync catches up after downtime in wide windows and
+  keeps its place. A gateway that had been off walked the gap in 2,000-block
+  windows and saved its cursor only at the end, so one failed request threw
+  away everything read and the next pass started over: an install off for
+  18 days owed about 43,000 requests that all had to succeed in one go. The
+  gap is now read in windows of 100,000 blocks on Base and 30,000 on
+  Robinhood Chain, each booked before the next is read, and the cursor
+  moves past each one, so an interrupted catch-up resumes where it stopped.
+  A full resync (`agentos trade sync --full`) sweeps in the same windows,
+  two requests a window instead of two per 2,000 blocks. A window the node
+  refuses for its size is still halved; a refused key or a rate limit
+  (HTTP 401, 403, 429) is not, and ends the pass after one request. A pass
+  with nothing to catch up sends exactly what it did. Base's block time is
+  now reported as 0.2 s (`blockTimeS` in `trading.network` said 2 s).
+- Trading: a token whose `balanceOf` never answers (an airdropped token that
+  reverts, say) is no longer asked again on every sync pass, for every
+  wallet, on the configured RPC. An ordinary pass leaves it out; the hourly
+  full read, a resync and any pass that sees it move still ask, and the
+  wallet's read stays `partial` until it answers. Measured on a metered
+  endpoint, one such token was 2 of the 18 billed calls of every steady
+  pass for 2 wallets on 2 chains; the pass is now 16.
+- Trading: a changed `trading.rpc_urls`, or `RPC_BASE_URL` /
+  `RPC_ROBINHOOD_URL`, reaches the engine without a restart. Liquidity reads
+  switched at once, but the wallet sync, orders and the network strip kept
+  the endpoint they started with until the gateway restarted. They now
+  switch on their next request; work already in flight finishes on the old
+  endpoint.
+- Trading: the background sync pauses a chain whose RPC refuses the key. An
+  endpoint answering HTTP 401 or 403 (a deactivated or wrong key) was asked
+  again on every pass for every wallet, and each refusal was logged: about
+  24,700 refused requests in a week from one gateway. After two refusals in
+  a row the background sync leaves that chain alone for 1, 2, 5, then 15
+  minutes at a time; its wallets read `failed` with the refusal as the
+  reason, a resync tries at once, and the first answer or a new URL ends
+  the pause. Timeouts, rate limits and server errors never pause it. The
+  change is logged once each way (`trading.rpc_key_refused`,
+  `trading.rpc_key_accepted`).
+- Trading: the allowance review no longer re-reads itself. Every
+  `trading.allowances.list` started an Approval-log scan whose end
+  broadcast `trading.changed`, which made clients list again, so an open
+  Tools tab or Allowances sheet looped as fast as the client debounces (an
+  estimated 250 to 600 billed calls a minute, on every chain). The logs are
+  now read at most once a minute per wallet and chain (`--full` rescans at
+  once, and an approval the engine sends shows at once), while every listed
+  allowance is still read live, so a revoke is gone at once.
+  `trading.changed` (`reason: "allowances"`) goes out only when a pair was
+  added or a catch-up ended.
+- Trading: trigger and bracket cards show the wallet's balance from the
+  ledger, which the sync keeps current, instead of reading it on the RPC on
+  every list: one call per live trigger and two per bracket, every 30 s and
+  on every `trading.changed` while the desktop shows them. A trigger that
+  fires still reads the balance it sizes the order from on the chain.
+- Trading: a token whose contract names no symbol (junk, or not a token at
+  all) is read from the chain at most once an hour instead of on every
+  holdings read, which cost four calls each time. A token list that names
+  it still wins at once.
+- Trading: a submitted order with no receipt costs one receipt poll per
+  housekeeping pass instead of about five, for up to six hours, and no
+  longer holds DCA buys and trigger checks back about 6 s per stuck order.
+- Trading: `trading.network` (the network strip) reads the fee history at
+  most once a minute per chain, so a desktop poll costs one call per chain
+  instead of two most of the time; `--fresh` re-reads both, and signing
+  reads its own fees.
 
 ## [2026.11.21] - 2026-11-21
 
