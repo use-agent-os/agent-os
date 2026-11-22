@@ -7,7 +7,7 @@ it at its block time, and keep the FIFO lots current. Native ETH has no
 logs, so a change in the native balance that the ledger cannot explain is
 booked as a deposit or withdrawal.
 
-Three rules keep the ledger honest:
+These rules keep the ledger honest:
 
 * **Entries are the truth; lots are derived.** A position's lots and realized
   rows can be replayed from its entries at any time (:meth:`_replay_lots`).
@@ -20,6 +20,11 @@ Three rules keep the ledger honest:
   tables (``rebuild_logs``/``rebuild_state``) while the live ledger keeps
   serving; the swap-in happens in one transaction; an interrupted sweep
   resumes from where it stopped.
+* **A catch-up is resumable too.** A gap wider than one window (the gateway
+  was off) is swept window by window, and the cursor only moves past a
+  window once its transfers are booked, so an error or a restart costs one
+  window, not the gap. Balances and openings are reconciled only by a pass
+  whose sweep reached the head.
 * **A failed read is not a zero.** A ``balanceOf`` the node did not answer
   leaves the stored balance as it was and marks the wallet/chain read
   ``partial`` (``chain_reads``), so a flaky RPC can neither empty a holding
@@ -65,9 +70,6 @@ READ_FAILED = "failed"
 # An imported wallet's first sweep: about a day on Base, an hour on Robinhood.
 DEFAULT_INITIAL_LOOKBACK = 50_000
 DEFAULT_FULL_LOOKBACK = 2_000_000
-# A rebuild sweeps backwards in windows this many node-spans wide, so
-# progress is persisted often enough that an interruption costs little.
-REBUILD_WINDOW_SPANS = 10
 # Ignore native dust drift below this (gas of a tx we did not see).
 NATIVE_DUST_WEI = 10**13
 # An incremental pass re-reads this many blocks below the last synced one.
@@ -163,6 +165,14 @@ class WalletSyncer:
         wallet's first pass, ``include_hidden`` and ``read_all`` read them all,
         which is what bounds how long a balance that moved without a log (a
         non-standard token, a log the node served late) can stay wrong.
+
+        A gap wider than one window is swept by :meth:`_sweep`, which saves
+        the cursor as it goes. If it raises, so does the pass, before the
+        native, balance and opening reconciliation: those compare the chain's
+        balance *now* with what the sweep has booked, and a sweep that stopped
+        short has not booked what moved since. The ledger is then what a pass
+        that failed after booking leaves (transfers in, balances last-good),
+        and the service reports it as a failed read.
         """
         self.include_hidden = include_hidden
         address = wallet.key
@@ -188,9 +198,9 @@ class WalletSyncer:
         changed = False
         moved: set[str] = set()
         if start <= latest:
-            logs = await evm.transfer_logs(address, from_block=start, to_block=latest)
-            moved = {log.token for log in logs}
-            changed = await self._record_transfers(wallet, chain, logs) or changed
+            changed, moved = await self._sweep(
+                wallet, chain, evm, start, latest, oldest=oldest, resumable=state is not None
+            )
         changed = await self._reconcile_native(wallet, chain, evm) or changed
         read_every_token = read_all or include_hidden or state is None
         read = await self._refresh_balances(
@@ -202,6 +212,66 @@ class WalletSyncer:
         self.ledger.set_sync_state(chain.chain_id, address, last_block=latest, oldest_block=oldest)
         self._record_read(chain, address, read)
         return changed
+
+    async def _sweep(
+        self,
+        wallet: WalletRecord,
+        chain: ChainSpec,
+        evm: EvmClient,
+        start: int,
+        latest: int,
+        *,
+        oldest: int | None,
+        resumable: bool,
+    ) -> tuple[bool, set[str]]:
+        """Book every Transfer in ``start..latest``: (the ledger moved, the tokens that moved).
+
+        A gap within the node's own span (every steady pass) is one
+        ``transfer_logs`` call, the same call as ever. A wider one is read in
+        :func:`sweep_span` windows, oldest first, each booked before the next
+        is read; with ``resumable`` the cursor is saved after each window but
+        the last, which the pass itself writes. An error in window k is raised
+        with windows 1..k-1 booked and the cursor at the end of k-1, and the
+        next pass resumes there, re-reading ``SYNC_OVERLAP_BLOCKS`` of it that
+        the entries dedupe. Booking comes before saving, so a crash between
+        the two re-reads a window and never skips one.
+
+        A first sweep is not resumable: its cursor is what marks the
+        wallet/chain swept (``ensure_opening`` books no opening before it, the
+        service reports the pass as ``initial`` until it exists), so only the
+        pass writes it, at the head. For an imported wallet that sweep is
+        ``initial_lookback`` blocks, one or two windows.
+        """
+        address = wallet.key
+        window = sweep_span(chain, evm)
+        blocks = latest - start + 1
+        if blocks > window:
+            log.info(
+                "trading.sync_catch_up",
+                chain=chain.key,
+                wallet=address,
+                blocks=blocks,
+                windows=(blocks + window - 1) // window,
+            )
+        changed = False
+        moved: set[str] = set()
+        cursor = start
+        while cursor <= latest:
+            end = min(latest, cursor + window - 1)
+            # Within the node's span the call is the steady pass's own: an
+            # outage fails it at once, as it always has, instead of halving.
+            wide = end - cursor + 1 > evm.max_log_span
+            logs = await evm.transfer_logs(
+                address, from_block=cursor, to_block=end, max_span=window if wide else None
+            )
+            moved.update(t.token for t in logs)
+            changed = await self._record_transfers(wallet, chain, logs) or changed
+            if resumable and end < latest:
+                self.ledger.set_sync_state(
+                    chain.chain_id, address, last_block=end, oldest_block=oldest
+                )
+            cursor = end + 1
+        return changed, moved
 
     def _record_read(self, chain: ChainSpec, wallet: str, read: BalanceRead) -> None:
         if read.failed:
@@ -219,7 +289,12 @@ class WalletSyncer:
         self.ledger.set_chain_read(chain.chain_id, wallet, READ_FAILED, reason[:200])
 
     async def rebuild(self, wallet: WalletRecord, chain: ChainSpec) -> bool:
-        """Rebuild one wallet/chain from the chain: sweep into the shadow, then swap in."""
+        """Rebuild one wallet/chain from the chain: sweep into the shadow, then swap in.
+
+        The sweep walks backwards in :func:`sweep_span` windows (two
+        ``eth_getLogs`` each) and saves its place after every one, so an
+        interruption costs a window.
+        """
         evm = self._evm_for(chain)
         address = wallet.key
         state = self.ledger.rebuild_state(chain.chain_id, address)
@@ -244,13 +319,15 @@ class WalletSyncer:
             target_from = int(state["target_from"])
             scanned_down_to = int(state["scanned_down_to"])
 
-        window = max(1, evm.max_log_span) * REBUILD_WINDOW_SPANS
+        window = sweep_span(chain, evm)
         total = max(1, latest + 1 - target_from)
         try:
             while scanned_down_to > target_from:
                 lo = max(target_from, scanned_down_to - window)
                 self._progress(chain, address, latest, target_from, scanned_down_to, "sweep")
-                logs = await evm.transfer_logs(address, from_block=lo, to_block=scanned_down_to - 1)
+                logs = await evm.transfer_logs(
+                    address, from_block=lo, to_block=scanned_down_to - 1, max_span=window
+                )
                 self.ledger.add_rebuild_logs(
                     chain.chain_id,
                     address,
@@ -1436,6 +1513,11 @@ def swap_value(
 
 def _pick(table: dict[Any, Any] | None, key: Any) -> Any:
     return table.get(key) if table else None
+
+
+def sweep_span(chain: ChainSpec, evm: EvmClient) -> int:
+    """Blocks per Transfer sweep window: the chain's measured span, never below the node's."""
+    return max(evm.max_log_span, int(chain.transfer_log_span))
 
 
 def summarize_transfers(logs: list[TransferLog], wallet: str) -> dict[str, dict[str, int]]:

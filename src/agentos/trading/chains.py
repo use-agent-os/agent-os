@@ -48,6 +48,16 @@ class ChainSpec:
     block_time_s: float = 2.0
     # Largest eth_getLogs span the public RPC tolerates per call.
     max_log_span: int = 2000
+    # Span for the wallet sync's Transfer sweeps (a catch-up after downtime,
+    # a first sweep, a rebuild): one wallet's topic, no address, so the answer
+    # grows with that wallet's activity, not the chain's. Measured on dRPC
+    # 2026-11-22: Base took 2k, 10k, 100k (~1 s) and 1M blocks; Robinhood
+    # Chain took 40k and refused 50k with an HTTP 500 ("200000 addresses ×
+    # blocks"), and its public node caps the same query at 30k with a
+    # JSON-RPC error. Ceilings within what was measured, not promises:
+    # ``transfer_logs`` halves a refused window. An unmeasured chain sweeps
+    # at ``max_log_span``.
+    transfer_log_span: int = 2000
     # Span for a *sparse* topic filter (one wallet's Approval logs), where
     # the answer is a handful of rows however wide the window. Measured on
     # dRPC 2026-09-20: Base takes 100k blocks in ~7 s and refuses 1M with an
@@ -105,6 +115,10 @@ BASE = ChainSpec(
     block_time_s=2.0,
     max_log_span=2000,
     approval_log_span=100_000,
+    # The widest span with a measured answer time (~1 s, a tenth of the
+    # client's timeout). 1M was accepted too, but how long it takes, and how
+    # big the answer gets for a busy wallet, was not measured.
+    transfer_log_span=100_000,
     aliases=("base-mainnet", "8453"),
     blockscout_url="https://base.blockscout.com",
     multicall3=MULTICALL3,
@@ -128,6 +142,9 @@ ROBINHOOD = ChainSpec(
     block_time_s=0.1,
     max_log_span=2000,
     approval_log_span=40_000,
+    # The public node's cap, which the paid endpoint's 40k also covers: no
+    # window is refused on either, so none costs a wasted call and a halving.
+    transfer_log_span=30_000,
     aliases=("robinhood-chain", "hood", "4663"),
     # robinhoodchain.blockscout.com answers every non-browser request with a
     # Cloudflare challenge (403, checked 2026-09-15, any User-Agent), so there
