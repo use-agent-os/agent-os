@@ -1050,6 +1050,31 @@ class TurnRecovery:
             reason=recovery.reason,
             attempts=recovery.attempts,
         )
+        await self._settle_held_wakes(recovery)
+
+    async def _settle_held_wakes(self, recovery: _Recovery) -> None:
+        """Wake the parent for children whose wake waited on this recovery.
+
+        While the recovery was pending or running, the restart announce held
+        back the parent's wake for its abandoned children (the resumed turn
+        carries on with them). Without a resumed turn, nothing else tells it.
+        """
+        from agentos.gateway.subagent_announce import settle_wakes_held_for_recovery
+
+        try:
+            await settle_wakes_held_for_recovery(
+                recovery.session_key,
+                resumed=recovery.state == "resumed",
+                session_manager=self._session_manager,
+                task_runtime=self._task_runtime,
+            )
+        except Exception:  # noqa: BLE001 - bookkeeping is best-effort
+            log.warning(
+                "turn_recovery.held_wakes_failed",
+                session_key=recovery.session_key,
+                run_id=recovery.origin_task_id,
+                exc_info=True,
+            )
 
     async def _persist(self, recovery: _Recovery) -> None:
         update = getattr(self._storage, "update_agent_task", None)

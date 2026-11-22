@@ -463,3 +463,53 @@ async def test_a_cancelled_sender_leaves_the_wake_to_the_worker(storage: Session
     assert await SubagentWakeWorker(outbox, deliver).run_once() == 1
     assert len(runtime.sent) == 1
     assert (await _row(storage))["state"] == "delivered"
+
+
+async def test_only_a_wake_held_for_recovery_is_reopened(storage: SessionStorage) -> None:
+    outbox = _install(storage, _Clock())
+    runtime = _Runtime()
+    await outbox.drop(parent_session_key=PARENT, parent_task_id=TASK, reason="parent_aborted")
+    await outbox.reopen(parent_session_key=PARENT, parent_task_id=TASK, reason="parent_recovering")
+    assert (await _row(storage))["state"] == "dropped"
+    await _send_parent_wake(PARENT, TASK, PAYLOADS, task_runtime=runtime)
+    assert runtime.sent == []  # an aborted parent is still never woken
+
+    other = "task-held"
+    await outbox.drop(parent_session_key=PARENT, parent_task_id=other, reason="parent_recovering")
+    held = await outbox.dropped(parent_session_key=PARENT, reason="parent_recovering")
+    assert [row["parent_task_id"] for row in held] == [other]
+    await outbox.reopen(parent_session_key=PARENT, parent_task_id=other, reason="parent_recovering")
+    row = await storage.get_subagent_wake(group_key(PARENT, other))
+    assert row is not None and (row["state"], row["reason"]) == ("awaiting", None)
+    # Back to awaiting, the group wakes its parent once.
+    payloads = [{**PAYLOADS[0], "parent_task_id": other}]
+    await _send_parent_wake(PARENT, other, payloads, task_runtime=runtime)
+    await _send_parent_wake(PARENT, other, payloads, task_runtime=runtime)
+    assert len(runtime.sent) == 1
+
+
+@pytest.mark.parametrize("resumed", [False, True])
+async def test_a_recovery_settling_while_a_hold_is_written(
+    storage: SessionStorage, resumed: bool
+) -> None:
+    # The recovery ends between the announce deciding to hold the wake and
+    # the hold reaching the outbox. Settled without a resumed turn, the wake
+    # must not stay dropped; after a resumed turn, it must.
+    outbox = _install(storage, _Clock())
+    write_drop = outbox.drop
+
+    async def drop_then_settle(**kwargs: Any) -> None:
+        await write_drop(**kwargs)
+        await subagent_announce.settle_wakes_held_for_recovery(
+            PARENT, resumed=resumed, session_manager=None, task_runtime=_Runtime()
+        )
+
+    outbox.drop = drop_then_settle  # type: ignore[method-assign]
+    held = await subagent_announce._drop_wake_for_recovering_parent(PARENT, TASK)
+
+    row = await _row(storage)
+    if resumed:
+        assert held is True and row["state"] == "dropped"
+    else:
+        # Not held: the caller wakes the parent as for any closed group.
+        assert held is False and row["state"] == "awaiting"

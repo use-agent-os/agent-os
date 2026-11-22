@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Gateway: a parent session whose interrupted turn restart recovery could
+  not resume (tombstoned after its attempts, or the resume was cancelled by
+  your message) is now woken once for the subagents the restart abandoned.
+  Before, their wake was held back for the resumed turn and then dropped for
+  good, so nothing ever told the parent what happened to those children.
+
 ## [2026.11.23] - 2026-11-23
 
 ### Changed

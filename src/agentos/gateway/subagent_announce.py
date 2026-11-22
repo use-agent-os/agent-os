@@ -60,6 +60,9 @@ class SpawnGroupTracker:
     def __init__(self) -> None:
         self._closed: set[tuple[str, str]] = set()
         self._woken: set[tuple[str, str]] = set()
+        # Groups whose wake is held back while restart recovery resumes the
+        # parent's interrupted turn (``_drop_wake_for_recovering_parent``).
+        self._held: set[tuple[str, str]] = set()
 
     def mark_closed(self, parent_session_key: str, parent_task_id: str) -> None:
         self._closed.add((parent_session_key, parent_task_id))
@@ -76,13 +79,26 @@ class SpawnGroupTracker:
     def discard_woken(self, group_key: tuple[str, str]) -> None:
         self._woken.discard(group_key)
 
+    def hold(self, parent_session_key: str, parent_task_id: str) -> None:
+        self._held.add((parent_session_key, parent_task_id))
+
+    def is_held(self, parent_session_key: str, parent_task_id: str) -> bool:
+        return (parent_session_key, parent_task_id) in self._held
+
+    def take_held(self, parent_session_key: str) -> list[str]:
+        """Forget the parent's held groups; return their parent task ids."""
+        taken = sorted(task_id for key, task_id in self._held if key == parent_session_key)
+        for task_id in taken:
+            self._held.discard((parent_session_key, task_id))
+        return taken
+
     def evict(self, parent_session_key: str) -> int:
         """Drop all groups associated with ``parent_session_key``.
 
-        Returns the count of removed entries (closed + woken).
+        Returns the count of removed entries (closed + woken + held).
         """
         removed = 0
-        for bucket in (self._closed, self._woken):
+        for bucket in (self._closed, self._woken, self._held):
             for entry in [e for e in bucket if e[0] == parent_session_key]:
                 bucket.discard(entry)
                 removed += 1
@@ -230,8 +246,10 @@ async def announce_restart_abandoned_children(
 
     A parent whose own interrupted turn *turn_recovery* is resuming (pending
     or running) is not woken as well: its children are still recorded on it,
-    and the resumed turn reads them. Two turns -- "continue" and "your
-    children were abandoned" -- would otherwise run on it, in either order.
+    and the resumed turn carries on with them. Two turns -- "continue" and
+    "your children were abandoned" -- would otherwise run on it, in either
+    order. The wake is only held back: should the recovery end without a
+    resumed turn, :func:`settle_wakes_held_for_recovery` sends it after all.
     Run this after the recovery scan.
 
     Returns how many children were announced.
@@ -258,9 +276,10 @@ async def announce_restart_abandoned_children(
             continue
         parent_task_id = metadata.get("parent_task_id")
         parent_task_id = parent_task_id if isinstance(parent_task_id, str) else None
+        held = False
         if _parent_recovering(turn_recovery, parent_session_key):
-            await _drop_wake_for_recovering_parent(parent_session_key, parent_task_id)
-        elif parent_task_id:
+            held = await _drop_wake_for_recovering_parent(parent_session_key, parent_task_id)
+        if not held and parent_task_id:
             _tracker.mark_closed(parent_session_key, parent_task_id)
         event = SubagentCompletionEvent(
             parent_session_key=parent_session_key,
@@ -300,21 +319,122 @@ def _parent_recovering(turn_recovery: Any | None, parent_session_key: str) -> bo
         return False
 
 
+#: Outbox ``reason`` of a group wake held back while restart recovery resumes
+#: the parent's interrupted turn (see :func:`settle_wakes_held_for_recovery`).
+PARENT_RECOVERING_REASON = "parent_recovering"
+
+
 async def _drop_wake_for_recovering_parent(
     parent_session_key: str, parent_task_id: str | None
-) -> None:
+) -> bool:
+    """Hold the group's wake back while the parent's turn is resumed.
+
+    Returns whether it is held: ``False`` without a group, or when the
+    recovery settled while the hold was being written (it then found nothing
+    to release), so the caller wakes the parent as usual.
+    """
     log.info(
         "subagent_announce.wake_skipped_for_recovery",
         parent_session_key=parent_session_key,
         parent_task_id=parent_task_id,
     )
+    if not parent_task_id:
+        return False
+    _tracker.hold(parent_session_key, parent_task_id)
     outbox = get_wake_outbox()
-    if outbox is not None and parent_task_id:
+    if outbox is not None:
         await outbox.drop(
             parent_session_key=parent_session_key,
             parent_task_id=parent_task_id,
-            reason="parent_recovering",
+            reason=PARENT_RECOVERING_REASON,
         )
+    if _tracker.is_held(parent_session_key, parent_task_id):
+        return True
+    if outbox is not None:
+        await outbox.reopen(
+            parent_session_key=parent_session_key,
+            parent_task_id=parent_task_id,
+            reason=PARENT_RECOVERING_REASON,
+        )
+    return False
+
+
+async def settle_wakes_held_for_recovery(
+    parent_session_key: str,
+    *,
+    resumed: bool,
+    session_manager: Any,
+    task_runtime: Any,
+) -> int:
+    """Settle the wakes held back while *parent_session_key*'s turn was recovered.
+
+    Restart recovery calls this when it is done with the parent's interrupted
+    turn. While it was resuming the turn, the restart announce held back the
+    wake for the parent's abandoned children (the resumed turn carries on with
+    them). When a resumed turn completed (*resumed*), they stay dropped, as
+    before. Otherwise -- every attempt failed and the run was tombstoned, a
+    user's message cancelled the resume, a later boot closed or reported it --
+    no turn ever told the parent about those children, so each held group goes
+    back to ``awaiting`` and wakes the parent once, like any closed group whose
+    children have ended (or when its last child ends).
+
+    The outbox rows make this work across restarts: a wake held on one boot
+    is sent when a later boot settles the recovery. Returns how many wakes
+    were sent.
+    """
+
+    if resumed:
+        # The holds stay: a hold still being written meanwhile must stay one.
+        return 0
+    held = _tracker.take_held(parent_session_key)
+    outbox = get_wake_outbox()
+    if outbox is not None:
+        rows = await outbox.dropped(
+            parent_session_key=parent_session_key, reason=PARENT_RECOVERING_REASON
+        )
+        held += [
+            str(row["parent_task_id"])
+            for row in rows
+            if row.get("parent_task_id") and str(row["parent_task_id"]) not in held
+        ]
+    woken = 0
+    for parent_task_id in held:
+        try:
+            if outbox is not None:
+                await outbox.reopen(
+                    parent_session_key=parent_session_key,
+                    parent_task_id=parent_task_id,
+                    reason=PARENT_RECOVERING_REASON,
+                )
+            _tracker.mark_closed(parent_session_key, parent_task_id)
+            payloads = await _build_terminal_group_payloads(
+                parent_session_key=parent_session_key,
+                parent_task_id=parent_task_id,
+                session_manager=session_manager,
+            )
+            if not payloads:
+                continue  # a child still runs: its announce wakes the parent
+            wake = await _prepare_parent_wake(parent_session_key, parent_task_id, payloads)
+            if wake is None:
+                continue
+            await _dispatch_parent_wake(
+                wake, task_runtime=task_runtime, completion_manager=_background_completion_manager
+            )
+            woken += 1
+        except Exception:  # noqa: BLE001 - one group must not stop the others
+            log.warning(
+                "subagent_announce.held_wake_failed",
+                parent_session_key=parent_session_key,
+                parent_task_id=parent_task_id,
+                exc_info=True,
+            )
+    if woken:
+        log.info(
+            "subagent_announce.held_wakes_sent",
+            parent_session_key=parent_session_key,
+            count=woken,
+        )
+    return woken
 
 
 async def reconcile_awaiting_wakes(
@@ -352,8 +472,9 @@ async def reconcile_awaiting_wakes(
             )
             if not payloads:
                 continue  # children still running, or none recorded
-            if _parent_recovering(turn_recovery, parent_session_key):
+            if _parent_recovering(turn_recovery, parent_session_key) and (
                 await _drop_wake_for_recovering_parent(parent_session_key, parent_task_id)
+            ):
                 continue
             _tracker.mark_closed(parent_session_key, parent_task_id)
             wake = await _prepare_parent_wake(parent_session_key, parent_task_id, payloads)
