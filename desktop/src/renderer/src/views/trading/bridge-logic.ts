@@ -36,7 +36,7 @@ export function otherChain(chainId: ChainId): ChainId {
   return chainId === 8453 ? 4663 : 8453
 }
 
-/** Relay's fill estimate in the fewest words: "~2s", "~3 min"; null when it gave none. */
+/** The bridge's fill estimate in the fewest words: "~2s", "~3 min"; null when it gave none. */
 export function formatEta(seconds: number | null | undefined): string | null {
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return null
   if (seconds < 90) return `~${Math.max(1, Math.round(seconds))}s`

@@ -2630,17 +2630,19 @@ class TradingConfig(BaseSettings):
     )
 
     enabled: bool = True
-    # Where the aggregator (the AgentOS DEX, the swap route) is served. Only
-    # change this to point at another deployment of the same API.
+    # Where the aggregator (the AgentOS DEX: the swap route and the bridge) is
+    # served. Only change this to point at another deployment of the same API.
     aggregator_base_url: str = "https://agg.useagentos.dev"
     # Extra contracts an aggregator quote may name as the approval spender
-    # (and send the swap to), on top of the built-in pins: the AgentOS Router
-    # and 0x's AllowanceHolder. For when the gateway moves to a new contract
+    # (and send the swap or the bridge call to), on top of the built-in pins:
+    # the AgentOS Router, 0x's AllowanceHolder and the AgentOS bridge
+    # contract. For when the gateway moves to a new contract
     # before this build knows it. Each must be an address you have verified;
     # one the wallet approves can move up to the approved amount.
     aggregator_trusted_spenders: list[str] = Field(default_factory=list)
-    # Where Relay (the Base ⇄ Robinhood Chain bridge) is served; public and
-    # keyless. Only change this to point at another deployment of its API.
+    # Unused since the bridge moved behind the AgentOS DEX (it is asked at
+    # aggregator_base_url and calls Relay or Across itself). Still accepted,
+    # so a config file that sets it keeps loading.
     relay_base_url: str = "https://api.relay.link"
     # Chain id (as a string, TOML keys are strings) -> JSON-RPC URL override.
     # When a chain has no entry, RPC_BASE_URL / RPC_ROBINHOOD_URL are tried
@@ -2663,8 +2665,8 @@ class TradingConfig(BaseSettings):
     @field_validator("aggregator_base_url", "relay_base_url")
     @classmethod
     def _calldata_url_must_be_https(cls, value: str, info: ValidationInfo) -> str:
-        """The aggregator and Relay hand back calldata the wallet signs: they
-        must be fetched over TLS. Plain ``http`` is allowed only for a loopback
+        """The aggregator hands back calldata the wallet signs: it must be
+        fetched over TLS. Plain ``http`` is allowed only for a loopback
         host (a local mock or a dev deployment on this machine)."""
         from urllib.parse import urlsplit
 

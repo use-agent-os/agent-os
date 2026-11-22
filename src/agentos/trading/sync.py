@@ -52,6 +52,7 @@ from agentos.trading.evm import EvmClient, TransferLog
 from agentos.trading.ledger import OPENING_NOTE, Ledger
 from agentos.trading.pnl import per_raw, sell_fifo, to_human
 from agentos.trading.prices import PriceService, TokenMeta
+from agentos.trading.providers import PROVIDER_LABELS
 from agentos.trading.vault import WalletRecord
 
 log = structlog.get_logger(__name__)
@@ -414,7 +415,7 @@ class WalletSyncer:
         foreign = [t for t in logs if t.tx_hash not in own_tx]
         groups = await self._group_transfers(chain, address, foreign)
         swaps = [o for o in orders if _order_kind(o) == "swap"]
-        # A bridge's origin side is a send to the Relay solver; its arrival
+        # A bridge's origin side is a send to the bridge contract; its arrival
         # on the other chain is that chain's own deposit (docs/bridge.md).
         sends = [o for o in orders if _order_kind(o) in ("send", "bridge")]
         revokes = [o for o in orders if _order_kind(o) == "revoke"]
@@ -1402,7 +1403,8 @@ def _withdraw_note(order: dict[str, Any], recipient: str) -> str:
     if _order_kind(order) == "bridge":
         dest = bridge_destination_chain_id(order)
         name = CHAINS[dest].name if dest in CHAINS else "the other chain"
-        return f"bridged to {name} (Relay)"
+        label = PROVIDER_LABELS.get(str(order.get("provider") or "relay"), "Relay")
+        return f"bridged to {name} ({label})"
     return f"sent to {checksum_address(recipient)}"
 
 

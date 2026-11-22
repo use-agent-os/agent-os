@@ -22,9 +22,9 @@ from tests.test_trading.fakes import (
     WETH,
     FakeAggregator,
     FakeChain,
+    FakeDexBridge,
     FakeIndexer,
     FakePrices,
-    FakeRelay,
     fake_sign_tx,
     make_transport,
 )
@@ -134,8 +134,8 @@ def fake_indexer() -> FakeIndexer:
 
 
 @pytest.fixture
-def fake_relay() -> FakeRelay:
-    return FakeRelay()
+def fake_bridge() -> FakeDexBridge:
+    return FakeDexBridge()
 
 
 @pytest.fixture
@@ -145,7 +145,7 @@ def transport(
     fake_aggregator: FakeAggregator,
     fake_prices: FakePrices,
     fake_indexer: FakeIndexer,
-    fake_relay: FakeRelay,
+    fake_bridge: FakeDexBridge,
 ) -> httpx.MockTransport:
     return make_transport(
         chains={
@@ -155,7 +155,7 @@ def transport(
         aggregator=fake_aggregator,
         prices=fake_prices,
         indexer=fake_indexer,
-        relay=fake_relay,
+        bridge=fake_bridge,
     )
 
 

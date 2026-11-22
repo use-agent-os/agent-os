@@ -1,7 +1,7 @@
 """``trading.bridge.quote|create|status|routes``: an agent may quote and create, never approve.
 
-Runs through the real dispatcher and service with Relay answered from the
-recorded quotes (``tests/test_trading/fakes.py``, ``FakeRelay``).
+Runs through the real dispatcher and service with AgentOS DEX's bridge
+endpoints faked (``tests/test_trading/fakes.py``, ``FakeDexBridge``).
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from typing import Any
 from agentos.gateway.rpc import RpcContext, get_dispatcher
 from tests.test_gateway.test_rpc_trading import _agent_ctx, call, ctx, stack  # noqa: F401
 from tests.test_trading.conftest import PASSWORD
-from tests.test_trading.fakes import RELAY_SOLVER, USDC, USDG
+from tests.test_trading.fakes import AGENTOS_BRIDGE, BRIDGE_NATIVE, USDC, USDG
 
 METHODS = (
     "trading.bridge.quote",
@@ -61,8 +61,12 @@ async def test_quote_takes_chain_names_and_one_size(
     quote = res.payload["quote"]
     assert quote["tokenOut"]["symbol"] == "USDG" and quote["amountIn"] == "25"
     assert quote["guard"]["decision"] == "allow"
-    sent = stack["relay"].calls[-1]["body"]
-    assert sent["originCurrency"] == USDC and sent["destinationCurrency"] == USDG
+    assert quote["provider"] == "relay" and quote["refundGuaranteed"] is True
+    sent = stack["bridge"].calls[-1]["params"]
+    assert sent["sellToken"] == USDC and sent["buyToken"] == USDG
+    assert sent["originChain"] == "8453" and sent["destinationChain"] == "4663"
+    # A preview asks for the price only: no taker, so nothing to sign or track.
+    assert "taker" not in sent and quote["requestId"] is None
 
     by_usd = await call(
         "trading.bridge.quote",
@@ -71,6 +75,7 @@ async def test_quote_takes_chain_names_and_one_size(
     )
     assert by_usd.ok, by_usd.error
     assert by_usd.payload["quote"]["amountIn"] == "0.01"
+    assert stack["bridge"].calls[-1]["params"]["sellToken"] == BRIDGE_NATIVE
 
     by_pct = await call(
         "trading.bridge.quote",
@@ -144,7 +149,10 @@ async def test_agent_creates_but_only_the_operator_approves(
     assert order["kind"] == "bridge" and order["status"] == "awaiting_approval"
     assert order["initiator"] == "agent" and order["sessionKey"] == "agent:trading:desk:1"
     assert order["clientOrderId"] == "br-1" and order["note"] == "user: bridge"
-    assert order["recipient"].lower() == RELAY_SOLVER
+    assert order["recipient"].lower() == AGENTOS_BRIDGE
+    assert order["recipientLabel"] == "AgentOS Bridge"
+    # Creating asks for the transaction too, so it is checked before it parks.
+    assert stack["bridge"].calls[-1]["params"]["taker"] == order["wallet"].lower()
     assert order["bridge"]["destinationChainId"] == 4663 and order["bridge"]["requestId"]
 
     denied = await call("trading.orders.approve", {"orderId": order["orderId"]}, agent)

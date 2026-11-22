@@ -32,7 +32,7 @@ root release README with task-oriented guides.
   Contracts: [`lp-cards.md`](lp-cards.md), [`lp-write.md`](lp-write.md),
   [`lp-book.md`](lp-book.md) (every LP position across Uniswap, Aero and
   Aerodrome),
-  [`bridge.md`](bridge.md) (Base ⇄ Robinhood Chain through Relay)
+  [`bridge.md`](bridge.md) (Base ⇄ Robinhood Chain through the AgentOS DEX)
   (Uniswap V4 cards and writes), [`dca.md`](dca.md) (DCA mandates).
 - [`triggers.md`](triggers.md) - price triggers: conditional orders
   (`below`, `above`, `trail`) the trading engine watches and fires itself.

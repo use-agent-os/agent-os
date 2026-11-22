@@ -178,15 +178,37 @@ async def test_the_signing_step_refuses_while_trading_is_off(world: World, tmp_p
     assert all(r["status"] != "filled" for r in world.runs(mandate_id))
 
 
-def test_relay_client_follows_the_live_base_url(world: World) -> None:
-    first = world.service._relay
-    assert world.service._relay is first
+def test_bridge_client_follows_the_live_aggregator_base_url(world: World) -> None:
+    first = world.service._bridge
+    assert world.service._bridge is first
+    assert first.base_url == "https://agg.useagentos.dev"
     _running(world).trading = _running(world).trading.model_copy(
+        update={"aggregator_base_url": "https://dex.example.test"}
+    )
+    second = world.service._bridge
+    assert second is not first
+    assert second.base_url == "https://dex.example.test"
+
+
+def test_a_config_that_still_sets_relay_base_url_keeps_loading(world: World) -> None:
+    # The key is unused since the bridge moved behind AgentOS DEX, but a file
+    # that carries it must not stop the gateway from booting.
+    updated = _running(world).trading.model_copy(
         update={"relay_base_url": "https://relay.example.test"}
     )
-    second = world.service._relay
-    assert second is not first
-    assert second.base_url == "https://relay.example.test"
+    _running(world).trading = updated
+    assert world.service._bridge.base_url == "https://agg.useagentos.dev"
+
+
+def test_trusted_bridges_add_the_operators_spenders(world: World) -> None:
+    from agentos.trading.bridge import AGENTOS_BRIDGE
+
+    assert world.service._trusted_bridges() == frozenset({AGENTOS_BRIDGE})
+    extra = "0x" + "ab" * 20
+    _running(world).trading = _running(world).trading.model_copy(
+        update={"aggregator_trusted_spenders": [extra]}
+    )
+    assert world.service._trusted_bridges() == frozenset({AGENTOS_BRIDGE, extra})
 
 
 def test_clock_constants_are_shared() -> None:

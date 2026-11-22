@@ -96,7 +96,7 @@ export function quote(extra: Partial<Quote> = {}): Quote {
 
 /**
  * A bridge order as the engine files it: 0.01 ETH leaving Base for
- * Robinhood Chain through Relay, parked for the user. `chainId`/`tokenIn`
+ * Robinhood Chain through the AgentOS DEX (Relay), parked for the user. `chainId`/`tokenIn`
  * are the origin, `tokenOut` the destination token.
  */
 export function bridgeOrder(extra: Partial<Order> = {}): Order {
@@ -113,8 +113,8 @@ export function bridgeOrder(extra: Partial<Order> = {}): Order {
     valueUsd: 25,
     priceImpactPct: null,
     gasUsd: 0.02,
-    recipient: '0xa5f565650890fba1824ee0f21ebbbf660a179934',
-    recipientLabel: 'Relay solver',
+    recipient: '0xe7b13ae215b1aa7b5f42ac0cafaffdd54441bc20',
+    recipientLabel: 'AgentOS Bridge',
     provider: 'relay',
     note: null,
     bridge: {
@@ -128,10 +128,14 @@ export function bridgeOrder(extra: Partial<Order> = {}): Order {
         explorerUrl: 'https://explorer.robinhood.com',
       },
       asset: 'ETH',
+      source: 'relay',
+      sourceLabel: 'Relay',
+      refundGuaranteed: true,
+      feeBps: 5,
       requestId: null,
       fillStatus: null,
       feesUsd: 0.12,
-      fees: { gasUsd: 0.02, relayerUsd: 0.1, appUsd: 0 },
+      fees: { gasUsd: null, relayerUsd: 0.1, appUsd: 0.02 },
       rate: '0.99',
       timeEstimateSeconds: 30,
       approvalTxHash: null,

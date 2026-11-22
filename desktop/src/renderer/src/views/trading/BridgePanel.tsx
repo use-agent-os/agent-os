@@ -1,4 +1,4 @@
-import { ArrowDownUp, ChevronDown, CircleCheck, ShieldAlert } from 'lucide-react'
+import { ArrowDownUp, ChevronDown, CircleCheck, ShieldAlert, TriangleAlert } from 'lucide-react'
 import { useMemo, useState, type CSSProperties } from 'react'
 import { t, type MessageKey } from '~/i18n'
 import { useNow } from '~/lib/use-now'
@@ -37,7 +37,7 @@ import {
 
 /**
  * The ticket, bridging: the same asset from one chain to the other through
- * Relay (docs/bridge.md). It is the swap ticket's twin on purpose: one
+ * the AgentOS DEX (docs/bridge.md). It is the swap ticket's twin on purpose: one
  * wallet, the chain it pays on in the head, two legs, a live price on the
  * button, and a confirm sheet as the only door out. What differs is what a
  * bridge is: the receive leg is never chosen (ETH lands as ETH, USDC as
@@ -110,7 +110,7 @@ export function BridgePanel({
       : false
 
   // The engine refuses to price what the wallet cannot fund, so a shortfall
-  // is said on the button rather than asked of Relay.
+  // is said on the button rather than asked of the bridge.
   const ready = Boolean(wallet) && isPositiveAmount(parsed) && unlocked && !insufficient
   const params: BridgeParams | null = ready
     ? { chainId, toChainId, token: tokenIn.address, amount: parsed as string, wallet }
@@ -319,6 +319,13 @@ export function BridgePanel({
                 <b>{eta}</b>
               </div>
             ) : null}
+          </div>
+        ) : null}
+
+        {live && fresh.refundGuaranteed === false ? (
+          <div className="trd-warn" data-tone="warn" role="status" data-testid="bridge-refund-warn">
+            <TriangleAlert className="size-3.5" strokeWidth={2} aria-hidden />
+            <span>{t('trading.bridge.refundNotGuaranteed')}</span>
           </div>
         ) : null}
 

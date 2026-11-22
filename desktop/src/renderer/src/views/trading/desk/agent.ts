@@ -14,7 +14,7 @@
 export const TRADING_AGENT_ID = 'trading'
 
 /** Bump when the spec or the files below change: the desktop rewrites them once. */
-export const TRADING_AGENT_VERSION = 28
+export const TRADING_AGENT_VERSION = 29
 
 const MANAGED_MARK = `<!-- Managed by the AgentOS desktop app (trading agent v${TRADING_AGENT_VERSION}). Edits are overwritten. -->`
 
@@ -62,7 +62,7 @@ export function tradingAgentSpec(): TradingAgentSpec {
     id: TRADING_AGENT_ID,
     name: 'Trading desk',
     description:
-      'The AgentOS desktop trading desk. Swaps, portfolio, Uniswap V4 liquidity read-outs, markets (every pool a token trades in, on every DEX), DCA mandates, price triggers, brackets (take-profit + stop-loss as one), bridges between Base and Robinhood Chain (ETH, USDC↔USDG through Relay) and missions on Base and Robinhood Chain through the wallet vault. Managed by the desktop app.',
+      'The AgentOS desktop trading desk. Swaps, portfolio, Uniswap V4 liquidity read-outs, markets (every pool a token trades in, on every DEX), DCA mandates, price triggers, brackets (take-profit + stop-loss as one), bridges between Base and Robinhood Chain (ETH, USDC↔USDG through the AgentOS DEX) and missions on Base and Robinhood Chain through the wallet vault. Managed by the desktop app.',
     tools: TRADING_AGENT_TOOLS,
   }
 }
@@ -336,7 +336,9 @@ USDC from Base to Robinhood Chain\`, \`deposit ETH into Robinhood Chain\`,
 - Quote only when the user asks for an estimate:
   \`agentos trade bridge quote --chain base --to-chain robinhood --token ETH --amount 0.01 --json\`
   (\`--usd 20\` or \`--pct 50\` size it the same way a swap does). Report
-  the expected amount, the fees and the time estimate, then wait.
+  the expected amount, the fees, the bridge it would use (\`sourceLabel\`)
+  and the time estimate, then wait. When \`refundGuaranteed\` is \`false\`,
+  say that this bridge does not promise a refund if the transfer fails.
 - The order is one line:
   \`agentos trade bridge create --chain base --to-chain robinhood --token ETH --amount 0.01 --note "user: bridge 0.01 ETH to Robinhood" --client-id bridge-eth-20260920T1015 --wait --wait-seconds 600 --json\`
   \`--chain\` is where the funds are now, \`--to-chain\` where they go,
@@ -347,9 +349,9 @@ USDC from Base to Robinhood Chain\`, \`deposit ETH into Robinhood Chain\`,
   approves it on the card. Say so in one sentence with the order id, then
   stop. Never approve it yourself and never retry it unchanged.
 - After the approval, \`--wait\` holds through the deposit on the origin
-  chain and Relay's fill on the destination: the order stays \`submitted\`
+  chain and the bridge's fill on the destination: the order stays \`submitted\`
   until the funds have arrived and only then reads \`confirmed\`. Report
-  the Relay \`bridge.requestId\`, the deposit tx (\`explorerUrl\`), the
+  the bridge used (\`bridge.sourceLabel\`), \`bridge.requestId\`, the deposit tx (\`explorerUrl\`), the
   destination tx (\`bridge.destinationExplorerUrl\`), the amount received
   (\`receivedOut\` in the destination token) and the fees (\`bridge.feesUsd\`).
 - When the wait runs out while the order is still \`submitted\`,
@@ -561,7 +563,8 @@ skill only repeats it. Do not open it or run \`--help\` to find a flag.
   \`--in\`, sized by the engine at the current price), \`--pct 50\` (share of
   the balance; \`100\` keeps gas back). Exactly one of the three.
 - Bridging (AGENTS.md, "Bridging"): the same asset to the other chain,
-  ETH or USDC↔USDG between Base and Robinhood Chain, through Relay.
+  ETH or USDC↔USDG between Base and Robinhood Chain, through the AgentOS DEX
+  (it picks Relay or Across, whichever delivers more).
   \`agentos trade bridge quote --chain base --to-chain robinhood --token ETH --amount 0.01 --json\`
   \`agentos trade bridge create --chain base --to-chain robinhood --token USDC --amount 25 --note '<the user’s words>' --client-id <id> --wait --wait-seconds 600 --json\`
   \`agentos trade bridge status <orderId|requestId> --json\`

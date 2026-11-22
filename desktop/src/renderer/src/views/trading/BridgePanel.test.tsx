@@ -37,12 +37,15 @@ function bridgeQuote(extra: Partial<BridgeQuote> = {}): BridgeQuote {
     minOut: '0.0987',
     rate: 0.997,
     feesUsd: 0.12,
-    fees: { gasUsd: 0.02, relayerUsd: 0.1, appUsd: 0 },
+    fees: { gasUsd: null, relayerUsd: 0.1, appUsd: 0.02 },
+    fee: { bps: 5, amount: '0.00005' },
     timeEstimateSeconds: 2,
-    requestId: '0xreq',
+    refundGuaranteed: true,
+    requestId: null,
     valueUsd: 250,
     fetchedAt: Date.now(),
     provider: 'relay',
+    source: 'relay',
     guard: { decision: 'allow', spentTodayUsd: 0, dailyCapUsd: 1000, thresholdUsd: 100 },
     ...extra,
   }
@@ -169,7 +172,7 @@ describe('BridgePanel', () => {
     expect(amountInput()).toHaveValue('0.0997')
   })
 
-  it('says a shortfall on the button and never asks Relay to price it', async () => {
+  it('says a shortfall on the button and never asks the bridge to price it', async () => {
     mount()
     await waitFor(() => expect(screen.getByText(/Balance 1/)).toBeInTheDocument())
     fireEvent.change(amountInput(), { target: { value: '2' } })
@@ -193,15 +196,44 @@ describe('BridgePanel', () => {
     expect(calls('trading.bridge.quote')).toHaveLength(0)
   })
 
-  it('shows why Relay would not price it', async () => {
+  it('shows why the bridge would not price it', async () => {
     rpcCall.mockImplementation(async (method: string) => {
-      if (method === 'trading.bridge.quote') throw new Error('Relay unreachable: timeout')
+      if (method === 'trading.bridge.quote') throw new Error('AgentOS DEX unreachable: timeout')
       return {}
     })
     mount()
     fireEvent.change(amountInput(), { target: { value: '0.1' } })
-    expect(await screen.findByRole('alert')).toHaveTextContent('Relay unreachable: timeout')
+    expect(await screen.findByRole('alert')).toHaveTextContent('AgentOS DEX unreachable: timeout')
     expect(screen.getByTestId('bridge-review')).toBeDisabled()
+  })
+
+  it('names the bridge the AgentOS DEX chose, and says when it promises no refund', async () => {
+    rpcCall.mockImplementation(async (method: string) => {
+      if (method === 'wallet.balances') {
+        return { balances: [balance(ETH, '1', 2500)], updatedAt: Date.now() }
+      }
+      if (method === 'trading.bridge.quote') {
+        return {
+          quote: bridgeQuote({ provider: 'across', source: 'across', refundGuaranteed: false }),
+        }
+      }
+      return {}
+    })
+    mount()
+    fireEvent.change(amountInput(), { target: { value: '0.1' } })
+    await waitFor(() => expect(screen.getByTestId('bridge-facts')).toHaveTextContent('via Across'))
+    expect(screen.getByTestId('bridge-refund-warn')).toHaveTextContent(
+      'does not guarantee a refund',
+    )
+    fireEvent.click(screen.getByTestId('bridge-review'))
+    expect(screen.getByTestId('confirm-refund-warn')).toBeInTheDocument()
+  })
+
+  it('a bridge that guarantees the refund carries no warning', async () => {
+    mount()
+    fireEvent.change(amountInput(), { target: { value: '0.1' } })
+    await waitFor(() => expect(screen.getByTestId('bridge-facts')).toHaveTextContent('via Relay'))
+    expect(screen.queryByTestId('bridge-refund-warn')).toBeNull()
   })
 
   it('sends only from the confirm sheet, then hands the order on', async () => {

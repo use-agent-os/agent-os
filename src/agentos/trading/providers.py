@@ -28,8 +28,10 @@ PROVIDER_LABELS: dict[str, str] = {
     # Not a provider any more (removed 2026-11): the label of order rows the
     # Uniswap Trading API provider filled while it existed.
     "uniswap": "Uniswap",
-    # Not a swap provider: the bridge an order of kind ``bridge`` runs through.
+    # Not swap providers: the bridge an order of kind ``bridge`` runs through
+    # (AgentOS DEX picks one per quote, ``bridge.BRIDGE_SOURCES``).
     "relay": "Relay",
+    "across": "Across",
 }
 
 

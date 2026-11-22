@@ -273,6 +273,8 @@ export const trading = {
   'trading.bridge.route': 'Route',
   'trading.bridge.fees': 'Bridge fees',
   'trading.bridge.eta': 'Arrives in',
+  'trading.bridge.refundNotGuaranteed':
+    'This bridge does not guarantee a refund if the transfer fails once it has started.',
   'trading.bridge.cta': 'Review bridge',
   'trading.bridge.sent': 'Bridge sent',
   'trading.bridge.sent.body': 'Follow the deposit and the arrival on Orders.',

@@ -78,7 +78,7 @@ export type Initiator = 'manual' | 'agent' | 'external'
 export type OrderKind =
   'swap' | 'send' | 'revoke' | 'lp_collect' | 'lp_remove' | 'lp_add' | 'bridge'
 
-/** Where a bridge's destination fill stands, as Relay reports it (docs/bridge.md). */
+/** Where a bridge's destination fill stands, as the bridge reports it (docs/bridge.md). */
 export type BridgeFillStatus = 'waiting' | 'pending' | 'success' | 'failure' | 'refund' | 'unknown'
 
 /** The destination chain of a bridge, the same shape as the chain objects in `trade status`. */
@@ -93,8 +93,9 @@ export interface BridgeChain {
 /**
  * The `bridge` block of a `kind: "bridge"` order: the same asset moving
  * from the origin chain (the order's `chainId`/`tokenIn`) to `destinationChain`
- * through Relay. The deposit is the order's own tx; the destination tx
- * arrives when Relay reports the fill.
+ * through the AgentOS DEX, which deposits into `source` (Relay or Across).
+ * The deposit is the order's own tx; the destination tx arrives when the
+ * bridge reports the fill.
  */
 export interface BridgeInfo {
   originChainId: number
@@ -102,9 +103,17 @@ export interface BridgeInfo {
   destinationChain: BridgeChain | null
   /** The asset family crossing: ETH→ETH, or USD (USDC on Base ↔ USDG on Robinhood Chain). */
   asset: 'ETH' | 'USD' | string
+  /** The bridge the AgentOS DEX chose: `relay` or `across`. */
+  source?: string | null
+  sourceLabel?: string | null
+  /** False when the bridge does not promise a refund if the transfer fails. */
+  refundGuaranteed?: boolean | null
+  /** The AgentOS fee, in basis points of what leaves the wallet. */
+  feeBps?: number | null
   requestId: string | null
   fillStatus: BridgeFillStatus | null
   feesUsd: number | null
+  /** `relayerUsd` is what the bridge keeps, `appUsd` the AgentOS fee. */
   fees?: { gasUsd: number | null; relayerUsd: number | null; appUsd: number | null } | null
   /** Destination units per origin unit, as a decimal string; null when unknown. */
   rate?: string | number | null
@@ -114,7 +123,7 @@ export interface BridgeInfo {
   depositExplorerUrl?: string | null
   destinationTxHash?: string | null
   destinationExplorerUrl?: string | null
-  /** When the engine last asked Relay about the fill (ms). */
+  /** When the engine last asked about the fill (ms). */
   checkedAt?: number | null
 }
 
@@ -268,8 +277,8 @@ export interface Order {
   expiresAt: number | null
   /** A swap to native ETH on an L2 that delivered WETH instead names it here. */
   deliveredToken?: Token | null
-  /** The swap route, or `relay` on a bridge (not a selectable route). */
-  provider?: ProviderId | 'relay'
+  /** The swap route, or the bridge (`relay`, `across`) on a bridge order. */
+  provider?: ProviderId | 'relay' | 'across'
   /** The caller's idempotency key, when it gave one. */
   clientOrderId?: string | null
   slippagePct?: number | null
@@ -813,9 +822,21 @@ export interface Quote {
   }
 }
 
+/** One bridge's answer in a quote's comparison (`routes`). */
+export interface BridgeRouteOffer {
+  source: string
+  label: string
+  available: boolean
+  selected: boolean
+  expectedOut?: string | null
+  timeEstimateSeconds?: number | null
+  refundGuaranteed?: boolean
+  reason?: string | null
+}
+
 /**
  * `trading.bridge.quote` (docs/bridge.md): what `amountIn` of `tokenIn` on the
- * origin chain is expected to deliver on the destination, and what Relay keeps.
+ * origin chain is expected to deliver on the destination, and what it costs.
  */
 export interface BridgeQuote {
   wallet: string
@@ -827,19 +848,28 @@ export interface BridgeQuote {
   amountInRaw?: string
   expectedOut: string
   expectedOutRaw?: string
-  /** The floor the engine holds its own re-quote to before it signs. */
+  /** The least the engine lets the bridge commit to before it signs. */
   minOut: string
   minOutRaw?: string
   /** Destination units per origin unit; null when unknown. */
   rate: string | number | null
   feesUsd: number | null
+  /** `relayerUsd` is what the bridge keeps, `appUsd` the AgentOS fee. */
   fees?: { gasUsd: number | null; relayerUsd: number | null; appUsd: number | null } | null
+  /** The AgentOS fee, taken on-chain from what leaves the wallet. */
+  fee?: { bps: number; amount: string; amountRaw?: string } | null
   timeEstimateSeconds: number | null
+  /** False when the bridge does not promise a refund if the transfer fails. */
+  refundGuaranteed?: boolean | null
   requestId?: string | null
   valueUsd: number | null
-  /** When Relay answered (ms). */
+  /** When the AgentOS DEX answered (ms). */
   fetchedAt?: number
+  /** The bridge the quote is built from: `relay` or `across`. */
   provider?: string
+  source?: string
+  /** Both bridges' answers, whichever was chosen. */
+  routes?: BridgeRouteOffer[]
   guard: Quote['guard']
 }
 
@@ -876,8 +906,8 @@ export const PROVIDERS: readonly { id: ProviderId; label: string }[] = [
 
 export const DEFAULT_PROVIDER: ProviderId = 'aggregator'
 
-/** The bridge route's label; `relay` is not a swap provider. */
-const ROUTE_LABELS: Record<string, string> = { relay: 'Relay' }
+/** The bridges' labels; neither is a swap provider. */
+const ROUTE_LABELS: Record<string, string> = { relay: 'Relay', across: 'Across' }
 
 export function providerLabel(id: string | null | undefined): string {
   return PROVIDERS.find((p) => p.id === id)?.label ?? (id ? (ROUTE_LABELS[id] ?? String(id)) : '')

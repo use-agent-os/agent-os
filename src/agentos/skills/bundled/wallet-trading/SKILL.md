@@ -170,7 +170,7 @@ you only proposes (24 h).
 
 ## Bridge (Base ⇄ Robinhood)
 
-A bridge moves the **same asset to the other chain** through Relay: NOT a
+A bridge moves the **same asset to the other chain** via the AgentOS DEX: NOT a
 swap, NOT a send (no recipient). `--chain` = origin, `--to-chain` =
 destination. Only these routes exist; anything else → say only ETH and
 USDC↔USDG bridge, and stop:
@@ -183,7 +183,8 @@ USDC↔USDG bridge, and stop:
 1. Pre-flight: `status`, then the balance on the origin chain; for ETH leave
    some there for gas.
 2. `bridge quote` only when the user asks for an estimate (`quote.expectedOut`,
-   `feesUsd`, `rate`, `timeEstimateSeconds`, `requestId`).
+   `feesUsd`, `rate`, `timeEstimateSeconds`, `providerLabel`);
+   `refundGuaranteed: false` → say no refund is promised.
 3. `bridge create` → `order` (`kind: "bridge"`, `status`, `bridge.requestId`,
    `fillStatus`, `depositExplorerUrl`, `destinationExplorerUrl`, `feesUsd`).
    From you ALWAYS `awaiting_approval`: report order id, `requestId`, expected
@@ -196,7 +197,8 @@ USDC↔USDG bridge, and stop:
    hand back to the user.
 5. `failed` with a refund reason = funds returned on the origin chain; say so.
    Errors: `trading.bridge.unsupported_route` (exit 2, `details.supportedRoutes`),
-   `trading.bridge.provider` (Relay down, exit 1: retry once),
+   `trading.bridge.no_route` (exit 2: amount too small),
+   `trading.bridge.provider` (bridge down, exit 1: retry once),
    `trading.insufficient_balance`, `trading.unpriced`, `trading.price_moved`.
 
 ## Don'ts

@@ -865,7 +865,7 @@ describe('approval facts · a bridge', () => {
     expect(by('send').value).toBe('0.01 ETH')
     expect(by('receive').value).toBe('≈ 0.0099 ETH')
     expect(by('bridgeFees').value).toBe('$0.12')
-    expect(by('bridgeFees').full).toBe('gas $0.02 · relayer $0.10')
+    expect(by('bridgeFees').full).toBe('bridge $0.10 · AgentOS $0.02')
     expect(facts.some((f) => f.key === 'to')).toBe(false)
     expect(facts.some((f) => f.wide)).toBe(false)
   })

@@ -1,0 +1,69 @@
+{
+    "originChainId": 8453,
+    "destinationChainId": 4663,
+    "sellToken": {
+        "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+        "symbol": "USDC",
+        "decimals": 6
+    },
+    "buyToken": {
+        "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "symbol": "USDG",
+        "decimals": 6
+    },
+    "sellAmount": "25000000",
+    "fee": {
+        "bps": 5,
+        "amount": "12500"
+    },
+    "netAmount": "24987500",
+    "source": "relay",
+    "buyAmount": "24954482",
+    "minBuyAmount": "24455392",
+    "estimatedTimeSeconds": 1,
+    "refund": {
+        "address": "0x7a3f5bc1d2e4968a0b1c2d3e4f5061728394a5b6",
+        "guaranteed": true
+    },
+    "expiresAt": 1795364640,
+    "orderId": "0x430590d4f576d33449d3c708417ae1a7536b1fe6ae6f1722b1b2d20eea301cb3",
+    "trackingId": "0x179536404123e65975ae8c4e5c22877bfeaebfa62477f2b29e576f7f6e010b5f",
+    "allowanceTarget": "0xe7b13ae215b1aa7b5f42ac0cafaffdd54441bc20",
+    "issues": {
+        "allowance": {
+            "actual": "0",
+            "spender": "0xe7b13ae215b1aa7b5f42ac0cafaffdd54441bc20"
+        },
+        "balance": {
+            "actual": "0",
+            "expected": "25000000"
+        }
+    },
+    "transaction": {
+        "chainId": 8453,
+        "to": "0xe7b13ae215b1aa7b5f42ac0cafaffdd54441bc20",
+        "data": "0xea91bd0c72656c6179000000000000000000000000000000000000000000000000000000000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda0291300000000000000000000000000000000000000000000000000000000017d784000000000000000000000000000000000000000000000000000000000017d476c430590d4f576d33449d3c708417ae1a7536b1fe6ae6f1722b1b2d20eea301cb300000000000000000000000000000000000000000000000000000000000012370000000000000000000000007a3f5bc1d2e4968a0b1c2d3e4f5061728394a5b6000000000000000000000000000000000000000000000000000000006b031720",
+        "value": "0",
+        "gas": null
+    },
+    "routes": [
+        {
+            "source": "relay",
+            "available": true,
+            "buyAmount": "24954482",
+            "minBuyAmount": "24455392",
+            "estimatedTimeSeconds": 1,
+            "refundGuaranteed": true,
+            "selected": true
+        },
+        {
+            "source": "across",
+            "available": true,
+            "buyAmount": "24949592",
+            "minBuyAmount": "24179987",
+            "estimatedTimeSeconds": 5,
+            "refundGuaranteed": false,
+            "selected": false
+        }
+    ]
+}

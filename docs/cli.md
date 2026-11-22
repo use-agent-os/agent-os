@@ -1167,9 +1167,9 @@ agentos trade send --chain base --token ETH --to <a> --to <b> --usd 5        # m
 agentos trade send --chain base --token USDC --to <a>=10 --to <b>=20 --file recipients.txt   # ADDR=AMOUNT per --to; file lines 'ADDR' or 'ADDR,AMOUNT'
 agentos trade allowances [--chain base|robinhood] [--wallet <addr>] [--full] [--wait/--no-wait] [--wait-seconds 1..3600]   # live ERC-20 allowances, spender labels, exposure; every listed amount is read live; the Approval logs that find the pairs are re-read at most once a minute per wallet and chain (--full rescans from the wallet's start at once); --wait polls until the scan has caught up
 agentos trade revoke --chain base --token <addr> --spender <addr> [--wallet <addr>] [--note <text>] [--wait] [--wait-seconds 1..900]   # approve(spender, 0)
-agentos trade bridge quote  --chain base --to-chain robinhood --token ETH (--amount 0.01 | --usd 20 | --pct 50) [--wallet <addr>] [--json]   # Relay: what arrives on the other chain, fees, whether it would wait
+agentos trade bridge quote  --chain base --to-chain robinhood --token ETH (--amount 0.01 | --usd 20 | --pct 50) [--wallet <addr>] [--json]   # AgentOS DEX bridge (Relay or Across, whichever delivers more): what arrives on the other chain, fees, the bridge chosen, whether it would wait
 agentos trade bridge create --chain base --to-chain robinhood --token USDC --amount 25 [--wallet <addr>] [--note <text>] [--client-id <id>] [--wait] [--wait-seconds 1..900] [--as-agent] [--json]   # ETH↔ETH or USDC↔USDG, both directions; from an agent it always waits for approval; confirmed = funds landed on the destination
-agentos trade bridge status <orderId|requestId> [--json]   # the deposit, Relay's fill on the other chain, the final status
+agentos trade bridge status <orderId|requestId> [--json]   # the deposit, the bridge's fill on the other chain, the final status
 agentos trade decode --chain base <txhash> / --data <0x…> [--to <addr>]   # what a transaction called and what moved
 agentos trade network [--fresh]             # head block, block age, gas, RPC latency and health per chain
 agentos trade lp pool <token|TOKEN/QUOTE|poolId> [--chain base|robinhood] [--quote <token>] [--fee <tier>] [--json] [--no-card]   # Uniswap V4: a token's deepest pool (or the one on --fee) — reserves, TVL, mcap, launcher, LP lock, biggest ranges
@@ -1323,9 +1323,11 @@ approval — there is no threshold under which the agent sends alone — while
 the daily cap still counts the batch's total; a send typed by a person runs
 at once. Each leg is booked as a `withdraw` entry under its order.
 `trade bridge` moves ETH or the USD stable (USDC on Base, USDG on Robinhood Chain)
-to the other chain through Relay: it is judged like a send (an agent's
+to the other chain through the AgentOS DEX, which asks Relay and Across and
+quotes the one that delivers more: it is judged like a send (an agent's
 always waits for approval and counts toward the cap), the engine re-quotes
-right before signing and sends only a deposit to the pinned Relay solver,
+the same bridge right before signing and sends only a call to the pinned
+AgentOS bridge contract, decoded and checked against the order,
 the deposit is a `withdraw` on the origin chain and the fill a `deposit` on
 the destination, and the order stays `submitted` until that fill lands
 ([`bridge.md`](bridge.md)). `trade
@@ -1594,8 +1596,8 @@ every error is `{"error": …}` on stderr and writes no card.
 `uniswap`), `aggregator_base_url` (default
 `https://agg.useagentos.dev`), `aggregator_trusted_spenders` (list of 0x
 addresses, default empty: contracts an aggregator quote may name as the
-approval spender and swap target on top of the built-in AgentOS Router and
-0x AllowanceHolder; added, never replacing them; mixed case must pass its
+approval spender and swap or bridge target on top of the built-in AgentOS
+Router, 0x AllowanceHolder and AgentOS bridge contract; added, never replacing them; mixed case must pass its
 EIP-55 checksum; set it as a JSON list of the verified addresses, e.g.
 `'["0x…"]'`), `rpc_urls` (chain id → JSON-RPC URL; the wallet sync's bulk ERC-20
 balance read still tries the chain's public node first),

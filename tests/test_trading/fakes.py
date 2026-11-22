@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -710,122 +711,214 @@ class FakeIndexer:
         )
 
 
-RELAY_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "relay"
-#: The Relay solver the recorded quotes deposit to.
-RELAY_SOLVER = "0x4cd00e387622c35bddb9b4c962c136462338bc31"
+BRIDGE_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "agentos_dex_bridge"
+#: AgentOSBridge: the contract every bridge transaction is sent to.
+AGENTOS_BRIDGE = "0xe7b13ae215b1aa7b5f42ac0cafaffdd54441bc20"
+#: ``bridge(BridgeParams)``.
+SEL_BRIDGE = "0xea91bd0c"
 USDG = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
 NATIVE_ZERO = "0x0000000000000000000000000000000000000000"
+#: How AgentOS DEX names a chain's coin.
+BRIDGE_NATIVE = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+#: What the fake delivers per unit bridged (after the fee), and the share of
+#: that the bridge commits to.
+BRIDGE_RATE = 0.9985
+BRIDGE_COMMIT = 0.98
+BRIDGE_FEE_BPS = 5
+#: (chain id, token) -> (symbol, decimals, asset class), as the gateway lists them.
+BRIDGE_TOKENS: dict[tuple[int, str], tuple[str, int, str]] = {
+    (8453, BRIDGE_NATIVE): ("ETH", 18, "ETH"),
+    (4663, BRIDGE_NATIVE): ("ETH", 18, "ETH"),
+    (8453, USDC): ("USDC", 6, "USD"),
+    (4663, USDG): ("USDG", 6, "USD"),
+}
 
 
-def relay_quote_fixtures() -> dict[tuple[int, int, str], dict[str, Any]]:
-    """The recorded ``/quote/v2`` bodies, keyed by (origin, destination, origin currency)."""
-    out: dict[tuple[int, int, str], dict[str, Any]] = {}
-    for name in RELAY_FIXTURES.glob("quote_*.json"):
-        body = json.loads(name.read_text(encoding="utf-8"))
-        details = body["details"]
-        origin = int(details["currencyIn"]["currency"]["chainId"])
-        destination = int(details["currencyOut"]["currency"]["chainId"])
-        token = str(details["currencyIn"]["currency"]["address"]).lower()
-        out[(origin, destination, token)] = body
-    return out
+def bridge_fixture(name: str) -> dict[str, Any]:
+    """One recorded ``/v1/bridge/*`` body (``tests/fixtures/agentos_dex_bridge``)."""
+    return json.loads((BRIDGE_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def bridge_expected_out(amount: int, *, scale: float = 1.0) -> int:
+    """What :class:`FakeDexBridge` quotes for ``amount`` (fee off the top, then its rate)."""
+    net = amount - amount * BRIDGE_FEE_BPS // 10_000
+    return int(net * BRIDGE_RATE * scale)
+
+
+def bridge_calldata(
+    *,
+    source: str,
+    token: str,
+    amount: int,
+    net: int,
+    order_id: str,
+    destination: int,
+    recipient: str,
+    deadline: int,
+) -> str:
+    """``AgentOSBridge.bridge(BridgeParams)``: the selector and eight static words."""
+    return (
+        SEL_BRIDGE
+        + source.encode("ascii").hex().ljust(64, "0")
+        + pad_address(token)
+        + pad_uint(amount)
+        + pad_uint(net)
+        + order_id.removeprefix("0x").rjust(64, "0")
+        + pad_uint(destination)
+        + pad_address(recipient)
+        + pad_uint(deadline)
+    )
 
 
 @dataclass
-class FakeRelay:
-    """Relay's quote and status endpoints, answered from the recorded fixtures.
+class FakeDexBridge:
+    """AgentOS DEX's ``/v1/bridge/quote`` and ``/v1/bridge/status``.
 
-    A quote is the fixture for the route, re-addressed to the caller (user,
-    recipient, ``from`` on every step, the ERC-20 deposit's depositor word)
-    and re-sized to the amount asked (``currencyIn``, ``currencyOut`` by the
-    fixture's rate times ``out_scale``, the native deposit's value, the
-    approve and deposit amount words). Every quote gets a fresh request id,
-    as Relay does. Statuses are played per request id in order; the last one
-    repeats, and an unknown id is ``waiting``.
+    A quote is built the way the gateway builds one: the fee comes off the
+    top, the rest is priced at ``BRIDGE_RATE`` (times ``out_scale``), and a
+    request with a ``taker`` gets fresh order and tracking ids and the
+    ``bridge(BridgeParams)`` call for exactly that order. Statuses are played
+    per tracking id in order; the last one repeats, and an unknown id is
+    ``pending``.
     """
 
-    quotes: dict[tuple[int, int, str], dict[str, Any]] = field(default_factory=relay_quote_fixtures)
     statuses: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
-    #: One status sequence for whatever request id is asked (tests rarely know it).
+    #: One status sequence for whatever tracking id is asked (tests rarely know it).
     default_statuses: list[dict[str, Any]] = field(default_factory=list)
     calls: list[dict[str, Any]] = field(default_factory=list)
     quote_error: tuple[int, dict[str, Any]] | None = None
     status_error: tuple[int, dict[str, Any]] | None = None
     mutate_quote: Callable[[dict[str, Any]], dict[str, Any]] | None = None
     out_scale: float = 1.0
+    #: The bridge the gateway picks when the request names none.
+    source: str = "relay"
+    refund_guaranteed: bool = True
+    bridge: str = AGENTOS_BRIDGE
     request_ids: list[str] = field(default_factory=list)
     _seq: int = 0
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
-        if path == "/quote/v2":
-            body = json.loads(request.content or b"{}")
-            self.calls.append({"path": path, "body": body})
+        params = dict(request.url.params)
+        if path == "/v1/bridge/quote":
+            self.calls.append({"path": path, "params": params})
             if self.quote_error is not None:
                 status, payload = self.quote_error
                 return httpx.Response(status, json=payload)
-            key = (
-                int(body["originChainId"]),
-                int(body["destinationChainId"]),
-                str(body["originCurrency"]).lower(),
-            )
-            template = self.quotes.get(key)
-            if template is None:
-                return httpx.Response(400, json={"message": "No routes found for this request"})
-            return httpx.Response(200, json=self._quote(template, body))
-        if path == "/intents/status/v3":
-            request_id = str(request.url.params.get("requestId") or "")
-            self.calls.append({"path": path, "requestId": request_id})
+            origin = int(params["originChain"])
+            destination = int(params["destinationChain"])
+            sell = BRIDGE_TOKENS.get((origin, str(params["sellToken"]).lower()))
+            buy = BRIDGE_TOKENS.get((destination, str(params["buyToken"]).lower()))
+            if sell is None or buy is None or sell[2] != buy[2]:
+                return httpx.Response(400, json=bridge_fixture("error_pair"))
+            return httpx.Response(200, json=self._quote(params, origin, destination, sell, buy))
+        if path == "/v1/bridge/status":
+            tracking_id = str(params.get("trackingId") or "")
+            self.calls.append({"path": path, "params": params})
             if self.status_error is not None:
                 status, payload = self.status_error
                 return httpx.Response(status, json=payload)
-            sequence = self.statuses.get(request_id)
+            sequence = self.statuses.get(tracking_id)
             if sequence is None:
                 sequence = self.default_statuses
-            if not sequence:
-                return httpx.Response(200, json={"status": "waiting"})
-            answer = sequence.pop(0) if len(sequence) > 1 else sequence[0]
-            return httpx.Response(200, json=answer)
-        return httpx.Response(404, json={"message": f"no fake for {path}"})
+            answer: dict[str, Any] = {"status": "pending"}
+            if sequence:
+                answer = sequence.pop(0) if len(sequence) > 1 else sequence[0]
+            return httpx.Response(
+                200,
+                json={
+                    "source": params.get("source"),
+                    "trackingId": tracking_id,
+                    "originTxHash": None,
+                    "destinationTxHash": None,
+                    **answer,
+                },
+            )
+        return httpx.Response(404, json={"error": {"code": "NOT_FOUND", "message": path}})
 
-    def _quote(self, template: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
-        quote = json.loads(json.dumps(template))
-        self._seq += 1
-        request_id = "0x" + format(0xFEED0000 + self._seq, "x").rjust(64, "0")
-        self.request_ids.append(request_id)
-        user = str(body["user"])
-        amount = int(body["amount"])
-        details = quote["details"]
-        template_in = int(details["currencyIn"]["amount"])
-        template_out = int(details["currencyOut"]["amount"])
-        out = int(amount * template_out / template_in * self.out_scale)
-        details["currencyIn"]["amount"] = str(amount)
-        details["currencyOut"]["amount"] = str(out)
-        details["currencyOut"]["amountFormatted"] = None
-        details["recipient"] = str(body["recipient"])
-        details["sender"] = user
-        native = str(body["originCurrency"]).lower() == NATIVE_ZERO
-        for step in quote["steps"]:
-            step["requestId"] = request_id
-            for item in step["items"]:
-                data = item["data"]
-                data["from"] = user
-                if step["id"] == "deposit":
-                    if native:
-                        data["value"] = str(amount)
-                    else:
-                        calldata = str(data["data"])
-                        data["data"] = (
-                            calldata[:10]
-                            + pad_address(user)
-                            + calldata[74:138]
-                            + pad_uint(amount)
-                            + calldata[202:]
-                        )
-                elif step["id"] == "approve":
-                    data["data"] = approve_calldata(RELAY_SOLVER, amount)
-                item.setdefault("check", {})["endpoint"] = (
-                    f"/intents/status/v3?requestId={request_id}"
-                )
+    def _quote(
+        self,
+        params: dict[str, Any],
+        origin: int,
+        destination: int,
+        sell: tuple[str, int, str],
+        buy: tuple[str, int, str],
+    ) -> dict[str, Any]:
+        amount = int(params["amount"])
+        fee = amount * BRIDGE_FEE_BPS // 10_000
+        net = amount - fee
+        expected = bridge_expected_out(amount, scale=self.out_scale)
+        floor = int(expected * BRIDGE_COMMIT)
+        source = str(params.get("source") or self.source)
+        taker = str(params["taker"]).lower() if params.get("taker") else None
+        sell_token = str(params["sellToken"]).lower()
+        native = sell_token == BRIDGE_NATIVE
+        deadline = int(time.time()) + 600
+        rows = [
+            {
+                "source": name,
+                "available": True,
+                "buyAmount": str(expected if name == source else expected - 1),
+                "minBuyAmount": str(floor),
+                "estimatedTimeSeconds": 1 if name == "relay" else 5,
+                "refundGuaranteed": self.refund_guaranteed if name == source else True,
+                "selected": name == source,
+            }
+            for name in ("relay", "across")
+        ]
+        quote: dict[str, Any] = {
+            "originChainId": origin,
+            "destinationChainId": destination,
+            "sellToken": {"address": sell_token, "symbol": sell[0], "decimals": sell[1]},
+            "buyToken": {
+                "address": str(params["buyToken"]).lower(),
+                "symbol": buy[0],
+                "decimals": buy[1],
+            },
+            "sellAmount": str(amount),
+            "fee": {"bps": BRIDGE_FEE_BPS, "amount": str(fee)},
+            "netAmount": str(net),
+            "source": source,
+            "buyAmount": str(expected),
+            "minBuyAmount": str(floor),
+            "estimatedTimeSeconds": 1 if source == "relay" else 5,
+            "refund": {"address": taker, "guaranteed": self.refund_guaranteed},
+            "expiresAt": deadline,
+            "orderId": None,
+            "trackingId": None,
+            "allowanceTarget": None if native else self.bridge,
+            "issues": None,
+            "transaction": None,
+            "routes": rows,
+        }
+        if taker is not None:
+            self._seq += 1
+            order_id = "0x" + format(0x0BDE0000 + self._seq, "x").rjust(64, "0")
+            tracking_id = "0x" + format(0xFEED0000 + self._seq, "x").rjust(64, "0")
+            self.request_ids.append(tracking_id)
+            quote.update(
+                {
+                    "orderId": order_id,
+                    "trackingId": tracking_id,
+                    "issues": {"allowance": None, "balance": None},
+                    "transaction": {
+                        "chainId": origin,
+                        "to": self.bridge,
+                        "data": bridge_calldata(
+                            source=source,
+                            token=sell_token,
+                            amount=amount,
+                            net=net,
+                            order_id=order_id,
+                            destination=destination,
+                            recipient=str(params.get("recipient") or taker),
+                            deadline=deadline,
+                        ),
+                        "value": str(amount) if native else "0",
+                        "gas": None,
+                    },
+                }
+            )
         if self.mutate_quote is not None:
             quote = self.mutate_quote(quote)
         return quote
@@ -837,16 +930,16 @@ def make_transport(
     prices: FakePrices,
     aggregator: FakeAggregator | None = None,
     indexer: FakeIndexer | None = None,
-    relay: FakeRelay | None = None,
+    bridge: FakeDexBridge | None = None,
 ) -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         host = request.url.host
         if host in chains:
             return chains[host].handle(request)
         if host == "agg.useagentos.dev":
+            if request.url.path.startswith("/v1/bridge/"):
+                return (bridge or FakeDexBridge()).handle(request)
             return (aggregator or FakeAggregator()).handle(request)
-        if host == "api.relay.link":
-            return (relay or FakeRelay()).handle(request)
         if host.endswith("blockscout.com"):
             return indexer.handle(request) if indexer else httpx.Response(404)
         return prices.handle(request)

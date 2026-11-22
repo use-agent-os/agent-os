@@ -19,8 +19,8 @@ from tests.test_trading.fakes import (
     USDC,
     WETH,
     FakeChain,
+    FakeDexBridge,
     FakePrices,
-    FakeRelay,
     fake_sign_tx,
     make_transport,
 )
@@ -50,11 +50,11 @@ async def stack(tmp_path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[dict
             "decimals": 18,
         },
     ]
-    relay = FakeRelay()
+    bridge = FakeDexBridge()
     transport = make_transport(
         chains={"mainnet.base.org": base, "rpc.mainnet.chain.robinhood.com": robinhood},
         prices=prices,
-        relay=relay,
+        bridge=bridge,
     )
     config = GatewayConfig()
     config.trading = TradingConfig(price_ttl_seconds=1)
@@ -81,7 +81,7 @@ async def stack(tmp_path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[dict
                 "service": service,
                 "base": base,
                 "robinhood": robinhood,
-                "relay": relay,
+                "bridge": bridge,
                 "events": events,
                 "config": config,
             }

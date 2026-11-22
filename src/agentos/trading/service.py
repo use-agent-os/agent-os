@@ -41,21 +41,23 @@ from agentos.trading.aggregator import (
     AggregatorProvider,
 )
 from agentos.trading.bridge import (
+    BRIDGE_CONTRACT_LABEL,
+    BRIDGE_FAILURE_GRACE_S,
     BRIDGE_FILL_GIVE_UP_S,
     BRIDGE_FILL_POLL_S,
     BRIDGE_FILL_TASK_S,
     BRIDGE_PROVIDER,
-    BRIDGE_PROVIDER_LABEL,
+    BRIDGE_SELECTOR,
     BRIDGE_STATUS_MIN_INTERVAL_S,
     BRIDGE_TOLERANCE_PCT,
-    FILL_FINAL,
-    RELAY_BASE_URL,
-    RELAY_SOLVERS,
+    BRIDGE_VIA,
+    TRUSTED_BRIDGES,
+    BridgeQuote,
     BridgeRoute,
-    RelayClient,
-    RelayQuote,
+    DexBridgeClient,
+    bridge_transaction,
     resolve_route,
-    validate_steps,
+    source_label,
 )
 from agentos.trading.chains import (
     CHAINS,
@@ -522,9 +524,10 @@ class TradingService:
         self._aggregator_factory = aggregator_factory
         self._aggregator: AggregatorClient | None = None
         self._aggregator_base = ""
-        self._relay_client: RelayClient | None = None
-        self._relay_base = ""
-        # One Relay status read per bridge order at a time: the fill tracker
+        self._bridge_client: DexBridgeClient | None = None
+        self._bridge_base = ""
+        self._bridge_failure_grace_s = BRIDGE_FAILURE_GRACE_S
+        # One fill status read per bridge order at a time: the fill tracker
         # and a status request must not both book the arrival.
         self._bridge_locks: dict[str, asyncio.Lock] = {}
         # The fill tracker's pause between polls; tests shorten it.
@@ -896,13 +899,25 @@ class TradingService:
             raise TradingError("trading.disabled", "Trading is disabled in config")
 
     @property
-    def _relay(self) -> RelayClient:
-        """The Relay client for the configured ``relay_base_url`` (rebuilt on change)."""
-        base = str(getattr(self.config, "relay_base_url", "") or RELAY_BASE_URL)
-        if self._relay_client is None or self._relay_base != base:
-            self._relay_client = RelayClient(base_url=base, http=self._http)
-            self._relay_base = base
-        return self._relay_client
+    def _bridge(self) -> DexBridgeClient:
+        """The bridge client for the configured ``aggregator_base_url`` (rebuilt on change).
+
+        The bridge is served by the same AgentOS DEX deployment as the swaps.
+        """
+        base = str(getattr(self.config, "aggregator_base_url", "") or AGGREGATOR_BASE).strip()
+        if self._bridge_client is None or self._bridge_base != base:
+            self._bridge_client = DexBridgeClient(base_url=base, http=self._http)
+            self._bridge_base = base
+        return self._bridge_client
+
+    def _trusted_bridges(self) -> frozenset[str]:
+        """The pinned bridge contracts, plus the operator's own (read on every use)."""
+        extra = {
+            str(a).strip().lower()
+            for a in (getattr(self.config, "aggregator_trusted_spenders", None) or [])
+            if str(a).strip()
+        }
+        return TRUSTED_BRIDGES | extra
 
     def ensure_started(self) -> None:
         """Start the sync/expiry loop once an event loop is running."""
@@ -2674,10 +2689,10 @@ class TradingService:
 
         A bridge moves one asset (ETH, or the USD stable) between chains, so
         when the origin chain's feed has no price the destination chain's
-        price of the same asset values it honestly. Relay's own ``amountUsd``
-        is never the figure the guardrails read: it is the provider grading
-        its own order, and a low one would book a large bridge as ~$0
-        against the daily cap. ``None`` when neither chain prices the asset.
+        price of the same asset values it honestly. A dollar figure from the
+        bridge is never what the guardrails read: it would be the provider
+        grading its own order, and a low one would book a large bridge as
+        ~$0 against the daily cap. ``None`` when neither chain prices the asset.
         """
         value = await self._value_usd(origin, meta_in, amount_raw)
         if value is not None:
@@ -2983,6 +2998,7 @@ class TradingService:
         quote = plan.get("quote") or {}
         execution = plan.get("execution") or {}
         fill = plan.get("fill") or {}
+        source = self._bridge_source(plan, row)
         deposit_hash = execution.get("depositTxHash") or row.get("tx_hash")
         dest_hash = fill.get("destinationTxHash")
         checked = fill.get("checkedAt")
@@ -2991,10 +3007,18 @@ class TradingService:
             "expectedOut": fmt(row.get("expected_out_raw")),
             "minOut": fmt(row.get("min_out_raw")),
             "receivedOut": fmt(row.get("received_out_raw")),
-            "provider": BRIDGE_PROVIDER,
-            "providerLabel": BRIDGE_PROVIDER_LABEL,
-            "recipientLabel": "Relay solver",
+            "provider": source,
+            "providerLabel": source_label(source),
+            # An order made before the bridge moved behind AgentOS DEX
+            # deposited straight to the Relay solver.
+            "recipientLabel": (
+                BRIDGE_CONTRACT_LABEL if plan.get("via") == BRIDGE_VIA else "Relay solver"
+            ),
             "bridge": {
+                "source": source,
+                "sourceLabel": source_label(source),
+                "refundGuaranteed": quote.get("refundGuaranteed"),
+                "feeBps": (quote.get("fee") or {}).get("bps"),
                 "originChainId": int(row["chain_id"]),
                 "destinationChainId": int(dest_id) if dest_id is not None else None,
                 "destinationChain": dest.to_dict() if dest is not None else None,
@@ -3017,6 +3041,17 @@ class TradingService:
                 "checkedAt": int(float(checked) * 1000) if checked else None,
             },
         }
+
+    @staticmethod
+    def _bridge_source(plan: dict[str, Any], row: dict[str, Any]) -> str:
+        """The bridge an order runs through: the one it executed on, else the one quoted."""
+        return str(
+            (plan.get("execution") or {}).get("source")
+            or plan.get("source")
+            or plan.get("provider")
+            or row.get("provider")
+            or BRIDGE_PROVIDER
+        )
 
     @staticmethod
     def _lp_plan(row: dict[str, Any]) -> dict[str, Any]:
@@ -3495,7 +3530,7 @@ class TradingService:
         except Exception as exc:
             raise lp._as_trading_error(exc, chain) from exc
 
-    # ── bridge (Base ⇄ Robinhood Chain through Relay, docs/bridge.md) ──
+    # ── bridge (Base ⇄ Robinhood Chain through AgentOS DEX, docs/bridge.md) ──
 
     @staticmethod
     def _bridge_route(origin: ChainSpec, destination: ChainSpec, token: str) -> BridgeRoute:
@@ -3520,8 +3555,15 @@ class TradingService:
         amount_in: str | None,
         amount_pct: float | None,
         amount_usd: float | None,
-    ) -> tuple[BridgeRoute, WalletRecord, TokenMeta, TokenMeta, int, int, RelayQuote, float | None]:
-        """Route, wallet, both tokens, size, balance, a checked Relay quote and the USD value."""
+        firm: bool,
+    ) -> tuple[
+        BridgeRoute, WalletRecord, TokenMeta, TokenMeta, int, int, BridgeQuote, float | None
+    ]:
+        """Route, wallet, both tokens, size, balance, a checked quote and the USD value.
+
+        ``firm`` asks for the transaction too and checks it as it will be
+        checked before signing; a preview only needs the amounts.
+        """
         route = self._bridge_route(origin, destination, token)
         record = self.vault.resolve(wallet)
         meta_in = await self.token_meta(origin, route.token_in.address)
@@ -3547,21 +3589,89 @@ class TradingService:
                 f"{format_amount(amount_raw, meta_in.decimals)}",
             )
         try:
-            quote = await self._relay.quote(
-                route=route, wallet=record.address, amount_raw=amount_raw
+            quote = await self._bridge.quote(
+                route=route, amount_raw=amount_raw, wallet=record.address if firm else None
             )
-            validate_steps(quote, route=route, wallet=record.address, amount_raw=amount_raw)
+            if firm:
+                self._bridge_tx(quote, route=route, record=record, amount_raw=amount_raw)
         except Exception as exc:
             raise _err(exc) from exc
-        if quote.expected_out_raw is None:
-            raise TradingError("trading.bridge.provider", "Relay quoted no destination amount")
         value = await self._bridge_value_usd(origin, destination, meta_in, meta_out, amount_raw)
         return route, record, meta_in, meta_out, amount_raw, balance, quote, value
 
+    def _bridge_tx(
+        self, quote: BridgeQuote, *, route: BridgeRoute, record: WalletRecord, amount_raw: int
+    ) -> dict[str, Any]:
+        """The quote's one transaction, checked against the order (``bridge_transaction``)."""
+        return bridge_transaction(
+            quote,
+            route=route,
+            wallet=record.address,
+            amount_raw=amount_raw,
+            trusted=self._trusted_bridges(),
+            now=self._now(),
+        )
+
     @staticmethod
     def _bridge_floor(expected_out_raw: int) -> int:
-        """How little the execution re-quote may deliver before the order is re-judged."""
+        """How little the execution re-quote may expect before the order is re-judged."""
         return int(expected_out_raw * (1 - BRIDGE_TOLERANCE_PCT / 100.0))
+
+    @staticmethod
+    def _bridge_min_out(quote: BridgeQuote) -> int:
+        """The least an order may deliver: the bridge's own floor, less the re-quote tolerance.
+
+        A bridge commits to a floor under what it expects (``minBuyAmount``);
+        the execution re-quote may commit to a little less again, and no
+        further than this.
+        """
+        return int(quote.min_buy_raw * (1 - BRIDGE_TOLERANCE_PCT / 100.0))
+
+    @staticmethod
+    def _bridge_costs(
+        quote: BridgeQuote, value: float | None
+    ) -> tuple[float | None, dict[str, float | None]]:
+        """What the bridge costs in dollars: the AgentOS fee and what the bridge keeps.
+
+        Both tokens of a route are the same asset, so the shortfall between
+        what leaves and what is expected to arrive is the cost, priced with
+        the engine's own value for the order. ``relayerUsd`` is the bridge's
+        cut (its relayer and the destination gas together).
+        """
+        route = quote.route
+        if value is None or quote.amount_raw <= 0:
+            return None, {}
+        if route.token_in.decimals != route.token_out.decimals:
+            return None, {}
+        per_unit = value / quote.amount_raw
+        app = quote.fee_raw * per_unit
+        relayer = max(0, quote.net_raw - quote.expected_out_raw) * per_unit
+        parts: dict[str, float | None] = {
+            "gasUsd": None,
+            "relayerUsd": round(relayer, 6),
+            "appUsd": round(app, 6),
+        }
+        return round(app + relayer, 6), parts
+
+    def _bridge_quote_plan(self, quote: BridgeQuote, value: float | None) -> dict[str, Any]:
+        """The quote as the plan keeps it: the gateway's answer and its cost in dollars."""
+        fees_usd, fees = self._bridge_costs(quote, value)
+        return {**quote.to_dict(), "feesUsd": fees_usd, "fees": fees}
+
+    def _bridge_approved(self, quote: BridgeQuote) -> dict[str, Any]:
+        """What an approval of this quote agrees to (the plan's ``approved`` block).
+
+        ``floorRaw`` is the least the execution re-quote may *expect*,
+        ``minOutRaw`` the least it may *commit* to; ``source`` pins the
+        re-quote to the bridge that was shown.
+        """
+        return {
+            "requestId": quote.request_id,
+            "source": quote.source,
+            "expectedOutRaw": str(quote.expected_out_raw),
+            "floorRaw": str(self._bridge_floor(quote.expected_out_raw)),
+            "minOutRaw": str(self._bridge_min_out(quote)),
+        }
 
     def _bridge_quote_dict(
         self,
@@ -3572,12 +3682,13 @@ class TradingService:
         meta_out: TokenMeta,
         amount_raw: int,
         balance: int,
-        quote: RelayQuote,
+        quote: BridgeQuote,
         value: float | None,
         initiator: str,
     ) -> dict[str, Any]:
-        expected = int(quote.expected_out_raw or 0)
-        floor = self._bridge_floor(expected)
+        expected = quote.expected_out_raw
+        floor = self._bridge_min_out(quote)
+        fees_usd, fees = self._bridge_costs(quote, value)
         verdict = guardrails.evaluate_bridge(
             initiator=initiator,
             value_usd=value,
@@ -3601,15 +3712,33 @@ class TradingService:
             "minOut": format_amount(floor, meta_out.decimals),
             "minOutRaw": str(floor),
             "rate": quote.rate,
-            "feesUsd": quote.fees_usd,
-            "fees": quote.fees,
+            "feesUsd": fees_usd,
+            "fees": fees,
+            "fee": {
+                "bps": quote.fee_bps,
+                "amount": format_amount(quote.fee_raw, meta_in.decimals),
+                "amountRaw": str(quote.fee_raw),
+            },
             "timeEstimateSeconds": quote.time_estimate_s,
+            "refundGuaranteed": quote.refund_guaranteed,
             "requestId": quote.request_id,
-            "solver": quote.solver,
             "valueUsd": value,
             "fetchedAt": int(quote.fetched_at * 1000),
-            "provider": BRIDGE_PROVIDER,
-            "providerLabel": BRIDGE_PROVIDER_LABEL,
+            "provider": quote.source,
+            "providerLabel": source_label(quote.source),
+            "source": quote.source,
+            "sourceLabel": source_label(quote.source),
+            "routes": [
+                {
+                    **row,
+                    "expectedOut": (
+                        format_amount(int(row["expectedOutRaw"]), meta_out.decimals)
+                        if row.get("expectedOutRaw")
+                        else None
+                    ),
+                }
+                for row in quote.routes
+            ],
             "guard": verdict.to_dict(),
         }
 
@@ -3634,6 +3763,7 @@ class TradingService:
             amount_in=amount_in,
             amount_pct=amount_pct,
             amount_usd=amount_usd,
+            firm=False,
         )
         return self._bridge_quote_dict(
             route=route,
@@ -3663,10 +3793,10 @@ class TradingService:
         wait: bool = False,
         client_order_id: str | None = None,
     ) -> dict[str, Any]:
-        """Create a bridge order: quote with Relay, park it or run it under the guardrails.
+        """Create a bridge order: quote it, then park it or run it under the guardrails.
 
-        The row is the origin side of the transfer (a send to the Relay
-        solver); the destination chain, the quote the user sees and the
+        The row is the origin side of the transfer (a call to the AgentOS
+        bridge contract); the destination chain, the quote the user sees and the
         fill's progress live in ``quote_json``. From an agent the order
         always waits for a human, like a send; a manual one runs at once.
         """
@@ -3681,20 +3811,19 @@ class TradingService:
             amount_in=amount_in,
             amount_pct=amount_pct,
             amount_usd=amount_usd,
+            firm=True,
         )
-        expected = int(quote.expected_out_raw or 0)
-        floor = self._bridge_floor(expected)
+        expected = quote.expected_out_raw
+        floor = self._bridge_min_out(quote)
         plan = {
             "kind": "bridge",
-            "provider": BRIDGE_PROVIDER,
+            "via": BRIDGE_VIA,
+            "provider": quote.source,
+            "source": quote.source,
             "route": route.to_dict(),
             "amountRaw": str(raw),
-            "quote": quote.to_dict(),
-            "approved": {
-                "requestId": quote.request_id,
-                "expectedOutRaw": str(expected),
-                "minOutRaw": str(floor),
-            },
+            "quote": self._bridge_quote_plan(quote, value),
+            "approved": self._bridge_approved(quote),
             "execution": {},
             "fill": {"status": None},
         }
@@ -3717,15 +3846,14 @@ class TradingService:
                     "expected_out_raw": str(expected),
                     "min_out_raw": str(floor),
                     "value_usd": value,
-                    "gas_usd": quote.fees.get("gasUsd"),
                     "status": "quoted",
                     "initiator": initiator,
                     "session_key": session_key,
                     "note": note,
                     "kind": "bridge",
-                    "recipient": quote.solver,
+                    "recipient": quote.bridge,
                     "quote_json": json.dumps(plan),
-                    "provider": BRIDGE_PROVIDER,
+                    "provider": quote.source,
                     "client_order_id": client_id,
                 }
             )
@@ -3748,7 +3876,7 @@ class TradingService:
     async def bridge_status(
         self, *, order_id: str | None = None, request_id: str | None = None
     ) -> dict[str, Any]:
-        """A bridge order with its fill read from Relay (when it is still in flight)."""
+        """A bridge order with its fill read from the bridge (when it is still in flight)."""
         row: dict[str, Any] | None = None
         if order_id:
             row = self.ledger.get_order(order_id)
@@ -3762,6 +3890,7 @@ class TradingService:
                         (plan.get("execution") or {}).get("requestId"),
                         (plan.get("approved") or {}).get("requestId"),
                         (plan.get("quote") or {}).get("requestId"),
+                        (plan.get("execution") or {}).get("orderId"),
                     )
                     if x
                 }
@@ -5479,38 +5608,45 @@ class TradingService:
             order_id, tx_hash, {"in": balance, "out": 0, "native": pre_native}, wait=wait
         )
 
-    @staticmethod
     def _check_bridge_tx(
-        tx: dict[str, Any], *, chain: ChainSpec, record: WalletRecord, native: bool, amount_raw: int
+        self,
+        tx: dict[str, Any],
+        *,
+        chain: ChainSpec,
+        record: WalletRecord,
+        native: bool,
+        amount_raw: int,
     ) -> None:
-        """The deposit is signed only as the pattern says (a last look, after validate_steps)."""
+        """The bridge call is signed only as the pattern says (a last look after ``_bridge_tx``)."""
         to = str(tx.get("to") or "").lower()
-        if to not in RELAY_SOLVERS:
+        if to not in self._trusted_bridges():
             raise TradingError(
-                "trading.tx_failed", f"deposit target {to} is not a Relay solver this desk trusts"
+                "trading.tx_failed",
+                f"bridge target {to} is not an AgentOS bridge contract this desk trusts",
             )
         if int(tx.get("chainId") or chain.chain_id) != chain.chain_id:
-            raise TradingError("trading.tx_failed", "deposit is not on the origin chain")
+            raise TradingError("trading.tx_failed", "bridge call is not on the origin chain")
         if str(tx.get("from") or record.address).lower() != record.address.lower():
-            raise TradingError("trading.tx_failed", "deposit is not from the order's wallet")
+            raise TradingError("trading.tx_failed", "bridge call is not from the order's wallet")
         value = TradingService._tx_value(tx)
         if native and value != amount_raw:
             raise TradingError(
-                "trading.tx_failed", f"deposit value {value} is not the order's {amount_raw}"
+                "trading.tx_failed", f"bridge value {value} is not the order's {amount_raw}"
             )
         if not native and value != 0:
-            raise TradingError("trading.tx_failed", "an ERC-20 deposit carries native value")
-        if len(str(tx.get("data") or "")) < 10:
-            raise TradingError("trading.tx_failed", "deposit carries no calldata")
+            raise TradingError("trading.tx_failed", "an ERC-20 bridge carries native value")
+        if not str(tx.get("data") or "").startswith(BRIDGE_SELECTOR):
+            raise TradingError("trading.tx_failed", "bridge call is not bridge(BridgeParams)")
 
     async def _execute_bridge(self, row: dict[str, Any], *, wait: bool) -> None:
-        """Re-quote an approved bridge, approve the solver when needed, then deposit.
+        """Re-quote an approved bridge, approve the bridge contract when needed, then call it.
 
-        The quote the user approved is only a promise about the price: Relay
-        is asked again now, and a fill below the approved floor sends an
-        agent's order back for approval (a manual one fails
-        ``trading.price_moved``), as a swap does. The approval is exact and
-        goes through ``_send`` like a swap's; the deposit's target, value and
+        The quote the user approved is only a promise about the price: the
+        gateway is asked again now, for the same bridge, and an answer that
+        expects or commits to less than the approved floors sends an agent's
+        order back for approval (a manual one fails ``trading.price_moved``),
+        as a swap does. The approval is the engine's own, exact, and goes
+        through ``_send`` like a swap's; the call's target, value and
         calldata are checked once more right before signing.
         """
         order_id = str(row["order_id"])
@@ -5533,21 +5669,30 @@ class TradingService:
                     f"{meta_in.symbol or 'tokens'}, needs "
                     f"{format_amount(amount_raw, meta_in.decimals)}",
                 )
+            approved = plan.get("approved") or {}
+            # A plan made through AgentOS DEX is re-quoted on the bridge the
+            # user was shown; an older one takes whichever is offered.
+            pinned = str(approved.get("source") or "") or None
             try:
-                quote = await self._relay.quote(
-                    route=route, wallet=record.address, amount_raw=amount_raw
+                quote = await self._bridge.quote(
+                    route=route,
+                    amount_raw=amount_raw,
+                    wallet=record.address,
+                    source=pinned if plan.get("via") == BRIDGE_VIA else None,
                 )
-                approve_tx, deposit_tx = validate_steps(
-                    quote, route=route, wallet=record.address, amount_raw=amount_raw
+                deposit_tx = self._bridge_tx(
+                    quote, route=route, record=record, amount_raw=amount_raw
                 )
             except Exception as exc:
                 raise _err(exc) from exc
             expected = quote.expected_out_raw
-            if expected is None:
-                raise TradingError("trading.bridge.provider", "Relay quoted no destination amount")
-            floor = int(row.get("min_out_raw") or 0)
+            floor = int(approved.get("floorRaw") or row.get("min_out_raw") or 0)
+            # Only a plan that recorded both floors is held to the second one. It
+            # is read from the plan, not the row: a first attempt that got as
+            # far as signing left the row holding that quote's own commitment.
+            commit_floor = int(approved.get("minOutRaw") or 0) if approved.get("floorRaw") else 0
             decimals = route.token_out.decimals
-            if floor and expected < floor:
+            if (floor and expected < floor) or quote.min_buy_raw < commit_floor:
                 reason = (
                     "bridge quote moved below the approved floor (expected "
                     f"{format_amount(int(row.get('expected_out_raw') or 0), decimals)}, now "
@@ -5555,19 +5700,19 @@ class TradingService:
                     "approve again"
                 )
                 if row["initiator"] == "agent":
-                    plan["quote"] = quote.to_dict()
-                    plan["approved"] = {
-                        "requestId": quote.request_id,
-                        "expectedOutRaw": str(expected),
-                        "minOutRaw": str(self._bridge_floor(expected)),
-                    }
+                    value = row.get("value_usd")
+                    plan["quote"] = self._bridge_quote_plan(quote, value)
+                    plan["approved"] = self._bridge_approved(quote)
+                    plan.update(via=BRIDGE_VIA, provider=quote.source, source=quote.source)
                     self.ledger.update_order(
                         order_id,
                         status="awaiting_approval",
                         reason=reason,
                         expires_at=self._now() + int(self.config.approval_ttl_seconds),
                         expected_out_raw=str(expected),
-                        min_out_raw=str(self._bridge_floor(expected)),
+                        min_out_raw=str(self._bridge_min_out(quote)),
+                        recipient=quote.bridge,
+                        provider=quote.source,
                         quote_json=json.dumps(plan),
                     )
                     await self._emit(
@@ -5581,32 +5726,51 @@ class TradingService:
                 value = await self._bridge_value_usd(
                     chain, route.destination, meta_in, meta_out, amount_raw
                 )
-            plan["quote"] = quote.to_dict()
+            bridge_address = str(deposit_tx["to"]).lower()
+            plan["quote"] = self._bridge_quote_plan(quote, value)
+            plan.update(via=BRIDGE_VIA, provider=quote.source, source=quote.source)
             plan["execution"] = {
                 "requestId": quote.request_id,
+                "orderId": quote.order_id,
+                "source": quote.source,
+                "bridge": bridge_address,
                 "quoteFetchedAt": quote.fetched_at,
                 "expectedOutRaw": str(expected),
+                "minBuyRaw": str(quote.min_buy_raw),
                 "approvalTxHash": None,
                 "depositTxHash": None,
             }
+            # From here the order is this quote: what the bridge commits to
+            # is the floor, and the contract called is the row's recipient.
             self.ledger.update_order(
                 order_id,
                 expected_out_raw=str(expected),
-                gas_usd=quote.fees.get("gasUsd"),
+                min_out_raw=str(quote.min_buy_raw),
                 value_usd=value,
+                recipient=bridge_address,
+                provider=quote.source,
                 quote_json=json.dumps(plan),
             )
-            solver = str(deposit_tx["to"]).lower()
-            if approve_tx is not None:
-                allowance = await evm.erc20_allowance(meta_in.address, record.address, solver)
+            if not meta_in.native:
+                allowance = await evm.erc20_allowance(
+                    meta_in.address, record.address, bridge_address
+                )
                 if allowance < amount_raw:
-                    spender = self._check_approval_tx(
+                    # The engine's own approval, for exactly the order: the
+                    # gateway hands out no approval calldata to trust.
+                    approve_tx: dict[str, Any] = {
+                        "from": record.address,
+                        "to": meta_in.address,
+                        "data": encode_approve(bridge_address, amount_raw),
+                        "value": "0",
+                        "chainId": chain.chain_id,
+                    }
+                    self._check_approval_tx(
                         approve_tx,
                         token=meta_in.address,
                         amount_raw=amount_raw,
-                        spenders=frozenset({solver}),
+                        spenders=frozenset({bridge_address}),
                     )
-                    approve_tx = {**approve_tx, "data": encode_approve(spender, amount_raw)}
                     approval_hash = await self._send(
                         chain,
                         record,
@@ -5643,7 +5807,7 @@ class TradingService:
                         evm,
                         token=meta_in.address,
                         owner=record.address,
-                        spenders=frozenset({solver}),
+                        spenders=frozenset({bridge_address}),
                         amount_raw=amount_raw,
                     )
             self._check_bridge_tx(
@@ -5675,7 +5839,7 @@ class TradingService:
     ) -> None:
         """Book the mined deposit as a withdrawal, then follow the fill on the other chain.
 
-        The order stays ``submitted`` until Relay reports the fill: only
+        The order stays ``submitted`` until the bridge reports the fill: only
         then are the funds where the user asked, and only then does it
         ``confirm`` (``_refresh_bridge_fill``). A restart re-enters here
         through ``recover_submitted`` with the deposit already booked; the
@@ -5686,6 +5850,7 @@ class TradingService:
         fill = plan.setdefault("fill", {})
         dest_id = (plan.get("route") or {}).get("destinationChainId")
         dest = CHAINS.get(int(dest_id)) if dest_id is not None else None
+        label = source_label(self._bridge_source(plan, row))
         if not execution.get("depositBookedAt"):
             evm = self.evm(chain)
             gas_wei = receipt_gas_wei(receipt)
@@ -5703,11 +5868,11 @@ class TradingService:
                 )
                 return
             amount = int(row["amount_raw"])
-            solver = str(row.get("recipient") or "")
+            target = str(row.get("recipient") or "")
             log_index = 0
             if not meta.native:
                 for t in receipt_transfers(receipt):
-                    if t.token == meta.address and t.sender == record.key and t.recipient == solver:
+                    if t.token == meta.address and t.sender == record.key and t.recipient == target:
                         log_index = t.log_index
                         break
             block_number = int(str(receipt.get("blockNumber") or "0x0"), 16)
@@ -5721,7 +5886,7 @@ class TradingService:
                 tx_hash=tx_hash,
                 log_index=log_index,
                 note=row.get("note")
-                or f"bridged to {dest.name if dest else 'the other chain'} (Relay)",
+                or f"bridged to {dest.name if dest else 'the other chain'} ({label})",
                 initiator=str(row["initiator"]),
                 order_id=order_id,
                 session_key=row.get("session_key"),
@@ -5748,7 +5913,9 @@ class TradingService:
             updated = self.ledger.update_order(
                 order_id,
                 expect_status="submitted",
-                reason=f"waiting for the Relay fill on {dest.name if dest else 'the other chain'}",
+                reason=(
+                    f"waiting for the {label} fill on {dest.name if dest else 'the other chain'}"
+                ),
                 spent_in_raw=str(amount),
                 gas_wei=str(gas_wei),
                 quote_json=json.dumps(plan),
@@ -5773,7 +5940,7 @@ class TradingService:
         return lock
 
     async def _track_bridge_fill(self, order_id: str) -> None:
-        """Poll Relay for the fill with a short backoff until the order is final.
+        """Poll the bridge for the fill with a short backoff until the order is final.
 
         One tracker lives at most ``BRIDGE_FILL_TASK_S``; past that the order
         stays ``submitted`` with its reason, and every ``tick`` re-enters
@@ -5787,12 +5954,11 @@ class TradingService:
             if row is None or row["status"] != "submitted":
                 return
             try:
-                fill = await self._refresh_bridge_fill(order_id, force=True)
-            except Exception as exc:  # Relay hiccups must not strand the order
+                await self._refresh_bridge_fill(order_id, force=True)
+            except Exception as exc:  # a status hiccup must not strand the order
                 log.warning("trading.bridge_fill_poll_failed", order=order_id, error=str(exc))
-                fill = None
-            if fill is not None and fill.get("status") in FILL_FINAL:
-                return
+            # A ``failure`` still inside its grace is not the end: the loop
+            # stops when the order itself has left ``submitted``.
             if time.monotonic() - started > BRIDGE_FILL_TASK_S:
                 return
             delay = BRIDGE_FILL_POLL_S[min(attempt, len(BRIDGE_FILL_POLL_S) - 1)]
@@ -5800,7 +5966,7 @@ class TradingService:
             await self._bridge_sleep(delay)
 
     async def _refresh_bridge_fill(self, order_id: str, *, force: bool = False) -> dict[str, Any]:
-        """Read the fill from Relay and settle the order when it is final.
+        """Read the fill from AgentOS DEX and settle the order when it is final.
 
         Rate-limited per order unless ``force``; one reader at a time per
         order (the tracker and ``trading.bridge.status`` can overlap), so the
@@ -5830,8 +5996,10 @@ class TradingService:
                 or (plan.get("quote") or {}).get("requestId")
                 or ""
             )
+            source = self._bridge_source(plan, row)
+            label = source_label(source)
             try:
-                result = await self._relay.status(request_id)
+                result = await self._bridge.status(request_id, source=source)
             except Exception as exc:
                 fill["lastError"] = str(exc)
                 fill["checkedAt"] = self._now()
@@ -5849,6 +6017,8 @@ class TradingService:
                     "lastError": None,
                 }
             )
+            if status != "failure":
+                fill.pop("failedSince", None)
             record = self.vault.get(str(row["wallet"]))
             if status == "success":
                 received = await self._book_bridge_arrival(order_id, row, plan, record)
@@ -5868,17 +6038,24 @@ class TradingService:
                     await self._order_finished(self.get_order(order_id))
                     await self._emit("trading.changed", {"reason": "order", "orderId": order_id})
                 return fill
+            if status == "failure":
+                # Often not the last word (Relay may still retry or refund):
+                # the order fails once the bridge has said so for a while.
+                since = float(fill.setdefault("failedSince", now))
+                if now - since < self._bridge_failure_grace_s:
+                    self.ledger.update_order(order_id, quote_json=json.dumps(plan))
+                    return fill
             if status in ("failure", "refund"):
                 why = (
                     "the funds were returned on the origin chain"
                     if status == "refund"
-                    else "the solver did not deliver"
+                    else "the bridge did not deliver"
                 )
                 updated = self.ledger.update_order(
                     order_id,
                     expect_status="submitted",
                     status="failed",
-                    reason=f"relay {status}: {why} (requestId {request_id})",
+                    reason=f"{label} {status}: {why} (requestId {request_id})",
                     quote_json=json.dumps(plan),
                 )
                 if updated is not None:
@@ -5893,7 +6070,7 @@ class TradingService:
                     status="failed",
                     reason=(
                         "bridge not filled within 6 h; the deposit is on chain — check "
-                        f"Relay with requestId {request_id}"
+                        f"{label} with requestId {request_id}"
                     ),
                     quote_json=json.dumps(plan),
                 )
@@ -5909,10 +6086,12 @@ class TradingService:
     async def _book_bridge_arrival(
         self, order_id: str, row: dict[str, Any], plan: dict[str, Any], record: WalletRecord
     ) -> int:
-        """Book what the solver delivered as a deposit on the destination chain; the amount.
+        """Book what the bridge delivered as a deposit on the destination chain; the amount.
 
         The amount comes from the fill transaction (its ``Transfer`` to the
-        wallet, or its value for the gas coin), else from the quote. The
+        wallet, or its value when it pays the gas coin straight to the
+        wallet), else from the quote: a fill that hands the coin over from
+        inside a contract call carries no value of its own. The
         entry is keyed by that transaction and log index, so a sweep that saw
         the transfer first has already booked it and this is a no-op.
         """
@@ -5940,8 +6119,9 @@ class TradingService:
             if receipt is not None:
                 if meta_out.native:
                     tx = await evm_d.get_transaction(str(dest_tx))
-                    if tx and tx.get("value"):
-                        amount = int(str(tx["value"]), 0)
+                    paid = int(str(tx["value"]), 0) if tx and tx.get("value") else 0
+                    if tx and paid and str(tx.get("to") or "").lower() == record.key:
+                        amount = paid
                 else:
                     for t in receipt_transfers(receipt):
                         if t.token == token_out and t.recipient == record.key:
@@ -5960,7 +6140,8 @@ class TradingService:
             ts,
             tx_hash=str(dest_tx).lower() if dest_tx else None,
             log_index=log_index,
-            note=row.get("note") or f"bridged from {origin.name} (Relay)",
+            note=row.get("note")
+            or f"bridged from {origin.name} ({source_label(self._bridge_source(plan, row))})",
             meta=meta_out,
             initiator=str(row["initiator"]),
             order_id=order_id,

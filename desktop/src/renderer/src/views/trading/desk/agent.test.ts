@@ -189,9 +189,16 @@ describe('tradingAgentFiles · reading an order', () => {
       /`--pct 100` on ETH fails with `trading\.invalid` when the balance is at\s+or below the 0\.001 ETH gas reserve/,
     )
   })
+  it('names the AgentOS DEX as the bridge and says when a refund is not promised (v29)', () => {
+    const agents = files['AGENTS.md'] ?? ''
+    const section = agents.slice(agents.indexOf('## Bridging'), agents.indexOf('## The fast path'))
+    expect(section).not.toMatch(/Relay's fill|the Relay `bridge\.requestId`/)
+    expect(section).toContain('`bridge.sourceLabel`')
+    expect(section).toMatch(/`refundGuaranteed` is `false`/)
+  })
   it('bridges the same asset between Base and Robinhood Chain through `trade bridge create`, and always waits (v28)', () => {
     // Until v27 the desk refused every bridge. The engine now bridges ETH
-    // and USDC↔USDG through Relay; from the desk the order always parks for
+    // and USDC↔USDG (through the AgentOS DEX since v29); from the desk the order always parks for
     // the user, and `--wait` only returns `confirmed` once the funds landed.
     const agents = files['AGENTS.md'] ?? ''
     expect(TRADING_AGENT_VERSION).toBeGreaterThanOrEqual(28)
@@ -537,8 +544,8 @@ describe('tradingAgentFiles · naming the markets sections (v27)', () => {
   const tools = files['TOOLS.md'] ?? ''
 
   it('bumped the version', () => {
-    expect(TRADING_AGENT_VERSION).toBe(28)
-    expect(agents).toContain('trading agent v28')
+    expect(TRADING_AGENT_VERSION).toBe(29)
+    expect(agents).toContain('trading agent v29')
   })
 
   it('says which section is which, and never calls USDG/WETH quote-side markets', () => {
