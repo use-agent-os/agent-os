@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from agentos.trading.vault import Vault
+from tests.test_trading.conftest import FAST_KDF
 
 PASSWORD = "hunter2-prod"
 
@@ -32,7 +33,9 @@ SURROUNDED = [
 
 
 def _vault(tmp_path: Path) -> Vault:
-    return Vault(root=tmp_path / "wallets")
+    # What these tests pin is which string unlocks, not how the key is
+    # derived; the real scrypt cost made this file take ~20s.
+    return Vault(root=tmp_path / "wallets", **FAST_KDF)
 
 
 def _set_up(tmp_path: Path, password: str) -> Vault:
