@@ -156,8 +156,14 @@ LP_FEE_GROWTH_TOLERANCE_DIV = 10
 # A submitted transaction with no receipt after this long is treated as
 # dropped. Until then ``tick`` keeps polling for it.
 SUBMITTED_GIVE_UP_S = 6 * 3600.0
-# One receipt poll per housekeeping pass for recovered orders.
-RECOVER_POLL_S = 5.0
+# One receipt poll per housekeeping pass for recovered orders: a zero window
+# is exactly one eth_getTransactionReceipt (the receipt wait checks its
+# deadline after the poll). It was 5 s, which at the wait's 1.5 s cadence was
+# about five polls per stuck order per pass, for up to six hours, and held
+# the DCA and trigger clock about 6 s per stuck order. A receipt that is there
+# is settled in full on that one poll: the sealed-receipt wait after it (an
+# L1-fee chain's re-read once the head is past the block) keeps its own bound.
+RECOVER_POLL_S = 0.0
 # A load-balanced RPC endpoint does not answer from one node. Measured on
 # Base on 2026-09-19: a receipt came back from a node that had the block
 # while the very next eth_getBalance and eth_call were served by one that
