@@ -4,6 +4,7 @@ Every JSON-RPC item is billed on a metered endpoint, so these count the items
 the fake nodes receive (``FakeChain.calls``) on a pinned clock:
 
 - trigger and bracket cards: one balance read per live trigger on every list;
+- tokens that name no symbol: four metadata calls on every holdings read;
 - ``recover_submitted``: about five receipt polls per stuck order per pass;
 - the network strip: ``eth_feeHistory`` on every uncached call.
 """
@@ -11,12 +12,20 @@ the fake nodes receive (``FakeChain.calls``) on a pinned clock:
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import pytest
 
 from agentos.trading import service as service_module
 from agentos.trading.chains import BASE
-from agentos.trading.service import NETWORK_FEE_TTL_S, TradingService
+from agentos.trading.evm import SEL_DECIMALS, SEL_NAME, SEL_SYMBOL
+from agentos.trading.prices import TokenMeta
+from agentos.trading.service import (
+    NAMELESS_TOKEN_TTL_S,
+    NETWORK_FEE_TTL_S,
+    TradingError,
+    TradingService,
+)
 from tests.test_trading.conftest import PASSWORD
 from tests.test_trading.fakes import USDC, WETH, FakeAggregator, FakeChain, FakePrices
 from tests.test_trading.test_brackets import protect
@@ -99,6 +108,97 @@ async def test_a_fire_sizes_from_the_chain_not_the_card(world: World) -> None:
     (row,) = service.ledger.orders_for_trigger(trigger_id)
     order = service.get_order(str(row["order_id"]))
     assert order["status"] == "confirmed" and order["amountIn"] == "0.02"  # 50 % of 0.04
+
+
+# ── C: tokens that name no symbol ──────────────────────────────────────────
+
+
+#: A contract that answers ``symbol()``/``name()`` with an empty string.
+NAMELESS = "0x5555555555555555555555555555555555555555"
+#: An address with no code on the fake chain.
+GHOST = "0x6666666666666666666666666666666666666666"
+
+
+def _metadata_reads(chain: FakeChain, token: str) -> int:
+    selectors = {SEL_SYMBOL, SEL_NAME, SEL_DECIMALS}
+    return sum(
+        1
+        for call in chain.calls
+        if call["method"] == "eth_call"
+        and str(call["params"][0].get("to") or "").lower() == token
+        and str(call["params"][0].get("data") or "") in selectors
+    )
+
+
+async def test_a_token_that_names_no_symbol_costs_its_metadata_once(
+    funded_service: TradingService, base_chain: FakeChain
+) -> None:
+    service = funded_service
+    clock = Clock(T0)
+    service._now = clock
+    wallet = service.test_wallet  # type: ignore[attr-defined]
+    base_chain.tokens[NAMELESS] = ("", "", 9)
+    base_chain.set_erc20(NAMELESS, wallet, 5 * 10**9)
+    service.ledger.set_balance(BASE.chain_id, wallet, NAMELESS, 5 * 10**9)
+    base_chain.calls.clear()
+    await service.balances()
+    assert _metadata_reads(base_chain, NAMELESS) == 3 and _rpc(base_chain, "eth_getCode") == 1
+    base_chain.calls.clear()
+    for _ in range(3):
+        clock.now += 30
+        rows = await service.balances(include_hidden=True)
+        await service.portfolio(include_hidden=True)
+    assert _metadata_reads(base_chain, NAMELESS) == 0 and _rpc(base_chain, "eth_getCode") == 0
+    (row,) = [r for r in rows if r["token"]["address"] == NAMELESS]
+    assert row["amount"] == "5" and row["token"]["symbol"] == ""
+    # Asked again once the hour is up, in case the contract learnt a name.
+    clock.now = T0 + NAMELESS_TOKEN_TTL_S + 1
+    await service.balances()
+    assert _metadata_reads(base_chain, NAMELESS) == 3 and _rpc(base_chain, "eth_getCode") == 1
+
+
+async def test_no_code_and_an_unreachable_node_are_never_cached(
+    funded_service: TradingService, base_chain: FakeChain
+) -> None:
+    service = funded_service
+    for _ in range(2):
+        with pytest.raises(TradingError, match="No contract"):
+            await service.token_meta(BASE, GHOST)
+    assert _metadata_reads(base_chain, GHOST) == 6 and _rpc(base_chain, "eth_getCode") == 2
+    assert (BASE.chain_id, GHOST) not in service._nameless_until
+    # A contract that names nothing, read while eth_getCode was failing: a
+    # guess, asked again next time; cached once the node has answered.
+    base_chain.tokens[NAMELESS] = ("", "", 18)
+    base_chain.fail_methods.add("eth_getCode")
+    await service.token_meta(BASE, NAMELESS)
+    base_chain.fail_methods.clear()
+    base_chain.calls.clear()
+    await service.token_meta(BASE, NAMELESS)
+    await service.token_meta(BASE, NAMELESS)
+    assert _metadata_reads(base_chain, NAMELESS) == 3 and _rpc(base_chain, "eth_getCode") == 1
+
+
+async def test_a_token_the_list_learns_later_is_named_at_once(
+    funded_service: TradingService, base_chain: FakeChain, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = funded_service
+    base_chain.tokens[NAMELESS] = ("", "", 9)
+    assert (await service.token_meta(BASE, NAMELESS)).symbol == ""
+    listed = TokenMeta(BASE.chain_id, NAMELESS, "LATE", "Late Listing", 9, verified=True)
+    original = service.prices.known_token
+
+    async def known_token(chain: Any, address: str) -> TokenMeta | None:
+        if address.lower() == NAMELESS:
+            return listed
+        return await original(chain, address)
+
+    monkeypatch.setattr(service.prices, "known_token", known_token)
+    base_chain.calls.clear()
+    meta = await service.token_meta(BASE, NAMELESS)
+    assert meta.symbol == "LATE" and meta.verified is True
+    assert _metadata_reads(base_chain, NAMELESS) == 0
+    row = service.ledger.get_token(BASE.chain_id, NAMELESS)
+    assert row is not None and row["symbol"] == "LATE" and row["verified"] == 1
 
 
 # ── D: recovering submitted orders ─────────────────────────────────────────

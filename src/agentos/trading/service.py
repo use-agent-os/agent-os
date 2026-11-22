@@ -219,6 +219,12 @@ NETWORK_TTL_S = 10.0
 # 10 s cache, so every poll used to cost two calls per chain; now it is one
 # most of the time. Signing never reads this: ``_send`` asks ``fee_data``.
 NETWORK_FEE_TTL_S = 60.0
+# A token whose contract answers but names no symbol is served from the
+# ledger this long before its metadata is read again (a 3-call batch plus
+# eth_getCode). It is almost always junk or a non-token contract, and every
+# holdings read paid those four calls again for it. The token list can still
+# name it at any time; a contract upgraded to gain a symbol shows within this.
+NAMELESS_TOKEN_TTL_S = 3_600.0
 # A head block older than this means the endpoint is behind or the chain is
 # stalled; either way a read from it is not to be trusted.
 STALE_HEAD_S = 60.0
@@ -573,6 +579,9 @@ class TradingService:
         # chain id -> (read at, maxFeePerGas, tip): the strip's fee figures
         # (``NETWORK_FEE_TTL_S``); signing reads its own.
         self._network_fees: dict[int, tuple[float, int, int]] = {}
+        # (chain id, token) -> until when a token that names no symbol is
+        # served from the ledger (``NAMELESS_TOKEN_TTL_S``).
+        self._nameless_until: dict[tuple[int, str], float] = {}
         # One Approval-log scan per wallet/chain at a time; a review call
         # returns what is cached and reports that the scan is still running.
         self._allowance_scans: dict[tuple[int, str], asyncio.Task[None]] = {}
@@ -1234,7 +1243,16 @@ class TradingService:
         key = normalize_address(address)
         row, seal = self.ledger.sealed_token(chain.chain_id, key)
         cached: TokenMeta | None = None
-        if row and (row["symbol"] or row["verified"]):
+        # A row the chain was asked for lately and that names no symbol: the
+        # answer would be the same four calls for the same empty name.
+        until = self._nameless_until.get((chain.chain_id, key), 0.0)
+        nameless = (
+            row is not None
+            and not row["symbol"]
+            and not row["verified"]
+            and 0.0 < until - self._now() <= NAMELESS_TOKEN_TTL_S
+        )
+        if row and (row["symbol"] or row["verified"] or nameless):
             cached = TokenMeta(
                 chain_id=chain.chain_id,
                 address=key,
@@ -1249,18 +1267,26 @@ class TradingService:
             # judge: used as cached only when the engine's seal still holds.
             # Locked (``None``), nothing can sign; the next unlocked use checks.
             verdict = self.sealer.check(integrity.TOKEN_KIND, row, seal)
-            if verdict in (None, "ok"):
+            if verdict in (None, "ok") and not nameless:
                 return cached
             if verdict == "mismatch":
                 log.warning("trading.token_seal_mismatch", chain=chain.chain_id, token=key)
+            if verdict not in (None, "ok"):
+                nameless = False  # a row whose seal failed is read again
         known = await self.prices.known_token(chain, key)
         if known is not None:
+            # The list learnt it: its name wins over the empty one at once.
+            self._nameless_until.pop((chain.chain_id, key), None)
             self._remember_token(known)
             return known
+        if nameless and cached is not None:
+            return cached
         symbol, name, decimals = "", "", 18
+        answered = True
         try:
             symbol, name, decimals = await self.evm(chain).erc20_metadata(key)
         except (EvmRpcError, EvmTransportError):
+            answered = False
             if cached is not None:
                 # The chain could not be asked: keep the cached row rather than
                 # overwrite it with a guess (nothing can be quoted from an
@@ -1283,6 +1309,11 @@ class TradingService:
                     f"No contract at {key} on {chain.name}",
                     details={"address": key, "chainId": chain.chain_id},
                 )
+            if answered and code:
+                # The node answered both questions: a contract that names
+                # nothing. Not asked again for a while (``NAMELESS_TOKEN_TTL_S``);
+                # a guess made while the node was down is retried next time.
+                self._nameless_until[(chain.chain_id, key)] = self._now() + NAMELESS_TOKEN_TTL_S
         meta = TokenMeta(chain.chain_id, key, symbol, name, decimals)
         self._remember_token(meta)
         return meta
