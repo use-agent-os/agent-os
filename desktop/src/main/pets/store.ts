@@ -259,7 +259,9 @@ export class PetStore {
    * Adopt the pets that ship inside the app bundle, once each. They are
    * ordinary petdex folders, so the app has a pet to show before anyone
    * visits petdex.dev — or with no network at all. `.bundled.json` records
-   * what was seeded, so a built-in pet the user removed stays removed.
+   * what was seeded, so a built-in pet the user removed stays removed. A
+   * built-in pet seeded by an earlier release picks up the bundle's current
+   * name and description (see `refreshBundled`).
    */
   async seedBundled(bundledRoot: string): Promise<string[]> {
     let names: string[] = []
@@ -272,8 +274,16 @@ export class PetStore {
     const seeded = new Set(seededSlugs(marker))
     const added: string[] = []
     for (const slug of names.sort()) {
-      if (!isPetSlug(slug) || seeded.has(slug)) continue
+      if (!isPetSlug(slug)) continue
       const dir = path.join(bundledRoot, slug)
+      if (seeded.has(slug)) {
+        try {
+          await this.refreshBundled(dir, slug)
+        } catch {
+          /* a stale name is cosmetic; never block startup over it */
+        }
+        continue
+      }
       try {
         if (!(await stat(dir)).isDirectory()) continue
         // A pet already on disk under that slug is the user's; leave it be.
@@ -289,6 +299,34 @@ export class PetStore {
       writeFileSync(marker, JSON.stringify({ seeded: [...seeded] }, null, 2) + '\n', 'utf8')
     }
     return added
+  }
+
+  /**
+   * Bring an installed built-in pet's name and description up to the
+   * bundle's (the AgentOS mascot was renamed Luma after it shipped). Only a
+   * copy whose sheet is still byte-for-byte the bundled one is touched: a
+   * pet the user put under the same slug is theirs and keeps its name.
+   */
+  private async refreshBundled(bundledDir: string, slug: string): Promise<void> {
+    const dest = this.dir(slug)
+    const sheet = path.join(dest, 'spritesheet.webp')
+    if (!existsSync(sheet)) return
+    const bundledMeta = readJson(path.join(bundledDir, 'pet.json'))
+    const declared = bundledMeta.spritesheetPath
+    const bundledSheet = path.join(
+      bundledDir,
+      typeof declared === 'string' && declared.trim() ? declared.trim() : 'spritesheet.webp',
+    )
+    if ((await stat(sheet)).size !== (await stat(bundledSheet)).size) return
+    if (!readFileSync(sheet).equals(readFileSync(bundledSheet))) return
+    const displayName = String(bundledMeta.displayName || slug)
+    const description = String(bundledMeta.description || '')
+    const petJson = path.join(dest, 'pet.json')
+    const current = readJson(petJson)
+    if (current.displayName === displayName && current.description === description) return
+    const next: Record<string, unknown> = { ...current, id: slug, displayName, description }
+    if (typeof next.spritesheetPath !== 'string') next.spritesheetPath = 'spritesheet.webp'
+    writeFileSync(petJson, JSON.stringify(next, null, 2) + '\n', 'utf8')
   }
 }
 

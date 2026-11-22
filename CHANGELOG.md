@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- Desktop: the built-in pet is now called **Luma** (Settings › Appearance ›
+  Pet) instead of AgentOS. An install seeded by an earlier release picks up
+  the new name on the next launch; a pet you placed under the same slug keeps
+  its own name. The slug stays `agentos`, so the active pet and its saved
+  settings carry over.
+
 ## [2026.11.22] - 2026-11-22
 
 ### Added
