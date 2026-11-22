@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 import httpx
 import pytest
@@ -208,6 +209,14 @@ class TestEvmClient:
         receipt = await client.wait_for_receipt(tx_hash, timeout_s=1, interval_s=0.001)
         assert receipt is not None and evm_mod.receipt_succeeded(receipt)
 
+    async def test_receipt_wait_ends_at_its_deadline_not_an_interval_later(
+        self, client: EvmClient, chain: FakeChain
+    ) -> None:
+        tx_hash = await client.send_raw_transaction("0xdeadbeef")
+        started = time.monotonic()
+        assert await client.wait_for_receipt(tx_hash, timeout_s=0.05, interval_s=30) is None
+        assert time.monotonic() - started < 5
+
     async def test_sealed_receipt_replaces_a_provisional_l1_fee(
         self, client: EvmClient, chain: FakeChain
     ) -> None:
@@ -241,6 +250,19 @@ class TestEvmClient:
         assert evm_mod.receipt_gas_wei(receipt) == 200 + 10_543_899_578
         assert [e["event"] for e in logs] == ["trading.receipt_provisional"]
         assert logs[0]["reason"] == "head did not advance"
+
+    async def test_sealed_receipt_wait_ends_at_its_deadline_not_an_interval_later(
+        self, client: EvmClient, chain: FakeChain
+    ) -> None:
+        tx_hash = "0x" + "cd" * 32
+        first = chain.receipt(tx_hash, gas_used=100, gas_price=2)
+        first["l1Fee"] = hex(10_543_899_578)
+        started = time.monotonic()
+        receipt = await evm_mod.sealed_receipt(
+            client, tx_hash, first, timeout_s=0.05, interval_s=30
+        )
+        assert receipt is first
+        assert time.monotonic() - started < 5
 
     async def test_sealed_receipt_skips_chains_without_an_l1_fee(
         self, client: EvmClient, chain: FakeChain

@@ -947,6 +947,11 @@ def test_gateway_status_follows_a_recorded_bind_mode(tmp_path, monkeypatch) -> N
     _write_pidfile(_tailnet_record())
     _patch_pid_running(monkeypatch, True)
     _patch_health(monkeypatch, True)
+    # A running status probes the gateway's version over the network; the
+    # recorded tailnet address is unroutable here, so the probe would sit in
+    # its connect timeout for ~20s before giving up.
+    monkeypatch.setattr(gateway_cmd, "gateway_handshake_version", lambda **_: None)
+    monkeypatch.setattr(gateway_cmd, "gateway_runtime_probe", lambda **_: None)
 
     result = runner.invoke(app, ["gateway", "status", "--json"])
 

@@ -48,6 +48,15 @@ os.environ.setdefault("AGENTOS_OPENROUTER_LIVE_PRICING", "0")
 
 import pytest  # noqa: E402
 
+# CI splits the suite with --shard=I/N; see tests/ci_shard.py.
+from ci_shard import (  # noqa: E402, F401
+    pytest_addoption,
+    pytest_collection_modifyitems,
+    pytest_configure,
+    pytest_sessionfinish,
+    pytest_testnodedown,
+)
+
 
 @pytest.fixture(autouse=True)
 def _reset_redaction_secret_registry():

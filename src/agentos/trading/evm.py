@@ -899,9 +899,12 @@ class EvmClient:
             receipt = await self.get_transaction_receipt(tx_hash)
             if receipt is not None and receipt.get("blockNumber"):
                 return receipt
-            if time.monotonic() >= deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 return None
-            await asyncio.sleep(interval_s)
+            # The last wait ends at the deadline, not up to a whole interval
+            # past it: a 0.01s window must not cost a 1.5s sleep.
+            await asyncio.sleep(min(interval_s, remaining))
 
     async def wait_for_sealed_receipt(
         self,
@@ -968,10 +971,11 @@ async def sealed_receipt(
                 reason = "receipt re-read came back empty"
             if again is not None and again.get("blockNumber"):
                 return again
-        if time.monotonic() >= deadline:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             log.warning("trading.receipt_provisional", tx=tx_hash, block=block, reason=reason)
             return first
-        await asyncio.sleep(interval)
+        await asyncio.sleep(min(interval, remaining))
 
 
 def receipt_succeeded(receipt: dict[str, Any] | None) -> bool:
