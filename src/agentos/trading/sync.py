@@ -67,7 +67,8 @@ READ_OK = "ok"
 READ_PARTIAL = "partial"
 READ_FAILED = "failed"
 
-# An imported wallet's first sweep: about a day on Base, an hour on Robinhood.
+# An imported wallet's first sweep: about three hours on Base, under two on
+# Robinhood Chain (0.2 s and 0.12 s blocks, measured 2026-11-22).
 DEFAULT_INITIAL_LOOKBACK = 50_000
 DEFAULT_FULL_LOOKBACK = 2_000_000
 # Ignore native dust drift below this (gas of a tx we did not see).

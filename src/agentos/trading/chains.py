@@ -44,7 +44,8 @@ class ChainSpec:
     weth: str | None
     dexscreener_slug: str
     coingecko_platform: str | None
-    # Block time hint (seconds) for receipt polling and log chunking.
+    # Seconds per block, for display: ``network()`` reports it as
+    # ``blockTimeS``. Nothing schedules or chunks by it.
     block_time_s: float = 2.0
     # Largest eth_getLogs span the public RPC tolerates per call.
     max_log_span: int = 2000
@@ -112,7 +113,8 @@ BASE = ChainSpec(
     weth="0x4200000000000000000000000000000000000006",
     dexscreener_slug="base",
     coingecko_platform="base",
-    block_time_s=2.0,
+    # About five blocks a second (measured 2026-11-22; it was 2 s at launch).
+    block_time_s=0.2,
     max_log_span=2000,
     approval_log_span=100_000,
     # The widest span with a measured answer time (~1 s, a tenth of the
