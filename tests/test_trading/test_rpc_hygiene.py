@@ -732,3 +732,117 @@ class TestRefusedKey:
         monkeypatch.setattr(service, "trigger_check", triggers)
         await service.housekeep()
         assert ran == ["dca", "triggers"]
+
+    # A refusal while the pause runs only confirms it. Before this, one resync
+    # with 2 wallets moved a 2-minute pause to 15 (measured 2026-11-22).
+
+    async def test_a_resync_while_paused_neither_lengthens_nor_extends_the_pause(
+        self, funded_service: TradingService, gate: Gate, clock: list[float]
+    ) -> None:
+        service = funded_service
+        clock[0] = float(int(clock[0]))
+        await service.import_wallet("Second", private_key="0x" + "22" * 32)
+        await service.sync_all()
+        gate.refuse[BASE_HOST] = 403
+        await service.sync_all()  # both wallets refused: paused for a minute
+        clock[0] += 60
+        await service.sync_all()  # the first wallet refused again: two minutes
+        pause = service._auth_pauses[8453]
+        assert (pause.refusals, pause.pauses, pause.until) == (3, 2, clock[0] + 120)
+        until = pause.until
+        clock[0] += 30
+        gate.seen.clear()
+        with capture_logs() as logs:
+            await service.sync_all(kind=SYNC_REQUESTED)  # the resync button
+        # Both wallets were asked and both say why; the pause is where it was.
+        assert gate.hits(BASE_HOST) == 2
+        reads = [r for r in service.chain_reads() if r["chainId"] == 8453]
+        assert len(reads) == 2
+        assert all(r["status"] == "failed" and "HTTP 403" in r["reason"] for r in reads)
+        assert not any(r["reason"].startswith("paused") for r in reads)
+        assert (pause.refusals, pause.pauses, pause.until) == (5, 2, until)
+        assert not [e for e in logs if e["event"].startswith("trading.rpc_key")]
+        # The background sync still waits for the same end, then takes one step.
+        clock[0] = until - 1
+        gate.seen.clear()
+        await service.sync_all()
+        assert gate.hits(BASE_HOST) == 0
+        clock[0] = until
+        await service.sync_all()
+        assert gate.hits(BASE_HOST) == 1
+        assert service._auth_pauses[8453] is pause
+        assert (pause.pauses, pause.until) == (3, until + 300)
+
+    async def test_two_wallets_walk_the_schedule_one_step_per_expiry(
+        self, funded_service: TradingService, gate: Gate, clock: list[float]
+    ) -> None:
+        service = funded_service
+        clock[0] = float(int(clock[0]))
+        await service.import_wallet("Second", private_key="0x" + "22" * 32)
+        await service.sync_all()
+        gate.refuse[BASE_HOST] = 403
+        delays: list[float] = []
+        with capture_logs() as logs:
+            gate.seen.clear()
+            await service.sync_all()  # two refusals in one pass: the first pause
+            assert gate.hits(BASE_HOST) == 2
+            for _ in range(5):
+                pause = service._auth_pauses[8453]
+                step, until = pause.pauses, pause.until
+                delays.append(until - clock[0])
+                # Half-way a resync asks both wallets; the pause stays as it is.
+                clock[0] += (until - clock[0]) / 2
+                gate.seen.clear()
+                await service.sync_all(kind=SYNC_REQUESTED)
+                assert gate.hits(BASE_HOST) == 2
+                assert (pause.pauses, pause.until) == (step, until)
+                clock[0] = until - 1
+                gate.seen.clear()
+                await service.sync_all()
+                assert gate.hits(BASE_HOST) == 0
+                # At its end one wallet is asked, and its refusal starts the next pause.
+                clock[0] = until
+                await service.sync_all()
+                assert gate.hits(BASE_HOST) == 1
+                assert service._auth_pauses[8453].pauses == step + 1
+        # 1, 2, 5, then 15 minutes, and 15 minutes from then on.
+        assert delays == [60, 120, 300, 900, 900]
+        assert service._auth_pauses[8453].until - clock[0] == 900
+        events = [e["event"] for e in logs if e["event"].startswith("trading.rpc_key")]
+        assert events == ["trading.rpc_key_refused"]
+
+    @pytest.mark.parametrize("kind", ["background", SYNC_REQUESTED])
+    async def test_a_new_url_ends_the_pause_and_says_so(
+        self, funded_service: TradingService, gate: Gate, kind: str
+    ) -> None:
+        service = funded_service
+        await service.sync_all()
+        gate.refuse[BASE_HOST] = 401
+        await service.sync_all()
+        await service.sync_all()
+        assert service._auth_pauses[8453].pauses == 1
+        service.config.rpc_urls = {"8453": CUSTOM_BASE}
+        with capture_logs() as logs:
+            await service.sync_all(kind=kind)
+        # The new endpoint answered, but the line says only what is known when
+        # the pause ends: the URL changed. Not that the old key was accepted.
+        ended = [e for e in logs if e["event"].startswith("trading.rpc_key")]
+        assert [(e["event"], e["chain"], e["reason"]) for e in ended] == [
+            ("trading.rpc_key_pause_ended", "base", "rpc_url_changed")
+        ]
+        assert service._auth_pauses == {}
+        assert _read(service, 8453)["status"] == "ok"
+
+    async def test_a_new_url_before_any_pause_logs_no_end(
+        self, funded_service: TradingService, gate: Gate
+    ) -> None:
+        service = funded_service
+        await service.sync_all()
+        gate.refuse[BASE_HOST] = 401
+        await service.sync_all()  # one refusal: counted, not paused
+        assert service._auth_pauses[8453].pauses == 0
+        service.config.rpc_urls = {"8453": CUSTOM_BASE}
+        with capture_logs() as logs:
+            await service.sync_all()
+        assert not [e for e in logs if e["event"].startswith("trading.rpc_key")]
+        assert service._auth_pauses == {}

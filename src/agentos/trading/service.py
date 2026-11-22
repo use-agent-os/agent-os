@@ -191,8 +191,11 @@ HIDDEN_RESCAN_S = 3600.0
 # week, one per wallet x chain per pass, and logged each. After this many refusals
 # in a row the background sync leaves the chain alone for the next of these
 # delays (the last repeats); an answer or a new URL ends the pause, and a
-# requested sync always tries. Timeouts and 5xx never count: they say nothing
-# about the key, and one bad minute must not blind the sync.
+# requested sync always tries. A refusal while a pause runs (a requested pass,
+# a later wallet of the same pass) does not lengthen it: in a live test
+# (2026-11-22) one resync with two wallets moved a 2-minute pause to 15, so the
+# pause takes one step per expiry. Timeouts and 5xx never count: they say
+# nothing about the key, and one bad minute must not blind the sync.
 AUTH_REFUSED_STATUSES = frozenset({401, 403})
 AUTH_REFUSALS_BEFORE_PAUSE = 2
 AUTH_PAUSE_S = (60.0, 120.0, 300.0, 900.0)
@@ -474,7 +477,8 @@ class _AuthPause:
     # The URL that refused (memory only, never shown); a different one is tried at once.
     url: str
     refusals: int = 0
-    # Pauses so far: picks the next delay from ``AUTH_PAUSE_S``.
+    # Pauses so far: picks the next delay from ``AUTH_PAUSE_S``. Only a
+    # refusal after ``until`` starts the next one.
     pauses: int = 0
     until: float = 0.0
     reason: str = ""
@@ -2558,26 +2562,35 @@ class TradingService:
         a ``--refresh``) is answered at once, also when the request was folded
         into a background pass already running (``_sync_pass_kind``).
         """
-        pause = self._auth_pauses.get(chain.chain_id)
+        pause = self._auth_pause(chain)
         if pause is None or self._sync_pass_kind != SYNC_BACKGROUND:
             return None
-        if pause.url != self._rpc_url(chain):
-            # A new endpoint or key is worth asking at once.
-            del self._auth_pauses[chain.chain_id]
-            return None
         return pause if self._now() < pause.until else None
+
+    def _auth_pause(self, chain: ChainSpec) -> _AuthPause | None:
+        """The chain's pause record, dropped once the URL it was counted against is replaced."""
+        pause = self._auth_pauses.get(chain.chain_id)
+        if pause is None or pause.url == self._rpc_url(chain):
+            return pause
+        # A new endpoint or key is worth asking at once. Nothing is known of it
+        # yet, so this is not ``rpc_key_accepted``: the pause just ends.
+        del self._auth_pauses[chain.chain_id]
+        if pause.pauses:
+            log.info("trading.rpc_key_pause_ended", chain=chain.key, reason="rpc_url_changed")
+        return None
 
     def _auth_refused(self, chain: ChainSpec, exc: Exception) -> None:
         """Count a refused key (HTTP 401/403) towards the chain's pause; nothing else counts."""
         if not isinstance(exc, EvmTransportError) or exc.status not in AUTH_REFUSED_STATUSES:
             return
-        url = self._rpc_url(chain)
-        pause = self._auth_pauses.get(chain.chain_id)
-        if pause is None or pause.url != url:
-            pause = self._auth_pauses[chain.chain_id] = _AuthPause(url=url)
+        pause = self._auth_pause(chain)
+        if pause is None:
+            pause = self._auth_pauses[chain.chain_id] = _AuthPause(url=self._rpc_url(chain))
         pause.refusals += 1
         pause.reason = str(exc)
-        if pause.refusals < AUTH_REFUSALS_BEFORE_PAUSE:
+        if pause.refusals < AUTH_REFUSALS_BEFORE_PAUSE or self._now() < pause.until:
+            # Not yet two in a row, or the pause is running and this refusal only
+            # confirms it: a requested pass and later wallets of a pass still ask.
             return
         delay = AUTH_PAUSE_S[min(pause.pauses, len(AUTH_PAUSE_S) - 1)]
         pause.pauses += 1
