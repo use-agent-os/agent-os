@@ -189,7 +189,7 @@ export const LP_ROW: LpPosition = {
   },
   quote: { address: USDC.address, symbol: 'USDC', decimals: 6, priceUsd: 1 },
   pool: { poolId: '0xpool', feePct: '0.05%', tickSpacing: 10, tvlUsd: null, priceUsd: 2500 },
-  range: { priceLower: 2000, priceUpper: 2400 },
+  range: { priceLower: 2000, priceUpper: 2400, mcapLower: 2_100_000, mcapUpper: 9_800_000 },
   status: 'above-range',
   principal: { base: LP_AMOUNT, quote: LP_AMOUNT, usd: 1300 },
   fees: { base: LP_AMOUNT, quote: LP_AMOUNT, usd: 4 },

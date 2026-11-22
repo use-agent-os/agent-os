@@ -138,6 +138,10 @@ export const trading = {
   'trading.liquidity.filter.label': 'Protocols',
   'trading.liquidity.col.pool': 'Pool',
   'trading.liquidity.col.range': 'Range',
+  'trading.liquidity.col.mcap': 'Market cap range (USD)',
+  'trading.liquidity.mcap.help':
+    'The market cap at each end of the range this position provides liquidity over',
+  'trading.liquidity.mcap.none': 'No market cap: the token supply or the quote price is not known',
   'trading.liquidity.col.amounts': 'Deposited',
   'trading.liquidity.col.earned': 'Unclaimed',
   'trading.liquidity.col.value': 'Value',

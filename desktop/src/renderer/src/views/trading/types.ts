@@ -1260,8 +1260,17 @@ export interface LpPosition {
     tvlUsd: number | null
     priceUsd: number | null
   }
-  /** Quote per one base token; `null` for a pair. */
-  range: { priceLower: number | null; priceUpper: number | null } | null
+  /**
+   * Quote per one base token; `null` for a pair. The market-cap bounds are
+   * the base token's USD market cap at each end of the range: `null` when its
+   * supply or the quote's price is not known, absent from an older gateway.
+   */
+  range: {
+    priceLower: number | null
+    priceUpper: number | null
+    mcapLower?: number | null
+    mcapUpper?: number | null
+  } | null
   status: LpStatus
   principal: LpSides
   /** Uncollected trading fees; `null` where they compound or could not be read. */

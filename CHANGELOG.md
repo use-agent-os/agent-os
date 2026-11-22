@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Desktop: the Liquidity tab shows each position's **Market cap range (USD)**,
+  the market cap of the pool's token at each end of the range the position
+  provides liquidity over (`$2.93M – $3.05M`). It is a column of the desk's
+  table and a line on each card of the BOOK beside the chat. A position whose
+  token supply or quote price is not known shows a dash.
 - Trading: `trading.status` (and `agentos trade status --json`) reports per
   chain what the engine has sent that chain's RPC since the gateway started,
   as `rpcUsage`: HTTP requests, JSON-RPC calls by method and failed requests,
