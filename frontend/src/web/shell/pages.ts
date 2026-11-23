@@ -1,4 +1,12 @@
-import { Bell, CalendarClock, ChartColumn, FolderKanban, House, MessagesSquare } from 'lucide-react'
+import {
+  Bell,
+  CalendarClock,
+  CandlestickChart,
+  ChartColumn,
+  FolderKanban,
+  House,
+  MessagesSquare,
+} from 'lucide-react'
 import type { MessageKey } from '@/i18n'
 import type { Destination } from '@/web/app/routes'
 
@@ -44,6 +52,14 @@ export const PAGES: readonly PageEntry[] = [
     titleKey: 'webShell.pageUsage',
     descriptionKey: 'webShell.pageUsageDescription',
     icon: ChartColumn,
+    group: 'overview',
+  },
+  {
+    id: 'trading',
+    path: '/trading',
+    titleKey: 'webShell.pageTrading',
+    descriptionKey: 'webShell.pageTradingDescription',
+    icon: CandlestickChart,
     group: 'overview',
   },
   {
