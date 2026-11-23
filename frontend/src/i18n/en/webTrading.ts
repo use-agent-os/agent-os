@@ -85,7 +85,8 @@ export const webTrading = defineNamespace('webTrading', {
   ordersEmptyBody: 'Swaps, sends and bridges the engine runs show here.',
   noOpenOrders: 'Nothing open right now.',
   awaitingNote_one: '{count} order waits for approval. Approve or reject it in the desktop app.',
-  awaitingNote_other: '{count} orders wait for approval. Approve or reject them in the desktop app.',
+  awaitingNote_other:
+    '{count} orders wait for approval. Approve or reject them in the desktop app.',
   automations: 'Automations',
   automationsEmpty: 'No DCA plans, price triggers or brackets.',
   automationsFailed: 'Could not load the automations',

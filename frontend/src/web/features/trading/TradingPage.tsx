@@ -94,14 +94,24 @@ export function TradingPage() {
     )
   else if (!enabled)
     body = (
-      <Gate icon={<Power />} title={t('webTrading.disabledTitle')} body={t('webTrading.disabledBody')} />
+      <Gate
+        icon={<Power />}
+        title={t('webTrading.disabledTitle')}
+        body={t('webTrading.disabledBody')}
+      />
     )
   else if (!vault.data?.initialized)
     body = (
-      <Gate icon={<Vault />} title={t('webTrading.noVaultTitle')} body={t('webTrading.noVaultBody')} />
+      <Gate
+        icon={<Vault />}
+        title={t('webTrading.noVaultTitle')}
+        body={t('webTrading.noVaultBody')}
+      />
     )
   else if (!vault.data.unlocked)
-    body = <Gate icon={<Lock />} title={t('webTrading.lockedTitle')} body={t('webTrading.lockedBody')} />
+    body = (
+      <Gate icon={<Lock />} title={t('webTrading.lockedTitle')} body={t('webTrading.lockedBody')} />
+    )
   else if (wallets.isPending) body = <PageLoading />
   else if (wallets.isError)
     body = (

@@ -128,7 +128,9 @@ export function LiquidityView({ wallet }: { wallet?: string }) {
       {totals.outOfRange > 0 ? (
         <p className="trd-callout">{tPlural('webTrading.outOfRange', totals.outOfRange)}</p>
       ) : null}
-      {book.data.partialScan ? <p className="trd-callout">{t('webTrading.liquidityPartial')}</p> : null}
+      {book.data.partialScan ? (
+        <p className="trd-callout">{t('webTrading.liquidityPartial')}</p>
+      ) : null}
       <Card asChild padding="none" className="trd-table-wrap">
         <section aria-label={t('webTrading.viewLiquidity')}>
           <CardHeader title={t('webTrading.viewLiquidity')} className="px-4 pt-4" />

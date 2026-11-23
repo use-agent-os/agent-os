@@ -61,7 +61,9 @@ function PoolRows({ pools, symbol }: { pools: MarketsPool[]; symbol: string }) {
             <td data-col="change" className="trd-cell-num">
               <span
                 className="trd-num"
-                data-tone={p.change24hPct === null ? undefined : p.change24hPct >= 0 ? 'up' : 'down'}
+                data-tone={
+                  p.change24hPct === null ? undefined : p.change24hPct >= 0 ? 'up' : 'down'
+                }
               >
                 {formatPct(p.change24hPct, { signed: true })}
               </span>
@@ -73,7 +75,15 @@ function PoolRows({ pools, symbol }: { pools: MarketsPool[]; symbol: string }) {
   )
 }
 
-function PoolTable({ side, pools, symbol }: { side: MarketsSide; pools: MarketsPool[]; symbol: string }) {
+function PoolTable({
+  side,
+  pools,
+  symbol,
+}: {
+  side: MarketsSide
+  pools: MarketsPool[]
+  symbol: string
+}) {
   const title =
     side === 'quote'
       ? t('webTrading.marketsQuote', { symbol })
@@ -173,7 +183,12 @@ export function MarketsView({ chains }: { chains: readonly number[] }) {
       </form>
 
       {!params ? (
-        <EmptyState size="sm" icon={<Store />} title={t('webTrading.viewMarkets')} description={t('webTrading.marketsIntro')} />
+        <EmptyState
+          size="sm"
+          icon={<Store />}
+          title={t('webTrading.viewMarkets')}
+          description={t('webTrading.marketsIntro')}
+        />
       ) : markets.isError ? (
         <ErrorState
           title={t('webTrading.marketsFailed')}
@@ -194,7 +209,11 @@ export function MarketsView({ chains }: { chains: readonly number[] }) {
             />
             <span className="trd-figure__value">{formatPrice(data.token.priceUsd)}</span>
           </Card>
-          <PriceChart chainId={data.chain.id} token={data.token.address} symbol={data.token.symbol} />
+          <PriceChart
+            chainId={data.chain.id}
+            token={data.token.address}
+            symbol={data.token.symbol}
+          />
           {data.partial ? <p className="trd-callout">{t('webTrading.marketsPartial')}</p> : null}
           {empty ? (
             <p className="trd-note">{t('webTrading.marketsEmpty')}</p>

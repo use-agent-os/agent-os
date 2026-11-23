@@ -95,7 +95,10 @@ export function PriceChart({
   const change = first && last ? ((last - first) / first) * 100 : null
   return (
     <Card asChild>
-      <section aria-label={t('webTrading.chartOf', { symbol: shown })} className="flex flex-col gap-3">
+      <section
+        aria-label={t('webTrading.chartOf', { symbol: shown })}
+        className="flex flex-col gap-3"
+      >
         <CardHeader
           title={t('webTrading.chartOf', { symbol: shown })}
           action={
@@ -113,7 +116,9 @@ export function PriceChart({
         />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="flex items-baseline gap-2">
-            <span className="trd-figure__value">{formatPrice(chart.data?.stats.priceUsd ?? last)}</span>
+            <span className="trd-figure__value">
+              {formatPrice(chart.data?.stats.priceUsd ?? last)}
+            </span>
             <span
               className="trd-num"
               data-tone={change === null ? undefined : change >= 0 ? 'up' : 'down'}

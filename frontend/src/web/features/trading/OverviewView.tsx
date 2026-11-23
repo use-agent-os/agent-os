@@ -1,7 +1,13 @@
 import { Coins, Flame, TrendingUp, Wallet as WalletIcon } from 'lucide-react'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webTrading'
-import { allocationSegments, chainName, clampSymbol, shortAddress, walletLabel } from '@/views/trading/logic'
+import {
+  allocationSegments,
+  chainName,
+  clampSymbol,
+  shortAddress,
+  walletLabel,
+} from '@/views/trading/logic'
 import type { Portfolio } from '@/views/trading/types'
 import { Card, CardHeader } from '@/web/components/ui/card'
 import { IconTile, STAT_LABEL } from '@/web/features/home/overview-ui'
@@ -120,7 +126,10 @@ export function OverviewView({ portfolio }: { portfolio: Portfolio }) {
                         <span className="trd-mono">{shortAddress(wallet.address)}</span>
                       </ExplorerLink>
                     </span>
-                    <span className="trd-wallet__chains" aria-label={t('webTrading.walletNetworks')}>
+                    <span
+                      className="trd-wallet__chains"
+                      aria-label={t('webTrading.walletNetworks')}
+                    >
                       {wallet.chains.map((c) => (
                         <ChainChip key={c} chainId={c} />
                       ))}
