@@ -59,19 +59,25 @@ the collected files and that table, so a shard reproduces locally:
 uv run pytest tests -q -n 6 -m "not slow" --shard=2/3 --shard-report=/tmp/shard-2.json
 ```
 
-The table is keyed by `platform.system()`; an OS without its own table
-(currently Windows) falls back to another's, so `--shard=I/4` picks the same
-files as Windows shard `I`.
+The table is keyed by `platform.system()` and has one table per CI OS (Linux
+and Windows): the same file costs more on Windows, and not by the same factor
+for every file. `--shard-timings-os=Windows` splits by the Windows table on
+any machine, so `--shard=I/4 --shard-timings-os=Windows` picks the same files
+as Windows shard `I`.
 
 **Shard timings.** Adding, removing or renaming a test file needs no timing
 update: a file missing from the table costs the average, and stale entries
 only hurt balance, never coverage. When shards drift out of balance, download
-a CI run's `shard-report-*` artifacts and refit (per-OS tables the reports do
-not cover are kept):
+the `shard-report-*` artifacts of several recent green runs (pull request runs
+and the daily run on `main` carry both OSes, a push to `main` only Linux) and
+refit. Each shard runs on a runner of its own whose speed varies from run to
+run, so a file's timing is its median over all the reports given; per-OS
+tables the reports do not cover are kept:
 
 ```sh
-python scripts/ci_test_timings.py fit <shard-report.json>...   # rewrites .github/ci-test-timings.json
-python scripts/ci_test_timings.py check --require Linux <shard-report.json>...  # what CI result runs
+gh run download <run-id> -p 'shard-report-*' -D reports/<run-id>    # once per run
+python scripts/ci_test_timings.py fit reports/*/*/shard-report.json  # rewrites .github/ci-test-timings.json
+python scripts/ci_test_timings.py check --require Linux <one run's shard-report.json>...  # what CI result runs
 ```
 
 Fast inner loop while iterating:

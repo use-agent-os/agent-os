@@ -259,9 +259,9 @@ jobs:
   # tests/conftest.py gives each worker its own state dir. `slow` tests
   # (latency benchmarks) get a runner of their own and run serially: sharing
   # the runner's CPUs with busy workers doubles their measured p50.
-  # A new test file just lands at the average cost. To rebalance, download a
-  # run's shard-report-* artifacts and run
-  # `python scripts/ci_test_timings.py fit <reports>`.
+  # A new test file just lands at the average cost. To rebalance, download
+  # several green runs' shard-report-* artifacts (both OSes) and run
+  # `python scripts/ci_test_timings.py fit <reports>` (see AGENTS.md).
   ubuntu-tests:
     name: Test (ubuntu-latest, 3.12, ${{ matrix.shard }})
     needs: classify-changes
