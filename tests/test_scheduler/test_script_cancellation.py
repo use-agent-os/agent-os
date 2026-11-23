@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+import structlog
 
 from agentos.scheduler import scripts as scripts_module
 from agentos.scheduler.delivery import DeliveryChain
@@ -25,6 +26,7 @@ from agentos.scheduler.jobs import execute_with_timeout
 from agentos.scheduler.payloads import make_agent_turn_payload, make_script_payload
 from agentos.scheduler.scripts import run_job_script
 from agentos.scheduler.types import CronJob
+from tests.fakes.virtual_clock import run_on_virtual_clock
 
 _GATED_SCRIPT = (
     "from pathlib import Path\n"
@@ -242,6 +244,128 @@ async def test_run_does_not_end_until_a_slow_kill_lands(
             if child.returncode is None:
                 child.proc.kill()
             await child.proc.communicate()
+
+
+class _NeverSeenToExit:
+    """A child whose exit, as far as the event loop can tell, never comes.
+
+    ``kill()`` is accepted and nothing follows: ``returncode`` stays ``None``
+    and ``communicate()`` never returns. That is a child in an
+    uninterruptible kernel call (hung NFS or FUSE I/O, a stuck driver call),
+    which a kill only takes effect on once the call returns, or one whose
+    exit the loop's child watcher never reported.
+    """
+
+    pid = 4242
+    returncode: int | None = None
+
+    def __init__(self) -> None:
+        self.kills = 0
+
+    def kill(self) -> None:
+        self.kills += 1
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        await asyncio.get_running_loop().create_future()
+        raise AssertionError("unreachable: the future above is never resolved")
+
+
+def _stuck_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[_NeverSeenToExit, AsyncMock]:
+    monkeypatch.setenv("AGENTOS_STATE_DIR", str(tmp_path))
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "stuck.py").write_text("pass", encoding="utf-8")
+    child = _NeverSeenToExit()
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", AsyncMock(return_value=child))
+    # The double has no real pid to signal; the sweep is stubbed, and only
+    # checked to still run once the reap has given up.
+    sweep = AsyncMock()
+    monkeypatch.setattr(scripts_module, "_kill_process_group", sweep)
+    return child, sweep
+
+
+async def _start_and_kill(ending: str) -> tuple[asyncio.Task[tuple[bool, str]], float]:
+    """Start the stuck script and bring its run to the kill; return the run and the kill time."""
+    pending = asyncio.create_task(run_job_script("stuck.py", timeout=30))
+    if ending == "timeout":
+        # The run's own deadline kills it, 30 s in.
+        return pending, 30.0
+    await asyncio.sleep(5)
+    pending.cancel()
+    return pending, 5.0
+
+
+@pytest.mark.parametrize("ending", ["timeout", "cancellation"])
+def test_run_ends_when_a_killed_scripts_exit_is_never_seen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ending: str
+) -> None:
+    """The wait for a killed child's exit has a limit. A child whose exit never
+    comes must not hold the run, its job slot, or a scheduler shutdown (which
+    cancels the run and then waits for it) forever: the run ends as failed
+    once the limit has passed, and the error log names the pid."""
+    child, sweep = _stuck_script(tmp_path, monkeypatch)
+
+    async def scenario() -> tuple[object, float, float]:
+        pending, killed_at = await _start_and_kill(ending)
+        try:
+            # On the virtual clock: an unbounded wait fails here instead of hanging.
+            async with asyncio.timeout_at(killed_at + 2 * scripts_module._EXIT_WAIT_LIMIT_S):
+                outcome: object = await pending
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+        return outcome, killed_at, asyncio.get_running_loop().time()
+
+    with structlog.testing.capture_logs() as logs:
+        outcome, killed_at, ended_at = run_on_virtual_clock(scenario)
+
+    if ending == "timeout":
+        assert outcome == (False, "Script timed out after 30s: stuck.py")
+    else:
+        assert outcome == "cancelled"
+    assert child.kills == 1
+    assert ended_at == pytest.approx(killed_at + scripts_module._EXIT_WAIT_LIMIT_S)
+    assert [entry for entry in logs if entry["event"] == "cron.script.unkillable_after_kill"] == [
+        {
+            "event": "cron.script.unkillable_after_kill",
+            "log_level": "error",
+            "pid": 4242,
+            "limit_s": scripts_module._EXIT_WAIT_LIMIT_S,
+        }
+    ]
+    sweep.assert_awaited_once_with(child)
+
+
+@pytest.mark.parametrize("ending", ["timeout", "cancellation"])
+def test_cancelling_a_run_waiting_for_a_killed_scripts_exit_ends_it_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ending: str
+) -> None:
+    """The exit wait outlasts the run's own deadline; a cancellation that
+    arrives during it must still end the run straight away, not at the limit."""
+    child, sweep = _stuck_script(tmp_path, monkeypatch)
+
+    async def scenario() -> tuple[float, float]:
+        loop = asyncio.get_running_loop()
+        pending, killed_at = await _start_and_kill(ending)
+        # Well past the pipe grace, well short of the limit: in the exit wait.
+        await asyncio.sleep(killed_at + 10 - loop.time())
+        assert not pending.done()
+        pending.cancel()
+        cancelled_at = loop.time()
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+        return cancelled_at, loop.time()
+
+    with structlog.testing.capture_logs() as logs:
+        cancelled_at, ended_at = run_on_virtual_clock(scenario)
+
+    assert ended_at == cancelled_at
+    events = [entry["event"] for entry in logs]
+    assert "cron.script.exit_pending_after_kill" in events
+    assert "cron.script.unkillable_after_kill" not in events
+    assert child.kills == 1
+    sweep.assert_awaited_once_with(child)
 
 
 _WRAPPER_SCRIPT = (

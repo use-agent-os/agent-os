@@ -334,22 +334,43 @@ def _redact(text: str) -> str:
 #: scheduler shutdown may hang on it.
 _REAP_GRACE_S = 1.0
 
+#: How long, counted from the kill, the reap waits for the child's own exit.
+#: A kill normally lands in milliseconds, and a loaded Windows runner has
+#: taken longer than :data:`_REAP_GRACE_S`, so this is far above both. A
+#: child whose exit has still not been seen by then is stuck, not slow:
+#: either it is in an uninterruptible kernel call (I/O on a hung NFS or FUSE
+#: mount, a stuck driver call), which a kill only ends once the call
+#: returns, or the loop's child watcher never reported its exit. Waiting
+#: longer would not change that, and would hold the job's slot and the
+#: scheduler's shutdown, which cancels its runs and then waits for them with
+#: no limit of its own.
+_EXIT_WAIT_LIMIT_S = 30.0
+
 #: How often the reap checks for the exit of a killed child that outlasted
 #: the grace.
 _EXIT_POLL_S = 0.05
 
 
 async def _kill_and_reap(proc: asyncio.subprocess.Process) -> None:
-    """Kill *proc* and wait until it has exited, tolerating one that already had.
+    """Kill *proc* and wait, up to a limit, for it to exit, tolerating one that already had.
 
-    Only the wait for the pipes is bounded (see :data:`_REAP_GRACE_S`). The
-    wait for the child itself is not: a kill only starts its termination
+    The wait for the pipes ends after :data:`_REAP_GRACE_S`. The wait for
+    the child itself goes on past it: a kill only starts the termination
     (``TerminateProcess`` returns at once, and a loaded Windows runner has
     not reported the exit within the grace), and until the child has exited
-    it can still write, behind a run already recorded as failed. A kill
-    cannot be caught or ignored, so that wait ends. It watches
-    ``returncode``, which is set as soon as the exit is seen, because
-    ``wait()`` also waits for the pipes.
+    it can still write, behind a run already recorded as failed. That wait
+    watches ``returncode``, which is set as soon as the exit is seen,
+    because ``wait()`` also waits for the pipes.
+
+    It still ends :data:`_EXIT_WAIT_LIMIT_S` after the kill. A kill cannot be
+    caught or ignored, but it does not take effect while the child is in an
+    uninterruptible kernel call, and an exit the loop's child watcher never
+    reports is never seen. At the limit this logs
+    ``cron.script.unkillable_after_kill`` at error level and returns with
+    ``returncode`` still ``None``. The caller then reports its deadline or
+    re-raises its cancellation as it would have anyway, so the run ends as
+    failed; it never reaches the exit-code check that could report success.
+    A cancellation during the wait ends it at once.
 
     Reaping matters even after a kill: an unreaped child leaves the event
     loop warning about a pending transport on the next GC pass. ``kill`` on a
@@ -357,6 +378,8 @@ async def _kill_and_reap(proc: asyncio.subprocess.Process) -> None:
     ``ProcessLookupError``; the outcome the caller reports is the deadline,
     not that race, so it is swallowed here.
     """
+    loop = asyncio.get_running_loop()
+    give_up_at = loop.time() + _EXIT_WAIT_LIMIT_S
     try:
         proc.kill()
     except ProcessLookupError:
@@ -367,8 +390,12 @@ async def _kill_and_reap(proc: asyncio.subprocess.Process) -> None:
         pass
     if proc.returncode is None:
         log.warning("cron.script.exit_pending_after_kill", pid=proc.pid, grace_s=_REAP_GRACE_S)
-        while proc.returncode is None:
-            await asyncio.sleep(_EXIT_POLL_S)
+    while proc.returncode is None:
+        remaining = give_up_at - loop.time()
+        if remaining <= 0:
+            log.error("cron.script.unkillable_after_kill", pid=proc.pid, limit_s=_EXIT_WAIT_LIMIT_S)
+            return
+        await asyncio.sleep(min(_EXIT_POLL_S, remaining))
 
 
 async def run_job_script(
@@ -469,7 +496,9 @@ async def run_job_script(
             # shutdown) cancels this coroutine rather than raising the inner
             # TimeoutError. The child is ours either way: kill and reap it
             # before the cancellation propagates, so a run recorded as failed
-            # cannot keep writing behind the scheduler's back.
+            # cannot keep writing behind the scheduler's back. Only a child
+            # whose exit is not seen within _EXIT_WAIT_LIMIT_S is given up on
+            # (logged by _kill_and_reap), so a stuck one cannot hang shutdown.
             await _kill_and_reap(proc)
             raise
         except Exception as exc:
