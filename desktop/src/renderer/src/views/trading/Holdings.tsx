@@ -29,6 +29,7 @@ import {
   sortHoldings,
   type HoldingSort,
   splitDust,
+  splitUnverified,
   walletLabel,
 } from './logic'
 import { isStockToken } from './markets-logic'
@@ -90,14 +91,22 @@ export function Holdings({
     dir: 'desc',
   })
   const [showDust, setShowDust] = useState(false)
-  // Junk is not dust: it has no value to be under, so it is never in `dust`.
-  const { kept, dust } = splitDust(holdings.filter((h) => !h.hidden))
+  const [showUnverified, setShowUnverified] = useState(false)
+  // One bucket per holding, first match wins: junk (the engine hid it), then
+  // unverified (the ⚠, whatever it is worth), then dust. Junk is never dust:
+  // it has no value to be under.
+  const { kept: listed, unverified } = splitUnverified(holdings.filter((h) => !h.hidden))
+  const { kept, dust } = splitDust(listed)
   const junk = holdings.filter((h) => h.hidden)
   // Each holding exactly once, whatever is folded open: a row that appeared
   // twice would give React two children with one key, and React then leaves
   // stale rows behind on the next toggle.
   const { hidden, mask, title } = useBalanceMask()
-  const rows = sortHoldings([...kept, ...(showDust ? dust : []), ...junk], sort.key, sort.dir)
+  const rows = sortHoldings(
+    [...kept, ...(showDust ? dust : []), ...(showUnverified ? unverified : []), ...junk],
+    sort.key,
+    sort.dir,
+  )
 
   function toggle(key: HoldingSort) {
     setSort((s) =>
@@ -110,7 +119,7 @@ export function Holdings({
   // under the hand that pressed it. Nothing here is a setting.
   const junkFilter = hiddenCount > 0 && onToggleHidden
   const filters =
-    dust.length || junkFilter ? (
+    dust.length || unverified.length || junkFilter ? (
       <div className="trd-hiddenbar" data-testid="hidden-bar">
         <span className="trd-hiddenbar__label">{t('trading.holdings.hidden.label')}</span>
         <div className="trd-hiddenbar__chips">
@@ -122,6 +131,16 @@ export function Holdings({
               pressed={showDust}
               onToggle={() => setShowDust((v) => !v)}
               testId="dust-toggle"
+            />
+          ) : null}
+          {unverified.length ? (
+            <FilterChip
+              count={unverified.length}
+              label={t('trading.holdings.hidden.unverified')}
+              help={t('trading.holdings.hidden.unverified.help')}
+              pressed={showUnverified}
+              onToggle={() => setShowUnverified((v) => !v)}
+              testId="unverified-toggle"
             />
           ) : null}
           {junkFilter ? (

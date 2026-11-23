@@ -10,6 +10,7 @@ import {
   gasReserveEth,
   maxSpendable,
   splitDust,
+  splitUnverified,
   syncShown,
   allocationSegments,
   amountFromPct,
@@ -460,6 +461,24 @@ describe('splitDust', () => {
     const { kept, dust } = splitDust([mk('ON', DUST_USD), mk('UNDER', DUST_USD * 0.99)])
     expect(kept.map((h) => h.token.symbol)).toEqual(['ON'])
     expect(dust.map((h) => h.token.symbol)).toEqual(['UNDER'])
+  })
+})
+
+describe('splitUnverified', () => {
+  const mk = (symbol: string, verified: boolean, native = false) =>
+    ({ token: { symbol, verified, native } }) as unknown as Parameters<
+      typeof splitUnverified
+    >[0][number]
+
+  it('folds tokens on no list, never the native coin', () => {
+    const { kept, unverified } = splitUnverified([
+      mk('USDC', true),
+      mk('CHASE', false),
+      mk('ETH', false, true),
+      mk('Macca', false),
+    ])
+    expect(kept.map((h) => h.token.symbol)).toEqual(['USDC', 'ETH'])
+    expect(unverified.map((h) => h.token.symbol)).toEqual(['CHASE', 'Macca'])
   })
 })
 
