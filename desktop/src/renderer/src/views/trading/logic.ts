@@ -369,6 +369,24 @@ export function splitDust(holdings: readonly Holding[]): { kept: Holding[]; dust
   return { kept, dust }
 }
 
+/** A token on none of the chain's lists: the ⚠ beside its ticker. Folded away
+ *  by default so a launch someone airdropped does not sit next to ETH, but
+ *  (unlike junk) still counted in the totals: the engine kept it because it
+ *  trades, or because the wallet touched it. The native coin is never one. */
+export function isUnverified(h: Holding): boolean {
+  return !h.token.verified && !h.token.native
+}
+
+export function splitUnverified(holdings: readonly Holding[]): {
+  kept: Holding[]
+  unverified: Holding[]
+} {
+  const kept: Holding[] = []
+  const unverified: Holding[] = []
+  for (const h of holdings) (isUnverified(h) ? unverified : kept).push(h)
+  return { kept, unverified }
+}
+
 export function sortHoldings(
   holdings: readonly Holding[],
   key: HoldingSort,

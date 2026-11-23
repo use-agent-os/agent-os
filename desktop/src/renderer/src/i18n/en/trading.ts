@@ -85,6 +85,9 @@ export const trading = {
   'trading.holdings.hidden.label': 'Hidden',
   'trading.holdings.hidden.dust': 'dust',
   'trading.holdings.hidden.dust.help': 'Positions worth under',
+  'trading.holdings.hidden.unverified': 'unverified',
+  'trading.holdings.hidden.unverified.help':
+    'Tokens on no token list (marked ⚠). Folded away by default, still counted in the totals.',
   'trading.holdings.hidden.junk': 'junk',
   'trading.holdings.hidden.junk.help':
     'Airdrops nobody lists or trades and you never touched. Shown rows are marked and never counted.',

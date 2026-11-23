@@ -29,6 +29,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   The thread, menus, session sidebar and icon rail, session dialogs, chat
   header, side panel, pending queue and approval card all share the same
   rounded shapes.
+- Desktop trading: Holdings now hides unverified tokens (the ones marked ⚠,
+  on no token list) by default. A new "unverified" chip in the Hidden bar
+  shows how many there are and brings them back into the table. They still
+  count in the portfolio totals; only junk and dust are left out of those.
 
 ### Fixed
 - Trading: a tiny agent swap, such as a $0.05 DCA buy, no longer waits for
