@@ -9,6 +9,7 @@ export const webTrading = defineNamespace('webTrading', {
   hideAmounts: 'Hide amounts',
   showAmounts: 'Show amounts',
   loading: 'Loading the trading desk',
+  offline: 'Connection to the gateway lost. Figures below may be out of date.',
 
   // States before the desk
   errorTitle: 'Could not read the trading engine',

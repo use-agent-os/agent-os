@@ -145,6 +145,14 @@
       animation: none;
     }
   }
+  .trd-offline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .trd-offline > svg {
+    color: var(--warn);
+  }
   .trd-read-warn {
     display: flex;
     flex-direction: column;

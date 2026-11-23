@@ -2,7 +2,7 @@
 // figures, the empty and error states, the privacy switch, and that nothing
 // it renders offers to act.
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import marketsFixture from '@/views/trading/__fixtures__/markets/nvda.json'
 import '@/test/web'
 import { renderWeb } from '@/test/render-web'
@@ -654,5 +654,32 @@ describe('TradingPage engine text behind the privacy switch', () => {
     const row = await screen.findByTestId('trd-automation-trigger')
     expect(row.textContent).toContain('notify')
     expect(row.textContent).not.toContain(BALANCE_MASK)
+  })
+})
+
+describe('TradingPage connection lost', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('says the figures may be stale while the gateway is unreachable, and clears on reconnect', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    renderPage()
+    expect(await screen.findAllByText('$12,480.52')).not.toHaveLength(0)
+    expect(screen.queryByText(/Connection to the gateway lost/)).toBeNull()
+
+    act(() => useConnection.getState().setState('disconnected'))
+    // The shell's grace period: a short blip says nothing.
+    expect(screen.queryByText(/Connection to the gateway lost/)).toBeNull()
+    await act(() => vi.advanceTimersByTimeAsync(2_000))
+    const notice = screen.getByText(
+      'Connection to the gateway lost. Figures below may be out of date.',
+    )
+    expect(notice).toHaveAttribute('role', 'status')
+    // The last figures stay, under the notice.
+    expect(screen.getAllByText('$12,480.52')).not.toHaveLength(0)
+
+    act(() => useConnection.getState().setState('connected'))
+    await waitFor(() => expect(screen.queryByText(/Connection to the gateway lost/)).toBeNull())
   })
 })

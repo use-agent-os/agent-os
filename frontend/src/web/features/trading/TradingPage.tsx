@@ -1,4 +1,4 @@
-import { Eye, EyeOff, Lock, Power, Info, Vault, Wallet as WalletIcon } from 'lucide-react'
+import { Eye, EyeOff, Lock, Power, Info, Unplug, Vault, Wallet as WalletIcon } from 'lucide-react'
 import { useId, useState, type ReactNode } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webTrading'
@@ -8,6 +8,7 @@ import { PageHeader } from '@/web/components/ui/page-header'
 import { SegmentedControl } from '@/web/components/ui/segmented-control'
 import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import { PAGE_CLASS } from '@/web/features/home/overview-ui'
+import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import '@/web/styles/page-trading.css'
 import {
   useChainReadProblems,
@@ -55,6 +56,23 @@ function PrivacyToggle() {
 
 function Gate({ icon, title, body }: { icon: ReactNode; title: string; body: string }) {
   return <EmptyState icon={icon} title={title} description={body} />
+}
+
+/**
+ * While the gateway is unreachable the page keeps its last figures; this says
+ * they may be stale. It follows the shell's status dot (the same grace
+ * period, so a blip says nothing) and goes once the connection is back and
+ * the reads refetch. A status: announced once when it appears.
+ */
+function OfflineNotice() {
+  const connected = useDisplayedConnection() === 'connected'
+  if (connected) return null
+  return (
+    <p className="trd-callout trd-offline" role="status">
+      <Unplug aria-hidden className="size-4 shrink-0" />
+      {t('webTrading.offline')}
+    </p>
+  )
 }
 
 function PageLoading() {
@@ -206,6 +224,7 @@ export function TradingPage() {
           </p>
         }
       />
+      <OfflineNotice />
       {body}
     </div>
   )
