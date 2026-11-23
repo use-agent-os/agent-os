@@ -843,6 +843,11 @@ span:has(+ .session-filter) {
 .session-row > button[aria-haspopup] {
   border-radius: 9999px;
 }
+/* With its menu open, focus and hover have left the row, but the open
+   trigger stays shown: keep the time it covers hidden too. */
+.session-row:has(> button[aria-haspopup][data-state='open']) > a .text-small.tabular-nums {
+  visibility: hidden;
+}
 .session-rename {
   height: 32px;
   padding-inline: 12px;

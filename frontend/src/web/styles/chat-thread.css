@@ -761,10 +761,6 @@
     width: 14px;
     height: 14px;
   }
-  .chat-approval li[data-approval-id] {
-    border-radius: var(--chat-radius-inner);
-  }
-
   /* ---- Side panel (tool output, artifacts) ------------------------------- */
 
   .chat-overline {
@@ -915,6 +911,35 @@
   .chat-resize:is(:hover, :focus-visible)::after {
     background: var(--accent);
   }
+}
+
+/* The tray's card, restyled in place (unlayered, to win over
+ * its utilities): the inner radius and a softer
+ * hairline, a round tool badge, the thread's sans name and a rounded
+ * command well, so the dock reads as one piece with the composer. */
+.chat-approval li[data-approval-id] {
+  gap: 12px;
+  padding: 12px 12px 12px 14px;
+  border-color: color-mix(in oklab, var(--border), transparent 30%);
+  border-radius: var(--chat-radius-inner);
+  background: color-mix(in oklab, var(--surface-1), transparent 15%);
+  box-shadow: var(--highlight);
+}
+.chat-approval li[data-approval-id] > div:first-child > :first-child {
+  border-radius: 9999px;
+}
+.chat-approval li[data-approval-id] > div:first-child p:first-child {
+  font-family: inherit;
+  font-size: 14px;
+  letter-spacing: normal;
+}
+.chat-approval li[data-approval-id] pre,
+.chat-approval li[data-approval-id] .group\/cmd > :first-child {
+  border-radius: 12px;
+}
+.chat-approval li[data-approval-id] a {
+  border-radius: 9999px;
+  padding-inline: 10px;
 }
 
 @keyframes chat-rise-user {

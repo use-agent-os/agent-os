@@ -770,8 +770,9 @@
   .chat-tool-action[aria-pressed='true'] > svg {
     color: var(--accent);
   }
-  /* Collapsible pills fold to a round icon in a narrow composer. */
-  @container composer (max-width: 560px) {
+  /* Collapsible pills fold to a round icon in a narrow composer (a phone,
+   * or the thread beside an open side panel), before their labels clip. */
+  @container composer (max-width: 640px) {
     .chat-tool-action[data-collapse] {
       width: var(--chip-size);
       padding-inline: 0;
