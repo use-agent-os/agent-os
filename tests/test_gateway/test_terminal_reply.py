@@ -151,3 +151,36 @@ def test_sanitize_agent_error_rewrites_raw_iteration_timeout_message() -> None:
     assert error_class == "iteration_timeout"
     assert "timed out" in message.lower()
     assert "Iteration 1 exceeded iteration_timeout" not in message
+
+
+def test_a_request_hook_veto_carries_the_hooks_reason() -> None:
+    # A request hook (a spend gate, a policy check) refusing the request is a
+    # deliberate stop: the reply is the hook's reason, not generic failure text.
+    payload = {
+        "status": "failed",
+        "terminal_reason": "error",
+        "error_class": "request_vetoed",
+        "error_message": "The daily spend limit is reached.",
+    }
+
+    assert build_terminal_reply(payload) == "The daily spend limit is reached."
+    assert sanitize_agent_error(payload) == ("request_vetoed", "The daily spend limit is reached.")
+
+
+def test_a_request_hook_veto_without_a_reason_still_names_the_hook() -> None:
+    payload = {"status": "failed", "terminal_reason": "error", "error_class": "request_vetoed"}
+
+    assert (
+        build_terminal_reply(payload) == "A request hook stopped the task before it could finish."
+    )
+
+
+def test_a_spend_budget_stop_keeps_its_message_as_written() -> None:
+    payload = {
+        "status": "failed",
+        "terminal_reason": "error",
+        "error_class": "budget_exceeded",
+        "error_message": "Daily spend budget of $5.00 for agent Ops is reached.",
+    }
+
+    assert build_terminal_reply(payload) == "Daily spend budget of $5.00 for agent Ops is reached."
