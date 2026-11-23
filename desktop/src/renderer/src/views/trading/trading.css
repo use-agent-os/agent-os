@@ -1083,6 +1083,13 @@
 .trd-table td.trd-cell--muted {
   color: var(--muted-foreground);
 }
+/* A search that matched nothing: one quiet line under the header. Outside
+   the table, so it spans whatever columns the width leaves showing. */
+.trd-table-none {
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+}
 /* A junk token shown on request: present, but unmistakably not counted. */
 .trd-table tbody tr[data-hidden='true'] td {
   color: var(--muted-foreground);
@@ -3409,6 +3416,50 @@ button:disabled > .trd-hero__spin {
   flex-wrap: wrap;
   gap: 6px;
   margin-left: auto;
+}
+/* The holdings search: small, at the bar's start. With it there, the
+   "Hidden" label and its chips move over to the bar's end as one group,
+   and drop to a line of their own only when the two will not share one. */
+.trd-hiddenbar:has(.trd-holding-search) {
+  flex-wrap: wrap;
+  row-gap: 4px;
+  padding-block: 4px;
+}
+.trd-hiddenbar__fold {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.trd-holding-search + .trd-hiddenbar__fold {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.trd-holding-search.trd-picker__search {
+  flex: 1 1 140px;
+  min-width: 0;
+  max-width: 220px;
+  height: 22px;
+  gap: 6px;
+  padding: 0 4px 0 7px;
+  margin-left: -6px;
+}
+.trd-holding-search.trd-picker__search input {
+  font-size: 12px;
+}
+.trd-holding-search:focus-within {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 18%, transparent);
+}
+/* The book's narrow column: the chips explain themselves (the struck eye),
+   so the label gives way to keep the field and the chips on one line. */
+.trd-hiddenbar {
+  container: trd-hiddenbar / inline-size;
+}
+@container trd-hiddenbar (max-width: 460px) {
+  .trd-holding-search + .trd-hiddenbar__fold .trd-hiddenbar__label {
+    display: none;
+  }
 }
 .trd-chip {
   display: inline-flex;

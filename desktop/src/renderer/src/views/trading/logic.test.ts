@@ -45,6 +45,7 @@ import {
   toRaw,
   walletLabel,
   walletMatches,
+  holdingMatches,
 } from './logic'
 import type { Entry, Holding, Token } from './types'
 
@@ -210,6 +211,27 @@ describe('formatting', () => {
     // Nothing typed matches everything.
     expect(walletMatches(w, '')).toBe(true)
     expect(walletMatches(w, '   ')).toBe(true)
+  })
+  it('finds a holding by symbol, name, or a 0x run of its contract', () => {
+    const h = {
+      token: {
+        symbol: 'BNKR',
+        name: 'BankrCoin',
+        address: '0x22aF33FE49fD1Fa80c7149773dDe5890D3c76F3b',
+      },
+    }
+    expect(holdingMatches(h, 'bnk')).toBe(true)
+    expect(holdingMatches(h, ' BANKR ')).toBe(true)
+    expect(holdingMatches(h, 'coin')).toBe(true)
+    expect(holdingMatches(h, 'eth')).toBe(false)
+    // A contract address, whole or a run of it, needs the 0x.
+    expect(holdingMatches(h, '0x22af33')).toBe(true)
+    expect(holdingMatches(h, h.token.address)).toBe(true)
+    expect(holdingMatches(h, '22af33')).toBe(false)
+    expect(holdingMatches(h, '0x')).toBe(false)
+    // Nothing typed matches everything.
+    expect(holdingMatches(h, '')).toBe(true)
+    expect(holdingMatches(h, '  ')).toBe(true)
   })
   it('formats a clock', () => {
     expect(formatClock(0)).toBe('0:00')

@@ -22,6 +22,7 @@ import {
   formatPrice,
   formatUsd,
   formatUsdCell,
+  holdingMatches,
   pnlTone,
   sameAddress,
   sameToken,
@@ -37,6 +38,13 @@ import { UnwrapNote } from './Orders'
 import { AssetCell, Empty, ErrorState, Skeleton, Tick } from './parts'
 import { isWrappedEth, type Holding, type Wallet } from './types'
 import { copyAddress } from './WalletMenu'
+import { SearchField } from './WalletSearch'
+
+/**
+ * The table grows a search field once it holds enough rows to hunt through.
+ * Counted over everything loaded, folded rows included.
+ */
+export const HOLDING_SEARCH_MIN = 6
 
 /**
  * The ledger's table. Dense mono figures, a hairline per row, the
@@ -92,6 +100,7 @@ export function Holdings({
   })
   const [showDust, setShowDust] = useState(false)
   const [showUnverified, setShowUnverified] = useState(false)
+  const [query, setQuery] = useState('')
   // One bucket per holding, first match wins: junk (the engine hid it), then
   // unverified (the ⚠, whatever it is worth), then dust. Junk is never dust:
   // it has no value to be under.
@@ -102,11 +111,21 @@ export function Holdings({
   // twice would give React two children with one key, and React then leaves
   // stale rows behind on the next toggle.
   const { hidden, mask, title } = useBalanceMask()
+  // The search narrows what the chips show; it never unfolds a bucket. A
+  // folded unverified row is usually a lookalike of the very token searched.
+  const searchable = holdings.length >= HOLDING_SEARCH_MIN
+  const q = searchable ? query.trim() : ''
   const rows = sortHoldings(
     [...kept, ...(showDust ? dust : []), ...(showUnverified ? unverified : []), ...junk],
     sort.key,
     sort.dir,
-  )
+  ).filter((h) => holdingMatches(h, q))
+  // Matches the folds keep out, so an empty search says where to look.
+  const folded = q
+    ? [...(showDust ? [] : dust), ...(showUnverified ? [] : unverified)].filter((h) =>
+        holdingMatches(h, q),
+      ).length
+    : 0
 
   function toggle(key: HoldingSort) {
     setSort((s) =>
@@ -118,43 +137,61 @@ export function Holdings({
   // a filter chip with its count. Pressed = shown, and the rows appear right
   // under the hand that pressed it. Nothing here is a setting.
   const junkFilter = hiddenCount > 0 && onToggleHidden
+  const chips = Boolean(dust.length || unverified.length || junkFilter)
   const filters =
-    dust.length || unverified.length || junkFilter ? (
+    chips || searchable ? (
       <div className="trd-hiddenbar" data-testid="hidden-bar">
-        <span className="trd-hiddenbar__label">{t('trading.holdings.hidden.label')}</span>
-        <div className="trd-hiddenbar__chips">
-          {dust.length ? (
-            <FilterChip
-              count={dust.length}
-              label={t('trading.holdings.hidden.dust')}
-              help={`${t('trading.holdings.hidden.dust.help')} ${formatUsd(DUST_USD)}`}
-              pressed={showDust}
-              onToggle={() => setShowDust((v) => !v)}
-              testId="dust-toggle"
-            />
-          ) : null}
-          {unverified.length ? (
-            <FilterChip
-              count={unverified.length}
-              label={t('trading.holdings.hidden.unverified')}
-              help={t('trading.holdings.hidden.unverified.help')}
-              pressed={showUnverified}
-              onToggle={() => setShowUnverified((v) => !v)}
-              testId="unverified-toggle"
-            />
-          ) : null}
-          {junkFilter ? (
-            <FilterChip
-              count={hiddenCount}
-              label={t('trading.holdings.hidden.junk')}
-              help={t('trading.holdings.hidden.junk.help')}
-              pressed={showHidden}
-              busy={hiddenLoading}
-              onToggle={onToggleHidden}
-              testId="junk-toggle"
-            />
-          ) : null}
-        </div>
+        {searchable ? (
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            onSubmit={() => {
+              const first = rows[0]
+              if (q && first) onSelect(first)
+            }}
+            placeholder={t('trading.holdings.search')}
+            testId="holding-search"
+            className="trd-holding-search"
+          />
+        ) : null}
+        {chips ? (
+          <div className="trd-hiddenbar__fold">
+            <span className="trd-hiddenbar__label">{t('trading.holdings.hidden.label')}</span>
+            <div className="trd-hiddenbar__chips">
+              {dust.length ? (
+                <FilterChip
+                  count={dust.length}
+                  label={t('trading.holdings.hidden.dust')}
+                  help={`${t('trading.holdings.hidden.dust.help')} ${formatUsd(DUST_USD)}`}
+                  pressed={showDust}
+                  onToggle={() => setShowDust((v) => !v)}
+                  testId="dust-toggle"
+                />
+              ) : null}
+              {unverified.length ? (
+                <FilterChip
+                  count={unverified.length}
+                  label={t('trading.holdings.hidden.unverified')}
+                  help={t('trading.holdings.hidden.unverified.help')}
+                  pressed={showUnverified}
+                  onToggle={() => setShowUnverified((v) => !v)}
+                  testId="unverified-toggle"
+                />
+              ) : null}
+              {junkFilter ? (
+                <FilterChip
+                  count={hiddenCount}
+                  label={t('trading.holdings.hidden.junk')}
+                  help={t('trading.holdings.hidden.junk.help')}
+                  pressed={showHidden}
+                  busy={hiddenLoading}
+                  onToggle={onToggleHidden}
+                  testId="junk-toggle"
+                />
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </div>
     ) : null
 
@@ -440,6 +477,17 @@ export function Holdings({
               })}
         </tbody>
       </table>
+      {q && rows.length === 0 && !(loading && holdings.length === 0) ? (
+        <p className="trd-table-none" data-testid="holding-search-none">
+          {t('trading.holdings.search.none')}
+          {folded > 0 ? (
+            <span className="text-dim">
+              {' · '}
+              {t('trading.holdings.search.folded').replace('{count}', String(folded))}
+            </span>
+          ) : null}
+        </p>
+      ) : null}
     </div>
   )
 }
