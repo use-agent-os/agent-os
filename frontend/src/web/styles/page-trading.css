@@ -88,10 +88,12 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+    container-type: inline-size;
   }
+  /* Scales with its card so a five-figure total fits a narrow column. */
   .trd-figure__value {
     overflow: hidden;
-    font-size: var(--text-stat, 1.5rem);
+    font-size: clamp(1.125rem, 12cqi, var(--text-stat, 1.5rem));
     font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
