@@ -242,7 +242,10 @@ def _parent_session_of(task: _RuntimeTask) -> str | None:
     return parent if isinstance(parent, str) and parent else None
 
 
-@dataclass
+# ``eq=False``: a task is itself, not its field values. ``_remove_pending``
+# finds it in a session's queue by identity, instead of building and
+# comparing a tuple of every field for each queued task it passes.
+@dataclass(eq=False)
 class _RuntimeTask:
     task_id: str
     envelope: RouteEnvelope
@@ -265,6 +268,12 @@ class _RuntimeTask:
     #: The slot came from the nested pool, which only child runs use (see
     #: ``_acquire_fair_slot``). A child keeps it until it ends.
     nested_slot: bool = False
+    #: The running turn gave its slot back while it waits inline on another
+    #: task (``wait_inline``); it takes one in the same pool before going on.
+    parked: bool = False
+    #: A slot in the pool this parked turn left is kept for it: new
+    #: admissions leave it alone (``_shared_slot_free``, ``_nested_slot_free``).
+    resume_reserved: bool = False
     overflow_dropped: bool = False
     cancel_source: str | None = None
     cancel_reason: str | None = None
@@ -531,6 +540,15 @@ class TaskRuntime:
         self._subagent_in_flight = 0
         # Children holding a nested slot, not counted in ``_global_in_flight``.
         self._nested_in_flight = 0
+        # Turns parked in an inline wait (``wait_inline``): still running, but
+        # holding no slot until the wait ends. One that is about to come back
+        # reserves a slot in the pool it left, by pool here, so the turn in
+        # progress goes before queued ones.
+        self._parked_turns = 0
+        self._resume_reserved_shared = 0
+        self._resume_reserved_nested = 0
+        # Parked turns' task ids by the task id each one waits on.
+        self._inline_waiters: dict[str, set[str]] = {}
         # Tasks waiting for the last shared slot only because of the
         # round-robin tie-break, by session (``_shared_slot_free``).
         self._slot_contenders: dict[str, set[str]] = {}
@@ -574,9 +592,10 @@ class TaskRuntime:
 
     @property
     def active_turns(self) -> int:
-        """Turns holding a slot right now: the shared pool plus the nested one."""
+        """Turns in progress: those holding a shared or nested slot, plus the
+        ones parked in an inline wait (``wait_inline``)."""
 
-        return self._global_in_flight + self._nested_in_flight
+        return self._global_in_flight + self._nested_in_flight + self._parked_turns
 
     def stop_admission(self) -> None:
         """Refuse every further :meth:`enqueue` until :meth:`resume_admission`."""
@@ -997,6 +1016,158 @@ class TaskRuntime:
             return await self.status(task_id)
         await asyncio.wait_for(runtime_task.done.wait(), timeout=timeout)
         return await self.status(task_id)
+
+    async def wait_inline(
+        self,
+        task_id: str,
+        *,
+        waiter_task_id: str | None,
+        timeout: float | None = None,
+    ) -> AgentTaskRecord:
+        """:meth:`wait` for *task_id* from inside the running turn *waiter_task_id*.
+
+        The waiting turn holds no slot while it waits. It gives its slot back
+        here and, before this returns (the awaited task ended, or *timeout*
+        ran out and ``TimeoutError`` is raised), takes one back in the same
+        pool, ahead of queued turns. A turn blocked on its child
+        (``sessions_yield(session_key=...)``) that kept its slot made a chain
+        of such waits hold one slot per level, and a few chains filled both
+        pools while the deepest children waited for a slot nothing freed
+        until the waits timed out.
+
+        Anything else (no such running turn, the task already ended) is a
+        plain :meth:`wait`.
+        """
+        target = self._tasks.get(task_id)
+        waiter = self._tasks.get(waiter_task_id) if waiter_task_id else None
+        if (
+            target is None
+            or target.done.is_set()
+            or waiter is None
+            or waiter is target
+            or not waiter.acquired_slot
+            or waiter.parked
+            or waiter.turn_settled
+        ):
+            return await self.wait(task_id, timeout=timeout)
+        self._park(waiter, task_id)
+        try:
+            await self._notify_slot_change()
+            await asyncio.wait_for(target.done.wait(), timeout=timeout)
+        except asyncio.CancelledError:
+            self._unpark_on_cancel(waiter, task_id)
+            raise
+        except TimeoutError:
+            await self._unpark(waiter, task_id)
+            raise
+        await self._unpark(waiter, task_id)
+        return await self.status(task_id)
+
+    def _park(self, task: _RuntimeTask, target_id: str) -> None:
+        """Give *task*'s slot back while it waits on *target_id*.
+
+        Synchronous, so a cancel cannot land between the counters and the
+        flag. The turn keeps its place in its parent's lane
+        (``_parent_in_flight``) and stays alive for its own children's
+        nested-first admission (``_parent_run_alive``).
+        """
+        task.parked = True
+        self._parked_turns += 1
+        self._inline_waiters.setdefault(target_id, set()).add(task.task_id)
+        if task.nested_slot:
+            self._nested_in_flight = max(0, self._nested_in_flight - 1)
+        else:
+            self._global_in_flight = max(0, self._global_in_flight - 1)
+        log.debug(
+            "task_runtime.inline_wait_parked",
+            task_id=task.task_id,
+            waits_on=target_id,
+            nested=task.nested_slot,
+        )
+
+    async def _unpark(self, task: _RuntimeTask, target_id: str) -> None:
+        """Take a slot back for the parked *task*, before any queued turn."""
+        self._drop_inline_waiter(task, target_id)
+        if not task.parked:
+            return
+        self._reserve_resume_slot(task)
+        cond = self._ensure_fair_cond()
+        try:
+            async with cond:
+                while not self._resume_slot_free(task):
+                    await cond.wait()
+                self._take_back_slot(task)
+        except asyncio.CancelledError:
+            self._unpark_on_cancel(task, target_id)
+            raise
+
+    def _unpark_on_cancel(self, task: _RuntimeTask, target_id: str) -> None:
+        """Settle a parked *task* whose wait was cancelled, without waiting."""
+        self._drop_inline_waiter(task, target_id)
+        if not task.parked:
+            return
+        if task.cancel_requested or task.stop_signal.shutdown:
+            # The run is being stopped and needs no slot to end. Its parked
+            # state, and a slot kept for it, are settled when the run
+            # releases (``_release_slot``), which wakes the waiting turns.
+            return
+        # Cancelled from inside the turn (a tool's execution timeout): the
+        # turn goes on, so it takes its slot back now, past the cap if it
+        # must, rather than run uncounted. Its release brings it back down.
+        over_cap = not self._resume_slot_free(task)
+        self._take_back_slot(task)
+        if over_cap:
+            log.info(
+                "task_runtime.inline_wait_resumed_over_cap",
+                task_id=task.task_id,
+                nested=task.nested_slot,
+            )
+
+    def _drop_inline_waiter(self, task: _RuntimeTask, target_id: str) -> None:
+        waiters = self._inline_waiters.get(target_id)
+        if waiters is None:
+            return
+        waiters.discard(task.task_id)
+        if not waiters:
+            del self._inline_waiters[target_id]
+
+    def _reserve_resume_slot(self, task: _RuntimeTask) -> None:
+        if task.resume_reserved:
+            return
+        task.resume_reserved = True
+        if task.nested_slot:
+            self._resume_reserved_nested += 1
+        else:
+            self._resume_reserved_shared += 1
+
+    def _drop_resume_reservation(self, task: _RuntimeTask) -> None:
+        if not task.resume_reserved:
+            return
+        task.resume_reserved = False
+        if task.nested_slot:
+            self._resume_reserved_nested = max(0, self._resume_reserved_nested - 1)
+        else:
+            self._resume_reserved_shared = max(0, self._resume_reserved_shared - 1)
+
+    def _resume_slot_free(self, task: _RuntimeTask) -> bool:
+        # Reservations do not hold back the turns they were made for.
+        if task.nested_slot:
+            return self._nested_in_flight < self._max_nested_concurrency
+        return self._global_in_flight < self._max_concurrency
+
+    def _take_back_slot(self, task: _RuntimeTask) -> None:
+        self._drop_resume_reservation(task)
+        if task.nested_slot:
+            self._nested_in_flight += 1
+        else:
+            self._global_in_flight += 1
+        task.parked = False
+        self._parked_turns = max(0, self._parked_turns - 1)
+
+    async def _notify_slot_change(self) -> None:
+        cond = self._ensure_fair_cond()
+        async with cond:
+            cond.notify_all()
 
     def is_task_active(self, task_id: str) -> bool:
         """True while ``task_id`` is queued or running in this process."""
@@ -1837,8 +2008,14 @@ class TaskRuntime:
         A child keeps the slot it got until it ends, so the counters only move
         on admission and release: ``_global_in_flight <= max_concurrency`` and
         ``_nested_in_flight <= max_nested_concurrency``, hence no more than
-        ``max_concurrency + max_nested_concurrency`` turns ever run at once,
-        whatever the per-parent limit and however deep the nesting.
+        ``max_concurrency + max_nested_concurrency`` turns ever hold a slot at
+        once, whatever the per-parent limit and however deep the nesting. A
+        turn parked in an inline wait (``wait_inline``) holds none until it
+        takes one back in the same pool; slots kept for such turns
+        (``_resume_reserved_*``) count as taken here. The one exception: a
+        parked turn whose wait is cancelled from inside the turn (a tool
+        timeout) takes its slot back at once, if need be past the cap, until
+        it ends.
         """
         is_child = task.run_kind in _CHILD_RUN_KINDS
         try:
@@ -1903,14 +2080,16 @@ class TaskRuntime:
             await self._wait_for_slot_change(cond, recheck=parent is not None)
 
     def _shared_slot_free(self, task: _RuntimeTask, agent_id: str, session_key: str) -> bool:
+        # A slot a parked turn coming back has reserved is taken (``wait_inline``).
+        in_use = self._global_in_flight + self._resume_reserved_shared
         # Predicate 1: global slot available.
-        if self._global_in_flight >= self._max_concurrency:
+        if in_use >= self._max_concurrency:
             return False
         # Predicate 2: a child run in the shared pool leaves the reserved
         # slots to other work, so a fan-out cannot take them.
         if (
             task.run_kind in _CHILD_RUN_KINDS
-            and self._max_concurrency - self._global_in_flight <= self._subagent_reserved_slots
+            and self._max_concurrency - in_use <= self._subagent_reserved_slots
         ):
             return False
         # Tie-break: when exactly one slot remains and several sessions of
@@ -1919,7 +2098,7 @@ class TaskRuntime:
         # sessions that are contending count: one at the head that is
         # running, or waiting on something else (its parent lane, the
         # reserve), must not hold the slot back from the rest.
-        idle_slots = self._max_concurrency - self._global_in_flight
+        idle_slots = self._max_concurrency - in_use
         rr = self._agent_session_rr.get(agent_id)
         if idle_slots != 1 or not rr or len(rr) < 2:
             return True
@@ -1950,14 +2129,20 @@ class TaskRuntime:
         task.acquired_slot = True
 
     def _parent_run_alive(self, parent: str) -> bool:
-        """True while *parent* has a run holding a slot whose turn has not ended."""
+        """True while *parent* has an admitted run whose turn has not ended.
+
+        A run parked in an inline wait (``wait_inline``) counts: it gave its
+        slot back, but its turn is alive and may be waiting on this child.
+        """
 
         running = self._running_by_session.get(parent)
         return running is not None and running.acquired_slot and not running.turn_settled
 
     def _nested_slot_free(self) -> bool:
-        return self._nested_in_flight < self._max_nested_concurrency and (
-            self._global_in_flight + self._nested_in_flight
+        # A slot a parked child coming back has reserved is taken.
+        in_use = self._nested_in_flight + self._resume_reserved_nested
+        return in_use < self._max_nested_concurrency and (
+            self._global_in_flight + self._resume_reserved_shared + in_use
             < self._max_concurrency + self._max_nested_concurrency
         )
 
@@ -1988,13 +2173,26 @@ class TaskRuntime:
                         self._parent_in_flight.pop(parent, None)
                     else:
                         self._parent_in_flight[parent] = remaining
-                if task.nested_slot:
+                if task.parked:
+                    # A run stopped while parked in an inline wait: its slot
+                    # went back when it parked.
+                    self._drop_resume_reservation(task)
+                    task.parked = False
+                    self._parked_turns = max(0, self._parked_turns - 1)
+                elif task.nested_slot:
                     self._nested_in_flight = max(0, self._nested_in_flight - 1)
-                    task.nested_slot = False
                 else:
                     self._global_in_flight = max(0, self._global_in_flight - 1)
+                if not task.nested_slot:
                     self._drop_agent_in_flight(task.envelope.agent_id)
+                task.nested_slot = False
                 task.acquired_slot = False
+            # Turns parked waiting on this one come back next: the slot it
+            # frees (when in their pool) goes to them before any queued turn.
+            for waiter_id in self._inline_waiters.pop(task.task_id, ()):
+                waiter = self._tasks.get(waiter_id)
+                if waiter is not None and waiter.parked:
+                    self._reserve_resume_slot(waiter)
         # Wake every task waiting for a slot.
         if self._fair_cond is not None:
             async with self._fair_cond:

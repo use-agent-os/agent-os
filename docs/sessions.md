@@ -161,8 +161,8 @@ child takes a shared slot first and a nested one when the shared slots open to
 children are taken. In the shared pool children always leave
 `subagents.subagent_reserved_slots` (default `2`, at most `max_concurrency - 1`)
 free, so your own message starts at once even while children of finished turns
-are still running. A child keeps its slot until it ends. Running turns never
-exceed `max_concurrency + max_nested_concurrency`, at any nesting depth,
+are still running. A child keeps its slot until it ends. Turns holding a slot
+never exceed `max_concurrency + max_nested_concurrency`, at any nesting depth,
 whatever `max_concurrent_children` is.
 
 ```toml
@@ -171,9 +171,14 @@ max_concurrency = 4
 # max_nested_concurrency = 4   # default: max_concurrency
 ```
 
-A chain of parents each waiting inline on its own child can fill both pools;
-the extra children then wait for a slot until something ends (the inline wait
-has its own timeout).
+A turn waiting inline (`sessions_yield` with a `session_key`) holds no slot
+while it waits: it gives its slot back, and takes one in the same pool back
+before the wait returns, ahead of queued turns. The slot the awaited task frees
+when it ends goes to the turn waiting on it first. So a chain of parents each
+waiting on its own child, down to the spawn depth limit, never fills the pools
+with turns that are only waiting. A turn waiting this way still counts as
+running (for example in `agentos gateway status`), and still holds its place in
+its own parent's `max_concurrent_children` lane.
 
 If the gateway restarts while subagent runs are in progress, they are not
 resumed. Each is marked `abandoned` (reason `process_restart`), and their
