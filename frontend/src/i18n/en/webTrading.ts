@@ -133,7 +133,6 @@ export const webTrading = defineNamespace('webTrading', {
   historyNetwork: 'Network',
   allNetworks: 'All networks',
   pnlSummary: 'Profit and loss',
-  gas: 'Gas {amount}',
 
   // Markets
   marketsLabel: 'Token',

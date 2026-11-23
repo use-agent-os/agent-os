@@ -368,4 +368,19 @@
       text-align: left;
     }
   }
+
+  /* ---- History ---------------------------------------------------------- */
+  .trd-pnl {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+    gap: 12px;
+  }
+  .trd-pnl dt {
+    color: var(--text-muted);
+    font-size: var(--text-small, 0.8125rem);
+  }
+  .trd-pnl dd {
+    font-size: 1.125rem;
+    font-weight: 600;
+  }
 }
