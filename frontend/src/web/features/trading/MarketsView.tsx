@@ -22,7 +22,7 @@ import type { MarketsParams, MarketsPool, MarketsSide } from '@/views/trading/ty
 import { Button } from '@/web/components/ui/button'
 import { Card, CardHeader } from '@/web/components/ui/card'
 import { Input } from '@/web/components/ui/input'
-import { EmptyState, ErrorState, Skeleton } from '@/web/components/ui/states'
+import { EmptyState, ErrorState, Skeleton, useDelayed } from '@/web/components/ui/states'
 import { ambiguousCandidates, useMarkets, type SymbolCandidate } from './data'
 import { TokenCell, TokenMark } from './parts'
 import { PriceChart } from './PriceChart'
@@ -180,6 +180,29 @@ function CandidatePicker({
   )
 }
 
+/** How long a markets read runs before the page says why it is slow. */
+export const MARKETS_SLOW_MS = 4_000
+
+/**
+ * The skeleton while pools are read. A rate-limited price source can hold
+ * `trading.markets` for 15 s or more; past a few seconds a line says so, so
+ * the grey block does not read as a hang. It mounts with each read, so a new
+ * search starts the clock again.
+ */
+function MarketsLoading() {
+  const slow = useDelayed(MARKETS_SLOW_MS)
+  return (
+    <div className="flex flex-col gap-2">
+      <Skeleton className="h-64 rounded-card" />
+      {slow ? (
+        <p className="trd-note" role="status">
+          {t('webTrading.marketsSlow')}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 export function MarketsView({ chains }: { chains: readonly number[] }) {
   const defaultChain = chains[0] ?? 8453
   const [draft, setDraft] = useState('')
@@ -261,7 +284,7 @@ export function MarketsView({ chains }: { chains: readonly number[] }) {
           onRetry={() => void markets.refetch()}
         />
       ) : markets.isPending ? (
-        <Skeleton className="h-64 rounded-card" />
+        <MarketsLoading />
       ) : data ? (
         <>
           <Card className="flex flex-wrap items-center justify-between gap-3">

@@ -158,6 +158,7 @@ export const webTrading = defineNamespace('webTrading', {
   colDex: 'DEX',
   colTvl: 'TVL',
   colVolume: 'Volume 24h',
+  marketsSlow: 'Still reading pools. A busy price source can take up to a minute.',
   marketsPartial: 'The read stopped early; some pools may be missing.',
   marketsAmbiguous: 'Several tokens use this symbol. Pick one:',
   marketsAmbiguousMore_one: '{count} more match is not listed. Search by address to see it.',

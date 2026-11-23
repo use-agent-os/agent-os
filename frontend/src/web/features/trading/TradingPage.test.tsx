@@ -703,3 +703,32 @@ describe('TradingPage explorer links', () => {
     expect(txLink).toHaveAccessibleName(`${hash}, Open the transaction on the explorer`)
   })
 })
+
+describe('TradingPage slow markets read', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('says why after a few seconds of reading pools, and goes when they arrive', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    let release: (() => void) | null = null
+    const rpc = tradingRpc().handle(
+      'trading.markets',
+      () => new Promise((resolve) => (release = () => resolve(marketsFixture))),
+    )
+    renderPage(rpc)
+    await openView(/markets/i)
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'NVDA' } })
+    fireEvent.submit(screen.getByRole('search'))
+    await waitFor(() => expect(release).not.toBeNull())
+    const slow = /Still reading pools/
+    await act(() => vi.advanceTimersByTimeAsync(3_000))
+    expect(screen.queryByText(slow)).toBeNull()
+    await act(() => vi.advanceTimersByTimeAsync(1_500))
+    expect(screen.getByText(slow)).toHaveAttribute('role', 'status')
+
+    act(() => release!())
+    expect((await screen.findAllByTestId('trd-pool')).length).toBeGreaterThan(0)
+    expect(screen.queryByText(slow)).toBeNull()
+  })
+})
