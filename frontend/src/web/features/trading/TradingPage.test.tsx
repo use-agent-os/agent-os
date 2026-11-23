@@ -602,3 +602,57 @@ describe('TradingPage unfinished or failed chain reads', () => {
     expect(screen.queryByTestId('trd-read-warning')).toBeNull()
   })
 })
+
+describe('TradingPage engine text behind the privacy switch', () => {
+  const REASON = 'trading.insufficient_balance: Public test key A holds 0 USDC, needs 149.986351'
+
+  it("masks a failed order's reason with the amounts, keeping its status", async () => {
+    const rpc = tradingRpc().handle('trading.orders.list', {
+      orders: [order({ status: 'failed', reason: REASON, txHash: null })],
+    })
+    renderPage(rpc)
+    await openView(/orders/i)
+    const row = await screen.findByTestId('trd-order')
+    expect(row.textContent).toContain('needs 149.986351')
+    fireEvent.click(screen.getByRole('button', { name: /hide amounts/i }))
+    await waitFor(() => expect(row.textContent).not.toContain('149.986351'))
+    expect(row.textContent).not.toContain('holds 0 USDC')
+    expect(within(row).getByText('Failed')).toBeInTheDocument()
+  })
+
+  it("masks a history entry's note with the amounts", async () => {
+    const rpc = tradingRpc().handle('trading.history', {
+      entries: [entry({ note: 'Sent 12.5 USDC to cold storage' })],
+    })
+    renderPage(rpc)
+    await openView(/history/i)
+    expect(await screen.findByText('Sent 12.5 USDC to cold storage')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /hide amounts/i }))
+    await waitFor(() => expect(screen.queryByText(/12\.5 USDC/)).toBeNull())
+  })
+
+  it('leaves an alert-only trigger\'s "notify" readable with the amounts hidden', async () => {
+    const trigger = {
+      id: 'trg_2',
+      name: 'Price alert',
+      status: 'armed',
+      chain: { id: 8453 },
+      token: token('ETH'),
+      bracket: null,
+      condition: { label: 'under $3,000' },
+      action: { label: 'notify' },
+    }
+    const rpc = tradingRpc().handle('trading.trigger.list', {
+      kind: 'triggers',
+      triggers: [trigger],
+      totals: { count: 1, armed: 1, awaiting: 0, triggered: 0 },
+    })
+    localStorage.setItem('agentos-web.trading.balancesHidden', 'true')
+    reloadBalancePrivacy()
+    renderPage(rpc)
+    await openView(/orders/i)
+    const row = await screen.findByTestId('trd-automation-trigger')
+    expect(row.textContent).toContain('notify')
+    expect(row.textContent).not.toContain(BALANCE_MASK)
+  })
+})

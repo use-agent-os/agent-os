@@ -54,6 +54,21 @@ export function Amount({ text, className }: { text: string; className?: string }
 }
 
 /**
+ * An engine note or failure reason under a row. It is free text and often
+ * names amounts and balances ("holds 0 USDC, needs 149.98"), so it masks
+ * whole with the amounts; clamped plain text otherwise.
+ */
+export function EngineNote({ text, max = 120 }: { text: string | null | undefined; max?: number }) {
+  const hidden = useBalancePrivacy((s) => s.hidden)
+  if (!text) return null
+  return (
+    <p className="trd-order__note" data-masked={hidden || undefined}>
+      {hidden ? BALANCE_MASK : clampText(text, max)}
+    </p>
+  )
+}
+
+/**
  * A token's mark: its initials in a round tile. Logos come from third
  * parties, so the web page never loads them.
  */

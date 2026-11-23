@@ -23,6 +23,7 @@ import { useAutomations, useOrders } from './data'
 import {
   Amount,
   ChainChip,
+  EngineNote,
   ExplorerLink,
   formatWhen,
   initiatorLabel,
@@ -30,7 +31,7 @@ import {
   Money,
   StatusBadge,
 } from './parts'
-import { clampSym, clampText, txUrl, useMask } from './safety'
+import { clampSym, clampText, namesFigure, txUrl, useMask } from './safety'
 
 // Orders: what the engine is running or waiting on, then what finished, and
 // the automations (DCA plans, price triggers, brackets). Approving,
@@ -60,7 +61,7 @@ function OrderRow({ order }: { order: Order }) {
             </>
           ) : null}
         </div>
-        {note ? <p className="trd-order__note">{clampText(note, 120)}</p> : null}
+        <EngineNote text={note} />
       </div>
       <div className="trd-order__side">
         <Money value={order.valueUsd} />
@@ -114,8 +115,13 @@ function AutomationRow({ a }: { a: Automation }) {
       },
     )}`
   else if (a.type === 'trigger')
-    // The action names what it moves ("buy $50 of ETH"): a figure like any other.
-    detail = `${clampText(a.item.condition.label, 40)} · ${mask(clampText(a.item.action.label, 48))}`
+    // An action that names what it moves ("buy $50 of ETH") is a figure like
+    // any other; one that moves nothing ("notify") stays readable.
+    detail = `${clampText(a.item.condition.label, 40)} · ${
+      namesFigure(a.item.action.label)
+        ? mask(clampText(a.item.action.label, 48))
+        : clampText(a.item.action.label, 48)
+    }`
   else
     detail = t('webTrading.bracketLines', {
       tp: clampText(a.item.lines.takeProfitLabel, 24),

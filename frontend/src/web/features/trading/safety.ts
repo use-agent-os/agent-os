@@ -51,6 +51,14 @@ export function useMask(): (text: string) => string {
   return (text) => (hidden ? BALANCE_MASK : text)
 }
 
+/**
+ * Whether an engine label names a figure ("buy $50 of ETH", "sell 25%"): any
+ * digit counts. A label with none ("notify") shows even with amounts hidden.
+ */
+export function namesFigure(text: string | null | undefined): boolean {
+  return /\p{N}/u.test(text ?? '')
+}
+
 /** Block explorers by chain id (src/agentos/trading/chains.py). */
 const EXPLORERS: Readonly<Record<number, string>> = {
   8453: 'https://basescan.org',

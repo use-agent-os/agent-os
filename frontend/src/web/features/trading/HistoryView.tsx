@@ -16,13 +16,14 @@ import { useHistory } from './data'
 import {
   Amount,
   ChainChip,
+  EngineNote,
   ExplorerLink,
   formatWhen,
   initiatorLabel,
   kindLabel,
   Money,
 } from './parts'
-import { clampSym, clampText, txUrl } from './safety'
+import { clampSym, txUrl } from './safety'
 
 // History: the ledger, newest day first, under the profit-and-loss figures
 // the portfolio already carries. A network filter narrows the read itself.
@@ -56,7 +57,7 @@ function EntryRow({ e }: { e: Entry }) {
           ) : null}
           <Leg amount={e.amountOut} symbol={e.tokenOut?.symbol} />
         </div>
-        {e.note ? <p className="trd-order__note">{clampText(e.note, 120)}</p> : null}
+        <EngineNote text={e.note} />
       </div>
       <div className="trd-order__side">
         <Money value={e.valueUsd} />
