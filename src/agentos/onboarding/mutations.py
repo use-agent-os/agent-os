@@ -41,7 +41,7 @@ from agentos.onboarding.redaction import (
     redact_x_search_payload,
 )
 from agentos.onboarding.search_specs import get_search_provider_setup_spec
-from agentos.provider.registry import is_local_provider
+from agentos.provider.registry import is_local_provider, openrouter_url_refusal
 from agentos.router_tiers import (
     DEFAULT_TEXT_TIER,
     TEXT_TIERS,
@@ -721,7 +721,21 @@ def upsert_llm_provider(
     # as an explicit argument — re-checking either would turn an unrelated edit
     # into a hard failure on a config the operator never typed.
     base_url = str(base_url or "").strip()
-    if base_url and base_url != str(saved_base_url or "").strip():
+    saved_base_url = str(saved_base_url or "").strip()
+    # The key the runtime will send, as far as this process can see it: an
+    # OpenRouter key may keep an OpenRouter URL under any provider name.
+    key_in_use = effective_api_key or os.environ.get(effective_api_key_env or spec.env_key, "")
+    if saved_base_url and openrouter_url_refusal(provider_id, saved_base_url, key_in_use):
+        # OpenRouter's URL saved for another provider: the default an earlier
+        # version kept under [llm] whatever the provider. That provider's own
+        # endpoint replaces it, also where the import path replays it below.
+        if base_url == saved_base_url:
+            base_url = ""
+        saved_base_url = ""
+    if base_url and base_url != saved_base_url:
+        refusal = openrouter_url_refusal(provider_id, base_url, key_in_use)
+        if refusal:
+            raise ValueError(refusal)
         _validate_provider_base_url(base_url)
     effective_base_url = base_url or saved_base_url or spec.default_base_url
     if spec.requires_base_url and not effective_base_url:
