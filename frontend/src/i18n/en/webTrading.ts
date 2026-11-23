@@ -94,7 +94,7 @@ export const webTrading = defineNamespace('webTrading', {
   trigger: 'Price trigger',
   bracket: 'Bracket',
   dcaSpent: '{spent} of {cap} spent',
-  dcaRuns: 'Every {schedule}',
+  dcaRuns: 'Runs {schedule}',
   bracketLines: 'Take profit {tp} · stop {sl}',
   byAgent: 'Agent',
   byYou: 'You',

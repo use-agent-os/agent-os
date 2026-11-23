@@ -141,6 +141,26 @@ describe('TradingPage views', () => {
     expect(screen.getByRole('note')).toHaveTextContent(/1 order waits for approval/)
   })
 
+  it("reads a DCA plan's schedule as the engine words it, without doubling it", async () => {
+    const rpc = tradingRpc().handle('trading.dca.list', {
+      mandates: [
+        {
+          name: 'Weekly ETH',
+          status: 'active',
+          chain: { id: 8453 },
+          token: ETH,
+          schedule: { label: 'every week' },
+          budget: { spentUsd: 100, capUsd: 500 },
+        },
+      ],
+    })
+    renderPage(rpc)
+    await openView(/orders/i)
+    const row = await screen.findByTestId('trd-automation-dca')
+    expect(row).toHaveTextContent(/Runs every week/)
+    expect(row).not.toHaveTextContent(/every every/i)
+  })
+
   it('shows the orders error state', async () => {
     const rpc = tradingRpc().handle('trading.orders.list', () => {
       throw new Error('ledger busy')
