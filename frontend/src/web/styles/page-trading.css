@@ -383,4 +383,30 @@
     font-size: 1.125rem;
     font-weight: 600;
   }
+
+  /* ---- Markets ---------------------------------------------------------- */
+  .trd-search {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+  .trd-search__input {
+    min-width: min(100%, 14rem);
+    flex: 1;
+  }
+  .trd-table [data-col='dex'] {
+    max-width: 12rem;
+    white-space: nowrap;
+  }
+  @container trd-table (max-width: 44rem) {
+    .trd-table [data-col='volume'] {
+      display: none;
+    }
+  }
+  @container trd-table (max-width: 30rem) {
+    .trd-table [data-col='dex'] {
+      display: none;
+    }
+  }
 }
