@@ -10,8 +10,10 @@ commands and the bundled `wallet-trading` skill are all clients of the same
 gateway RPC surface (`wallet.*`, `trading.*`). The web console's Trading page
 (`/trading`, see [Web UI](../web-ui.md)) is a read-only view of the same
 engine: it shows wallets, holdings, orders, history, markets and liquidity
-positions, and every action (swap, send, approve, order changes, wallet and
-vault changes) stays in the desktop app and the CLI.
+positions, and has no fund-moving or state-changing actions: every action
+(swap, send, approve, order changes, wallet and vault changes) stays in the
+desktop app and the CLI. Its reads behave like any other client's reads
+(with `unlock_mode = "auto"` a read can unlock the vault).
 
 > Swaps move real money and cannot be undone. Start with small amounts, keep
 > the daily cap low, and treat the vault directory like an SSH key.

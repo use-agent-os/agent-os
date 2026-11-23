@@ -23,13 +23,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 - Web UI: a read-only Trading page at `/trading` shows the trading engine's
-  wallets: an overview with total value, PnL, gas and allocation, holdings
-  with a price chart, orders with DCA plans, price triggers and brackets,
-  the ledger history with a PnL summary, the markets a token trades in, and
-  liquidity positions. **Hide amounts** masks every figure and is remembered
-  in the browser. It says why nothing shows when trading is off or the vault
-  is locked; swaps, sends, approvals and every wallet or vault action stay
-  in the desktop app.
+  wallets in six views: Overview (total value, PnL, gas and allocation),
+  Holdings with a price chart, Orders with DCA plans, price triggers and
+  brackets, History with a PnL summary, Markets (the pools a token trades
+  in) and Liquidity positions. **Hide amounts** masks balances, values and
+  PnL and is remembered in the browser. It says why nothing shows when
+  trading is off or the vault is locked. The page has no fund-moving or
+  state-changing actions: swaps, sends, approvals, order changes and every
+  wallet or vault action stay in the desktop app and the CLI. Its reads do
+  what any engine read does: with `unlock_mode = "auto"` a read can unlock
+  the vault, the liquidity book refreshes in the background while shown,
+  and a Markets search queries GeckoTerminal.
 
 ### Changed
 - Web UI: the chat has a fresh look. A new chat opens on a two-tone headline
