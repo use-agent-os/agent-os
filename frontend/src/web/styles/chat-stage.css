@@ -490,14 +490,17 @@
     --composer-elevation:
       0 1px 2px hsl(var(--shadow-color) / 0.3), 0 18px 44px -18px hsl(var(--shadow-color) / 0.7);
     position: relative;
-    border-radius: 22px;
+    container: composer / inline-size;
+    border-radius: 24px;
     border: 1px solid color-mix(in oklab, var(--border-control), transparent 50%);
-    background-color: var(--surface-1);
+    /* Glass: a translucent surface over the stage glow, lit from the top. */
+    background-color: color-mix(in oklab, var(--surface-1), transparent 12%);
     background-image: linear-gradient(
       180deg,
-      color-mix(in oklab, var(--surface-2), transparent 35%),
+      color-mix(in oklab, var(--surface-2), transparent 30%),
       transparent 70%
     );
+    backdrop-filter: blur(18px) saturate(1.2);
     box-shadow: var(--highlight), var(--composer-elevation);
     transition:
       border-color var(--duration-base) var(--ease-out),
@@ -506,8 +509,8 @@
   .chat-composer[data-size='hero'] {
     --composer-elevation:
       0 1px 2px hsl(var(--shadow-color) / 0.3), 0 28px 70px -24px hsl(var(--shadow-color) / 0.8);
-    min-height: 128px;
-    border-radius: 24px;
+    min-height: 140px;
+    border-radius: 28px;
   }
   :root[data-theme='light'] .chat-composer {
     --composer-elevation:
@@ -549,6 +552,34 @@
   }
   .chat-composer-input::placeholder {
     color: var(--text-muted);
+  }
+  /* The prompt field with a small leading glyph (the new-session card). */
+  .chat-composer-field {
+    position: relative;
+  }
+  .chat-composer-glyph {
+    position: absolute;
+    top: 23px;
+    left: 22px;
+    width: 18px;
+    height: 18px;
+    color: var(--accent);
+    opacity: 0.85;
+    pointer-events: none;
+  }
+  .chat-composer-field > .chat-composer-input,
+  .chat-composer[data-size='hero'] .chat-composer-field > .chat-composer-input {
+    padding-inline-start: 50px;
+  }
+  @media (max-width: 767px), (pointer: coarse) {
+    .chat-composer-glyph {
+      top: 20px;
+      left: 18px;
+    }
+    .chat-composer-field > .chat-composer-input,
+    .chat-composer[data-size='hero'] .chat-composer-field > .chat-composer-input {
+      padding-inline-start: 44px;
+    }
   }
   .chat-composer[data-size='hero'] .chat-composer-input {
     padding: 20px 22px 8px;
@@ -722,10 +753,78 @@
     padding-inline-end: 32px;
   }
 
-  /* Toolbar icon button (attach, capabilities). */
+  /* A labelled action pill (attach, plan mode): no chevron, a little more
+   * room on the label side. */
+  .chat-tool-action {
+    padding-inline: 9px 11px;
+  }
+  /* A pressed toggle reads as on: accent icon, a lime-tinted rim. */
+  .chat-tool-action[aria-pressed='true'] {
+    border-color: color-mix(in oklab, var(--accent), transparent 55%);
+    background: color-mix(in oklab, var(--surface-2), var(--accent) 10%);
+    color: var(--text);
+  }
+  .chat-tool-action[aria-pressed='true'] > svg {
+    color: var(--accent);
+  }
+  /* Collapsible pills fold to a round icon in a narrow composer. */
+  @container composer (max-width: 560px) {
+    .chat-tool-action[data-collapse] {
+      width: 32px;
+      padding-inline: 0;
+      justify-content: center;
+    }
+    .chat-tool-action[data-collapse] > .chat-tool-chip-label {
+      display: none;
+    }
+  }
+  @media (pointer: coarse) {
+    .chat-tool-action[data-collapse] {
+      min-width: 44px;
+    }
+  }
+
+  /* Toolbar icon button (capabilities): a round outlined control. */
   .chat-tool-icon {
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
     border-radius: 9999px;
+    border: 1px solid var(--border);
+    background: transparent;
     color: var(--text-muted);
+    transition:
+      scale var(--duration-press) var(--ease-out),
+      color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out);
+  }
+  .chat-tool-icon > svg {
+    width: 15px;
+    height: 15px;
+  }
+  @media (hover: hover) {
+    .chat-tool-icon:hover {
+      border-color: var(--border-strong);
+      background: var(--surface-3);
+      color: var(--text);
+    }
+  }
+  .chat-tool-icon:active {
+    scale: 0.95;
+  }
+  .chat-tool-icon[data-state='open'] {
+    border-color: color-mix(in oklab, var(--accent), transparent 55%);
+    background: var(--surface-3);
+    color: var(--text);
+  }
+  @media (pointer: coarse) {
+    .chat-tool-icon {
+      width: 44px;
+      height: 44px;
+    }
   }
 
   /* ---- Attachment tray ------------------------------------------------ */
