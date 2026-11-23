@@ -145,7 +145,7 @@ export function SidePanel({ transcript, phone }: { transcript: TranscriptState; 
           variant="ghost"
           aria-label={t('webChat.panelClose')}
           onClick={close}
-          className="-mr-1 text-text-muted hover:text-text"
+          className="chat-head-action -mr-1"
         >
           <X />
         </Button>

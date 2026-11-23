@@ -190,7 +190,7 @@ export function TranscriptView(props: TranscriptViewProps) {
             variant="secondary"
             size="sm"
             onClick={follow.resume}
-            className="pointer-events-auto rounded-full pr-3.5 pl-3 shadow-overlay"
+            className="chat-latest-button pointer-events-auto rounded-full pr-3.5 pl-3"
           >
             <ArrowDown />
             {t('webChat.latest')}

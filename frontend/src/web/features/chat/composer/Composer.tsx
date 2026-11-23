@@ -446,18 +446,18 @@ export function Composer(props: ComposerProps) {
     >
       {queue.length > 0 ? (
         <section aria-label={t('webChat.queued')} className="chat-queue anim-enter">
-          <p className="px-1.5 pb-1 text-label text-text-muted">{t('webChat.queued')}</p>
+          <p className="chat-queue-label px-1.5 pb-1 text-label text-text-muted">
+            {t('webChat.queued')}
+          </p>
           <ol className="flex flex-col gap-0.5">
             {queue.map((item, i) => (
-              <li
-                key={i}
-                className="flex items-center gap-2 rounded-control py-0.5 pl-1.5 text-ui hover:bg-surface-3/60"
-              >
+              <li key={i} className="flex items-center gap-2 py-0.5 pl-2.5 hover:bg-surface-3/60">
                 <span className="min-w-0 flex-1 truncate">{item.text}</span>
                 <Button
                   size="icon-sm"
                   variant="ghost"
                   aria-label={t('webChat.queuedEdit', { index: i + 1 })}
+                  className="rounded-full"
                   onClick={() => {
                     removeQueued(i)
                     setText(item.text)
@@ -470,6 +470,7 @@ export function Composer(props: ComposerProps) {
                   size="icon-sm"
                   variant="ghost"
                   aria-label={t('webChat.queuedRemove', { index: i + 1 })}
+                  className="rounded-full"
                   onClick={() => removeQueued(i)}
                 >
                   <Trash2 />

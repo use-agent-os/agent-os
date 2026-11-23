@@ -777,26 +777,51 @@
   .chat-panel-in {
     animation: chat-panel-in var(--duration-slow) var(--ease-enter) both;
   }
+  /* A floating glass card beside the thread (the composer's surface and
+   * large radius); a full-height sheet on phones. */
   .chat-side {
-    border-left: 1px solid var(--border);
-    background: var(--surface-1);
-    box-shadow: -16px 0 40px -28px hsl(var(--shadow-color) / 0.55);
+    margin: 10px 10px 10px 0;
+    border: 1px solid color-mix(in oklab, var(--border-control), transparent 50%);
+    border-radius: 24px;
+    background-color: color-mix(in oklab, var(--surface-1), transparent 8%);
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--surface-2), transparent 40%),
+      transparent 160px
+    );
+    backdrop-filter: blur(18px) saturate(1.2);
+    box-shadow:
+      var(--highlight),
+      0 18px 44px -20px hsl(var(--shadow-color) / 0.6);
+  }
+  :root[data-theme='light'] .chat-side {
+    box-shadow:
+      var(--highlight),
+      0 14px 36px -18px hsl(var(--shadow-color) / 0.22);
+  }
+  .chat-side.fixed {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background-color: var(--surface-1);
+    padding-top: env(safe-area-inset-top);
   }
   .chat-side-head {
     display: flex;
     align-items: center;
     gap: 12px;
-    min-height: 60px;
-    padding: 10px 12px 6px 16px;
+    min-height: 64px;
+    padding: 12px 12px 6px 14px;
   }
+  /* Tabs are pills on a gliding pill, like the composer's chips. */
   .chat-side-tabs {
     --glide-bg: var(--surface-3);
-    --glide-radius: 8px;
+    --glide-radius: 9999px;
     display: flex;
     flex-shrink: 0;
-    gap: 2px;
+    gap: 4px;
     margin: 0 12px;
-    padding: 4px 0 8px;
+    padding: 4px 0 10px;
     overflow-x: auto;
     border-bottom: 1px solid var(--border);
   }
@@ -804,17 +829,29 @@
     display: flex;
     flex-shrink: 0;
     align-items: center;
-    border-radius: 8px;
+    min-height: 30px;
+    border-radius: 9999px;
+    border: 1px solid var(--border);
     color: var(--text-muted);
-    font-size: 13px;
-    transition: color var(--duration-fast) var(--ease-out);
+    font-size: max(12px, calc(13px * var(--text-scale)));
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out);
+  }
+  .chat-side-tab > button:first-child {
+    border-radius: 9999px;
   }
   .chat-side-tab[data-active='true'] {
+    border-color: color-mix(in oklab, var(--accent), transparent 60%);
     color: var(--text);
     font-weight: 500;
   }
+  .chat-side-tab[data-active='true'] svg {
+    color: var(--accent);
+  }
   .chat-side-tab:hover {
     color: var(--text);
+    border-color: var(--border-strong);
   }
   .chat-side-tab svg {
     flex-shrink: 0;
@@ -824,21 +861,31 @@
   .chat-side-tab-close {
     display: inline-grid;
     place-items: center;
-    margin-right: 2px;
-    border-radius: 6px;
+    width: 22px;
+    height: 22px;
+    margin-inline: 2px 4px;
+    border-radius: 9999px;
     color: var(--text-muted);
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out);
   }
   .chat-side-tab-close:hover {
+    background: var(--surface-overlay);
     color: var(--text);
+  }
+  .chat-side-tab-close > svg {
+    width: 12px;
+    height: 12px;
   }
   .chat-side-well {
     min-height: 100%;
-    padding: 12px 14px;
-    border-radius: 12px;
+    padding: 14px 16px;
+    border-radius: var(--chat-radius-inner);
   }
   .chat-side-media {
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--chat-radius-inner);
     box-shadow: var(--elevation-card);
   }
   .chat-thought-text {
@@ -850,8 +897,8 @@
   /* The side panel's resize edge: a hairline that lights up on hover/focus. */
   .chat-resize {
     position: absolute;
-    inset-block: 0;
-    left: -4px;
+    inset-block: 20px;
+    left: -6px;
     z-index: 1;
     width: 8px;
     cursor: col-resize;

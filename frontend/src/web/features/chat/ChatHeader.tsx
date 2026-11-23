@@ -39,8 +39,8 @@ import {
 import '@/web/styles/chat-stage.css'
 import { AgentAvatar } from './AgentAvatar'
 
-const ICON_BUTTON =
-  'rounded-full text-text-muted hover:text-text aria-pressed:bg-surface-3 aria-pressed:text-text'
+// Round outlined, like the composer's options button (chat-stage.css).
+const ICON_BUTTON = 'chat-head-action'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -110,7 +110,7 @@ export function ChatHeader(props: ChatHeaderProps) {
   }
 
   return (
-    <header className="chat-header sticky top-0 z-[var(--z-sticky)] flex min-h-14 items-center gap-1 px-3 py-2 sm:px-4">
+    <header className="chat-header sticky top-0 z-[var(--z-sticky)] flex min-h-14 items-center gap-2 px-3 py-2 sm:px-4">
       {/* Phones open navigation from the shell's top bar; a second ☰ here duplicated it. */}
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {editing ? (

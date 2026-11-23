@@ -646,9 +646,12 @@
 
   /* ---- Toolbar chips (agent, project, model route) --------------------- */
 
+  /* The pills follow the text-size preference with the prompt they sit
+   * under (--text-scale; the floor stays 12px). */
   .chat-tool-chip {
+    --chip-size: calc(32px * var(--text-scale));
     display: inline-flex;
-    height: 32px;
+    height: var(--chip-size);
     min-width: 0;
     flex: 0 1 auto;
     align-items: center;
@@ -658,7 +661,7 @@
     border: 1px solid var(--border);
     background: color-mix(in oklab, var(--surface-2), transparent 35%);
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: max(12px, calc(13px * var(--text-scale)));
     font-weight: 500;
     white-space: nowrap;
     transition:
@@ -668,8 +671,8 @@
       background-color var(--duration-fast) var(--ease-out);
   }
   .chat-tool-chip > svg:not(.chat-tool-chip-chevron) {
-    width: 15px;
-    height: 15px;
+    width: calc(15px * var(--text-scale));
+    height: calc(15px * var(--text-scale));
     flex-shrink: 0;
   }
   .chat-tool-chip-label {
@@ -770,7 +773,7 @@
   /* Collapsible pills fold to a round icon in a narrow composer. */
   @container composer (max-width: 560px) {
     .chat-tool-action[data-collapse] {
-      width: 32px;
+      width: var(--chip-size);
       padding-inline: 0;
       justify-content: center;
     }
@@ -789,8 +792,8 @@
     display: inline-grid;
     place-items: center;
     flex-shrink: 0;
-    width: 32px;
-    height: 32px;
+    width: calc(32px * var(--text-scale));
+    height: calc(32px * var(--text-scale));
     border-radius: 9999px;
     border: 1px solid var(--border);
     background: transparent;
@@ -802,8 +805,8 @@
       background-color var(--duration-fast) var(--ease-out);
   }
   .chat-tool-icon > svg {
-    width: 15px;
-    height: 15px;
+    width: calc(15px * var(--text-scale));
+    height: calc(15px * var(--text-scale));
   }
   @media (hover: hover) {
     .chat-tool-icon:hover {
@@ -840,12 +843,12 @@
     max-width: 16rem;
     align-items: center;
     gap: 10px;
-    padding: 5px 5px 5px 5px;
+    padding: 5px;
     border: 1px solid var(--border);
-    border-radius: 14px;
-    background: var(--surface-2);
+    border-radius: var(--chat-radius-inner);
+    background: color-mix(in oklab, var(--surface-2), transparent 25%);
     box-shadow: var(--highlight);
-    font-size: 12px;
+    font-size: max(12px, calc(12px * var(--text-scale)));
   }
   .chat-chip-thumb {
     display: inline-grid;
@@ -862,7 +865,7 @@
     display: inline-grid;
     place-items: center;
     flex-shrink: 0;
-    border-radius: 8px;
+    border-radius: 9999px;
     color: var(--text-muted);
     transition:
       background-color var(--duration-fast) var(--ease-out),
@@ -877,15 +880,33 @@
 
   /* Messages queued behind the running turn: a tab on top of the composer. */
   .chat-queue {
-    margin-inline: 14px;
+    margin-inline: 18px;
     margin-bottom: -1px;
-    padding: 6px 8px 8px;
-    border: 1px solid var(--border);
+    padding: 8px 8px 10px;
+    border: 1px solid color-mix(in oklab, var(--border-control), transparent 50%);
     border-bottom: 0;
-    border-radius: 14px 14px 0 0;
-    background: color-mix(in oklab, var(--surface-2), transparent 20%);
+    border-radius: var(--chat-radius-card) var(--chat-radius-card) 0 0;
+    background: color-mix(in oklab, var(--surface-2), transparent 25%);
     box-shadow: var(--highlight);
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(18px) saturate(1.2);
+  }
+  /* A queued message: a rounded row with round edit/remove actions. */
+  .chat-queue li {
+    min-height: 32px;
+    border-radius: 12px;
+    font-size: var(--text-prose);
+  }
+  .chat-queue-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .chat-queue-label::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--accent);
   }
 
   /* ---- Header ------------------------------------------------------------ */
@@ -942,8 +963,8 @@
   .chat-title-button {
     min-width: 0;
     max-width: 100%;
-    border-radius: var(--radius-control);
-    padding: 4px 8px;
+    border-radius: 9999px;
+    padding: 5px 12px;
     text-align: start;
     font-size: 15px;
     font-weight: 600;
@@ -955,19 +976,23 @@
       background: var(--surface-2);
     }
   }
+  /* Session badges: the composer chips' glass pills, one size smaller. */
   .chat-meta-chip {
     display: inline-flex;
-    height: 24px;
+    height: 28px;
     min-width: 0;
     flex-shrink: 1;
     align-items: center;
     gap: 6px;
-    padding: 0 8px 0 4px;
+    padding: 0 10px 0 5px;
     border-radius: 9999px;
     border: 1px solid var(--border);
-    background: color-mix(in oklab, var(--surface-1), transparent 40%);
+    background: color-mix(in oklab, var(--surface-2), transparent 45%);
+    box-shadow: var(--highlight);
+    backdrop-filter: blur(10px);
     color: var(--text-muted);
     font-size: 12px;
+    font-weight: 500;
     white-space: nowrap;
   }
   .chat-meta-chip > svg {
@@ -976,11 +1001,13 @@
     flex-shrink: 0;
   }
   .chat-meta-chip[data-plain] {
-    padding-inline: 7px;
+    width: 28px;
+    justify-content: center;
+    padding-inline: 0;
   }
   .chat-id-chip {
     font-family: var(--font-mono);
-    padding-inline: 8px 6px;
+    padding-inline: 10px 8px;
     transition:
       color var(--duration-fast) var(--ease-out),
       border-color var(--duration-fast) var(--ease-out),
@@ -996,6 +1023,35 @@
       color: var(--text);
     }
   }
+}
+
+/* Unlayered (it restyles a ghost Button): the header's and the side
+ * panel's icon actions are round outlined controls, the family of the
+ * composer's options button. */
+.chat-head-action {
+  border-radius: 9999px;
+  color: var(--text-muted);
+  box-shadow: inset 0 0 0 1px var(--border);
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    scale var(--duration-press) var(--ease-out);
+}
+@media (hover: hover) {
+  .chat-head-action:hover {
+    color: var(--text);
+    background: var(--surface-3);
+    box-shadow: inset 0 0 0 1px var(--border-strong);
+  }
+}
+.chat-head-action:active {
+  scale: 0.95;
+}
+.chat-head-action:is([data-state='open'], [aria-pressed='true']) {
+  color: var(--text);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent), transparent 55%);
 }
 
 /* Unlayered: the round send/stop is its own control, not a Button variant. */
