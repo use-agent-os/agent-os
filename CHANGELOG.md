@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.24] - 2026-11-24
+
 ### Security
 - Provider keys: with `[llm] provider` set to anything but `openrouter` and no
   `base_url`, AgentOS sent every model request, with that provider's API key
