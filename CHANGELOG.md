@@ -21,6 +21,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   non-OpenRouter provider without a `base_url`, rotate that provider's API
   key.
 
+### Added
+- Web UI: a read-only Trading page at `/trading` shows the trading engine's
+  wallets: an overview with total value, PnL, gas and allocation, holdings
+  with a price chart, orders with DCA plans, price triggers and brackets,
+  the ledger history with a PnL summary, the markets a token trades in, and
+  liquidity positions. **Hide amounts** masks every figure and is remembered
+  in the browser. It says why nothing shows when trading is off or the vault
+  is locked; swaps, sends, approvals and every wallet or vault action stay
+  in the desktop app.
+
 ### Changed
 - Web UI: the chat has a fresh look. A new chat opens on a two-tone headline
   and the brand mark, with keyboard hints floating beside it. The composer is

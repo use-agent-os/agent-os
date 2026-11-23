@@ -7,7 +7,11 @@ the encrypted wallet vault, the ledger with cost basis and PnL, quote and
 swap execution, and the guardrails that bound what an agent may do on its
 own. The desktop app's Trading page, the `agentos wallet` / `agentos trade`
 commands and the bundled `wallet-trading` skill are all clients of the same
-gateway RPC surface (`wallet.*`, `trading.*`).
+gateway RPC surface (`wallet.*`, `trading.*`). The web console's Trading page
+(`/trading`, see [Web UI](../web-ui.md)) is a read-only view of the same
+engine: it shows wallets, holdings, orders, history, markets and liquidity
+positions, and every action (swap, send, approve, order changes, wallet and
+vault changes) stays in the desktop app and the CLI.
 
 > Swaps move real money and cannot be undone. Start with small amounts, keep
 > the daily cap low, and treat the vault directory like an SSH key.
@@ -91,7 +95,7 @@ gateway RPC surface (`wallet.*`, `trading.*`).
   across Uniswap V2/V3/V4, Aero and Aerodrome on Base and Robinhood Chain,
   staked positions and their rewards included. Cached by the engine and read
   only while someone looks (`docs/lp-book.md`); the desktop's Liquidity tab
-  shows it.
+  shows it, and the web console's Trading page lists it read-only.
 - **Uniswap V4 liquidity** — read a token's pools, their liquidity ranges
   and the vault's positions (cards in the chat, `docs/lp-cards.md`), and
   change them: collect fees, remove liquidity (100 % burns the NFT), add

@@ -1031,9 +1031,13 @@ update is also listed in the attention inbox.
 
 The rebuilt console leaves out a few things the previous one had, on purpose:
 
-- **Trading actions.** LP, DCA, market and trigger/bracket cards in chat are
-  read-only: they refresh, but collect, remove, add and the DCA and trigger
-  actions are only in the desktop app (and the CLI).
+- **Trading actions.** The Trading page and the LP, DCA, market and
+  trigger/bracket cards in chat are read-only. Swaps, sends, bridges,
+  approvals, liquidity changes, creating or cancelling orders, DCA plans,
+  triggers and brackets, approving held orders, trading settings, a chain
+  sync, and every wallet or vault action (create, import, export, rename,
+  remove, unlock, lock) are only in the desktop app (and the CLI). The page
+  never asks for a vault password, private key or seed phrase.
 - **Engine-run objects in Automations.** Automations covers scheduled jobs
   only. DCA mandates, price triggers, brackets and missions are managed from
   the desktop app or the CLI (`agentos trade …`).
