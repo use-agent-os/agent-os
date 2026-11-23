@@ -14,6 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   level held a slot: two chains of subagents at the spawn depth limit filled
   both pools at the default limits, and the deepest children did not start
   until the inline waits timed out (300 s by default).
+- Engine: the note that tells the model a tool hook adjusted a call's
+  arguments now survives when an oversized text result is shortened, before
+  its first send or for history at the end of the turn. A short preview (the
+  160-character head of a control-tool result, or a tail shorter than the
+  note under a small cap) used to cut it off or drop it.
 
 ## [2026.11.23] - 2026-11-23
 
