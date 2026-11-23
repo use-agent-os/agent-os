@@ -17,10 +17,10 @@ export const webTrading = defineNamespace('webTrading', {
     'The trading engine is turned off in this gateway’s configuration. Turn it on in the desktop app’s Settings › Trading, or set enabled = true under [trading] in the config file.',
   noVaultTitle: 'No wallet vault yet',
   noVaultBody:
-    'Trading is on, but no wallet vault exists. Create one in the AgentOS desktop app or with `agentos wallet setup`.',
+    'Trading is on, but no wallet vault exists. Create one in the AgentOS desktop app or with the agentos wallet setup command.',
   lockedTitle: 'The wallet vault is locked',
   lockedBody:
-    'Wallet balances and orders can be read once the vault is unlocked. Unlock it in the desktop app or with `agentos wallet unlock`; this page never asks for the vault password.',
+    'Wallet balances and orders can be read once the vault is unlocked. Unlock it in the desktop app or with the agentos wallet unlock command; this page never asks for the vault password.',
   noWalletsTitle: 'No wallets yet',
   noWalletsBody: 'Create or import a wallet in the desktop app, and it shows here.',
 
