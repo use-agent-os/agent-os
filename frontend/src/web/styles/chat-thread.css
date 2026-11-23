@@ -10,6 +10,19 @@
  * is neutralised by the reduced-motion block in base.css. */
 
 @layer components {
+  /* ---- Shape ------------------------------------------------------------ */
+
+  /* One shape language for the whole chat, shared with the composer card:
+   * large-radius cards, round icon tiles and pill actions. Buttons inside a
+   * chat card read as pills (the same family as the composer's chips). */
+  :root {
+    --chat-radius-card: 20px;
+    --chat-radius-inner: 14px;
+  }
+  :where(.chat-card, .chat-turn-error, .chat-approval, .chat-side-head) :where(button, a) {
+    --radius-control: 9999px;
+  }
+
   /* ---- Turn ------------------------------------------------------------- */
 
   .chat-turn {
@@ -276,7 +289,7 @@
     flex-direction: column;
     padding: 4px;
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--chat-radius-card);
     background: color-mix(in oklab, var(--surface-1), transparent 25%);
     box-shadow: var(--highlight);
   }
@@ -316,7 +329,7 @@
     gap: 10px;
     min-height: 34px;
     padding: 4px 8px;
-    border-radius: 10px;
+    border-radius: 14px;
     text-align: start;
     color: var(--text);
     transition: background-color var(--duration-fast) var(--ease-out);
@@ -356,7 +369,7 @@
     justify-content: center;
     width: 22px;
     height: 22px;
-    border-radius: 7px;
+    border-radius: 9999px;
     border: 1px solid var(--border-strong);
     background: var(--surface-2);
     color: var(--text-muted);
@@ -413,7 +426,7 @@
   }
   .chat-well {
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 12px;
     background: var(--surface-inset);
     box-shadow: var(--inset-shadow);
     padding: 8px 10px;
@@ -492,7 +505,7 @@
     gap: 12px;
     padding: 12px 12px 12px 14px;
     border: 1px solid color-mix(in oklab, var(--danger), transparent 80%);
-    border-radius: 14px;
+    border-radius: var(--chat-radius-card);
     background: color-mix(in oklab, var(--surface-1), var(--danger) 4%);
     box-shadow: var(--elevation-card);
   }
@@ -503,7 +516,7 @@
     justify-content: center;
     width: 30px;
     height: 30px;
-    border-radius: 9px;
+    border-radius: 9999px;
     background: color-mix(in oklab, var(--danger), transparent 88%);
     color: var(--danger);
   }
@@ -543,7 +556,7 @@
   .chat-notice[data-tone] {
     padding: 8px 12px;
     border: 1px solid color-mix(in oklab, var(--warn), transparent 75%);
-    border-radius: 12px;
+    border-radius: var(--chat-radius-inner);
     background: color-mix(in oklab, var(--warn), transparent 93%);
     color: var(--text);
   }
@@ -560,7 +573,7 @@
   .chat-note {
     padding: 10px 14px;
     border: 1px dashed var(--border-strong);
-    border-radius: 14px;
+    border-radius: var(--chat-radius-inner);
     background: color-mix(in oklab, var(--surface-1), transparent 40%);
     color: var(--text-muted);
     font-family: var(--font-sans);
@@ -576,9 +589,9 @@
   /* ---- Cards ------------------------------------------------------------ */
 
   .chat-card {
-    padding: 16px 18px;
+    padding: 18px 20px;
     border: 1px solid var(--border);
-    border-radius: 16px;
+    border-radius: var(--chat-radius-card);
     background: var(--surface-1);
     box-shadow: var(--elevation-card);
   }
@@ -605,7 +618,7 @@
   .chat-subcard {
     padding: 12px;
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--chat-radius-inner);
     background: var(--surface-2);
     box-shadow: var(--highlight);
   }
@@ -640,7 +653,7 @@
     justify-content: center;
     width: 30px;
     height: 30px;
-    border-radius: 9px;
+    border-radius: 9999px;
     border: 1px solid var(--border);
     background: var(--surface-2);
     color: var(--text-muted);
@@ -666,7 +679,7 @@
     width: 44px;
     height: 44px;
     border: 1px solid var(--border);
-    border-radius: 11px;
+    border-radius: var(--chat-radius-inner);
   }
   .chat-artifact-thumb > svg {
     width: 18px;
@@ -679,9 +692,9 @@
     cursor: pointer;
     align-items: flex-start;
     gap: 10px;
-    padding: 10px 12px;
+    padding: 11px 14px;
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--chat-radius-inner);
     background: color-mix(in oklab, var(--surface-2), transparent 50%);
     transition:
       background-color var(--duration-fast) var(--ease-out),
@@ -722,7 +735,7 @@
 
   .chat-approval {
     padding: 6px;
-    border-radius: 18px;
+    border-radius: var(--chat-radius-card);
     background: color-mix(in oklab, var(--surface-1), var(--warn) 5%);
     box-shadow:
       0 0 0 1px color-mix(in oklab, var(--warn), transparent 66%),
@@ -743,7 +756,7 @@
     place-items: center;
     width: 24px;
     height: 24px;
-    border-radius: 8px;
+    border-radius: 9999px;
     background: color-mix(in oklab, var(--warn), transparent 86%);
   }
   .chat-approval-icon > svg {
@@ -751,7 +764,7 @@
     height: 14px;
   }
   .chat-approval li[data-approval-id] {
-    border-radius: 13px;
+    border-radius: var(--chat-radius-inner);
   }
 
   /* ---- Side panel (tool output, artifacts) ------------------------------- */
