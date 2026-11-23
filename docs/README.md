@@ -27,13 +27,13 @@ root release README with task-oriented guides.
 - [`features.md`](features.md) - capability catalog.
 - [`features/agentic-trading.md`](features/agentic-trading.md) - trading
   connections, bundled trading skills, and the safety model.
-- [`features/trading.md`](features/trading.md) - engine-held wallets, Uniswap
-  swaps on Base and Robinhood Chain, ledger/PnL, and agent guardrails.
-  Contracts: [`lp-cards.md`](lp-cards.md), [`lp-write.md`](lp-write.md),
+- [`features/trading.md`](features/trading.md) - engine-held wallets, swaps
+  on Base and Robinhood Chain through the AgentOS DEX, ledger/PnL, and agent
+  guardrails. Contracts: [`lp-cards.md`](lp-cards.md) and
+  [`lp-write.md`](lp-write.md) (Uniswap V4 cards and writes),
   [`lp-book.md`](lp-book.md) (every LP position across Uniswap, Aero and
-  Aerodrome),
-  [`bridge.md`](bridge.md) (Base ⇄ Robinhood Chain through the AgentOS DEX)
-  (Uniswap V4 cards and writes), [`dca.md`](dca.md) (DCA mandates).
+  Aerodrome), [`bridge.md`](bridge.md) (Base ⇄ Robinhood Chain through the
+  AgentOS DEX), [`dca.md`](dca.md) (DCA mandates).
 - [`triggers.md`](triggers.md) - price triggers: conditional orders
   (`below`, `above`, `trail`) the trading engine watches and fires itself.
 - [`brackets.md`](brackets.md) - brackets: take-profit + stop-loss on one
@@ -46,16 +46,15 @@ root release README with task-oriented guides.
 - [`features/memory.md`](features/memory.md) - durable memory and recall.
 - [`features/skills.md`](features/skills.md) - skill discovery, install, and
   authoring.
-- [`features/browser.md`](features/browser.md) - browser automation and
-  Chrome attachment.
+- [`features/browser.md`](features/browser.md) - browser automation:
+  navigate, click, type, screenshot, and JavaScript execution via Chromium,
+  plus opt-in attachment to your own Chrome.
 - [`flows.md`](flows.md) - Image Flows: node-graph image workflows, the
   `agentos flows` CLI, the `flow_run` agent tool and its cost gate.
 - [`acp-agents.md`](acp-agents.md) - delegate coding work to Claude Code,
   Codex, Gemini CLI, Cursor and other ACP harnesses.
 - [`features/compaction-and-cache.md`](features/compaction-and-cache.md) -
   long-session compaction and prompt-cache continuity.
-- [`features/browser.md`](features/browser.md) - browser automation:
-  navigate, click, type, screenshot, and JavaScript execution via Chromium.
 
 ## Surfaces and Operations
 

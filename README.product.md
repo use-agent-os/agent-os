@@ -5,7 +5,7 @@
 # AgentOS Product Guide
 
 AgentOS is a local-first AI agent with native agentic trading, for
-the terminal, a local Web UI, and messaging channels. An on-device Pilot Router
+the terminal, a local Web UI, the macOS desktop app, and messaging channels. An on-device Pilot Router
 classifies each task locally and routes it to the cheapest capable model. It is designed for users who want one
 agent surface that can chat, use tools, remember useful context, run scheduled
 work, publish artifacts, and route work across multiple LLM providers without
@@ -49,11 +49,12 @@ single-turn chat alone.
 | --- | --- |
 | Pilot Router | Local, on-device routing that chooses an appropriate model tier per turn so simple tasks avoid premium-model cost. |
 | Tool compression | Large tool outputs stay useful without flooding the model context; raw results can be preserved while compact previews are sent to the model. |
-| Unified surfaces | CLI, Web UI, gateway RPC, and channels share the same runtime path, tools, memory, approvals, and usage accounting. |
+| Unified surfaces | CLI, Web UI, the desktop app, gateway RPC, and channels share the same runtime path, tools, memory, approvals, and usage accounting. |
 | Durable sessions | Conversations, transcripts, compaction summaries, artifacts, cost, and replay data are persisted for later inspection. |
 | Personal memory | User facts, notes, and task traces can be saved and recalled through local keyword and semantic search. |
 | Multi-provider runtime | OpenRouter (the default), the Bankr LLM Gateway, OpenCAP, Surplus Intelligence, OpenAI, Anthropic, Gemini, DeepSeek, DashScope, Ollama, and other provider-compatible backends can be configured through one schema. |
 | Safe tool use | File, shell, web, memory, git, artifact, media, channel, and agent tools run behind policy layers and approval surfaces. |
+| Agentic trading | Engine-held EVM wallets in an encrypted vault; swaps, sends, bridges, liquidity, DCA, triggers, and brackets on Base and Robinhood Chain, bounded by guardrails and approvals. |
 
 ## Documentation Map
 
@@ -65,10 +66,13 @@ single-turn chat alone.
 | Configure providers, router, search, channels, memory, and permissions | [`docs/configuration.md`](docs/configuration.md) |
 | Learn the CLI command groups | [`docs/cli.md`](docs/cli.md) |
 | Use the local control console | [`docs/web-ui.md`](docs/web-ui.md) |
+| Use the macOS desktop app | [`docs/desktop-app.md`](docs/desktop-app.md) |
 | Resume, export, abort, or delete sessions | [`docs/sessions.md`](docs/sessions.md) |
 | Choose and inspect LLM providers/models | [`docs/providers-and-models.md`](docs/providers-and-models.md) |
 | Configure web search | [`docs/search.md`](docs/search.md) |
 | Understand the main product capabilities | [`docs/features.md`](docs/features.md) |
+| Hold wallets and trade on Base and Robinhood Chain | [`docs/features/trading.md`](docs/features/trading.md) |
+| Connect trading MCP servers and skills | [`docs/features/agentic-trading.md`](docs/features/agentic-trading.md) |
 | Use Pilot Router | [`docs/features/agentos-router.md`](docs/features/agentos-router.md) |
 | Understand tool compression and tool-result handles | [`docs/features/tool-compression.md`](docs/features/tool-compression.md) |
 | Work with memory | [`docs/features/memory.md`](docs/features/memory.md) |
@@ -82,7 +86,10 @@ single-turn chat alone.
 | Choose permissions and approval posture | [`docs/approvals-and-permissions.md`](docs/approvals-and-permissions.md) |
 | Inspect usage and model cost | [`docs/usage-and-cost.md`](docs/usage-and-cost.md) |
 | Diagnose and replay a turn | [`docs/diagnostics-and-replay.md`](docs/diagnostics-and-replay.md) |
+| Connect AgentOS to external MCP servers | [`docs/mcp.md`](docs/mcp.md) |
 | Connect MCP-capable clients | [`docs/mcp-server.md`](docs/mcp-server.md) |
+| Reach a gateway from another machine | [`docs/remote-access.md`](docs/remote-access.md) |
+| Run the gateway in a container | [`docs/container-gateway.md`](docs/container-gateway.md) |
 | Run sessions, cron, diagnostics, migration, and MCP operations | [`docs/operations.md`](docs/operations.md) |
 | Fix common install/runtime problems | [`docs/troubleshooting.md`](docs/troubleshooting.md) |
 | Understand AgentOS terminology | [`docs/glossary.md`](docs/glossary.md) |
@@ -168,6 +175,8 @@ Read: [`docs/features/tool-compression.md`](docs/features/tool-compression.md)
   memory, sessions, artifacts, media, scheduled jobs, and subagents.
 - Install, inspect, publish, and compose skills.
 - Schedule recurring runs with `agentos cron`.
+- Manage wallets and trade with `agentos wallet` and `agentos trade`.
+- Delegate coding work to external harnesses over ACP with `agentos acp`.
 - Save durable memory and search previous sessions.
 - Track usage and estimated cost with `agentos cost`.
 - Diagnose readiness with `agentos doctor` and `/control/` health views.

@@ -13,4 +13,9 @@ electron-builder reads this directory (`directories.buildResources`).
   for a light or dark menu bar. Shipped through `extraResources`, since
   nothing in this directory reaches the packaged app by itself.
 - `entitlements.mac.plist` — Hardened Runtime exceptions Electron needs
-  (JIT, unsigned executable memory); required for Developer ID + notarization.
+  (JIT, unsigned executable memory, DYLD environment variables, disabled
+  library validation); required for Developer ID + notarization.
+- `pets/` — the pets that ship with the app, one petdex folder each
+  (`pet.json` + `spritesheet.webp`; today only `agentos`, Luma). Shipped
+  through `extraResources`; `PetStore.seedBundled` copies them into the pets
+  directory on first launch.
