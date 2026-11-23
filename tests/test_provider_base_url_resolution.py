@@ -13,7 +13,8 @@ every registered provider except OpenRouter, in the gateway and in
 Now an unset ``base_url`` is the provider's own endpoint, and a key of
 another provider is never sent to an OpenRouter host: a config that still
 points such a provider at OpenRouter is refused with a message that says how
-to fix it.
+to fix it. An OpenRouter key (``sk-or-...``) is OpenRouter's own under any
+provider name, so ``provider = "openai"`` with OpenRouter's URL keeps working.
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ from agentos.provider.types import Message
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 SURPLUS_URL = "https://api.surplusintelligence.ai/v1"
 FAKE_KEY = "surplus-test-key-not-real"
+OPENROUTER_KEY = "sk-or-v1-test-key-not-real"
 
 _RUNTIME_SPECS = [spec for spec in list_provider_specs() if spec.runtime_supported]
 _OTHER_PROVIDERS = [spec for spec in _RUNTIME_SPECS if spec.provider_id != "openrouter"]
@@ -216,6 +218,38 @@ def test_a_surplus_key_inherited_by_a_router_tier_is_not_sent_to_openrouter() ->
     )
     with pytest.raises(ProviderBuildError):
         _build_provider(fallback)
+
+
+def test_an_openrouter_key_may_go_to_openrouter_under_another_provider_name() -> None:
+    # ``provider = "openai"`` with OpenRouter's URL and an OpenRouter key: the
+    # OpenAI-compatible way to use OpenRouter. The key is OpenRouter's own.
+    config = ProviderConfig(
+        provider="openai", model="openai/gpt-5.6", api_key=OPENROUTER_KEY, base_url=OPENROUTER_URL
+    )
+    assert _build_provider(config) is not None
+
+
+@pytest.mark.parametrize("explicit", [False, True], ids=["saved", "explicit"])
+def test_configure_keeps_an_openrouter_url_that_serves_an_openrouter_key(
+    explicit: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Replacing the URL with OpenAI's would send the OpenRouter key to OpenAI.
+    monkeypatch.setenv("OPENROUTER_API_KEY", OPENROUTER_KEY)
+    config = _write_config(
+        tmp_path,
+        '[llm]\nprovider = "openai"\nmodel = "openai/gpt-5.6"\n'
+        f'api_key_env = "OPENROUTER_API_KEY"\nbase_url = "{OPENROUTER_URL}"\n',
+    )
+
+    result = upsert_llm_provider(
+        config,
+        provider_id="openai",
+        model="openai/gpt-5.6-mini",
+        base_url="https://openrouter.ai/api" if explicit else "",
+    )
+
+    assert "openrouter.ai" in result.config.llm.base_url
+    assert result.config.llm.api_key_env == "OPENROUTER_API_KEY"
 
 
 def test_configure_saves_the_providers_endpoint(

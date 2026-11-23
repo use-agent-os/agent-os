@@ -73,7 +73,9 @@ endpoint. A key is sent only to its own provider's host: with a provider other
 than `openrouter`, a `base_url` on `openrouter.ai` (for example one left behind
 after changing `provider`) is refused, and the turn fails with a message that
 says what to change, before any request is made. `agentos configure provider`
-replaces such a saved URL with the provider's endpoint.
+replaces such a saved URL with the provider's endpoint. The one exception is
+an OpenRouter key (`sk-or-...`): it is OpenRouter's own, so `provider =
+"openai"` with OpenRouter's `base_url` and that key keeps working.
 
 Once a provider has a key or key reference configured, switch the active
 provider and model without prompts:

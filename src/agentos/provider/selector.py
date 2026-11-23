@@ -70,7 +70,9 @@ def _build_provider(cfg: ProviderConfig) -> LLMProvider:
     # A key (and the conversation) goes only where its provider serves it:
     # never another provider's to OpenRouter, as an OpenRouter base_url left
     # in place after the provider changed would. Checked before any client.
-    refusal = openrouter_url_refusal(cfg.credential_provider or spec.provider_id, base_url)
+    refusal = openrouter_url_refusal(
+        cfg.credential_provider or spec.provider_id, base_url, cfg.api_key
+    )
     if refusal:
         raise ProviderBuildError(refusal)
 

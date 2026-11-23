@@ -383,17 +383,29 @@ def is_openrouter_url(url: str) -> bool:
     return host == "openrouter.ai" or host.endswith(".openrouter.ai")
 
 
-def openrouter_url_refusal(provider_id: str, base_url: str) -> str:
+def is_openrouter_key(api_key: str) -> bool:
+    """True when *api_key* is one OpenRouter issued (they all start ``sk-or-``)."""
+
+    return str(api_key or "").strip().startswith("sk-or-")
+
+
+def openrouter_url_refusal(provider_id: str, base_url: str, api_key: str = "") -> str:
     """Why *provider_id*'s API key must not go to *base_url*, or ``""``.
 
     Only OpenRouter's own key belongs on an OpenRouter host. A base URL there
     for another provider is, in practice, the OpenRouter default left behind
     in ``[llm]`` (or a profile) after the provider changed; sending that
     provider's key to it hands the key to OpenRouter.
+
+    *api_key*, when the caller knows it, settles the one legitimate case: an
+    OpenRouter key used under an OpenAI-compatible provider name (``provider =
+    "openai"`` with OpenRouter's URL) is OpenRouter's own and may go there.
     """
 
     provider = str(provider_id or "").strip().lower()
     if provider == "openrouter" or not is_openrouter_url(base_url):
+        return ""
+    if is_openrouter_key(api_key):
         return ""
     own = default_base_url_for(provider)
     fix = (

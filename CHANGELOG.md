@@ -16,8 +16,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   An unset `base_url` is now the provider's own endpoint, `configure`
   replaces a saved OpenRouter URL of another provider, and a key of another
   provider is never sent to an `openrouter.ai` host: such a config fails with
-  a message saying what to change. If you ran a non-OpenRouter provider
-  without a `base_url`, rotate that provider's API key.
+  a message saying what to change (an OpenRouter key, `sk-or-...`, may still
+  go there under an OpenAI-compatible provider name). If you ran a
+  non-OpenRouter provider without a `base_url`, rotate that provider's API
+  key.
 
 ### Fixed
 - Gateway: a parent session whose interrupted turn restart recovery could
