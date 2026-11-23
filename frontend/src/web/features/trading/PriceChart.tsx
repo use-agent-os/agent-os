@@ -19,6 +19,20 @@ import { clampSym } from './safety'
 const RANGES: readonly ChartRange[] = ['1h', '6h', '1d', '1w', 'all']
 const HEIGHT = 260
 
+/**
+ * Points as the library takes them: whole unix seconds, finite, strictly
+ * ascending, one per second. It throws on anything else, and a payload is
+ * not trusted to be any of that.
+ */
+export function chartData(points: readonly { t: number; c: number }[]) {
+  const seen = new Set<number>()
+  return points
+    .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.c))
+    .map((p) => ({ time: Math.floor(p.t), value: p.c }))
+    .sort((a, b) => a.time - b.time)
+    .filter((p) => (seen.has(p.time) ? false : (seen.add(p.time), true)))
+}
+
 function Line({ points, label }: { points: { t: number; c: number }[]; label: string }) {
   const host = useRef<HTMLDivElement>(null)
   const mode = useTheme((s) => s.mode)
@@ -30,16 +44,23 @@ function Line({ points, label }: { points: { t: number; c: number }[]; label: st
     void import('lightweight-charts').then((lib) => {
       if (disposed || !host.current) return
       const theme = chartTheme(mode)
-      const chart = lib.createChart(el, {
-        height: HEIGHT,
-        autoSize: true,
-        layout: { background: { color: theme.background }, textColor: theme.textColor },
-        grid: { vertLines: { visible: false }, horzLines: { color: theme.gridColor } },
-        rightPriceScale: { borderColor: theme.borderColor },
-        timeScale: { borderColor: theme.borderColor, timeVisible: true },
-        handleScroll: false,
-        handleScale: false,
-      })
+      let chart: ReturnType<typeof lib.createChart>
+      try {
+        chart = lib.createChart(el, {
+          height: HEIGHT,
+          autoSize: true,
+          layout: { background: { color: theme.background }, textColor: theme.textColor },
+          grid: { vertLines: { visible: false }, horzLines: { color: theme.gridColor } },
+          rightPriceScale: { borderColor: theme.borderColor },
+          timeScale: { borderColor: theme.borderColor, timeVisible: true },
+          handleScroll: false,
+          handleScale: false,
+        })
+      } catch {
+        // No canvas (jsdom, headless): the line is decoration there.
+        return
+      }
+      remove = () => chart.remove()
       const first = points[0]?.c ?? 0
       const last = points[points.length - 1]?.c ?? 0
       const color = last >= first ? theme.upColor : theme.downColor
@@ -50,15 +71,8 @@ function Line({ points, label }: { points: { t: number; c: number }[]; label: st
         lineWidth: 2,
         priceFormat: { type: 'custom', formatter: (p: number) => formatPrice(p) },
       })
-      // Points are unix seconds, sorted and de-duplicated as the library wants.
-      const seen = new Set<number>()
-      const data = [...points]
-        .sort((a, b) => a.t - b.t)
-        .filter((p) => (seen.has(p.t) ? false : (seen.add(p.t), true)))
-        .map((p) => ({ time: p.t as never, value: p.c }))
-      series.setData(data)
+      series.setData(chartData(points).map((p) => ({ ...p, time: p.time as never })))
       chart.timeScale().fitContent()
-      remove = () => chart.remove()
     })
     return () => {
       disposed = true
