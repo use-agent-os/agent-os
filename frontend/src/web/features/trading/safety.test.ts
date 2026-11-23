@@ -62,7 +62,8 @@ describe('trading read guard', () => {
 
   it('never names a trading or wallet method outside the allow-list, nor passes refresh', () => {
     const allowed = new Set<string>(TRADING_READ_METHODS)
-    const events = /^(trading\.(changed|order\.finished|(dca|trigger|bracket)\.changed|trigger\.fired))$/
+    const events =
+      /^(trading\.(changed|order\.finished|(dca|trigger|bracket)\.changed|trigger\.fired))$/
     const offenders: string[] = []
     for (const { file, text } of featureSources()) {
       for (const m of text.matchAll(/['"`]((?:trading|wallet)\.[a-zA-Z_.]+)['"`]/g)) {
