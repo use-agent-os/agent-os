@@ -7,6 +7,10 @@ same tree computes the same partition and each file runs in exactly one shard.
 A file with no recorded timing still lands somewhere, at the average cost;
 stale timings only cost balance, never coverage.
 
+The timings are kept per OS (``platform.system()``); an OS without a table of
+its own uses another's. ``--shard-timings-os=OS`` splits by that OS's table
+instead, so a CI shard of another OS reproduces locally.
+
 ``--shard-report=PATH`` writes the shard's per-file durations and how many
 tests it kept out of how many it collected. ``scripts/ci_test_timings.py``
 checks those reports add up to the whole suite and refits the timings file
@@ -87,6 +91,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="run only the test files timing-balanced into shard I of N",
     )
     group.addoption(
+        "--shard-timings-os",
+        default=None,
+        metavar="OS",
+        help="split by this platform.system()'s timings (default: this machine's)",
+    )
+    group.addoption(
         "--shard-report",
         default=None,
         metavar="PATH",
@@ -113,9 +123,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     shard = config.getoption("--shard")
     if shard:
         index, count = parse_shard(shard)
-        mine = set(
-            assign_files((_file_of(i.nodeid) for i in items), count, load_timings())[index - 1]
-        )
+        timings = load_timings(system=config.getoption("--shard-timings-os"))
+        mine = set(assign_files((_file_of(i.nodeid) for i in items), count, timings)[index - 1])
         kept = [item for item in items if _file_of(item.nodeid) in mine]
         dropped = [item for item in items if _file_of(item.nodeid) not in mine]
         if dropped:

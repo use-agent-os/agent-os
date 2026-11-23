@@ -20,8 +20,9 @@ import pytest
 
 from agentos.engine import Agent, AgentConfig
 from agentos.engine.agent import HOOK_ADJUSTED_ARGUMENTS_KEY
-from agentos.engine.hooks import Rewrite, ToolHookCall, ToolHookResult
+from agentos.engine.hooks import ReplaceResult, Rewrite, ToolHookCall, ToolHookResult
 from agentos.engine.tool_batch import ToolBatchExecutor
+from agentos.engine.tool_projection import _split_hook_adjusted_note, hook_adjusted_arguments_note
 from agentos.engine.types import ToolCall, ToolResult, ToolResultEvent, WarningEvent
 from agentos.provider import (
     ChatConfig,
@@ -439,3 +440,100 @@ async def test_the_approval_prompt_shows_the_command_that_runs_and_the_model_doe
     assert str(result.content).startswith("removed\n\n[Note: a tool hook adjusted")
     assert "(adjusted: command)" in str(result.content)
     assert "INJECTED" not in json.dumps([m.model_dump(mode="json") for m in replay])
+
+
+# ---------------------------------------------------------------------------
+# The note survives the shrink of an oversized result before its first send
+# ---------------------------------------------------------------------------
+
+NOTE = (
+    "[Note: a tool hook adjusted the arguments of this call before it ran "
+    "(adjusted: path). This result is for the adjusted call.]"
+)
+
+
+class _RewriteAndReplaceHook(_RewriteHook):
+    """Rewrites the call, then replaces its result with *content*."""
+
+    def __init__(self, rewrite: Callable[[dict[str, Any]], dict[str, Any]], content: str) -> None:
+        super().__init__(rewrite)
+        self._content = content
+
+    def after_tool(self, call: ToolHookCall, outcome: ToolHookResult) -> Any:
+        return ReplaceResult(self._content)
+
+
+@pytest.mark.asyncio
+async def test_the_note_survives_the_head_preview_of_an_oversized_control_result() -> None:
+    # A control-class result over its cap keeps only a 160-char head preview.
+    # The note follows the text, so it went with the rest.
+    async def sessions_yield(path: str, token: str | None = None) -> str:
+        return json.dumps({"status": "yielded"})
+
+    registry, tool_def = _write_tool(sessions_yield, name="sessions_yield")
+    hook = _RewriteAndReplaceHook(lambda args: {**args, "path": "other"}, "x" * 20_000)
+    provider = _ScriptedProvider("sessions_yield", {"path": "mine"})
+    # A small window: the result cap is its 4,000-char floor.
+    agent = _agent(provider, registry, tool_def, hook, context_window_tokens=16_000)
+
+    _ = [event async for event in agent.run_turn("wait for it")]
+
+    (result,) = _blocks(provider.calls[1], ContentBlockToolResult)
+    content = str(result.content)
+    assert len(content) < 1_000  # shrunk
+    assert content.endswith(NOTE)
+
+
+@pytest.mark.asyncio
+async def test_the_note_survives_a_tail_preview_shorter_than_it() -> None:
+    # Over its cap, a text result keeps its head and a tail of 35% of the
+    # preview. With a small cap the tail is shorter than the note.
+    async def write_file(path: str, token: str | None = None) -> str:
+        return "".join(f"line {n}\n" for n in range(2_000))
+
+    registry, tool_def = _write_tool(write_file)
+    hook = _RewriteHook(lambda args: {**args, "path": "src/app.py"})
+    provider = _ScriptedProvider("write_file", {"path": "notes.md"})
+    agent = _agent(provider, registry, tool_def, hook, tool_result_provider_request_max_chars=300)
+
+    _ = [event async for event in agent.run_turn("update the notes")]
+
+    (result,) = _blocks(provider.calls[1], ContentBlockToolResult)
+    content = str(result.content)
+    assert content.startswith("[tool_result_projection]")
+    assert content.count(NOTE) == 1 and content.endswith(NOTE)
+
+
+@pytest.mark.asyncio
+async def test_the_note_survives_the_history_cap_at_the_end_of_the_turn() -> None:
+    # Once the turn is over, a result over the history cap is shortened the
+    # same way, head and a 35% tail, before it is persisted.
+    async def write_file(path: str, token: str | None = None) -> str:
+        return "".join(f"line {n}\n" for n in range(2_000))
+
+    registry, tool_def = _write_tool(write_file)
+    hook = _RewriteHook(lambda args: {**args, "path": "src/app.py"})
+    provider = _ScriptedProvider("write_file", {"path": "notes.md"})
+    agent = _agent(provider, registry, tool_def, hook, history_tool_result_max_chars=300)
+
+    _ = [event async for event in agent.run_turn("update the notes")]
+
+    (sent,) = _blocks(provider.calls[1], ContentBlockToolResult)
+    assert str(sent.content).endswith(NOTE)  # under the provider cap: sent whole
+    (kept,) = _blocks(agent._history, ContentBlockToolResult)
+    content = str(kept.content)
+    assert content.startswith("[tool_result_projection]")
+    assert content.count(NOTE) == 1 and content.endswith(NOTE)
+
+
+def test_only_a_trailing_note_of_note_size_is_kept_whole() -> None:
+    note = hook_adjusted_arguments_note(["path"])
+    assert note == NOTE
+    assert _split_hook_adjusted_note(f"body\n\n{note}") == ("body", note)
+    # Not at the end, or not a paragraph of its own: part of the output.
+    assert _split_hook_adjusted_note(f"{note}\n\nmore") == (f"{note}\n\nmore", "")
+    assert _split_hook_adjusted_note(f"body {note}") == (f"body {note}", "")
+    # A tool's own text that only looks like a note is previewed like the rest
+    # rather than kept whole past the cap.
+    fake = f"{NOTE[:-1]}{'x' * 5_000}]"
+    assert _split_hook_adjusted_note(f"body\n\n{fake}") == (f"body\n\n{fake}", "")

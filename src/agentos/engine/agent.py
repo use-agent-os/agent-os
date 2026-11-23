@@ -95,6 +95,7 @@ from agentos.engine.tool_batch import ToolBatchExecutor, registry_spec_lookup
 from agentos.engine.tool_projection import (
     ToolResultProjector,
     _pending_approval_payload,
+    hook_adjusted_arguments_note,
 )
 from agentos.engine.tool_text_compat import strip_synthetic_tool_call_suffix
 from agentos.engine.tool_token_estimate import estimate_tokens as get_approx_tokens
@@ -585,10 +586,7 @@ def _note_hook_adjusted_arguments(result: ToolResult, arguments: dict[str, Any])
         payload[HOOK_ADJUSTED_ARGUMENTS_KEY] = names
         content = json.dumps(payload, ensure_ascii=False)
     else:
-        note = (
-            "[Note: a tool hook adjusted the arguments of this call before it ran "
-            f"(adjusted: {', '.join(names)}). This result is for the adjusted call.]"
-        )
+        note = hook_adjusted_arguments_note(names)
         # Trailing blank lines dropped first: with them the note would follow
         # two or more empty lines, the projection collapses those, and a
         # result it shortened that way goes out wrapped in a projection

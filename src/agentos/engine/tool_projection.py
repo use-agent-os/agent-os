@@ -64,6 +64,46 @@ from agentos.result_budget import (
 logger = structlog.get_logger("agentos.engine.agent")
 
 
+#: How the note opens that a text result gets when a tool hook ran its call
+#: with other arguments (``agent._note_hook_adjusted_arguments``).
+_HOOK_ADJUSTED_ARGUMENTS_NOTE_PREFIX = "[Note: a tool hook adjusted the arguments of this call "
+#: Longer than any real note: text a tool returned that only looks like one
+#: must not slip past the preview whole.
+_HOOK_ADJUSTED_ARGUMENTS_NOTE_MAX_CHARS = 1_000
+
+
+def hook_adjusted_arguments_note(names: list[str]) -> str:
+    """The note telling the model a tool hook adjusted these arguments."""
+
+    return (
+        f"{_HOOK_ADJUSTED_ARGUMENTS_NOTE_PREFIX}before it ran "
+        f"(adjusted: {', '.join(names)}). This result is for the adjusted call.]"
+    )
+
+
+def _split_hook_adjusted_note(content: str) -> tuple[str, str]:
+    """Split a text result into its body and its trailing hook note (or ``""``).
+
+    The note is not the tool's output, so a projection previews only the body
+    and keeps the note whole: a head or tail preview would cut it off.
+    """
+
+    body, separator, last = content.rpartition("\n\n")
+    if (
+        separator
+        and len(last) <= _HOOK_ADJUSTED_ARGUMENTS_NOTE_MAX_CHARS
+        and last.startswith(_HOOK_ADJUSTED_ARGUMENTS_NOTE_PREFIX)
+        and last.endswith("]")
+        and "\n" not in last
+    ):
+        return body, last
+    return content, ""
+
+
+def _with_note(projection: str, note: str) -> str:
+    return f"{projection}\n\n{note}" if note else projection
+
+
 _LARGE_JSON_TOOL_FIELD_KEYS: frozenset[str] = frozenset({"body", "body_base64"})
 
 
@@ -459,7 +499,8 @@ class ToolResultProjector:
 
         The full payload goes to the on-disk tool-result store (the projection
         names its handle); the transcript keeps the projection forever. Error
-        and artifact-producing results are never projected.
+        and artifact-producing results are never projected. A tool hook's note
+        that it adjusted the call's arguments is kept whole, after the preview.
         """
         if not isinstance(block.content, str) or block.is_error:
             return block
@@ -470,17 +511,18 @@ class ToolResultProjector:
             return block
         if _tool_result_content_has_artifact(content):
             return block
+        body, note = _split_hook_adjusted_note(content)
         if budget_class is ToolResultBudgetClass.CONTROL:
             replacement = compact_tool_result_content(
                 tool_name=tool_name,
-                content=content,
+                content=body,
                 max_preview_chars=160,
                 budget_class=budget_class,
                 is_error=block.is_error,
             )
         else:
             replacement = self._tool_result_projection_for_provider(
-                content,
+                body,
                 tool_use_id=block.tool_use_id,
                 tool_name=tool_name or "tool",
                 reason=(
@@ -490,6 +532,7 @@ class ToolResultProjector:
                 ),
                 max_preview_chars=min(result_cap, 4_000),
             )
+        replacement = _with_note(replacement, note)
         if len(replacement) >= len(content):
             return block
         self.config.metadata["tool_provider_guard_projection_applied"] = True
@@ -578,13 +621,15 @@ class ToolResultProjector:
             return block
         if _tool_result_content_has_artifact(content):
             return block
+        body, note = _split_hook_adjusted_note(content)
         projection = self._tool_result_projection_for_provider(
-            content,
+            body,
             tool_use_id=block.tool_use_id,
             tool_name=tool_name,
             reason="tool result from an earlier turn, shortened for history",
             max_preview_chars=min(cap, 4_000),
         )
+        projection = _with_note(projection, note)
         if len(projection) >= len(content):
             return block
         return ContentBlockToolResult(

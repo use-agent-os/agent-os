@@ -13,7 +13,7 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import ci_shard
@@ -90,12 +90,50 @@ def test_timings_fall_back_to_another_os_table(tmp_path: Path) -> None:
     assert ci_shard.load_timings(tmp_path / "missing.json", "Linux") == {}
 
 
-def test_the_committed_timings_cover_most_of_the_suite() -> None:
+@pytest.mark.parametrize("system", ["Linux", "Windows"])
+def test_the_committed_timings_cover_most_of_the_suite(system: str) -> None:
     """Stale timings only cost balance, but an empty table would cost all of it."""
-    timings = ci_shard.load_timings(system="Linux")
+    tables = json.loads(ci_shard.TIMINGS_PATH.read_text(encoding="utf-8"))
     files = list((REPO / "tests").rglob("test_*.py"))
 
-    assert len(timings) > len(files) // 2
+    # Each CI OS has a table of its own: a test costs more on Windows, and
+    # not by the same factor for every file.
+    assert len(tables[system]) > len(files) // 2
+
+
+class _Config:
+    """What the collection hook reads of a pytest config."""
+
+    def __init__(self, **options: Any) -> None:
+        self._options = options
+        self.stash = pytest.Stash()
+        self.hook = SimpleNamespace(pytest_deselected=lambda items: None)
+
+    def getoption(self, name: str) -> Any:
+        return self._options.get(name)
+
+
+@pytest.mark.parametrize("system", [None, "Windows"])
+def test_a_shard_splits_by_the_timings_of_the_os_asked_for(
+    monkeypatch: pytest.MonkeyPatch, system: str | None
+) -> None:
+    asked: list[str | None] = []
+
+    def load_timings(path: Path = ci_shard.TIMINGS_PATH, system: str | None = None) -> Any:
+        asked.append(system)
+        return {"a.py": 1.0, "b.py": 9.0, "c.py": 1.0}
+
+    monkeypatch.setattr(ci_shard, "load_timings", load_timings)
+    items: list[Any] = [
+        SimpleNamespace(nodeid=f"{name}::test") for name in ("a.py", "b.py", "c.py")
+    ]
+    config = _Config(**{"--shard": "1/2", "--shard-timings-os": system})
+
+    ci_shard.pytest_collection_modifyitems(config, items)  # type: ignore[arg-type]
+
+    # ``None`` is this machine's own table.
+    assert asked == [system]
+    assert [item.nodeid for item in items] == ["b.py::test"]
 
 
 class TestCheckPartition:
@@ -136,6 +174,19 @@ class TestCheckPartition:
         assert timings_script.main(["check", "--require", "Linux", str(path)]) == 0
         assert timings_script.main(["check", "--require", "Windows", str(path)]) == 1
         assert "no shard reports for Windows" in capsys.readouterr().out
+
+
+def test_fit_takes_a_files_median_over_several_runs() -> None:
+    # Each shard runs on a runner of its own, whose speed varies from run to
+    # run: one slow runner must not set a file's timing.
+    runs = [
+        _report("1/1", 2, 2, {"a.py": 1.0, "b.py": 4.0}),
+        _report("1/1", 2, 2, {"a.py": 3.0, "b.py": 5.0}),
+        _report("1/1", 1, 1, {"a.py": 2.0}),
+        _report("1/1", 2, 2, {"a.py": 30.0, "b.py": 6.0}),
+    ]
+
+    assert timings_script.fit_timings({"Linux": runs}, {}) == {"Linux": {"a.py": 2.5, "b.py": 5.0}}
 
 
 def test_fit_replaces_the_reported_os_and_keeps_the_others() -> None:
