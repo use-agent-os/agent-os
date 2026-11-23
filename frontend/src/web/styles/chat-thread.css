@@ -10,6 +10,17 @@
  * is neutralised by the reduced-motion block in base.css. */
 
 @layer components {
+  /* ---- Shape ------------------------------------------------------------ */
+
+  /* One shape language for the whole chat, shared with the composer card:
+   * large-radius cards, round icon tiles and pill actions. Buttons inside a
+   * chat card read as pills (the same family as the composer's chips). */
+  /* The radii (--chat-radius-card, --chat-radius-inner) are set in shell.css,
+   * so the frame around the chat shares them. */
+  :where(.chat-card, .chat-turn-error, .chat-approval, .chat-side-head) :where(button, a) {
+    --radius-control: 9999px;
+  }
+
   /* ---- Turn ------------------------------------------------------------- */
 
   .chat-turn {
@@ -276,7 +287,7 @@
     flex-direction: column;
     padding: 4px;
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--chat-radius-card);
     background: color-mix(in oklab, var(--surface-1), transparent 25%);
     box-shadow: var(--highlight);
   }
@@ -316,7 +327,7 @@
     gap: 10px;
     min-height: 34px;
     padding: 4px 8px;
-    border-radius: 10px;
+    border-radius: 14px;
     text-align: start;
     color: var(--text);
     transition: background-color var(--duration-fast) var(--ease-out);
@@ -356,7 +367,7 @@
     justify-content: center;
     width: 22px;
     height: 22px;
-    border-radius: 7px;
+    border-radius: 9999px;
     border: 1px solid var(--border-strong);
     background: var(--surface-2);
     color: var(--text-muted);
@@ -413,7 +424,7 @@
   }
   .chat-well {
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 12px;
     background: var(--surface-inset);
     box-shadow: var(--inset-shadow);
     padding: 8px 10px;
@@ -492,7 +503,7 @@
     gap: 12px;
     padding: 12px 12px 12px 14px;
     border: 1px solid color-mix(in oklab, var(--danger), transparent 80%);
-    border-radius: 14px;
+    border-radius: var(--chat-radius-card);
     background: color-mix(in oklab, var(--surface-1), var(--danger) 4%);
     box-shadow: var(--elevation-card);
   }
@@ -503,7 +514,7 @@
     justify-content: center;
     width: 30px;
     height: 30px;
-    border-radius: 9px;
+    border-radius: 9999px;
     background: color-mix(in oklab, var(--danger), transparent 88%);
     color: var(--danger);
   }
@@ -543,7 +554,7 @@
   .chat-notice[data-tone] {
     padding: 8px 12px;
     border: 1px solid color-mix(in oklab, var(--warn), transparent 75%);
-    border-radius: 12px;
+    border-radius: var(--chat-radius-inner);
     background: color-mix(in oklab, var(--warn), transparent 93%);
     color: var(--text);
   }
@@ -560,7 +571,7 @@
   .chat-note {
     padding: 10px 14px;
     border: 1px dashed var(--border-strong);
-    border-radius: 14px;
+    border-radius: var(--chat-radius-inner);
     background: color-mix(in oklab, var(--surface-1), transparent 40%);
     color: var(--text-muted);
     font-family: var(--font-sans);
@@ -576,9 +587,9 @@
   /* ---- Cards ------------------------------------------------------------ */
 
   .chat-card {
-    padding: 16px 18px;
+    padding: 18px 20px;
     border: 1px solid var(--border);
-    border-radius: 16px;
+    border-radius: var(--chat-radius-card);
     background: var(--surface-1);
     box-shadow: var(--elevation-card);
   }
@@ -605,7 +616,7 @@
   .chat-subcard {
     padding: 12px;
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--chat-radius-inner);
     background: var(--surface-2);
     box-shadow: var(--highlight);
   }
@@ -640,7 +651,7 @@
     justify-content: center;
     width: 30px;
     height: 30px;
-    border-radius: 9px;
+    border-radius: 9999px;
     border: 1px solid var(--border);
     background: var(--surface-2);
     color: var(--text-muted);
@@ -666,7 +677,7 @@
     width: 44px;
     height: 44px;
     border: 1px solid var(--border);
-    border-radius: 11px;
+    border-radius: var(--chat-radius-inner);
   }
   .chat-artifact-thumb > svg {
     width: 18px;
@@ -679,9 +690,9 @@
     cursor: pointer;
     align-items: flex-start;
     gap: 10px;
-    padding: 10px 12px;
+    padding: 11px 14px;
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--chat-radius-inner);
     background: color-mix(in oklab, var(--surface-2), transparent 50%);
     transition:
       background-color var(--duration-fast) var(--ease-out),
@@ -722,7 +733,7 @@
 
   .chat-approval {
     padding: 6px;
-    border-radius: 18px;
+    border-radius: var(--chat-radius-card);
     background: color-mix(in oklab, var(--surface-1), var(--warn) 5%);
     box-shadow:
       0 0 0 1px color-mix(in oklab, var(--warn), transparent 66%),
@@ -743,17 +754,13 @@
     place-items: center;
     width: 24px;
     height: 24px;
-    border-radius: 8px;
+    border-radius: 9999px;
     background: color-mix(in oklab, var(--warn), transparent 86%);
   }
   .chat-approval-icon > svg {
     width: 14px;
     height: 14px;
   }
-  .chat-approval li[data-approval-id] {
-    border-radius: 13px;
-  }
-
   /* ---- Side panel (tool output, artifacts) ------------------------------- */
 
   .chat-overline {
@@ -766,26 +773,51 @@
   .chat-panel-in {
     animation: chat-panel-in var(--duration-slow) var(--ease-enter) both;
   }
+  /* A floating glass card beside the thread (the composer's surface and
+   * large radius); a full-height sheet on phones. */
   .chat-side {
-    border-left: 1px solid var(--border);
-    background: var(--surface-1);
-    box-shadow: -16px 0 40px -28px hsl(var(--shadow-color) / 0.55);
+    margin: 10px 10px 10px 0;
+    border: 1px solid color-mix(in oklab, var(--border-control), transparent 50%);
+    border-radius: 24px;
+    background-color: color-mix(in oklab, var(--surface-1), transparent 8%);
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--surface-2), transparent 40%),
+      transparent 160px
+    );
+    backdrop-filter: blur(18px) saturate(1.2);
+    box-shadow:
+      var(--highlight),
+      0 18px 44px -20px hsl(var(--shadow-color) / 0.6);
+  }
+  :root[data-theme='light'] .chat-side {
+    box-shadow:
+      var(--highlight),
+      0 14px 36px -18px hsl(var(--shadow-color) / 0.22);
+  }
+  .chat-side.fixed {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background-color: var(--surface-1);
+    padding-top: env(safe-area-inset-top);
   }
   .chat-side-head {
     display: flex;
     align-items: center;
     gap: 12px;
-    min-height: 60px;
-    padding: 10px 12px 6px 16px;
+    min-height: 64px;
+    padding: 12px 12px 6px 14px;
   }
+  /* Tabs are pills on a gliding pill, like the composer's chips. */
   .chat-side-tabs {
     --glide-bg: var(--surface-3);
-    --glide-radius: 8px;
+    --glide-radius: 9999px;
     display: flex;
     flex-shrink: 0;
-    gap: 2px;
+    gap: 4px;
     margin: 0 12px;
-    padding: 4px 0 8px;
+    padding: 4px 0 10px;
     overflow-x: auto;
     border-bottom: 1px solid var(--border);
   }
@@ -793,17 +825,29 @@
     display: flex;
     flex-shrink: 0;
     align-items: center;
-    border-radius: 8px;
+    min-height: 30px;
+    border-radius: 9999px;
+    border: 1px solid var(--border);
     color: var(--text-muted);
-    font-size: 13px;
-    transition: color var(--duration-fast) var(--ease-out);
+    font-size: max(12px, calc(13px * var(--text-scale)));
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out);
+  }
+  .chat-side-tab > button:first-child {
+    border-radius: 9999px;
   }
   .chat-side-tab[data-active='true'] {
+    border-color: color-mix(in oklab, var(--accent), transparent 60%);
     color: var(--text);
     font-weight: 500;
   }
+  .chat-side-tab[data-active='true'] svg {
+    color: var(--accent);
+  }
   .chat-side-tab:hover {
     color: var(--text);
+    border-color: var(--border-strong);
   }
   .chat-side-tab svg {
     flex-shrink: 0;
@@ -813,21 +857,31 @@
   .chat-side-tab-close {
     display: inline-grid;
     place-items: center;
-    margin-right: 2px;
-    border-radius: 6px;
+    width: 22px;
+    height: 22px;
+    margin-inline: 2px 4px;
+    border-radius: 9999px;
     color: var(--text-muted);
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out);
   }
   .chat-side-tab-close:hover {
+    background: var(--surface-overlay);
     color: var(--text);
+  }
+  .chat-side-tab-close > svg {
+    width: 12px;
+    height: 12px;
   }
   .chat-side-well {
     min-height: 100%;
-    padding: 12px 14px;
-    border-radius: 12px;
+    padding: 14px 16px;
+    border-radius: var(--chat-radius-inner);
   }
   .chat-side-media {
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--chat-radius-inner);
     box-shadow: var(--elevation-card);
   }
   .chat-thought-text {
@@ -839,8 +893,8 @@
   /* The side panel's resize edge: a hairline that lights up on hover/focus. */
   .chat-resize {
     position: absolute;
-    inset-block: 0;
-    left: -4px;
+    inset-block: 20px;
+    left: -6px;
     z-index: 1;
     width: 8px;
     cursor: col-resize;
@@ -857,6 +911,35 @@
   .chat-resize:is(:hover, :focus-visible)::after {
     background: var(--accent);
   }
+}
+
+/* The tray's card, restyled in place (unlayered, to win over
+ * its utilities): the inner radius and a softer
+ * hairline, a round tool badge, the thread's sans name and a rounded
+ * command well, so the dock reads as one piece with the composer. */
+.chat-approval li[data-approval-id] {
+  gap: 12px;
+  padding: 12px 12px 12px 14px;
+  border-color: color-mix(in oklab, var(--border), transparent 30%);
+  border-radius: var(--chat-radius-inner);
+  background: color-mix(in oklab, var(--surface-1), transparent 15%);
+  box-shadow: var(--highlight);
+}
+.chat-approval li[data-approval-id] > div:first-child > :first-child {
+  border-radius: 9999px;
+}
+.chat-approval li[data-approval-id] > div:first-child p:first-child {
+  font-family: inherit;
+  font-size: 14px;
+  letter-spacing: normal;
+}
+.chat-approval li[data-approval-id] pre,
+.chat-approval li[data-approval-id] .group\/cmd > :first-child {
+  border-radius: 12px;
+}
+.chat-approval li[data-approval-id] a {
+  border-radius: 9999px;
+  padding-inline: 10px;
 }
 
 @keyframes chat-rise-user {

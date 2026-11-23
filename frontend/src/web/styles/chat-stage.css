@@ -152,6 +152,99 @@
     width: 24px;
     height: 24px;
   }
+  .stage-mark[data-size='xl'] {
+    width: 76px;
+    height: 76px;
+    border-radius: 24px;
+  }
+  .stage-mark[data-size='xl'] > .shell-brand-mark {
+    width: 38px;
+    height: 38px;
+  }
+  @media (max-width: 639px) {
+    .stage-mark[data-size='xl'] {
+      width: 60px;
+      height: 60px;
+      border-radius: 19px;
+    }
+    .stage-mark[data-size='xl'] > .shell-brand-mark {
+      width: 30px;
+      height: 30px;
+    }
+  }
+
+  /* ---- The mascot and its hint bubbles --------------------------------- */
+
+  .stage-mascot {
+    position: relative;
+    display: flex;
+    width: 100%;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+  /* With room and a keyboard, the hints float around the mark as bubbles,
+   * each tied to it by a small dot; elsewhere they are a centred row. */
+  @media (min-width: 640px) and (pointer: fine) {
+    .stage-mascot {
+      min-height: 140px;
+      justify-content: center;
+    }
+    .stage-mascot > .stage-hints {
+      position: absolute;
+      inset: 0;
+      display: block;
+      pointer-events: none;
+    }
+    .stage-mascot .stage-hint {
+      --bubble-float: calc(var(--stage-drift, 26s) / 4);
+      position: absolute;
+      animation: stage-float var(--bubble-float) var(--ease-in-out) infinite alternate;
+    }
+    .stage-mascot .stage-hint:nth-child(1) {
+      top: 30%;
+      right: calc(50% + 70px);
+      border-bottom-right-radius: 6px;
+    }
+    .stage-mascot .stage-hint:nth-child(2) {
+      top: 6%;
+      left: calc(50% + 70px);
+      border-bottom-left-radius: 6px;
+      animation-delay: calc(var(--bubble-float) / -2);
+    }
+    .stage-mascot .stage-hint:nth-child(3) {
+      bottom: 8%;
+      left: calc(50% + 86px);
+      border-top-left-radius: 6px;
+      animation-delay: calc(var(--bubble-float) / -3);
+    }
+    /* The dot that ties a bubble to the mark. */
+    .stage-mascot .stage-hint::after {
+      content: '';
+      position: absolute;
+      width: 5px;
+      height: 5px;
+      border-radius: 9999px;
+      background: var(--border-strong);
+    }
+    .stage-mascot .stage-hint:nth-child(1)::after {
+      right: -9px;
+      bottom: -5px;
+    }
+    .stage-mascot .stage-hint:nth-child(2)::after {
+      left: -9px;
+      bottom: -5px;
+    }
+    .stage-mascot .stage-hint:nth-child(3)::after {
+      left: -9px;
+      top: -5px;
+    }
+  }
+  @keyframes stage-float {
+    to {
+      transform: translateY(-4px);
+    }
+  }
   /* The breathing halo behind the tile. */
   .stage-mark::before {
     content: '';
@@ -190,12 +283,13 @@
 
   /* ---- Display heading ------------------------------------------------- */
 
+  /* Two tones: the greeting recedes (muted), the question carries the line. */
   .stage-title {
     max-width: 18em;
-    font-size: clamp(1.75rem, 1.05rem + 2.3vw, 2.75rem);
+    font-size: clamp(1.875rem, 1.05rem + 2.5vw, 3rem);
     font-weight: 600;
-    line-height: 1.1;
-    letter-spacing: -0.034em;
+    line-height: 1.12;
+    letter-spacing: -0.036em;
   }
   .stage-title-lead,
   .stage-title-rest {
@@ -206,16 +300,16 @@
   .stage-title-lead {
     background-image: linear-gradient(
       180deg,
-      var(--text) 30%,
-      color-mix(in oklab, var(--text), var(--text-muted) 45%)
+      color-mix(in oklab, var(--text), var(--text-muted) 70%),
+      var(--text-muted)
     );
   }
   .stage-title-rest {
     display: block;
     background-image: linear-gradient(
       180deg,
-      color-mix(in oklab, var(--text), var(--text-muted) 55%),
-      var(--text-muted)
+      var(--text) 35%,
+      color-mix(in oklab, var(--text), var(--text-muted) 35%)
     );
   }
   .stage-title-dot {
@@ -325,9 +419,33 @@
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 6px 20px;
+    gap: 8px;
     color: var(--text-muted);
     font-size: 12px;
+  }
+  /* Each hint is a small glass bubble. */
+  .stage-hint {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px 5px 6px;
+    border-radius: 9999px;
+    border: 1px solid var(--border);
+    background: color-mix(in oklab, var(--surface-2), transparent 30%);
+    box-shadow:
+      var(--highlight),
+      0 8px 22px -12px hsl(var(--shadow-color) / 0.5);
+    backdrop-filter: blur(10px);
+    white-space: nowrap;
+  }
+  .stage-hint > span {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  :root[data-theme='light'] .stage-hint {
+    background: color-mix(in oklab, var(--surface-1), transparent 15%);
+    box-shadow: 0 6px 18px -10px hsl(var(--shadow-color) / 0.25);
   }
   @media (pointer: coarse) {
     .stage-hints {
@@ -372,14 +490,17 @@
     --composer-elevation:
       0 1px 2px hsl(var(--shadow-color) / 0.3), 0 18px 44px -18px hsl(var(--shadow-color) / 0.7);
     position: relative;
-    border-radius: 22px;
+    container: composer / inline-size;
+    border-radius: 24px;
     border: 1px solid color-mix(in oklab, var(--border-control), transparent 50%);
-    background-color: var(--surface-1);
+    /* Glass: a translucent surface over the stage glow, lit from the top. */
+    background-color: color-mix(in oklab, var(--surface-1), transparent 12%);
     background-image: linear-gradient(
       180deg,
-      color-mix(in oklab, var(--surface-2), transparent 35%),
+      color-mix(in oklab, var(--surface-2), transparent 30%),
       transparent 70%
     );
+    backdrop-filter: blur(18px) saturate(1.2);
     box-shadow: var(--highlight), var(--composer-elevation);
     transition:
       border-color var(--duration-base) var(--ease-out),
@@ -388,8 +509,8 @@
   .chat-composer[data-size='hero'] {
     --composer-elevation:
       0 1px 2px hsl(var(--shadow-color) / 0.3), 0 28px 70px -24px hsl(var(--shadow-color) / 0.8);
-    min-height: 128px;
-    border-radius: 24px;
+    min-height: 140px;
+    border-radius: 28px;
   }
   :root[data-theme='light'] .chat-composer {
     --composer-elevation:
@@ -431,6 +552,34 @@
   }
   .chat-composer-input::placeholder {
     color: var(--text-muted);
+  }
+  /* The prompt field with a small leading glyph (the new-session card). */
+  .chat-composer-field {
+    position: relative;
+  }
+  .chat-composer-glyph {
+    position: absolute;
+    top: 23px;
+    left: 22px;
+    width: 18px;
+    height: 18px;
+    color: var(--accent);
+    opacity: 0.85;
+    pointer-events: none;
+  }
+  .chat-composer-field > .chat-composer-input,
+  .chat-composer[data-size='hero'] .chat-composer-field > .chat-composer-input {
+    padding-inline-start: 50px;
+  }
+  @media (max-width: 767px), (pointer: coarse) {
+    .chat-composer-glyph {
+      top: 20px;
+      left: 18px;
+    }
+    .chat-composer-field > .chat-composer-input,
+    .chat-composer[data-size='hero'] .chat-composer-field > .chat-composer-input {
+      padding-inline-start: 44px;
+    }
   }
   .chat-composer[data-size='hero'] .chat-composer-input {
     padding: 20px 22px 8px;
@@ -497,9 +646,12 @@
 
   /* ---- Toolbar chips (agent, project, model route) --------------------- */
 
+  /* The pills follow the text-size preference with the prompt they sit
+   * under (--text-scale; the floor stays 12px). */
   .chat-tool-chip {
+    --chip-size: calc(32px * var(--text-scale));
     display: inline-flex;
-    height: 32px;
+    height: var(--chip-size);
     min-width: 0;
     flex: 0 1 auto;
     align-items: center;
@@ -509,7 +661,7 @@
     border: 1px solid var(--border);
     background: color-mix(in oklab, var(--surface-2), transparent 35%);
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: max(12px, calc(13px * var(--text-scale)));
     font-weight: 500;
     white-space: nowrap;
     transition:
@@ -519,8 +671,8 @@
       background-color var(--duration-fast) var(--ease-out);
   }
   .chat-tool-chip > svg:not(.chat-tool-chip-chevron) {
-    width: 15px;
-    height: 15px;
+    width: calc(15px * var(--text-scale));
+    height: calc(15px * var(--text-scale));
     flex-shrink: 0;
   }
   .chat-tool-chip-label {
@@ -604,10 +756,79 @@
     padding-inline-end: 32px;
   }
 
-  /* Toolbar icon button (attach, capabilities). */
+  /* A labelled action pill (attach, plan mode): no chevron, a little more
+   * room on the label side. */
+  .chat-tool-action {
+    padding-inline: 9px 11px;
+  }
+  /* A pressed toggle reads as on: accent icon, a lime-tinted rim. */
+  .chat-tool-action[aria-pressed='true'] {
+    border-color: color-mix(in oklab, var(--accent), transparent 55%);
+    background: color-mix(in oklab, var(--surface-2), var(--accent) 10%);
+    color: var(--text);
+  }
+  .chat-tool-action[aria-pressed='true'] > svg {
+    color: var(--accent);
+  }
+  /* Collapsible pills fold to a round icon in a narrow composer (a phone,
+   * or the thread beside an open side panel), before their labels clip. */
+  @container composer (max-width: 640px) {
+    .chat-tool-action[data-collapse] {
+      width: var(--chip-size);
+      padding-inline: 0;
+      justify-content: center;
+    }
+    .chat-tool-action[data-collapse] > .chat-tool-chip-label {
+      display: none;
+    }
+  }
+  @media (pointer: coarse) {
+    .chat-tool-action[data-collapse] {
+      min-width: 44px;
+    }
+  }
+
+  /* Toolbar icon button (capabilities): a round outlined control. */
   .chat-tool-icon {
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: calc(32px * var(--text-scale));
+    height: calc(32px * var(--text-scale));
     border-radius: 9999px;
+    border: 1px solid var(--border);
+    background: transparent;
     color: var(--text-muted);
+    transition:
+      scale var(--duration-press) var(--ease-out),
+      color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out);
+  }
+  .chat-tool-icon > svg {
+    width: calc(15px * var(--text-scale));
+    height: calc(15px * var(--text-scale));
+  }
+  @media (hover: hover) {
+    .chat-tool-icon:hover {
+      border-color: var(--border-strong);
+      background: var(--surface-3);
+      color: var(--text);
+    }
+  }
+  .chat-tool-icon:active {
+    scale: 0.95;
+  }
+  .chat-tool-icon[data-state='open'] {
+    border-color: color-mix(in oklab, var(--accent), transparent 55%);
+    background: var(--surface-3);
+    color: var(--text);
+  }
+  @media (pointer: coarse) {
+    .chat-tool-icon {
+      width: 44px;
+      height: 44px;
+    }
   }
 
   /* ---- Attachment tray ------------------------------------------------ */
@@ -623,12 +844,12 @@
     max-width: 16rem;
     align-items: center;
     gap: 10px;
-    padding: 5px 5px 5px 5px;
+    padding: 5px;
     border: 1px solid var(--border);
-    border-radius: 14px;
-    background: var(--surface-2);
+    border-radius: var(--chat-radius-inner);
+    background: color-mix(in oklab, var(--surface-2), transparent 25%);
     box-shadow: var(--highlight);
-    font-size: 12px;
+    font-size: max(12px, calc(12px * var(--text-scale)));
   }
   .chat-chip-thumb {
     display: inline-grid;
@@ -645,7 +866,7 @@
     display: inline-grid;
     place-items: center;
     flex-shrink: 0;
-    border-radius: 8px;
+    border-radius: 9999px;
     color: var(--text-muted);
     transition:
       background-color var(--duration-fast) var(--ease-out),
@@ -660,15 +881,33 @@
 
   /* Messages queued behind the running turn: a tab on top of the composer. */
   .chat-queue {
-    margin-inline: 14px;
+    margin-inline: 18px;
     margin-bottom: -1px;
-    padding: 6px 8px 8px;
-    border: 1px solid var(--border);
+    padding: 8px 8px 10px;
+    border: 1px solid color-mix(in oklab, var(--border-control), transparent 50%);
     border-bottom: 0;
-    border-radius: 14px 14px 0 0;
-    background: color-mix(in oklab, var(--surface-2), transparent 20%);
+    border-radius: var(--chat-radius-card) var(--chat-radius-card) 0 0;
+    background: color-mix(in oklab, var(--surface-2), transparent 25%);
     box-shadow: var(--highlight);
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(18px) saturate(1.2);
+  }
+  /* A queued message: a rounded row with round edit/remove actions. */
+  .chat-queue li {
+    min-height: 32px;
+    border-radius: 12px;
+    font-size: var(--text-prose);
+  }
+  .chat-queue-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .chat-queue-label::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--accent);
   }
 
   /* ---- Header ------------------------------------------------------------ */
@@ -725,8 +964,8 @@
   .chat-title-button {
     min-width: 0;
     max-width: 100%;
-    border-radius: var(--radius-control);
-    padding: 4px 8px;
+    border-radius: 9999px;
+    padding: 5px 12px;
     text-align: start;
     font-size: 15px;
     font-weight: 600;
@@ -738,19 +977,23 @@
       background: var(--surface-2);
     }
   }
+  /* Session badges: the composer chips' glass pills, one size smaller. */
   .chat-meta-chip {
     display: inline-flex;
-    height: 24px;
+    height: 28px;
     min-width: 0;
     flex-shrink: 1;
     align-items: center;
     gap: 6px;
-    padding: 0 8px 0 4px;
+    padding: 0 10px 0 5px;
     border-radius: 9999px;
     border: 1px solid var(--border);
-    background: color-mix(in oklab, var(--surface-1), transparent 40%);
+    background: color-mix(in oklab, var(--surface-2), transparent 45%);
+    box-shadow: var(--highlight);
+    backdrop-filter: blur(10px);
     color: var(--text-muted);
     font-size: 12px;
+    font-weight: 500;
     white-space: nowrap;
   }
   .chat-meta-chip > svg {
@@ -759,11 +1002,13 @@
     flex-shrink: 0;
   }
   .chat-meta-chip[data-plain] {
-    padding-inline: 7px;
+    width: 28px;
+    justify-content: center;
+    padding-inline: 0;
   }
   .chat-id-chip {
     font-family: var(--font-mono);
-    padding-inline: 8px 6px;
+    padding-inline: 10px 8px;
     transition:
       color var(--duration-fast) var(--ease-out),
       border-color var(--duration-fast) var(--ease-out),
@@ -779,6 +1024,35 @@
       color: var(--text);
     }
   }
+}
+
+/* Unlayered (it restyles a ghost Button): the header's and the side
+ * panel's icon actions are round outlined controls, the family of the
+ * composer's options button. */
+.chat-head-action {
+  border-radius: 9999px;
+  color: var(--text-muted);
+  box-shadow: inset 0 0 0 1px var(--border);
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    scale var(--duration-press) var(--ease-out);
+}
+@media (hover: hover) {
+  .chat-head-action:hover {
+    color: var(--text);
+    background: var(--surface-3);
+    box-shadow: inset 0 0 0 1px var(--border-strong);
+  }
+}
+.chat-head-action:active {
+  scale: 0.95;
+}
+.chat-head-action:is([data-state='open'], [aria-pressed='true']) {
+  color: var(--text);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent), transparent 55%);
 }
 
 /* Unlayered: the round send/stop is its own control, not a Button variant. */

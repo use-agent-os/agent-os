@@ -1,5 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Check, Loader2, Paperclip, Pencil, Route, Settings2, Trash2 } from 'lucide-react'
+import {
+  Check,
+  ListChecks,
+  Loader2,
+  Paperclip,
+  Pencil,
+  Route,
+  Settings2,
+  Trash2,
+} from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -59,7 +68,7 @@ import {
 } from './drafts'
 import { composerEnterAction } from './keys'
 import { enqueueMessage, readQueue, useQueue, writeQueue } from './queue'
-import { AttachmentTray, isUploading, SendButton, ToolbarChip } from './parts'
+import { AttachmentTray, isUploading, SendButton, ToolbarButton, ToolbarChip } from './parts'
 import { useTrayClearance } from './tray-clearance'
 
 const MAX_HEIGHT_PX = 240
@@ -437,18 +446,18 @@ export function Composer(props: ComposerProps) {
     >
       {queue.length > 0 ? (
         <section aria-label={t('webChat.queued')} className="chat-queue anim-enter">
-          <p className="px-1.5 pb-1 text-label text-text-muted">{t('webChat.queued')}</p>
+          <p className="chat-queue-label px-1.5 pb-1 text-label text-text-muted">
+            {t('webChat.queued')}
+          </p>
           <ol className="flex flex-col gap-0.5">
             {queue.map((item, i) => (
-              <li
-                key={i}
-                className="flex items-center gap-2 rounded-control py-0.5 pl-1.5 text-ui hover:bg-surface-3/60"
-              >
+              <li key={i} className="flex items-center gap-2 py-0.5 pl-2.5 hover:bg-surface-3/60">
                 <span className="min-w-0 flex-1 truncate">{item.text}</span>
                 <Button
                   size="icon-sm"
                   variant="ghost"
                   aria-label={t('webChat.queuedEdit', { index: i + 1 })}
+                  className="rounded-full"
                   onClick={() => {
                     removeQueued(i)
                     setText(item.text)
@@ -461,6 +470,7 @@ export function Composer(props: ComposerProps) {
                   size="icon-sm"
                   variant="ghost"
                   aria-label={t('webChat.queuedRemove', { index: i + 1 })}
+                  className="rounded-full"
                   onClick={() => removeQueued(i)}
                 >
                   <Trash2 />
@@ -475,7 +485,7 @@ export function Composer(props: ComposerProps) {
         <ul
           role="listbox"
           aria-label={t('webChat.slashMenu')}
-          className="anim-scale-in mb-2 max-h-64 origin-bottom overflow-y-auto rounded-overlay border border-border bg-surface-overlay p-1 shadow-overlay"
+          className="chat-menu anim-scale-in mb-2 max-h-64 origin-bottom overflow-y-auto rounded-overlay border border-border bg-surface-overlay p-1 shadow-overlay"
         >
           {matches.map((cmd, i) => (
             <li
@@ -547,16 +557,14 @@ export function Composer(props: ComposerProps) {
               e.target.value = ''
             }}
           />
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label={t('webChat.attach')}
+          <ToolbarButton
+            icon={<Paperclip aria-hidden />}
+            label={t('webChat.attach')}
+            collapse
             onClick={() => fileInput.current?.click()}
-            className="chat-tool-icon size-8 hover:text-text"
-          >
-            <Paperclip />
-          </Button>
+          />
           <RoutePicker sessionKey={sessionKey} />
+          <PlanToggle sessionKey={sessionKey} />
           <CapabilityMenu
             sessionKey={sessionKey}
             visualEffects={visualEffects}
@@ -655,7 +663,7 @@ function RoutePicker({ sessionKey }: { sessionKey: string }) {
           className="ml-0.5 min-w-0 shrink"
         />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
+      <DropdownMenuContent align="start" className="chat-menu max-h-80 overflow-y-auto">
         <CheckItem checked={!pin.isPinned} onSelect={() => pin.clear()}>
           {unpinned}
         </CheckItem>
@@ -699,6 +707,23 @@ function RoutePicker({ sessionKey }: { sessionKey: string }) {
   )
 }
 
+/**
+ * Plan mode as a pill toggle beside the route: the composer's quick switch
+ * for the same `plan.mode.*` state the Capabilities menu (and `/plan`) sets.
+ */
+function PlanToggle({ sessionKey }: { sessionKey: string }) {
+  const plan = usePlanMode(sessionKey)
+  return (
+    <ToolbarButton
+      icon={<ListChecks aria-hidden />}
+      label={t('webChat.planMode')}
+      collapse
+      pressed={plan.on}
+      onClick={() => void plan.set(!plan.on)}
+    />
+  )
+}
+
 function CapabilityMenu({
   sessionKey,
   visualEffects,
@@ -714,16 +739,15 @@ function CapabilityMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          size="icon-sm"
-          variant="ghost"
+        <button
+          type="button"
           aria-label={t('webChat.capabilities')}
-          className="chat-tool-icon size-8 hover:text-text data-[state=open]:bg-surface-3 data-[state=open]:text-text"
+          className="chat-tool-icon target"
         >
-          <Settings2 />
-        </Button>
+          <Settings2 aria-hidden />
+        </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
+      <DropdownMenuContent align="start" className="chat-menu">
         <CheckItem checked={plan.on} onCheckedChange={(v) => void plan.set(Boolean(v))}>
           {t('webChat.planMode')}
         </CheckItem>

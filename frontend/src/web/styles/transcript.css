@@ -134,7 +134,7 @@
   max-width: 100%;
   width: fit-content;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--chat-radius-card, 14px);
   box-shadow: var(--elevation-card);
   background: var(--surface-1);
 }
@@ -190,7 +190,7 @@
 /* Code blocks: a card with a header (language, Copy). */
 .prose-chat .code-block {
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--chat-radius-inner, 14px);
   background: var(--code-bg);
   color: var(--code-text);
   overflow: hidden;

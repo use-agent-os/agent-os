@@ -7,6 +7,7 @@ import {
   MoreHorizontal,
   Search,
   SearchX,
+  Trash2,
   X,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -235,7 +236,7 @@ function useFirstLoadStagger(ready: boolean): boolean {
 function RowSkeleton({ wide }: { wide: boolean }) {
   return (
     <div className="flex items-center gap-2.5 px-2 py-1.5">
-      <Skeleton className="size-7 shrink-0 rounded-md" />
+      <Skeleton className="size-7 shrink-0 rounded-full" />
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <Skeleton className={wide ? 'h-3 w-4/5' : 'h-3 w-3/5'} />
         <Skeleton className="h-2.5 w-1/3" />
@@ -286,7 +287,7 @@ export function SessionList({ onNavigate }: { onNavigate?: () => void }) {
           {rows.length > 0 ? (
             <span
               aria-hidden
-              className="ml-2 rounded-full bg-surface-3 px-1.5 text-small leading-5 font-medium text-text-muted tabular-nums"
+              className="pane-count ml-2 rounded-full bg-surface-3 px-1.5 text-small leading-5 font-medium text-text-muted tabular-nums"
             >
               {rows.length}
             </span>
@@ -309,7 +310,7 @@ export function SessionList({ onNavigate }: { onNavigate?: () => void }) {
             value={filters.text}
             onChange={(e) => setFilters({ text: e.target.value })}
             placeholder={t('webShell.sessionsFilter')}
-            className="touch:h-11"
+            className="session-filter touch:h-11"
           />
         </label>
         {active ? (
@@ -470,11 +471,16 @@ function GroupingMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="icon-sm" variant="ghost" aria-label={t('webShell.sessionsGrouping')}>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label={t('webShell.sessionsGrouping')}
+          className="pane-action"
+        >
           <Layers />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="chat-menu">
         <DropdownMenuLabel>{t('webShell.sessionsGrouping')}</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={grouping} onValueChange={onChange}>
           <DropdownMenuRadioItem value="date">
@@ -524,11 +530,16 @@ function FilterMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="icon-sm" variant="ghost" aria-label={t('webShell.sessionsFilterMenu')}>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label={t('webShell.sessionsFilterMenu')}
+          className="pane-action"
+        >
           <Filter />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="max-h-96 overflow-y-auto">
+      <DropdownMenuContent align="end" className="chat-menu max-h-96 overflow-y-auto">
         {group('agent', t('webShell.sessionsFilterAgent'), options.agents)}
         <DropdownMenuSeparator />
         {group('channel', t('webShell.sessionsFilterChannel'), options.channels)}
@@ -847,7 +858,7 @@ function SessionItem(props: ItemProps) {
                   disabled={busy}
                   aria-invalid={error ? true : undefined}
                   aria-describedby={error ? `${row.key}-error` : undefined}
-                  className="h-8 min-w-0 flex-1 rounded-md border border-border-control bg-surface-inset px-2 text-ui"
+                  className="session-rename h-8 min-w-0 flex-1 rounded-md border border-border-control bg-surface-inset px-2 text-ui"
                 />
                 <Button size="sm" variant="primary" type="submit" disabled={busy}>
                   {t('webShell.renameSave')}
@@ -952,7 +963,7 @@ function SessionItem(props: ItemProps) {
                     <MoreHorizontal />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align="end" className="chat-menu">
                   {menuItems(DropdownMenuItem, () => (
                     <DropdownMenuSeparator />
                   ))}
@@ -962,7 +973,7 @@ function SessionItem(props: ItemProps) {
           </div>
         </ContextMenuTrigger>
         {row.provisional ? null : (
-          <ContextMenuContent>
+          <ContextMenuContent className="chat-menu">
             {menuItems(ContextMenuItem, () => (
               <ContextMenuSeparator />
             ))}
@@ -1008,14 +1019,22 @@ function SessionItem(props: ItemProps) {
       />
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent
+          className="session-dialog"
           onCloseAutoFocus={(e) => {
             e.preventDefault()
             actionsRef.current?.focus()
           }}
         >
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('webShell.deleteTitle', { title })}</AlertDialogTitle>
-            <AlertDialogDescription>{t('webShell.deleteBody')}</AlertDialogDescription>
+          <AlertDialogHeader className="flex-row items-start gap-3.5">
+            <span aria-hidden className="session-dialog-tile">
+              <Trash2 />
+            </span>
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <AlertDialogTitle className="break-words">
+                {t('webShell.deleteTitle', { title })}
+              </AlertDialogTitle>
+              <AlertDialogDescription>{t('webShell.deleteBody')}</AlertDialogDescription>
+            </div>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('webCommon.cancel')}</AlertDialogCancel>

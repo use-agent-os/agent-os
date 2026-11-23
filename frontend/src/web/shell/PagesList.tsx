@@ -154,7 +154,7 @@ export function PagesList({ onNavigate }: { onNavigate?: () => void }) {
       </div>
       <div
         ref={track}
-        className="glide-track scroll-contained flex min-h-0 flex-1 flex-col gap-4 px-2 pt-1 pb-2 [--glide-bg:var(--surface-3)] [--glide-radius:8px]"
+        className="glide-track scroll-contained flex min-h-0 flex-1 flex-col gap-4 px-2 pt-1 pb-2 [--glide-bg:var(--surface-3)] [--glide-radius:var(--chat-radius-inner)]"
       >
         {GROUPS.map((group) => {
           const headingId = `${ids}-${group.id}`

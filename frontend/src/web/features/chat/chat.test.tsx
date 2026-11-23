@@ -269,6 +269,17 @@ describe('session actions menu', () => {
 })
 
 describe('composer', () => {
+  it('toggles plan mode from the toolbar pill, beside a labelled attach pill', async () => {
+    const user = userEvent.setup()
+    const rpc = chatRpc()
+    await openChat(rpc)
+    expect(screen.getByRole('button', { name: 'Attach files' })).toBeInTheDocument()
+    const plan = await screen.findByRole('button', { name: 'Plan mode' })
+    expect(plan).toHaveAttribute('aria-pressed', 'false')
+    await user.click(plan)
+    await waitFor(() => expect(rpc.callsTo('plan.mode.set')).toEqual([{ key: KEY, mode: 'on' }]))
+  })
+
   it('marks focus with a ring as well as the border (the border alone is ~1.6:1 in light)', async () => {
     const { composer } = await openChat(chatRpc())
     expect(composer.closest('.chat-composer')).not.toBeNull()

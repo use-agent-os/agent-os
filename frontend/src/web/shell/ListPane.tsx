@@ -47,7 +47,7 @@ export function ListPane({
       aria-label={t('webShell.listPaneLabel')}
       role="region"
       style={resizable ? { width } : undefined}
-      className="relative flex h-full min-h-0 shrink-0 flex-col border-r border-border bg-surface-1 max-md:w-full"
+      className="list-pane relative flex h-full min-h-0 shrink-0 flex-col border-r border-border bg-surface-1 max-md:w-full"
     >
       {view === 'sessions' ? (
         <SessionList onNavigate={onNavigate} />

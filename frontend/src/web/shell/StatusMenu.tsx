@@ -70,7 +70,7 @@ export function StatusMenu() {
             size="icon"
             aria-label={label}
             data-truth-state={truth.state}
-            className="relative hover:bg-surface-2 data-[state=open]:bg-surface-3"
+            className="rail-item relative hover:bg-surface-2 data-[state=open]:bg-surface-3"
           >
             <span
               aria-hidden
@@ -94,7 +94,7 @@ export function StatusMenu() {
           </Button>
         </DropdownMenuTrigger>
       </SimpleTooltip>
-      <DropdownMenuContent side="right" align="end" sideOffset={8} className="w-72">
+      <DropdownMenuContent side="right" align="end" sideOffset={8} className="chat-menu w-72">
         <div
           className="mb-1 flex gap-2.5 rounded-md border border-border bg-surface-2 px-2.5 py-2 shadow-highlight"
           data-testid="truth-summary"

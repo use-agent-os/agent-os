@@ -56,10 +56,14 @@
   margin-block: 12px;
   background: var(--border);
 }
+/* The one bright control in the rail: a round lime button, like Send. */
 .rail-new {
-  width: 34px;
-  height: 34px;
-  border-radius: 11px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  box-shadow:
+    var(--elevation-primary),
+    0 6px 18px -6px var(--accent-glow);
 }
 @media (pointer: coarse) {
   .rail-new {
@@ -115,8 +119,22 @@
 .rail-item:is([aria-pressed='true'], [aria-current='page']) {
   color: var(--text);
 }
+/* Round outlined buttons, the family of the composer's options button: a
+   hairline ring at rest that firms on hover; the active item's ring is the
+   track's pill. */
 .rail-item {
-  border-radius: 10px;
+  border-radius: 9999px;
+  box-shadow: inset 0 0 0 1px var(--border);
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+.rail-item:not([aria-pressed='true'], [aria-current='page']):hover {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.rail-item:is([aria-pressed='true'], [aria-current='page']) {
+  box-shadow: none;
 }
 .rail-item svg {
   width: 18px;
@@ -162,9 +180,11 @@
   z-index: -1;
   width: var(--rail-size);
   height: var(--rail-size);
-  border-radius: 10px;
+  border-radius: 9999px;
   background: var(--surface-3);
-  box-shadow: var(--highlight);
+  box-shadow:
+    var(--highlight),
+    inset 0 0 0 1px color-mix(in oklab, var(--accent) 42%, transparent);
   transform: translateY(calc(var(--rail-i, 0) * var(--rail-step)));
 }
 .rail-track::after {
@@ -187,6 +207,9 @@
 }
 .rail-track[data-toggle]::before {
   background: color-mix(in oklab, var(--surface-3) 75%, transparent);
+  box-shadow:
+    var(--highlight),
+    inset 0 0 0 1px var(--border-strong);
 }
 
 /* ---- Route fallback ----------------------------------------------------- */
@@ -255,6 +278,15 @@
   letter-spacing: 0.01em;
   color: var(--text-muted);
 }
+/* A hairline trails the label, so a group reads as a band, not a heading. */
+.pane-group-label::after {
+  content: '';
+  flex: 1;
+  min-width: 12px;
+  height: 1px;
+  margin-inline-start: 4px;
+  background: linear-gradient(to right, var(--border), transparent);
+}
 
 /* A Pages link: one compact line (icon, label, optional count). The current
    page sits on the track's gliding pill with a short accent bar; nothing
@@ -266,7 +298,7 @@
   gap: 10px;
   height: 34px;
   padding-inline: 10px 8px;
-  border-radius: 8px;
+  border-radius: var(--chat-radius-inner);
   color: var(--text-muted);
   font-weight: 450;
 }
@@ -721,4 +753,169 @@
 .inbox-badge.visible {
   transform-origin: 70% 30%;
   animation: agentos-scale-in var(--duration-spring) var(--ease-spring) both;
+}
+
+/* ---- The chat's shape language in the frame ------------------------------ */
+
+/* The chat (composer card, thread, menus) speaks in two radii, round tiles and
+   pill controls; the frame around it (list pane, rail, session dialogs, the
+   phone drawer) follows, so the sidebar never reads squarer than the page. */
+:root {
+  --chat-radius-card: 20px;
+  --chat-radius-inner: 14px;
+}
+
+/* Menus: the composer card's glass surface, an 18px radius, rounder rows. */
+.chat-menu {
+  padding: 6px;
+  border-radius: 18px;
+  border-color: color-mix(in oklab, var(--border-control), transparent 40%);
+  background-color: color-mix(in oklab, var(--surface-overlay), transparent 6%);
+  backdrop-filter: blur(18px) saturate(1.2);
+}
+.chat-menu
+  :is([role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio'], [role='option']) {
+  border-radius: 12px;
+}
+
+/* The session filter: a pill field like the composer's chips. */
+.session-filter {
+  height: 36px;
+  padding-inline: 34px 14px;
+  border-radius: 9999px;
+  border-color: color-mix(in oklab, var(--border-control), transparent 30%);
+  background: color-mix(in oklab, var(--surface-2), transparent 40%);
+}
+span:has(+ .session-filter) {
+  left: 13px;
+}
+@media (pointer: coarse) {
+  .session-filter {
+    height: 44px;
+  }
+}
+/* The count beside the heading and the header's icon actions (grouping,
+   filters): a ringed pill and round outlined buttons. */
+.pane-count {
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.pane-action {
+  border-radius: 9999px;
+  color: var(--text-muted);
+  box-shadow: inset 0 0 0 1px var(--border);
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+.pane-action:hover {
+  color: var(--text);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.pane-action[data-state='open'] {
+  color: var(--text);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 45%, transparent);
+}
+
+/* Session rows: the thread's inner radius, a round channel tile; the current
+   row is a lit card (ring, highlight) with the accent tile. */
+.session-row,
+.session-row > a {
+  border-radius: var(--chat-radius-inner);
+}
+.session-row[data-current] {
+  background: color-mix(in oklab, var(--surface-3), transparent 15%);
+  box-shadow:
+    var(--highlight),
+    inset 0 0 0 1px var(--border-strong);
+}
+.session-row:not([data-current]):hover {
+  background: color-mix(in oklab, var(--surface-2), transparent 20%);
+}
+.session-row[data-current]::before {
+  left: 1px;
+}
+.session-tile {
+  border-radius: 9999px;
+}
+.session-row > button[aria-haspopup] {
+  border-radius: 9999px;
+}
+/* With its menu open, focus and hover have left the row, but the open
+   trigger stays shown: keep the time it covers hidden too. */
+.session-row:has(> button[aria-haspopup][data-state='open']) > a .text-small.tabular-nums {
+  visibility: hidden;
+}
+.session-rename {
+  height: 32px;
+  padding-inline: 12px;
+  border-radius: 9999px;
+}
+.session-row form > button {
+  border-radius: 9999px;
+}
+/* Empty and failed lists sit in a soft dashed card, as the thread's notes. */
+.list-pane .empty-state {
+  margin: 8px 2px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--chat-radius-card);
+  background: color-mix(in oklab, var(--surface-2), transparent 55%);
+}
+.list-pane :is(.empty-state, .error-strip) button {
+  border-radius: 9999px;
+}
+.list-pane .error-strip {
+  border-radius: var(--chat-radius-inner);
+}
+
+/* Session dialogs (reset, delete): the composer's glass card, a round danger
+   tile and pill actions. */
+.session-dialog {
+  border-radius: 24px;
+  border-color: color-mix(in oklab, var(--border-control), transparent 40%);
+  background-color: color-mix(in oklab, var(--surface-overlay), transparent 4%);
+  backdrop-filter: blur(18px) saturate(1.2);
+}
+.session-dialog button {
+  border-radius: 9999px;
+}
+.session-dialog-tile {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in oklab, var(--danger) 25%, transparent);
+  background: color-mix(in oklab, var(--danger) 10%, transparent);
+  color: var(--danger);
+}
+.session-dialog-tile > svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* The phone drawer: a card with the composer's large radius on its open
+   edge. */
+.shell-drawer {
+  border-radius: 0 28px 28px 0;
+}
+.shell-drawer > .rail {
+  background: transparent;
+}
+.phone-bar > button {
+  border-radius: 9999px;
+}
+
+@media (forced-colors: active) {
+  .chat-menu,
+  .session-dialog {
+    border: 1px solid CanvasText;
+  }
+  .session-row[data-current] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }

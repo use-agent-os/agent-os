@@ -51,7 +51,7 @@ export function AgentSwitcher() {
           </Button>
         </DropdownMenuTrigger>
       </SimpleTooltip>
-      <DropdownMenuContent side="right" align="start" sideOffset={8} className="min-w-56">
+      <DropdownMenuContent side="right" align="start" sideOffset={8} className="chat-menu min-w-56">
         <DropdownMenuLabel>{t('webShell.agentSwitcherLabel')}</DropdownMenuLabel>
         {agents.isPending ? (
           <DropdownMenuItem disabled>{t('webShell.agentsLoading')}</DropdownMenuItem>

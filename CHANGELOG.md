@@ -21,6 +21,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   non-OpenRouter provider without a `base_url`, rotate that provider's API
   key.
 
+### Changed
+- Web UI: the chat has a fresh look. A new chat opens on a two-tone headline
+  and the brand mark, with keyboard hints floating beside it. The composer is
+  now a glass card with labelled pill buttons, including a new Plan mode pill
+  you can toggle on and off, and the pills grow with your text-size setting.
+  The thread, menus, session sidebar and icon rail, session dialogs, chat
+  header, side panel, pending queue and approval card all share the same
+  rounded shapes.
+
 ### Fixed
 - Gateway: a parent session whose interrupted turn restart recovery could
   not resume (tombstoned after its attempts, or the resume was cancelled by

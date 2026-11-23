@@ -10,6 +10,7 @@ import {
   ListChecks,
   Loader2,
   Paperclip,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react'
 import {
@@ -33,7 +34,6 @@ import { usePreferences } from '@/stores/preferences'
 import { useAttachments } from '@/views/chat/Attachments'
 import { outgoingAttachment, readPromptFromUrl } from '@/views/chat/logic'
 import { projectId, type RawProject } from '@/views/projects/logic'
-import { Button } from '@/web/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,9 +52,9 @@ import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { useMediaQuery } from '@/web/shell/use-media-query'
 import '@/web/styles/chat.css'
 import { AgentAvatar } from './AgentAvatar'
-import { KeyHints, StageBackdrop, StageHeading, StageMark } from './ChatStage'
+import { StageBackdrop, StageHeading, StageMascot } from './ChatStage'
 import { composerEnterAction } from './composer/keys'
-import { AttachmentTray, SendButton, ToolbarChip } from './composer/parts'
+import { AttachmentTray, SendButton, ToolbarButton, ToolbarChip } from './composer/parts'
 
 const MAX_HEIGHT_PX = 320
 
@@ -285,8 +285,8 @@ export function NewSessionPage() {
     >
       <StageBackdrop />
       <div className="stage-inner stage-enter">
-        <StageMark />
         <StageHeading />
+        <StageMascot />
         <div className="flex w-full flex-col items-center gap-3">
           {listError ? (
             <ErrorState
@@ -316,39 +316,39 @@ export function NewSessionPage() {
               rejection={attachments.rejection}
               onRemove={attachments.remove}
             />
-            <textarea
-              ref={textarea}
-              data-composer-input
-              aria-label={t('webChat.newPrompt')}
-              placeholder={
-                !loading && !chosenAgent
-                  ? t('webChat.newPlaceholderNoAgent')
-                  : t('webChat.newPlaceholder')
-              }
-              rows={3}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={onKeyDown}
-              onPaste={(e) => {
-                const files = [...(e.clipboardData?.files ?? [])]
-                if (files.length) {
-                  e.preventDefault()
-                  attachments.addFiles(files)
+            <div className="chat-composer-field">
+              <Sparkles className="chat-composer-glyph" aria-hidden />
+              <textarea
+                ref={textarea}
+                data-composer-input
+                aria-label={t('webChat.newPrompt')}
+                placeholder={
+                  !loading && !chosenAgent
+                    ? t('webChat.newPlaceholderNoAgent')
+                    : t('webChat.newPlaceholder')
                 }
-              }}
-              enterKeyHint={touch ? 'enter' : 'send'}
-              className="chat-composer-input max-md:text-base touch:text-base"
-            />
+                rows={3}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={onKeyDown}
+                onPaste={(e) => {
+                  const files = [...(e.clipboardData?.files ?? [])]
+                  if (files.length) {
+                    e.preventDefault()
+                    attachments.addFiles(files)
+                  }
+                }}
+                enterKeyHint={touch ? 'enter' : 'send'}
+                className="chat-composer-input max-md:text-base touch:text-base"
+              />
+            </div>
             <div className="chat-toolbar">
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label={t('webChat.attach')}
+              <ToolbarButton
+                icon={<Paperclip aria-hidden />}
+                label={t('webChat.attach')}
+                collapse
                 onClick={() => fileInput.current?.click()}
-                className="chat-tool-icon size-8 hover:text-text"
-              >
-                <Paperclip />
-              </Button>
+              />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild disabled={loading}>
                   <ToolbarChip
@@ -374,7 +374,10 @@ export function NewSessionPage() {
                     }
                   />
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="max-h-80 min-w-56 overflow-y-auto">
+                <DropdownMenuContent
+                  align="start"
+                  className="chat-menu max-h-80 min-w-56 overflow-y-auto"
+                >
                   <DropdownMenuLabel>{t('webChat.newAgent')}</DropdownMenuLabel>
                   <DropdownMenuRadioGroup value={chosenAgent ?? ''} onValueChange={setAgent}>
                     {(agents.data ?? []).map((a) => (
@@ -402,7 +405,10 @@ export function NewSessionPage() {
                     }
                   />
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="max-h-80 min-w-56 overflow-y-auto">
+                <DropdownMenuContent
+                  align="start"
+                  className="chat-menu max-h-80 min-w-56 overflow-y-auto"
+                >
                   <DropdownMenuLabel>{t('webChat.newProject')}</DropdownMenuLabel>
                   <DropdownMenuRadioGroup value={chosenProject} onValueChange={setProject}>
                     <PickItem value="">
@@ -464,7 +470,6 @@ export function NewSessionPage() {
             </button>
           ))}
         </div>
-        <KeyHints />
       </div>
       <input
         ref={fileInput}

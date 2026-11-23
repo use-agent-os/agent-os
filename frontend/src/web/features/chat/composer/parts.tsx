@@ -99,6 +99,42 @@ export function ToolbarChip({
 }
 
 /**
+ * A pill action in the composer toolbar (attach, plan mode): an icon and a
+ * label, without the menu chevron. `collapse` folds it to its icon on narrow
+ * composers (the label stays its accessible name); `pressed` makes it a
+ * toggle that shows its state.
+ */
+export function ToolbarButton({
+  icon,
+  label,
+  collapse,
+  pressed,
+  className,
+  ...props
+}: Omit<ComponentProps<'button'>, 'children'> & {
+  icon: ReactNode
+  label: string
+  collapse?: boolean
+  pressed?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={collapse ? label : undefined}
+      aria-pressed={pressed}
+      data-collapse={collapse || undefined}
+      className={cn('chat-tool-chip chat-tool-action target', className)}
+      {...props}
+    >
+      {icon}
+      <span className="chat-tool-chip-label" aria-hidden={collapse || undefined}>
+        {label}
+      </span>
+    </button>
+  )
+}
+
+/**
  * The round primary of a composer. One element for send and stop, so the
  * change between them is a morph (colour, icon cross-fade), not a swap.
  * A disabled send says why in its tooltip and accessible description.

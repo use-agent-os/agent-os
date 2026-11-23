@@ -17,7 +17,9 @@ const AgentSwitcher = lazy(async () => ({
 const StatusMenu = lazy(async () => ({ default: (await import('./StatusMenu')).StatusMenu }))
 
 function MenuPlaceholder({ label }: { label: string }) {
-  return <Button variant="ghost" size="icon" aria-label={label} aria-busy="true" />
+  return (
+    <Button variant="ghost" size="icon" aria-label={label} aria-busy="true" className="rail-item" />
+  )
 }
 
 /**
