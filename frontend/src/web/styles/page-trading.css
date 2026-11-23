@@ -409,4 +409,14 @@
       display: none;
     }
   }
+
+  /* ---- Liquidity -------------------------------------------------------- */
+  .trd-table [data-col='range'] {
+    max-width: 14rem;
+  }
+  @container trd-table (max-width: 44rem) {
+    .trd-table [data-col='fees'] {
+      display: none;
+    }
+  }
 }
