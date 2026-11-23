@@ -2,7 +2,7 @@ import { Search, Store } from 'lucide-react'
 import { useId, useState, type FormEvent } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webTrading'
-import { chainName, clampSymbol, errorText, formatPct, formatPrice } from '@/views/trading/logic'
+import { chainName, errorText, formatPct, formatPrice } from '@/views/trading/logic'
 import {
   dexLabel,
   feeLabel,
@@ -19,7 +19,7 @@ import { EmptyState, ErrorState, Skeleton } from '@/web/components/ui/states'
 import { useMarkets } from './data'
 import { TokenCell } from './parts'
 import { PriceChart } from './PriceChart'
-import { clampText } from './safety'
+import { clampSym, clampText } from './safety'
 
 // Markets: every pool a token trades in on one network, as the engine reads
 // them from its price source, with the token's price line on top. Rows link
@@ -38,7 +38,7 @@ function PoolRows({ pools, symbol }: { pools: MarketsPool[]; symbol: string }) {
             <td data-col="asset">
               <span className="flex min-w-0 flex-col">
                 <span className="truncate font-medium">
-                  {clampSymbol(a)}/{clampSymbol(b)}
+                  {clampSym(a)}/{clampSym(b)}
                 </span>
                 {showsCounterpartyName(p, symbol) ? (
                   <span className="trd-note truncate">{clampText(p.counterparty.name, 28)}</span>
@@ -140,7 +140,7 @@ export function MarketsView({ chains }: { chains: readonly number[] }) {
   }
 
   const data = markets.data
-  const symbol = data ? clampSymbol(data.token.symbol) : ''
+  const symbol = data ? clampSym(data.token.symbol) : ''
   const empty = data && data.sections.quote.length === 0 && data.sections.base.length === 0
 
   return (

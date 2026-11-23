@@ -4,13 +4,14 @@ import { t } from '@/i18n'
 import '@/i18n/en/webTrading'
 import { useTheme } from '@/stores/theme'
 import { chartTheme } from '@/views/chat/transcript/chart'
-import { clampSymbol, errorText, formatPct, formatPrice } from '@/views/trading/logic'
+import { errorText, formatPct, formatPrice } from '@/views/trading/logic'
 import type { ChartRange } from '@/views/trading/types'
 import { Button } from '@/web/components/ui/button'
 import { Card, CardHeader } from '@/web/components/ui/card'
 import { SegmentedControl } from '@/web/components/ui/segmented-control'
 import { ErrorState, Skeleton } from '@/web/components/ui/states'
 import { useChart } from './data'
+import { clampSym } from './safety'
 
 // A token's price line from `trading.chart`. The chart library loads on
 // first use, inside this feature's chunk, never with the console's shell.
@@ -88,7 +89,7 @@ export function PriceChart({
 }) {
   const [range, setRange] = useState<ChartRange>('1d')
   const chart = useChart(chainId, token, range)
-  const shown = clampSymbol(symbol)
+  const shown = clampSym(symbol)
   const points = chart.data?.points ?? []
   const first = points[0]?.c
   const last = points[points.length - 1]?.c

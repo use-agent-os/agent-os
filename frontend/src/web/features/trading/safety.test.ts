@@ -9,6 +9,7 @@ import { read, TRADING_READ_METHODS, type TradingReadMethod } from './data'
 import {
   addressUrl,
   BALANCE_MASK,
+  clampSym,
   clampText,
   reloadBalancePrivacy,
   txUrl,
@@ -121,6 +122,17 @@ describe('clampText', () => {
     expect(clampText('a'.repeat(100), 10)).toBe(`${'a'.repeat(9)}…`)
     expect(clampText('  two\n\tlines  ')).toBe('two lines')
     expect(clampText(null)).toBe('')
+  })
+
+  it('drops bidi overrides and zero-width characters from names and symbols', () => {
+    expect(clampText('USDC\u202eHTEW')).toBe('USDCHTEW')
+    expect(clampText('U\u200bSDC\ufeff\u2066x\u2069')).toBe('USDCx')
+    expect(clampSym('\u202eUSDC\u200d')).toBe('USDC')
+    expect(clampSym(null)).toBe('')
+  })
+
+  it('never cuts a character in half', () => {
+    expect(clampText('😀'.repeat(40), 4)).toBe('😀😀😀…')
   })
 })
 

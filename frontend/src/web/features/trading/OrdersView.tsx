@@ -2,7 +2,6 @@ import { ArrowRight, ListOrdered } from 'lucide-react'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webTrading'
 import {
-  clampSymbol,
   errorText,
   formatAmount,
   formatUsd,
@@ -31,7 +30,7 @@ import {
   Money,
   StatusBadge,
 } from './parts'
-import { clampText, txUrl, useMask } from './safety'
+import { clampSym, clampText, txUrl, useMask } from './safety'
 
 // Orders: what the engine is running or waiting on, then what finished, and
 // the automations (DCA plans, price triggers, brackets). Approving,
@@ -52,12 +51,12 @@ function OrderRow({ order }: { order: Order }) {
         </div>
         <div className="trd-order__legs">
           <Amount text={formatAmount(order.amountIn)} />
-          <span className="truncate">{clampSymbol(order.tokenIn.symbol)}</span>
+          <span className="truncate">{clampSym(order.tokenIn.symbol)}</span>
           {into ? (
             <>
               <ArrowRight aria-hidden className="size-3.5 shrink-0 text-text-muted" />
               <Amount text={formatAmount(order.receivedOut ?? order.expectedOut)} />
-              <span className="truncate">{clampSymbol(into.symbol)}</span>
+              <span className="truncate">{clampSym(into.symbol)}</span>
             </>
           ) : null}
         </div>
@@ -137,7 +136,7 @@ function AutomationRow({ a }: { a: Automation }) {
           <StatusBadge status={item.status} />
         </div>
         <p className="trd-order__note">
-          <span className="font-medium text-text">{clampSymbol(item.token.symbol)}</span> · {detail}
+          <span className="font-medium text-text">{clampSym(item.token.symbol)}</span> · {detail}
         </p>
       </div>
     </li>

@@ -1,18 +1,12 @@
 import { Coins, Flame, TrendingUp, Wallet as WalletIcon } from 'lucide-react'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webTrading'
-import {
-  allocationSegments,
-  chainName,
-  clampSymbol,
-  shortAddress,
-  walletLabel,
-} from '@/views/trading/logic'
+import { allocationSegments, chainName, shortAddress, walletLabel } from '@/views/trading/logic'
 import type { Portfolio } from '@/views/trading/types'
 import { Card, CardHeader } from '@/web/components/ui/card'
 import { IconTile, STAT_LABEL } from '@/web/features/home/overview-ui'
 import { ChainChip, ExplorerLink, Money } from './parts'
-import { addressUrl, clampText, useBalancePrivacy } from './safety'
+import { addressUrl, clampSym, clampText, useBalancePrivacy } from './safety'
 
 // The overview: the totals across the shown wallets, how the value splits
 // across tokens, and each wallet with its value and networks.
@@ -92,7 +86,7 @@ export function OverviewView({ portfolio }: { portfolio: Portfolio }) {
                 <li key={s.key}>
                   <span className="trd-swatch" data-series={`s${(i % 6) + 1}`} aria-hidden />
                   <span className="truncate">
-                    {s.key === 'other' ? t('webTrading.other') : clampSymbol(s.symbol)}
+                    {s.key === 'other' ? t('webTrading.other') : clampSym(s.symbol)}
                   </span>
                   <span className="trd-num text-text-muted">
                     {hidden ? '··' : `${s.pct.toFixed(1)}%`}

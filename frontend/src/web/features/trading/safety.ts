@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { clampSymbol } from '@/views/trading/logic'
 
 // The page's two safety helpers: hiding the figures (the desktop desk's
 // balance privacy, kept in this browser), and explorer links that are built
@@ -73,8 +74,24 @@ export function addressUrl(chainId: number, address: string | null | undefined):
   return `${base}/address/${address}`
 }
 
+// Control, bidi and zero-width characters: in a symbol anyone can mint, an
+// override can make "USDC/WETH" read as something else, or reorder the
+// figure beside it; a zero-width character makes a lookalike of a real one.
+const INVISIBLE = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g
+
 /** Untrusted names (token names, labels from chains and third parties) cut to a length a row can hold. */
 export function clampText(text: string | null | undefined, max = 32): string {
-  const s = (text ?? '').replace(/\s+/g, ' ').trim()
-  return s.length > max ? `${s.slice(0, max - 1)}…` : s
+  const chars = Array.from(
+    (text ?? '')
+      .replace(/[\t-\r]/g, ' ')
+      .replace(INVISIBLE, '')
+      .replace(/\s+/g, ' ')
+      .trim(),
+  )
+  return chars.length > max ? `${chars.slice(0, max - 1).join('')}…` : chars.join('')
+}
+
+/** A token symbol for a row: the shared clamp, without the invisible characters. */
+export function clampSym(symbol: string | null | undefined, max?: number): string {
+  return clampSymbol((symbol ?? '').replace(INVISIBLE, ''), max)
 }

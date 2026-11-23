@@ -1,7 +1,7 @@
 import { Droplets } from 'lucide-react'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webTrading'
-import { clampSymbol, errorText, formatAmountCompact } from '@/views/trading/logic'
+import { errorText, formatAmountCompact } from '@/views/trading/logic'
 import { formatRate, formatShare, mcapRange, positionTag } from '@/views/trading/liquidity-logic'
 import type { LpPosition } from '@/views/trading/types'
 import { Badge } from '@/web/components/ui/badge'
@@ -9,7 +9,7 @@ import { Card, CardHeader } from '@/web/components/ui/card'
 import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import { useLpBook } from './data'
 import { Amount, ChainChip, Money, StatusBadge } from './parts'
-import { clampText } from './safety'
+import { clampSym, clampText } from './safety'
 
 // Liquidity: the engine's book of Uniswap and Aerodrome positions for the
 // shown wallets, as a list. The book is a cached read; this page never asks
@@ -21,12 +21,12 @@ function rangeText(p: LpPosition): string | null {
   const lower = p.range?.priceLower
   const upper = p.range?.priceUpper
   if (lower == null || upper == null) return null
-  return `${formatRate(lower)} – ${formatRate(upper)} ${clampSymbol(p.quote.symbol)}`
+  return `${formatRate(lower)} – ${formatRate(upper)} ${clampSym(p.quote.symbol)}`
 }
 
 function Row({ p }: { p: LpPosition }) {
-  const base = clampSymbol(p.token.symbol)
-  const quote = clampSymbol(p.quote.symbol)
+  const base = clampSym(p.token.symbol)
+  const quote = clampSym(p.quote.symbol)
   const tag = positionTag(p)
   const share = formatShare(p.share)
   const range = rangeText(p)

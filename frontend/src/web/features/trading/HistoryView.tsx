@@ -4,7 +4,6 @@ import { t } from '@/i18n'
 import '@/i18n/en/webTrading'
 import {
   chainName,
-  clampSymbol,
   errorText,
   formatAmount,
   groupEntriesByDay,
@@ -23,7 +22,7 @@ import {
   kindLabel,
   Money,
 } from './parts'
-import { clampText, txUrl } from './safety'
+import { clampSym, clampText, txUrl } from './safety'
 
 // History: the ledger, newest day first, under the profit-and-loss figures
 // the portfolio already carries. A network filter narrows the read itself.
@@ -35,7 +34,7 @@ function Leg({ amount, symbol }: { amount: string | null; symbol: string | undef
   return (
     <>
       <Amount text={formatAmount(amount)} />
-      <span className="truncate">{clampSymbol(symbol)}</span>
+      <span className="truncate">{clampSym(symbol)}</span>
     </>
   )
 }

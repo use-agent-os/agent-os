@@ -3,7 +3,6 @@ import { useState } from 'react'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webTrading'
 import {
-  clampSymbol,
   formatAmount,
   formatPct,
   formatPrice,
@@ -16,6 +15,7 @@ import { Card } from '@/web/components/ui/card'
 import { EmptyState } from '@/web/components/ui/states'
 import { Amount, Money, TokenCell } from './parts'
 import { PriceChart } from './PriceChart'
+import { clampSym } from './safety'
 
 // Holdings: every priced or unpriced position the engine holds for the shown
 // wallets, by value; dust folds away behind a switch. A row's chart button
@@ -26,7 +26,7 @@ function holdingKey(h: Holding): string {
 }
 
 function Row({ h, onChart }: { h: Holding; onChart: (h: Holding) => void }) {
-  const symbol = clampSymbol(h.token.symbol)
+  const symbol = clampSym(h.token.symbol)
   return (
     <tr>
       <td data-col="asset">

@@ -3,10 +3,10 @@ import type { ReactNode } from 'react'
 import { t, type MessageKey } from '@/i18n'
 import '@/i18n/en/webTrading'
 import { cn } from '@/lib/utils'
-import { chainName, chainShort, clampSymbol, formatUsd, pnlTone } from '@/views/trading/logic'
+import { chainName, chainShort, formatUsd, pnlTone } from '@/views/trading/logic'
 import type { OrderStatus, TriggerStatus, MandateStatus, LpStatus } from '@/views/trading/types'
 import { Badge } from '@/web/components/ui/badge'
-import { BALANCE_MASK, clampText, useBalancePrivacy } from './safety'
+import { BALANCE_MASK, clampSym, clampText, useBalancePrivacy } from './safety'
 
 /**
  * A USD figure, masked when amounts are hidden. `toned` colours it by sign
@@ -76,7 +76,7 @@ export function TokenCell({
   verified?: boolean
   showChain?: boolean
 }) {
-  const shown = clampSymbol(symbol || address.slice(0, 8))
+  const shown = clampSym(symbol || address.slice(0, 8))
   return (
     <span className="trd-token">
       <TokenMark symbol={symbol} address={address} />
