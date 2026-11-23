@@ -200,7 +200,12 @@ aborted parent is not woken at all.
   children have all ended.
 - A parent whose interrupted turn is being resumed by restart recovery is not
   also woken for its abandoned children; their results are still added to its
-  transcript.
+  transcript. The wake is only held back: if no resumed turn completes (every
+  attempt failed and the run is tombstoned, your message cancelled the resume,
+  or a later boot closes it), the parent is woken once for those children
+  after all, on that boot or a later one. Once a resumed turn completes, the
+  held wake is final: a later recovery of the same session (another
+  interrupted turn) never sends it.
 - A wake whose delivery has had no outcome for 10 minutes is taken over and
   retried; one still not delivered 30 minutes after it was written is given up
   (`delivery_timeout`). Only then does the session's task-group card show the
