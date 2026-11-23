@@ -1,5 +1,5 @@
 import { CircleCheck, Download, Lock, MoreHorizontal, Plus, Settings2 } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { PopMenu } from '~/components/menu/PopMenu'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
@@ -14,11 +14,13 @@ import {
   sameAddress,
   shortAddress,
   walletLabel,
+  walletMatches,
 } from './logic'
 import { useBalanceMask, useBalancePrivacy } from '~/stores/balance-privacy'
 import { Money } from './parts'
 import type { ChainStatus, Limits, Totals, Wallet } from './types'
 import { usePopUp, WalletMenuItems } from './WalletMenu'
+import { WALLET_SEARCH_MIN, WalletSearch } from './WalletSearch'
 
 export type WalletSelection = 'all' | string
 
@@ -81,6 +83,13 @@ export function WalletRail({
   const ordered = activeFirst(wallets)
   const { hidden, title } = useBalanceMask()
 
+  // A long list grows a search. The query outlives a pick, so a run of
+  // wallets that share a word can be stepped through without retyping it.
+  const [query, setQuery] = useState('')
+  const searchable = wallets.length >= WALLET_SEARCH_MIN
+  const searching = searchable && query.trim() !== ''
+  const shown = searching ? ordered.filter((w) => walletMatches(w, query)) : ordered
+
   // Activating a wallet moves its row to the top of a list that may be scrolled
   // down to it: follow it, or a different wallet is suddenly under the pointer.
   // The list scrolls down; on a narrow desk the rail itself scrolls sideways.
@@ -108,13 +117,25 @@ export function WalletRail({
           </Button>
         ) : null}
       </div>
+      {searchable ? (
+        <div className="trd-rail__search">
+          <WalletSearch
+            value={query}
+            onChange={setQuery}
+            onSubmit={() => {
+              if (shown[0]) onSelect(shown[0].address)
+            }}
+          />
+        </div>
+      ) : null}
       <div
         className="trd-rail__list"
         role="listbox"
         aria-label={t('trading.rail.title')}
         ref={listRef}
       >
-        {wallets.length > 1 ? (
+        {/* "All" is no wallet a search can find: it steps aside while one runs. */}
+        {wallets.length > 1 && !searching ? (
           <button
             type="button"
             role="option"
@@ -138,7 +159,10 @@ export function WalletRail({
             </span>
           </button>
         ) : null}
-        {ordered.map((w) => (
+        {searching && shown.length === 0 ? (
+          <p className="trd-rail__empty">{t('trading.rail.search.none')}</p>
+        ) : null}
+        {shown.map((w) => (
           <WalletRow
             key={w.address}
             wallet={w}

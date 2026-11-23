@@ -555,6 +555,27 @@ export function activeFirst<T extends { primary: boolean }>(wallets: readonly T[
   return [...wallets].sort((a, b) => Number(b.primary) - Number(a.primary))
 }
 
+/**
+ * Whether a wallet answers a search typed over the wallet list: its label, or
+ * its address, whole or any run of it, with or without the 0x, or written
+ * short the way the desk prints it ("0xDd58…9b19", "dd58...9b19"). Case never
+ * matters: addresses come checksummed and get typed lowercase.
+ */
+export function walletMatches(wallet: { label: string; address: string }, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  if (wallet.label.toLowerCase().includes(q)) return true
+  const address = wallet.address.toLowerCase()
+  if (address.includes(q)) return true
+  const parts = q.split(/\s*(?:…|\.{2,})\s*/)
+  if (parts.length !== 2) return false
+  const bare = address.replace(/^0x/, '')
+  const head = (parts[0] ?? '').replace(/^0x/, '')
+  const tail = parts[1] ?? ''
+  if (!head && !tail) return false
+  return bare.startsWith(head) && bare.endsWith(tail) && head.length + tail.length <= bare.length
+}
+
 /** A sane label for a wallet with none. */
 export function walletLabel(wallet: { label: string; address: string }): string {
   return wallet.label.trim() || shortAddress(wallet.address)

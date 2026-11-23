@@ -53,6 +53,9 @@ export const trading = {
   'trading.rail.export': 'Export',
   'trading.rail.remove': 'Remove',
   'trading.rail.explorer': 'View on explorer',
+  'trading.rail.search': 'Search label or address',
+  'trading.rail.search.clear': 'Clear search',
+  'trading.rail.search.none': 'No wallet matches',
 
   // Overview
   'trading.head.switch': 'Switch wallet',

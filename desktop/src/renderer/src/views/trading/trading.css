@@ -235,6 +235,30 @@
   padding: 6px;
   overflow-y: auto;
 }
+/* The search over a long list: under the head band, above the rows, so the
+   rows scroll beneath it and it never scrolls away. */
+.trd-rail__search {
+  flex-shrink: 0;
+  padding: 6px 6px 0;
+}
+.trd-wallet-search__clear {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  color: var(--dim);
+}
+.trd-wallet-search__clear:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+.trd-rail__empty {
+  padding: 10px;
+  font-size: 12.5px;
+  color: var(--dim);
+}
 .trd-wallet {
   position: relative;
   display: grid;
@@ -631,6 +655,12 @@
 }
 .mac-menu.trd-head__switcher > .trd-head__wallets {
   flex-shrink: 1;
+}
+/* In the switcher the field sits in the menu's own inset, a row's width. */
+.trd-head__search.trd-picker__search {
+  height: 28px;
+  margin: 0 0 4px;
+  padding: 0 8px;
 }
 .trd-head__wallets {
   min-height: 0;
@@ -3245,6 +3275,14 @@ button:disabled > .trd-hero__spin {
     padding: 0 8px 0 2px;
     border-bottom: 0;
     background: transparent;
+  }
+  .trd-rail__search {
+    width: 180px;
+    padding: 0;
+  }
+  .trd-rail__empty {
+    flex-shrink: 0;
+    padding: 0 8px;
   }
   .trd-rail__list {
     flex: 0 1 auto;
