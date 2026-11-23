@@ -19,6 +19,7 @@ The outbox makes it durable:
   is a wake only held back while restart recovery resumes the parent's
   interrupted turn (reason ``parent_recovering``): should no resumed turn
   complete, :meth:`SubagentWakeOutbox.reopen` puts it back to ``awaiting``;
+  once one does, the row takes the final reason ``parent_resumed``;
 * the row turns ``delivered`` only once the task runtime accepted the wake; a
   failure keeps it ``pending`` with a backoff (1 s, 5 s, 30 s, then every 60 s)
   and the :class:`SubagentWakeWorker` retries it, giving up (``dropped``) after
@@ -233,6 +234,28 @@ class SubagentWakeOutbox:
             await self._storage.list_subagent_wakes(
                 DROPPED, parent_session_key=parent_session_key, reason=reason
             )
+        )
+
+    async def redrop(
+        self,
+        *,
+        parent_session_key: str,
+        parent_task_id: str | None,
+        reason: str,
+        new_reason: str,
+    ) -> None:
+        """Give a group dropped for *reason* the reason *new_reason* instead.
+
+        It stays dropped. A held wake (``parent_recovering``) a resumed turn
+        settled becomes final this way: :meth:`reopen` no longer matches it.
+        """
+
+        key = group_key(parent_session_key, parent_task_id)
+        row = await self._storage.get_subagent_wake(key)
+        if row is None or row.get("state") != DROPPED or row.get("reason") != reason:
+            return
+        await self._storage.update_subagent_wake(
+            key, expected_state=DROPPED, reason=new_reason, updated_at=self._clock()
         )
 
     async def reopen(self, *, parent_session_key: str, parent_task_id: str, reason: str) -> None:

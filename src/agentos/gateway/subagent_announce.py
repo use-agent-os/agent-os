@@ -61,8 +61,12 @@ class SpawnGroupTracker:
         self._closed: set[tuple[str, str]] = set()
         self._woken: set[tuple[str, str]] = set()
         # Groups whose wake is held back while restart recovery resumes the
-        # parent's interrupted turn (``_drop_wake_for_recovering_parent``).
+        # parent's interrupted turn (``_drop_wake_for_recovering_parent``),
+        # each until that recovery settles.
         self._held: set[tuple[str, str]] = set()
+        # Holds still being written: ``None`` until the recovery settles
+        # meanwhile, then whether it resumed the turn.
+        self._holding: dict[tuple[str, str], bool | None] = {}
 
     def mark_closed(self, parent_session_key: str, parent_task_id: str) -> None:
         self._closed.add((parent_session_key, parent_task_id))
@@ -79,17 +83,37 @@ class SpawnGroupTracker:
     def discard_woken(self, group_key: tuple[str, str]) -> None:
         self._woken.discard(group_key)
 
-    def hold(self, parent_session_key: str, parent_task_id: str) -> None:
-        self._held.add((parent_session_key, parent_task_id))
+    def begin_hold(self, parent_session_key: str, parent_task_id: str) -> None:
+        """A hold of the group's wake is being written."""
+        self._holding[(parent_session_key, parent_task_id)] = None
+
+    def end_hold(self, parent_session_key: str, parent_task_id: str) -> bool | None:
+        """The hold is written; return how the parent's recovery settled meanwhile.
+
+        ``None`` when it has not: the hold now stands until it does. Otherwise
+        whether it resumed the turn (its settling ran before the hold was
+        there to see).
+        """
+        key = (parent_session_key, parent_task_id)
+        settled = self._holding.pop(key, None)
+        if settled is None:
+            self._held.add(key)
+        return settled
 
     def is_held(self, parent_session_key: str, parent_task_id: str) -> bool:
         return (parent_session_key, parent_task_id) in self._held
 
-    def take_held(self, parent_session_key: str) -> list[str]:
-        """Forget the parent's held groups; return their parent task ids."""
+    def settle_held(self, parent_session_key: str, *, resumed: bool) -> list[str]:
+        """The parent's recovery settled: forget its holds, return their task ids.
+
+        A hold still being written learns the outcome from :meth:`end_hold`.
+        """
         taken = sorted(task_id for key, task_id in self._held if key == parent_session_key)
         for task_id in taken:
             self._held.discard((parent_session_key, task_id))
+        for key in self._holding:
+            if key[0] == parent_session_key:
+                self._holding[key] = resumed
         return taken
 
     def evict(self, parent_session_key: str) -> int:
@@ -102,6 +126,9 @@ class SpawnGroupTracker:
             for entry in [e for e in bucket if e[0] == parent_session_key]:
                 bucket.discard(entry)
                 removed += 1
+        for key in [k for k in self._holding if k[0] == parent_session_key]:
+            del self._holding[key]
+            removed += 1
         return removed
 
 
@@ -322,6 +349,9 @@ def _parent_recovering(turn_recovery: Any | None, parent_session_key: str) -> bo
 #: Outbox ``reason`` of a group wake held back while restart recovery resumes
 #: the parent's interrupted turn (see :func:`settle_wakes_held_for_recovery`).
 PARENT_RECOVERING_REASON = "parent_recovering"
+#: Outbox ``reason`` a held wake ends with once the resumed turn completed:
+#: that turn carried on with the children, and nothing reopens the row.
+PARENT_RESUMED_REASON = "parent_resumed"
 
 
 async def _drop_wake_for_recovering_parent(
@@ -330,8 +360,9 @@ async def _drop_wake_for_recovering_parent(
     """Hold the group's wake back while the parent's turn is resumed.
 
     Returns whether it is held: ``False`` without a group, or when the
-    recovery settled while the hold was being written (it then found nothing
-    to release), so the caller wakes the parent as usual.
+    recovery settled without a resumed turn while the hold was being written
+    (its settling found nothing to release), so the caller wakes the parent
+    as usual. Settled by a resumed turn meanwhile, the hold stands, final.
     """
     log.info(
         "subagent_announce.wake_skipped_for_recovery",
@@ -340,23 +371,34 @@ async def _drop_wake_for_recovering_parent(
     )
     if not parent_task_id:
         return False
-    _tracker.hold(parent_session_key, parent_task_id)
     outbox = get_wake_outbox()
+    _tracker.begin_hold(parent_session_key, parent_task_id)
+    try:
+        if outbox is not None:
+            await outbox.drop(
+                parent_session_key=parent_session_key,
+                parent_task_id=parent_task_id,
+                reason=PARENT_RECOVERING_REASON,
+            )
+    finally:
+        resumed = _tracker.end_hold(parent_session_key, parent_task_id)
+    if resumed is None:
+        return True  # held until the recovery settles
     if outbox is not None:
-        await outbox.drop(
-            parent_session_key=parent_session_key,
-            parent_task_id=parent_task_id,
-            reason=PARENT_RECOVERING_REASON,
-        )
-    if _tracker.is_held(parent_session_key, parent_task_id):
-        return True
-    if outbox is not None:
-        await outbox.reopen(
-            parent_session_key=parent_session_key,
-            parent_task_id=parent_task_id,
-            reason=PARENT_RECOVERING_REASON,
-        )
-    return False
+        if resumed:
+            await outbox.redrop(
+                parent_session_key=parent_session_key,
+                parent_task_id=parent_task_id,
+                reason=PARENT_RECOVERING_REASON,
+                new_reason=PARENT_RESUMED_REASON,
+            )
+        else:
+            await outbox.reopen(
+                parent_session_key=parent_session_key,
+                parent_task_id=parent_task_id,
+                reason=PARENT_RECOVERING_REASON,
+            )
+    return resumed
 
 
 async def settle_wakes_held_for_recovery(
@@ -371,8 +413,10 @@ async def settle_wakes_held_for_recovery(
     Restart recovery calls this when it is done with the parent's interrupted
     turn. While it was resuming the turn, the restart announce held back the
     wake for the parent's abandoned children (the resumed turn carries on with
-    them). When a resumed turn completed (*resumed*), they stay dropped, as
-    before. Otherwise -- every attempt failed and the run was tombstoned, a
+    them). When a resumed turn completed (*resumed*), they stay dropped, for
+    good: their rows take the final reason :data:`PARENT_RESUMED_REASON`, so a
+    later recovery of the same parent (another interrupted turn) cannot reopen
+    them. Otherwise -- every attempt failed and the run was tombstoned, a
     user's message cancelled the resume, a later boot closed or reported it --
     no turn ever told the parent about those children, so each held group goes
     back to ``awaiting`` and wakes the parent once, like any closed group whose
@@ -383,11 +427,20 @@ async def settle_wakes_held_for_recovery(
     were sent.
     """
 
-    if resumed:
-        # The holds stay: a hold still being written meanwhile must stay one.
-        return 0
-    held = _tracker.take_held(parent_session_key)
+    held = _tracker.settle_held(parent_session_key, resumed=resumed)
     outbox = get_wake_outbox()
+    if resumed:
+        if outbox is not None:
+            for row in await outbox.dropped(
+                parent_session_key=parent_session_key, reason=PARENT_RECOVERING_REASON
+            ):
+                await outbox.redrop(
+                    parent_session_key=parent_session_key,
+                    parent_task_id=row.get("parent_task_id"),
+                    reason=PARENT_RECOVERING_REASON,
+                    new_reason=PARENT_RESUMED_REASON,
+                )
+        return 0
     if outbox is not None:
         rows = await outbox.dropped(
             parent_session_key=parent_session_key, reason=PARENT_RECOVERING_REASON

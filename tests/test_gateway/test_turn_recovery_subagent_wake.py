@@ -274,15 +274,30 @@ async def test_a_wake_held_by_one_boot_is_sent_when_a_later_boot_settles_it(
 async def test_a_resumed_parent_still_gets_no_second_turn_with_the_outbox(
     tmp_path: Path,
 ) -> None:
-    # The resume succeeds: the held wake stays dropped, as before.
+    # The resume succeeds: the held wake stays dropped, as before, and is
+    # final before the recovery's own "resumed" state is written (after that
+    # no boot settles the run again, so a crash in between must not leave
+    # the hold for a later recovery of the parent to reopen).
     env = _Env(tmp_path)
     await env.open()
     assert env.storage is not None and env.runner is not None
-    set_wake_outbox(SubagentWakeOutbox(env.storage))
+    storage = env.storage
+    set_wake_outbox(SubagentWakeOutbox(storage))
     _tracker.evict(KEY)
     try:
         parent = await _interrupted_session(env, tail="round_complete")
         await _abandoned_child(env, parent.task_id)
+        reasons_when_resumed: list[Any] = []
+        update_agent_task = storage.update_agent_task
+
+        async def update_and_look(task_id: str, **fields: Any) -> Any:
+            details = fields.get("details") or {}
+            if (details.get(RECOVERY_KEY) or {}).get("state") == "resumed":
+                row = await storage.get_subagent_wake(group_key(KEY, parent.task_id))
+                reasons_when_resumed.append(row and row["reason"])
+            return await update_agent_task(task_id, **fields)
+
+        storage.update_agent_task = update_and_look  # type: ignore[method-assign]
         env.runner.release = asyncio.Event()
         recovery = env.recovery()
         await recovery.scan()
@@ -296,7 +311,8 @@ async def test_a_resumed_parent_still_gets_no_second_turn_with_the_outbox(
         assert len(turns) == 1
         assert turns[0]["provenance"].get("source_tool") == "restart_recovery"
         row = await env.storage.get_subagent_wake(group_key(KEY, parent.task_id))
-        assert row is not None and row["state"] == "dropped"
+        assert row is not None and (row["state"], row["reason"]) == ("dropped", "parent_resumed")
+        assert reasons_when_resumed == ["parent_resumed"]
     finally:
         set_wake_outbox(None)
         _tracker.evict(KEY)
@@ -329,3 +345,88 @@ async def test_a_user_message_that_cancels_the_recovery_gets_the_wake_after_it(
     turns = [turn for turn in env.runner.turns if turn["session_key"] == KEY]
     assert turns[0]["message"] == "never mind, do this instead"
     assert [turn["provenance"].get("source_tool") for turn in turns[1:]] == ["subagent_completion"]
+
+
+# ---------------------------------------------------------------------------
+# A hold a resumed turn settled is final
+# ---------------------------------------------------------------------------
+
+
+async def _later_interrupted_turn(env: _Env) -> AgentTaskRecord:
+    """Another turn of the parent, which a later crash stopped after its reply."""
+    assert env.manager is not None and env.storage is not None
+    await env.manager.append_message(KEY, "user", "Now do the next thing.")
+    await env.manager.append_message(KEY, "assistant", "Done with that too.")
+    now = int(time.time() * 1000)
+    record = AgentTaskRecord(
+        session_key=KEY,
+        source_kind="web",
+        run_kind="default",
+        status=AgentTaskStatus.ABANDONED,
+        terminal_reason="process_restart",
+        # Newer than the first boot's resume task.
+        created_at=now + 1000,
+        started_at=now + 1000,
+        details={
+            "source_name": "test",
+            "metadata": {},
+            "route": {"interaction_mode": "interactive"},
+        },
+    )
+    await env.storage.create_agent_task(record)
+    return record
+
+
+@pytest.mark.parametrize(
+    ("with_outbox", "new_process"),
+    [(True, True), (True, False), (False, False)],
+    ids=["outbox-next-boot", "outbox-same-process", "memory-same-process"],
+)
+async def test_a_later_recovery_does_not_reopen_a_hold_a_resumed_turn_settled(
+    tmp_path: Path, with_outbox: bool, new_process: bool
+) -> None:
+    # The first recovery resumes the parent's turn, which carries on with the
+    # abandoned children: their wake stays held. A later recovery of the same
+    # parent (another interrupted turn) ends without a resumed turn. It must
+    # not wake the parent about children the resumed turn already took up.
+    env = _Env(tmp_path)
+    await env.open()
+    assert env.storage is not None and env.runner is not None
+    if with_outbox:
+        set_wake_outbox(SubagentWakeOutbox(env.storage))
+    _tracker.evict(KEY)
+    try:
+        parent = await _interrupted_session(env, tail="round_complete")
+        await _abandoned_child(env, parent.task_id)
+        env.runner.release = asyncio.Event()
+        first = env.recovery()
+        await first.scan()
+        assert await _boot_announce(env, first) == 1
+        env.runner.release.set()
+        await first.wait_idle(timeout=10)
+        await _drain(env)
+        assert await _recovery_state(env, parent.task_id) == "resumed"
+        # Settled for good: nothing of the group is kept in memory.
+        assert not _tracker.is_held(KEY, parent.task_id)
+
+        later = await _later_interrupted_turn(env)
+        if new_process:
+            _tracker.evict(KEY)
+        second = env.recovery()
+        await second.scan()
+        assert await _boot_announce(env, second) == 0
+        await second.wait_idle(timeout=10)
+        await _drain(env)
+
+        assert await _recovery_state(env, later.task_id) == "closed"
+        turns = [turn for turn in env.runner.turns if turn["session_key"] == KEY]
+        assert [turn["provenance"].get("source_tool") for turn in turns] == ["restart_recovery"], [
+            turn["message"][:60] for turn in turns
+        ]
+        if with_outbox:
+            row = await env.storage.get_subagent_wake(group_key(KEY, parent.task_id))
+            assert row is not None and row["state"] == "dropped"
+    finally:
+        set_wake_outbox(None)
+        _tracker.evict(KEY)
+        await env.close()

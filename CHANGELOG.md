@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   your message) is now woken once for the subagents the restart abandoned.
   Before, their wake was held back for the resumed turn and then dropped for
   good, so nothing ever told the parent what happened to those children.
+  After a resumed turn the held wake stays dropped for good, so a later
+  recovery of the same parent never wakes it about those children again.
 
 ## [2026.11.23] - 2026-11-23
 

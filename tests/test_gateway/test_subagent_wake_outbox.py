@@ -494,7 +494,7 @@ async def test_a_recovery_settling_while_a_hold_is_written(
 ) -> None:
     # The recovery ends between the announce deciding to hold the wake and
     # the hold reaching the outbox. Settled without a resumed turn, the wake
-    # must not stay dropped; after a resumed turn, it must.
+    # must not stay dropped; after a resumed turn, it must, for good.
     outbox = _install(storage, _Clock())
     write_drop = outbox.drop
 
@@ -509,7 +509,30 @@ async def test_a_recovery_settling_while_a_hold_is_written(
 
     row = await _row(storage)
     if resumed:
-        assert held is True and row["state"] == "dropped"
+        assert held is True
+        assert (row["state"], row["reason"]) == ("dropped", "parent_resumed")
+        # A later recovery of the parent that resumes nothing leaves it be.
+        woken = await subagent_announce.settle_wakes_held_for_recovery(
+            PARENT, resumed=False, session_manager=None, task_runtime=_Runtime()
+        )
+        assert woken == 0 and (await _row(storage))["state"] == "dropped"
     else:
         # Not held: the caller wakes the parent as for any closed group.
         assert held is False and row["state"] == "awaiting"
+    assert not _tracker.is_held(PARENT, TASK)
+
+
+async def test_a_resumed_turn_makes_its_held_wakes_final(storage: SessionStorage) -> None:
+    outbox = _install(storage, _Clock())
+    assert await subagent_announce._drop_wake_for_recovering_parent(PARENT, TASK) is True
+    assert _tracker.is_held(PARENT, TASK)
+
+    await subagent_announce.settle_wakes_held_for_recovery(
+        PARENT, resumed=True, session_manager=None, task_runtime=_Runtime()
+    )
+
+    assert not _tracker.is_held(PARENT, TASK)
+    row = await _row(storage)
+    assert (row["state"], row["reason"]) == ("dropped", "parent_resumed")
+    await outbox.reopen(parent_session_key=PARENT, parent_task_id=TASK, reason="parent_recovering")
+    assert (await _row(storage))["state"] == "dropped"

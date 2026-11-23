@@ -1031,6 +1031,11 @@ class TurnRecovery:
         recovery.state = state
         if reason:
             recovery.reason = reason
+        if state == "resumed":
+            # Make the held wakes final before the state is: once "resumed" is
+            # persisted no boot settles this run again, and a crash in between
+            # would leave them for another recovery of the session to reopen.
+            await self._settle_held_wakes(recovery)
         await self._persist(recovery)
         if hint:
             if recovery.reason == "restart_requested":
@@ -1050,7 +1055,8 @@ class TurnRecovery:
             reason=recovery.reason,
             attempts=recovery.attempts,
         )
-        await self._settle_held_wakes(recovery)
+        if state != "resumed":
+            await self._settle_held_wakes(recovery)
 
     async def _settle_held_wakes(self, recovery: _Recovery) -> None:
         """Wake the parent for children whose wake waited on this recovery.
