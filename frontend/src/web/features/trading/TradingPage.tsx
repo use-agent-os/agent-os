@@ -2,7 +2,7 @@ import { Eye, EyeOff, Lock, Power, Info, Vault, Wallet as WalletIcon } from 'luc
 import { useId, useState, type ReactNode } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webTrading'
-import { activeFirst, errorText, walletLabel } from '@/views/trading/logic'
+import { activeFirst, errorText, sameAddress, walletLabel } from '@/views/trading/logic'
 import { Button } from '@/web/components/ui/button'
 import { PageHeader } from '@/web/components/ui/page-header'
 import { SegmentedControl } from '@/web/components/ui/segmented-control'
@@ -76,7 +76,9 @@ export function TradingPage() {
   const vault = useVaultStatus(enabled)
   const open = enabled && vault.data?.initialized === true && vault.data.unlocked
   const wallets = useWallets(open)
-  const [wallet, setWallet] = useState<string>('')
+  const [picked, setWallet] = useState<string>('')
+  // A wallet removed elsewhere falls back to all wallets, as the picker shows.
+  const wallet = wallets.wallets.some((w) => sameAddress(w.address, picked)) ? picked : ''
   const [view, setView] = useState<TradingView>('overview')
   const ready = open && wallets.wallets.length > 0
   const portfolio = usePortfolio(wallet || undefined, ready)

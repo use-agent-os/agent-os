@@ -297,3 +297,21 @@ describe('TradingPage wallet switch', () => {
     expect(await screen.findAllByText('$77.00')).not.toHaveLength(0)
   })
 })
+
+describe('TradingPage wallet removed elsewhere', () => {
+  it('falls back to all wallets instead of reading a wallet that is gone', async () => {
+    let list = [wallet(WALLET_A, 'Main', true), wallet(WALLET_B, 'Side')]
+    const rpc = tradingRpc().handle('wallet.list', () => ({ wallets: list, primary: WALLET_A }))
+    renderPage(rpc)
+    const picker = await screen.findByRole('combobox')
+    fireEvent.change(picker, { target: { value: WALLET_B } })
+    await waitFor(() =>
+      expect(rpc.callsTo('trading.portfolio')).toContainEqual({ wallet: WALLET_B }),
+    )
+
+    list = [wallet(WALLET_A, 'Main', true)]
+    act(() => rpc.emit('_hello'))
+    await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue(''))
+    await waitFor(() => expect(rpc.callsTo('trading.portfolio').at(-1)).toEqual({}))
+  })
+})
