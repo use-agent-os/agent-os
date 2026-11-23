@@ -57,12 +57,16 @@ describe('TradingPage gates', () => {
     )
     renderPage(rpc)
     expect(await screen.findByText('No wallet vault yet')).toBeInTheDocument()
+    expect(screen.getByText(/agentos wallet setup command/)).toBeInTheDocument()
+    expect(screen.getByTestId('trading-page').textContent).not.toContain('`')
   })
 
   it('says the vault is locked and offers no way to unlock it', async () => {
     const rpc = tradingRpc().handle('wallet.status', vaultStatus({ unlocked: false }))
     renderPage(rpc)
     expect(await screen.findByText('The wallet vault is locked')).toBeInTheDocument()
+    expect(screen.getByText(/agentos wallet unlock command/)).toBeInTheDocument()
+    expect(screen.getByTestId('trading-page').textContent).not.toContain('`')
     expect(screen.queryByRole('button', { name: /unlock/i })).toBeNull()
     expect(document.querySelector('input[type="password"]')).toBeNull()
     expect(rpc.callsTo('wallet.list')).toEqual([])
