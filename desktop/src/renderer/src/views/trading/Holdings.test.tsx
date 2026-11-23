@@ -313,3 +313,146 @@ describe('Holdings · copy token address', () => {
     expect(onSelect).not.toHaveBeenCalled()
   })
 })
+
+describe('Holdings · search', () => {
+  const sym = (symbol: string, name: string, n: number, extra: Partial<Holding> = {}) =>
+    holding({
+      token: {
+        ...USDC,
+        symbol,
+        name,
+        address: `0x${String(n).padStart(40, '0')}`,
+      },
+      ...extra,
+    })
+  const six = [
+    sym('AGENTOS', 'AgentOS', 1),
+    sym('BNKR', 'BankrCoin', 2),
+    sym('USDC', 'USD Coin', 3),
+    sym('USDT', 'Tether USD', 4),
+    sym('DEGEN', 'Degen', 5),
+    holding({ token: ETH, amount: '0.5', valueUsd: 1250 }),
+  ]
+
+  it('stays out of a short table', () => {
+    renderDesk(
+      <Holdings
+        holdings={six.slice(0, 5)}
+        loading={false}
+        selected={null}
+        onSelect={noop}
+        onSwap={noop}
+        showChain
+      />,
+    )
+    expect(screen.queryByTestId('holding-search')).toBeNull()
+    expect(screen.queryByTestId('hidden-bar')).toBeNull()
+  })
+
+  it('narrows the table by symbol or name, and Escape brings it all back', () => {
+    renderDesk(
+      <Holdings
+        holdings={six}
+        loading={false}
+        selected={null}
+        onSelect={noop}
+        onSwap={noop}
+        showChain
+      />,
+    )
+    const field = screen.getByTestId('holding-search')
+    expect(screen.getAllByTestId('holding-row')).toHaveLength(6)
+    fireEvent.change(field, { target: { value: 'usd' } })
+    // USDC and USDT by symbol, Tether USD by name too: two rows, not three.
+    const rows = screen.getAllByTestId('holding-row').map((r) => r.textContent ?? '')
+    expect(rows).toHaveLength(2)
+    expect(rows.some((r) => r.includes('USDC'))).toBe(true)
+    expect(rows.some((r) => r.includes('USDT'))).toBe(true)
+    fireEvent.change(field, { target: { value: 'bankr' } })
+    expect(screen.getAllByTestId('holding-row')).toHaveLength(1)
+    expect(screen.getByTestId('holding-row').textContent).toContain('BNKR')
+    fireEvent.keyDown(field, { key: 'Escape' })
+    expect((field as HTMLInputElement).value).toBe('')
+    expect(screen.getAllByTestId('holding-row')).toHaveLength(6)
+  })
+
+  it('Return opens the first match', () => {
+    const onSelect = vi.fn()
+    renderDesk(
+      <Holdings
+        holdings={six}
+        loading={false}
+        selected={null}
+        onSelect={onSelect}
+        onSwap={noop}
+        showChain
+      />,
+    )
+    const field = screen.getByTestId('holding-search')
+    fireEvent.keyDown(field, { key: 'Enter' })
+    expect(onSelect).not.toHaveBeenCalled()
+    fireEvent.change(field, { target: { value: 'degen' } })
+    fireEvent.keyDown(field, { key: 'Enter' })
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    expect(onSelect.mock.calls[0]?.[0].token.symbol).toBe('DEGEN')
+  })
+
+  it('never unfolds a bucket, and says when the folds hold a match', () => {
+    const fake = sym('AGENTOS', 'AgentOS', 9, {
+      token: {
+        ...USDC,
+        symbol: 'AGENTOS',
+        name: 'AgentOS',
+        address: `0x${'9'.repeat(40)}`,
+        verified: false,
+      },
+    })
+    renderDesk(
+      <Holdings
+        holdings={[...six, fake]}
+        loading={false}
+        selected={null}
+        onSelect={noop}
+        onSwap={noop}
+        showChain
+      />,
+    )
+    const field = screen.getByTestId('holding-search')
+    fireEvent.change(field, { target: { value: 'agentos' } })
+    // The real one only: the ⚠ lookalike stays folded.
+    expect(screen.getAllByTestId('holding-row')).toHaveLength(1)
+    fireEvent.change(field, { target: { value: 'zzz' } })
+    expect(screen.queryAllByTestId('holding-row')).toHaveLength(0)
+    expect(screen.getByTestId('holding-search-none').textContent).toBe('No asset matches')
+    fireEvent.change(field, { target: { value: 'agentos' } })
+    fireEvent.click(screen.getByTestId('unverified-toggle'))
+    expect(screen.getAllByTestId('holding-row')).toHaveLength(2)
+  })
+
+  it('points at the folds when only they hold a match', () => {
+    const fake = holding({
+      token: {
+        ...USDC,
+        symbol: 'CLAIM',
+        name: 'Claim',
+        address: `0x${'8'.repeat(40)}`,
+        verified: false,
+      },
+    })
+    renderDesk(
+      <Holdings
+        holdings={[...six, fake]}
+        loading={false}
+        selected={null}
+        onSelect={noop}
+        onSwap={noop}
+        showChain
+      />,
+    )
+    fireEvent.change(screen.getByTestId('holding-search'), { target: { value: 'claim' } })
+    expect(screen.queryAllByTestId('holding-row')).toHaveLength(0)
+    expect(screen.getByTestId('holding-search-none').textContent).toBe(
+      'No asset matches · 1 more folded away under the chips',
+    )
+  })
+})

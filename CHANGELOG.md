@@ -22,6 +22,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   key.
 
 ### Added
+- Desktop app, Trade tab: the holdings table (six rows or more) now has a
+  small search field in the bar above it, on the desk and in the chat's BOOK
+  alike. Type part of a token's symbol or name, or a `0x` run of its contract
+  address; Return opens the first match's chart and Escape clears. The search
+  narrows what the dust, unverified and junk chips show and never unfolds
+  them; when only a folded row matches, the table says so.
 - Desktop app, Trade tab: a long wallet list (six wallets or more) now has a
   search field, in the desk's wallet rail and in the wallet switcher above the
   chat's BOOK alike. Type part of a wallet's label or address, with or without

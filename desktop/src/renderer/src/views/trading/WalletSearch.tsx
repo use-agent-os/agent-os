@@ -30,23 +30,59 @@ export function WalletSearch({
   className?: string
 }) {
   return (
-    <label className={cn('trd-picker__search trd-wallet-search', className)}>
-      <Search className="size-3.5 text-dim" strokeWidth={2} aria-hidden />
+    <SearchField
+      value={value}
+      onChange={onChange}
+      onSubmit={onSubmit}
+      menuFocus={menuFocus}
+      placeholder={t('trading.rail.search')}
+      testId="wallet-search"
+      className={cn('trd-wallet-search', className)}
+    />
+  )
+}
+
+/**
+ * The desk's search field, whatever list it filters: a magnifier, the input,
+ * and a clear button once there is something to clear. Return hands the
+ * query to `onSubmit`; Escape empties a field that has text and otherwise
+ * lets the key through.
+ */
+export function SearchField({
+  value,
+  onChange,
+  onSubmit,
+  menuFocus,
+  placeholder,
+  testId,
+  className,
+}: {
+  value: string
+  onChange: (value: string) => void
+  onSubmit?: () => void
+  menuFocus?: boolean
+  placeholder: string
+  testId: string
+  className?: string
+}) {
+  return (
+    <label className={cn('trd-picker__search', className)}>
+      <Search className="size-3.5 shrink-0 text-dim" strokeWidth={2} aria-hidden />
       <input
         type="text"
         role="searchbox"
         value={value}
-        placeholder={t('trading.rail.search')}
-        aria-label={t('trading.rail.search')}
+        placeholder={placeholder}
+        aria-label={placeholder}
         spellCheck={false}
         autoComplete="off"
         data-menu-autofocus={menuFocus ? '' : undefined}
-        data-testid="wallet-search"
+        data-testid={testId}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault()
-            onSubmit()
+            onSubmit?.()
           } else if (e.key === 'Escape' && value) {
             e.preventDefault()
             e.stopPropagation()

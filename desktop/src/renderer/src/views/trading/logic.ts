@@ -594,6 +594,23 @@ export function walletMatches(wallet: { label: string; address: string }, query:
   return bare.startsWith(head) && bare.endsWith(tail) && head.length + tail.length <= bare.length
 }
 
+/**
+ * Whether a holding answers a search typed over the holdings table: its
+ * symbol or its name, any run of either, case aside. A query that starts with
+ * 0x is a contract address, whole or any run of it; short queries never go
+ * looking inside addresses, where nearly any two letters would match.
+ */
+export function holdingMatches(
+  holding: { token: { symbol: string; name: string; address: string } },
+  query: string,
+): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  const { symbol, name, address } = holding.token
+  if (symbol.toLowerCase().includes(q) || name.toLowerCase().includes(q)) return true
+  return q.startsWith('0x') && q.length > 2 && address.toLowerCase().includes(q)
+}
+
 /** A sane label for a wallet with none. */
 export function walletLabel(wallet: { label: string; address: string }): string {
   return wallet.label.trim() || shortAddress(wallet.address)
