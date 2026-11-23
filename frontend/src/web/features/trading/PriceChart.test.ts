@@ -1,7 +1,13 @@
 // The chart library throws on unsorted, duplicate or non-finite points; the
 // payload is cleaned before it gets there.
-import { describe, expect, it } from 'vitest'
-import { chartData } from './PriceChart'
+import { screen, waitFor } from '@testing-library/react'
+import { createElement } from 'react'
+import { beforeEach, describe, expect, it } from 'vitest'
+import '@/test/web'
+import { renderWeb } from '@/test/render-web'
+import { useConnection } from '@/stores/connection'
+import { tradingRpc } from '@/test/web-trading'
+import { chartData, PriceChart } from './PriceChart'
 
 describe('chartData', () => {
   it('sorts, floors to whole seconds and keeps the first of a duplicate', () => {
@@ -29,5 +35,33 @@ describe('chartData', () => {
       ]),
     ).toEqual([{ time: 300, value: 5 }])
     expect(chartData([])).toEqual([])
+  })
+})
+
+describe('PriceChart header', () => {
+  beforeEach(() => useConnection.getState().setState('connected'))
+
+  it("shows the engine's change over the range, not one worked out from thinned points", async () => {
+    const rpc = tradingRpc().handle('trading.chart', {
+      source: 'geckoterminal',
+      range: '1d',
+      points: [
+        { t: 100, c: 10 },
+        { t: 200, c: 20 },
+      ],
+      stats: {
+        priceUsd: 20,
+        priceNative: null,
+        quoteSymbol: 'USDC',
+        marketCapUsd: null,
+        market: null,
+        changePct: -12.5,
+      },
+    })
+    renderWeb(createElement(PriceChart, { chainId: 8453, token: '0xabc', symbol: 'ETH' }), { rpc })
+    const change = await screen.findByTitle(/change over the range/i)
+    await waitFor(() => expect(change.textContent).toMatch(/12\.5/))
+    expect(change.textContent).not.toMatch(/100/)
+    expect(change.getAttribute('data-tone')).toBe('down')
   })
 })

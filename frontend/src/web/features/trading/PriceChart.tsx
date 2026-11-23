@@ -105,9 +105,9 @@ export function PriceChart({
   const chart = useChart(chainId, token, range)
   const shown = clampSym(symbol)
   const points = chart.data?.points ?? []
-  const first = points[0]?.c
   const last = points[points.length - 1]?.c
-  const change = first && last ? ((last - first) / first) * 100 : null
+  // The engine's change over the range, from its full series (the points are thinned).
+  const change = chart.data?.stats?.changePct ?? null
   return (
     <Card asChild>
       <section
@@ -132,7 +132,7 @@ export function PriceChart({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="flex items-baseline gap-2">
             <span className="trd-figure__value">
-              {formatPrice(chart.data?.stats.priceUsd ?? last)}
+              {formatPrice(chart.data?.stats?.priceUsd ?? last)}
             </span>
             <span
               className="trd-num"
