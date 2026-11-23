@@ -3,12 +3,16 @@
 macOS desktop shell for AgentOS, built with Electron + React + TypeScript.
 **macOS is the only supported platform**: the window chrome (`hiddenInset`
 title bar, traffic-light inset), menu bar, quit semantics and CLI lookup paths
-all assume Darwin, and `package.json` declares `"os": ["darwin"]`.
+all assume Darwin, and `package.json` declares `"os": ["darwin"]`. Releases
+ship for macOS 13 or newer, as arm64 and x64 builds.
 It is a thin client: the app locates the installed `agentos` CLI, supervises
-`agentos gateway run`, and renders its own desktop UI on top of the gateway's
-WebSocket/REST API.
+`agentos gateway run` (or connects to an external gateway, on this Mac or
+another host over HTTP/HTTPS), and renders its own desktop UI on top of the
+gateway's WebSocket/REST API. The user-facing guide is
+[docs/desktop-app.md](../docs/desktop-app.md); this file is for working on the
+app.
 
-## Shares logic with the web console, never UI
+## Shares logic with the web console, not its look
 
 The renderer imports the console's non-visual layer straight from
 `frontend/src` through the `@/` alias — the WebSocket RPC client, the chat
@@ -24,8 +28,12 @@ stylesheets are never imported here; `views/chat/chat.css` restyles the
 shared transcript class names (`.msg`, `.chat-tools-collapse`,
 `.msg-artifact-*`, …) in the desktop's own vocabulary, and the composer is a
 desktop component that merely matches the console's prop contract so the
-shared hooks can drive it. Desktop code lives under the `~/` alias; `@/` is
-always the console.
+shared hooks can drive it. A few unstyled behavioural pieces are reused as
+they are and dressed by the desktop's CSS: `ModalShell` (every sheet's focus
+trap and Escape), the keyboard-shortcut registry, the sonner `Toaster`, and in
+the chat the attachments strip, slash menu, pending queue, route picker and
+Run modes toolbar. Desktop code lives under the `~/` alias; `@/` is always the
+console.
 
 ## Layout
 
@@ -36,29 +44,37 @@ desktop/
 ├── electron-builder.yml      # .app / .dmg packaging
 ├── tsconfig.node.json        # main + preload + shared
 ├── tsconfig.web.json         # renderer + shared + the console's sources
-├── resources/                # icons and other packaging assets
+├── resources/                # icons, entitlements, built-in pets (see resources/README.md)
+├── scripts/                  # icon renderers, dev/ad-hoc signing hooks, release-version.mjs
 └── src/
     ├── shared/               # contracts used by all three processes
     │   ├── ipc.ts            #   channel names + DesktopApi shape
     │   ├── theme.ts          #   ThemePreference / PaletteId / resolveTheme
     │   ├── settings.ts       #   DesktopSettings + normalizer
     │   ├── quick-ask.ts      #   Quick Ask shortcuts, submission payload + validation
+    │   ├── updates.ts        #   update states, releaseUpdate, calverToSemver, MIN_GATEWAY_VERSION
+    │   ├── notify.ts, tray.ts, pet.ts, bootstrap.ts, app.ts  # per-domain payload types
     │   └── gateway.ts        #   GatewayStatus
     ├── main/                 # Electron main process (Node)
     │   ├── index.ts          #   lifecycle, single instance, quit hook
     │   ├── loopback-cors.ts  #   Origin presented to the gateway + CORS answer translated back
     │   ├── window.ts         #   BrowserWindow (vibrancy, hiddenInset, sandbox)
     │   ├── menu.ts           #   macOS application menu
+    │   ├── context-menu.ts   #   native right-click menu (Copy / Paste …)
+    │   ├── security.ts       #   Touch ID prompt; clipboard-scrub.ts blanks a copied key
+    │   ├── app-version.ts    #   the CalVer the packaged app carries (appCalver)
     │   ├── tray/             #   menu bar status item: pure menu builder, summary validation, Tray
     │   ├── ipc/              #   one file per IPC domain, registered in index.ts
     │   ├── settings/store.ts #   atomic JSON settings in userData/
     │   ├── gateway/          #   cli-locator + process supervisor (spawn, adopt, health)
     │   ├── bootstrap/        #   first-run engine install: discovery, install.sh runner, controller
+    │   ├── notify/           #   native notifications (notifier.ts)
+    │   ├── pets/             #   pet store + the agentos-pet:// protocol
     │   ├── quick-ask/        #   global hotkey, the floating panel window, hand-off inbox
-    │   └── updates/          #   engine updater (agentos upgrade) + electron-updater controller
+    │   └── updates/          #   engine updater (agentos upgrade) + electron-updater controller + auto-check
     ├── preload/index.ts      # contextBridge -> window.agentos (typed DesktopApi)
     └── renderer/             # React app (browser, no Node access)
-        ├── index.html        #   CSP locked to self + loopback
+        ├── index.html        #   CSP: scripts from self only; connect/img to http(s)/ws(s)
         └── src/
             ├── app/          #   App, AppShell, GatewayProviders (rpc + approvals), router
             ├── views/chat/   #   ChatView + chat.css — the desktop skin for the
@@ -71,17 +87,30 @@ desktop/
             ├── views/projects/ # Project page (`/projects/:id`): renamable title,
             │                 #   self-saving brief, the chats filed there
             ├── views/quick-ask/ # The Quick Ask panel (its own window, `#/quick-ask`)
-            ├── views/settings/ # Settings sheet: SettingsPanel (rail + section), one pane
-            │                 #   per section (providers, router, skills, channels, environment,
-            │                 #   trading, gateway, appearance, notifications, security, behaviour,
-            │                 #   shortcuts, advanced, about), parts.tsx, logic.ts, channels-logic.ts
-            ├── components/   #   Sidebar (+ resizer, project folders, session list with
-            │                 #   its row menu and view menu), Toolbar, menu/ (PopMenu,
-            │                 #   Menu, items, submenus), pet/, composer/, TruthBadge (the
-            │                 #   toolbar's runtime status) and AttentionPanel ("Needs you")
+            ├── views/setup/  #   first-run overlay: engine install, then the provider step
+            ├── views/skills/ #   Skills panel (a layer over the window, ⌘⇧K): installed
+            │                 #   skills, partner catalogs and the community hub
+            ├── views/trading/ # Trade mode: the trading desk around the desk's own chat
+            │                 #   (`desk/SessionRoute` on `sessions/:key`; `/trading`
+            │                 #   forwards there), the BOOK beside the chat, tickets,
+            │                 #   wallets, holdings, orders, liquidity, automations
+            ├── views/settings/ # Settings sheet: SettingsPanel (grouped icon rail with
+            │                 #   search + attention dots, then the section), sections.ts,
+            │                 #   one pane per section in panes/ (overview, providers, router,
+            │                 #   memory, capabilities, skills, channels, environment, trading,
+            │                 #   gateway, appearance, notifications, security, behaviour,
+            │                 #   shortcuts, advanced, about), overview/, memory/ and
+            │                 #   capabilities/ for the larger ones, parts.tsx, logic.ts,
+            │                 #   channels-logic.ts
+            ├── components/   #   Sidebar + SidebarResizer, sidebar/ (project folders, session
+            │                 #   list with its row menu and view menu), Toolbar, menu/ (PopMenu,
+            │                 #   Menu, items, submenus), pet/, composer/, approval/,
+            │                 #   NotificationBell, UpdatePill + UpdateNotices, TruthBadge
+            │                 #   (the toolbar's runtime status) and AttentionPanel ("Needs you")
             ├── theme/        #   theme system (see below)
             ├── stores/       #   zustand: gateway, sessions, projects, live, settings, ui,
-            │                 #   session-marks (pin/archive/unread), session-view
+            │                 #   session-marks (archive/unread; pins live on the gateway),
+            │                 #   session-view, trading, bootstrap, updates, quick-ask, pet, …
             ├── lib/          #   desktop-api bridge, motion curves, relative time,
             │                 #   use-runtime-host (process facts for the shared truth hook),
             │                 #   required-methods (RPCs the desktop adds; contract-tested)
@@ -93,10 +122,10 @@ desktop/
 
 Two axes, both persisted in settings and mirrored to macOS:
 
-| Axis         | Values                           | Where it lives                   |
-| ------------ | -------------------------------- | -------------------------------- |
-| `preference` | `system` \| `light` \| `dark`    | `shared/theme.ts`                |
-| `palette`    | `tactical` (brand) \| `graphite` | `renderer/src/theme/palettes.ts` |
+| Axis         | Values                                                                                                       | Where it lives                   |
+| ------------ | ------------------------------------------------------------------------------------------------------------ | -------------------------------- |
+| `preference` | `system` \| `light` \| `dark`                                                                                | `shared/theme.ts`                |
+| `palette`    | `tactical` (brand), `graphite`, and eight derived: `everforest`, `solarized`, `nord`, `midnight`, `slate`, `ember`, `mono`, `cyberpunk` | `renderer/src/theme/palettes.ts` |
 
 Flow:
 
@@ -112,47 +141,62 @@ Flow:
 4. OS appearance changes reach the store through `matchMedia` and the
    `theme:changed` IPC push; they only repaint while preference is `system`.
 
-Adding a palette: add an id to `PALETTE_IDS` in `shared/theme.ts` and a full
-`PaletteDefinition` in `palettes.ts`. The type forces every token for both
-modes; `palettes.test.ts` fails otherwise.
+Adding a palette: add the id to the `PaletteId` union and `PALETTE_IDS` in
+`shared/theme.ts`, and its `PaletteDefinition` to `PALETTES` in `palettes.ts`.
+The type forces every token for both modes; `palettes.test.ts` fails
+otherwise.
 
-UI: `ThemeToggle` (title bar, cycles preference) and `ThemeControls`
-(Settings > Appearance: the mode row and the searchable palette gallery).
+UI: `ThemeToggle` (toolbar, cycles preference) and `ThemeControls`
+(Settings > Appearance: `ThemeModeRow` and the searchable `PaletteGallery`).
 Tactical and Graphite are hand-tuned; the other palettes are derived from
 three seeds per mode (ground, ink, signal) by `derive()` in `palettes.ts`, so
 adding one is a `palette(id, label, description, darkSeed, lightSeed)` line
-plus its id in `PALETTE_IDS`.
+plus its id in `PALETTE_IDS` and `PALETTES`.
 
 ## Settings
 
-Settings is a sheet over the window, the Scheduled jobs posture: a quiet
-rail of sections on the left, the chosen one on the right as soft cards,
-Escape or "Done" to leave, the section remembered between opens (the
-`settingsOpen` / `settingsSection` flags in `stores/ui.ts`). Reached from the
-toolbar gear, ⌘, or the app menu's "Settings…" (main pushes `settings:open`). App preferences persist to `settings.json` through
-`settings:update`; `shared/settings.ts` owns that schema. The agent
-sections edit the **gateway's** configuration instead, through the same
-guided RPCs the web console's setup uses, with the `config.snapshot`
-revision on every write so a stale form cannot overwrite a newer file.
+Settings is a sheet over the window, the Scheduled jobs posture: a rail of
+sections on the left in four groups (Start, Agent, App, More; `sections.ts`),
+each with an icon and a dot when it needs attention (`attention.ts`), and a
+search field that ranks sections by name and keywords; the chosen one on the
+right as soft cards under a top bar with "Done". Escape or "Done" leaves. It
+opens on **Overview** (`DEFAULT_SECTION`) and then remembers the section
+between opens (the `settingsOpen` / `settingsSection` flags in
+`stores/ui.ts`). Reached from the toolbar gear, ⌘, or the app menu's
+"Settings…" (main pushes `settings:open`). App preferences persist to
+`settings.json` through `settings:update`; `shared/settings.ts` owns that
+schema. The agent sections edit the **gateway's** configuration instead,
+through the same guided RPCs the web console's setup uses (or `config.patch`
+where there is none), with the `config.snapshot` revision on every write so a
+stale form cannot overwrite a newer file.
 
-| Section       | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Models        | Provider (catalog from `onboarding.catalog`), API key / env key / base URL / proxy, default model from `models.list`; saved via `onboarding.provider.configure`. Thinking level via `config.set`.                                                                                                                                                                                                                                                                                                                                  |
-| Pilot Router  | Mode (Pilot / LLM judge / Off), default tier, safety net, judge model, translation cap, and the tier ladder c0–c3 + vision with a model and thinking level per rung; saved via `onboarding.router.configure` using the console's `buildRouterConfigureParams`.                                                                                                                                                                                                                                                                     |
-| Channels      | The console's Channels screen: every configured adapter from `channels.status` with status, connected time, restart count and the Telegram pairing list (`channels.pairing.*`); Add/Configure through a sheet built from the catalog's channel specs (`onboarding.channel.probe` + `upsert`), an Enabled switch (`onboarding.channel.enable`/`disable`), Restart (`channels.restart`) and Remove (`onboarding.channel.remove`), all with the snapshot revision; a managed gateway is restarted to apply, as Providers does. |
-| Gateway       | Live status with Start/Stop/Restart, endpoint copy + open console; an editable draft of mode/host/port/token/CLI path with validation, Save/Revert, and a "restart to apply" notice when the running endpoint differs.                                                                                                                                                                                                                                                                                                             |
-| Appearance    | Theme + palette (`ThemeRows`), text size (`data-text-size` on `<html>`), reduce transparency (`data-transparency` + `win.setVibrancy`).                                                                                                                                                                                                                                                                                                                                                                                            |
-| Notifications | Master switch; what happens while the window is in front (nothing / in-app banner / system notification); Do not disturb (30 min, 1 h, 3 h, until tomorrow 9:00); show details; per-event switches (reply finished with a minimum length, reply failed, approval needed, scheduled job runs off/failures/all, gateway stopped on its own); sound on/off and which (the app chime or a macOS alert sound); Dock badge and bounce; a test button and a door to System Settings › Notifications. See [Notifications](#notifications). |
-| Security      | Confirm with Touch ID: Off (default) / High-risk approvals / Every approval. Disabled with an explanation when the Mac cannot prompt (no sensor, none enrolled, lid closed) unless it is already on, so it can always be turned off; a Test button runs the prompt and reports the outcome. See [Touch ID](#touch-id).                                                                                                                                                                                                             |
-| Behaviour     | Open at login (mirrored to `app.setLoginItemSettings`), open at launch (home / last session), stop the gateway on quit, show in menu bar (see [Menu bar](#menu-bar)), Quick Ask (on/off, which global shortcut, a note when macOS refused the key; see [Quick Ask](#quick-ask)), Return vs ⌘Return to send, sidebar width reset.                                                                                                                                                                                                   |
-| Shortcuts     | The keys the app binds (⌘, ⌘N ⌘⇧S ⌘⇧O …, and the Quick Ask key chosen under Behaviour); static, nothing is rebindable.                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Advanced      | Paths (settings file, logs, gateway `config.toml`) with Finder/open actions, copy diagnostics (token redacted), reset all app settings behind an alertdialog.                                                                                                                                                                                                                                                                                                                                                                      |
-| About         | App/Electron/Chromium versions, gateway version + uptime, `updates.check`, links.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Section       | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overview      | The page Settings opens on: a hero with the progress and the next step, then a checklist (required: gateway running, provider and model; recommended: routing, memory, web search, images, voice, X search, channels, skills, environment, a wallet while trading is on, updates). Each row's fact comes from the snapshot or its own RPC (`skills.list`, `env.list`, …) and its button jumps to the place that changes it (`overview/jumps.ts`).                                                                                                          |
+| Providers     | The active provider first: key, **Test key** (`providers.probe`), default model from `models.list`, thinking level via `config.set` (`llm.thinking`), connection (env key / base URL / proxy); `providers.status` says whether the gateway already holds a key. Below, **Switch provider** filters the catalog from the snapshot, OpenCAP marked Recommended when nothing is set. Saved via `onboarding.provider.configure` (a custom OpenAI-compatible endpoint through `config.patch`).                                                                  |
+| Pilot Router  | Mode cards (Pilot / LLM judge / Jev / Off) with the judge model or TypeSafe key a mode needs, default tier, and the tier ladder c0–c3 + vision with a model and thinking level per rung; safety net, high-risk floor and translation cap under **Fine-tuning**. One save bar for the page, written through `config.patch` with only the keys that changed (`routerPatch`).                                                                                                                                                                                 |
+| Memory        | Four tabs: Remembered (the curated lists, `memory.curated.*`), Knowledge (documents, `memory.knowledge_base.*`), Try it (`memory.search`), Setup (embedding via `onboarding.memory_embedding.configure`; recall, nudges and limits via `config.patch`). Unsaved edits are parked per form (`memory/drafts.ts`).                                                                                                                                                                                                                                            |
+| Capabilities  | Web search, search on X, image generation and voice under a strip that says which service answers each; one card per capability saved through its guided write (`onboarding.search.configure`, `onboarding.x_search.configure`, `onboarding.imageGeneration.configure`, `onboarding.audio.configure`); **Test search** runs `search.query`.                                                                                                                                                                                                                |
+| Skills        | A summary strip (installed, ready, needs setup, offered to the agent) from `skills.list` and where skills come from; the library itself is the Skills panel (⌘⇧K), which **Needs setup** opens pre-filtered.                                                                                                                                                                                                                                                                                                                                               |
+| Channels      | The console's Channels screen: every configured adapter from `channels.status` with status, connected time, restart count and the Telegram pairing list (`channels.pairing.*`); Add/Configure through a sheet built from the catalog's channel specs (`onboarding.channel.probe` + `upsert`), an Enabled switch (`onboarding.channel.enable`/`disable`), Restart (`channels.restart`) and Remove (`onboarding.channel.remove`), all with the snapshot revision; a managed gateway is restarted to apply, as Providers does.                                |
+| Environment   | The console's Environment screen: every variable grouped by what reads it, set / missing / shadowed summary, search and filter; `env.list/set/unset/import`, and `env.reveal` behind a confirm, hidden again after 30 s.                                                                                                                                                                                                                                                                                                                                   |
+| Trading       | Its on/off switch in the head, a summary strip, the swap route (the AgentOS DEX, with a Test), networks and their RPCs, the vault (unlock mode via `wallet.setUnlockMode`, asks for the password) and the agent's limits; written through `config.patch`, read-only when the gateway will not take trading changes from here.                                                                                                                                                                                                                              |
+| Gateway       | Live status with Start/Stop/Restart, endpoint copy + open console; run mode (Managed / External) and an editable draft of protocol (`http`/`https`), host, port, token and CLI path with validation, folded away while a managed gateway is on its defaults; Save/Revert, and a "restart to apply" notice when the running endpoint differs.                                                                                                                                                                                                               |
+| Appearance    | Theme mode + palette gallery (`ThemeModeRow`, `PaletteGallery`), UI scale 90–175% (the window's zoom factor; ⌘+ / ⌘− / ⌘0), reduce transparency (`data-transparency` + `win.setVibrancy`), and the pet (see [Pet](#pet)).                                                                                                                                                                                                                                                                                                                                  |
+| Notifications | Master switch; what happens while the window is in front (nothing / in-app banner / system notification); Do not disturb (30 min, 1 h, 3 h, until tomorrow 9:00); show details; per-event switches (reply finished with a minimum length, reply failed, approval needed, scheduled job runs and swaps settled, each off/failures/all, gateway stopped on its own); sound on/off and which (the app chime or a macOS alert sound); Dock badge and bounce; a test button and a door to System Settings › Notifications. See [Notifications](#notifications). |
+| Security      | Confirm with Touch ID: Off (default) / High-risk approvals / Every approval. Disabled with an explanation when the Mac cannot prompt (no sensor, none enrolled, lid closed) unless it is already on, so it can always be turned off; a Test button runs the prompt and reports the outcome. See [Touch ID](#touch-id).                                                                                                                                                                                                                                     |
+| Behaviour     | Open at login (mirrored to `app.setLoginItemSettings`), open at launch (home / last session), stop the gateway on quit, show in menu bar (see [Menu bar](#menu-bar)), Quick Ask (on/off, which global shortcut, a note when macOS refused the key; see [Quick Ask](#quick-ask)), Return vs ⌘Return to send, sidebar width reset.                                                                                                                                                                                                                           |
+| Shortcuts     | The keys the app binds (⌘, ⌘N ⌘⇧S ⌘⇧O …, and the Quick Ask key chosen under Behaviour); static, nothing is rebindable.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Advanced      | Paths (settings file, app logs, gateway `config.toml`) with Finder/open actions, copy diagnostics (token redacted), and under Start over: reset all app settings, **Reinstall engine** and **Remove engine**, each behind an alertdialog.                                                                                                                                                                                                                                                                                                                  |
+| About         | An App card (electron-updater) and an Engine card (`agentos upgrade`, `updates.verifyData` after an update) with **Update all**, or a Gateway card for an external gateway; App/Electron/Chromium versions, gateway version + uptime, links.                                                                                                                                                                                                                                                                                                               |
 
 Main mirrors a few settings onto the window/OS on every write
 (`mirrorSettingsToOs` in `main/index.ts`): the login item, window vibrancy,
-the zoom factor, the menu bar item and the Quick Ask global shortcut. `nativeTheme` follows the theme section the same way, so a
-reset repaints correctly.
+the zoom factor, the menu bar item and the Quick Ask global shortcut. A
+run-mode switch is applied there too (`GatewaySupervisor.modeChanged`):
+External stops the gateway the app spawned, Managed starts or adopts the
+local one. `nativeTheme` follows the theme section the same way, so a reset
+repaints correctly.
 
 ## Menu bar
 
@@ -241,11 +285,12 @@ The sources (`renderer/src/lib/use-notifications.ts`, bound once from
 | Approval needed       | The console's approval poller (`useApprovals`): the pending count grew.                                                                                                                                                                                                                             |
 | Scheduled job         | `cron.run.finished` on the wildcard topic; the shell calls `cron.subscribe` for the app's lifetime (the Jobs panel only listens).                                                                                                                                                                   |
 | Gateway stopped       | The gateway store went from `running` to `error` without a stop being asked for.                                                                                                                                                                                                                    |
+| Trading               | Gateway broadcasts, nothing polled: `trading.approval.requested` (counts as an approval), `trading.order.finished` (a swap or send confirmed, failed, expired or rejected) and `trading.trigger.fired` (a price trigger fired); a click opens the desk.                                             |
 
 Native notifications are posted by **main** (`main/notify/notifier.ts`,
 Electron's `Notification`), not the renderer's web API, so a click can focus
-the window and push `notify:activated` with a target (session, jobs, settings)
-that the renderer navigates to. They are always `silent`; the sound is the
+the window and push `notify:activated` with a target (session, jobs,
+approvals, the desk, settings) that the renderer navigates to. They are always `silent`; the sound is the
 renderer's job (`lib/notify.ts`): the synthesised chime, or a macOS alert
 sound that main plays with `afplay` so it works with or without a
 notification. Main also owns the Dock badge (unseen + approvals waiting) and
@@ -584,8 +629,9 @@ Locally, `npm run
 package:mac` signs with the Developer ID identity in the keychain when there
 is one (set the same `APPLE_*` variables to notarize) and falls back to an
 ad-hoc signature otherwise. Hardened Runtime is on with
-`resources/entitlements.mac.plist` (V8 JIT + unsigned executable memory,
-which Electron needs; nothing wider).
+`resources/entitlements.mac.plist` (V8 JIT, unsigned executable memory,
+DYLD environment variables and disabled library validation, which Electron's
+runtime needs; none of them widens what the app can reach).
 
 ## Commands
 

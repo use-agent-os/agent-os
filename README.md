@@ -29,6 +29,11 @@ that can do each job. AgentOS also
 has memory that stays after you close it, a safe sandbox with many
 layers, built-in web search, and on-device embeddings.
 
+AgentOS trades natively, too. It keeps its own EVM wallets in an
+encrypted vault and swaps, sends, and bridges tokens on Base and
+Robinhood Chain through the AgentOS DEX. Guardrails bound every order
+the agent places, and larger ones wait for your approval.
+
 You can use AgentOS from the AgentOS App on your desktop, the Web UI,
 the CLI, or chat apps. All of them use the same core loop. This means tool calls, retries, and logs
 work the same way everywhere. AgentOS can talk to many AI providers.
@@ -82,10 +87,11 @@ the Python wheel: `AgentOS-<version>-arm64.dmg` for Apple silicon and
 Every client — the AgentOS App, the Web UI, the CLI, and the chat
 channels — talks to one local gateway. This gateway handles sessions, approvals, and
 scheduling. It sends each turn to the Pilot Router, which picks the
-model. Then it runs tool calls inside the safe sandbox.
+model. Then it runs tool calls inside the safe sandbox, and trades through
+the engine's own wallets on Base and Robinhood Chain.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-architecture.png" alt="AgentOS architecture: the Web UI, CLI, chat channels, and macOS native app connect to the gateway (sessions, approvals, scheduler), which drives the AgentOS Router (Bankr LLM Gateway, OpenRouter, OpenAI, Anthropic) and the sandboxed tools layer">
+  <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-architecture.png" alt="AgentOS architecture: the Web UI, CLI, chat channels, and the AgentOS App for macOS connect to the gateway (sessions, approvals, scheduler), which drives the Pilot Router (OpenRouter, Bankr LLM Gateway, OpenAI, Anthropic), the sandboxed tools layer, and the wallet and trading engine (Base, Robinhood Chain)">
 </p>
 
 Here is what happens to one message: it comes in through a channel,
@@ -299,11 +305,14 @@ the #1 documented upgrade regret):
 agentos upgrade
 ```
 
-On a `uv tool` or `pipx` install this installs the published PyPI release of
-`use-agent-os[recommended]` for you (`uv tool install --force --python
-<running> …`), then restarts the managed gateway and **verifies** the running
-gateway reports the new version before printing `Gateway: restarted and verified
-(<version>)`. It prints the `old → new` versions on success.
+On a `uv tool` or `pipx` install this first snapshots your config and state
+databases into `~/.agentos/state/snapshots/`, then installs the published
+release of `use-agent-os[recommended]` for you (`uv tool install --force
+--python <running> …`). The release comes from PyPI, or from the GitHub
+release wheel when GitHub is ahead or PyPI cannot be reached. It then restarts
+the gateway and **verifies** the running gateway reports the new version before
+printing `Gateway: restarted and verified (<version>)`, and checks the state
+databases. It prints the `old → new` versions on success.
 
 `agentos upgrade` always installs the release, never a local checkout — the PyPI
 wheel ships a control UI built in CI, while reinstalling a checkout would
@@ -315,11 +324,17 @@ Flags:
 
 | Flag | Effect |
 |---|---|
-| `--check` | Report whether a newer release exists on PyPI; change nothing. Offline → `could not check (offline)`, exit 0. |
+| `--check` | Report whether a newer release exists on PyPI or GitHub Releases; change nothing. Offline → `could not check (offline)`, exit 0. |
 | `--dry-run` | Print the exact upgrade command that would run; touch nothing. |
+| `--source <auto\|pypi\|github>` | Where to install from. `auto` (default) prefers PyPI and falls back to the GitHub release wheel. |
+| `--no-snapshot` | Skip the pre-upgrade snapshot of config and state databases (taken by default; the newest three are kept). |
 | `--no-restart` | Upgrade the package but leave the gateway running the OLD code. Prints an unmissable warning; you must then run `agentos gateway restart` yourself. |
 | `--timeout <s>` | Upgrade-subprocess timeout (default 600s). On timeout the tool's process group is killed and recovery guidance is printed — never a half-state. |
+| `--verify-data` | Only check the state databases (`PRAGMA quick_check`); change nothing. |
+| `--restore-snapshot <dir\|latest>` | Put a pre-upgrade snapshot back (the gateway must be stopped) and exit. |
 | `--json` | Machine-readable output. |
+
+See [`docs/cli.md`](docs/cli.md#upgrade) for the full upgrade reference.
 
 For a plain-`pip`, Windows portable, editable, or unclassifiable install,
 `agentos upgrade` will **not** fake it — it prints the exact manual command and
@@ -404,8 +419,8 @@ you plan to change the code, use
    --user`. If `agentos` is not found after install, open a new
    terminal.
 
-3. **(optional) Install extra features.** Telegram, Slack, and Discord
-   already work with the base install. The remaining opt-in extra is
+3. **(optional) Install extra features.** Telegram, Slack, Discord, and
+   Email already work with the base install. The remaining opt-in extra is
    `document-extras`, which adds PDF generation through WeasyPrint.
 
    ```sh
@@ -513,7 +528,7 @@ with no routing.
 ```sh
 agentos onboard                # full interactive wizard
 agentos onboard --if-needed    # safe to run again; does nothing if already set up
-agentos onboard --minimal      # only sets the provider; skips channels and search
+agentos onboard --minimal      # only sets the provider and router; skips channels and search
 agentos onboard status         # shows every setup section, but changes nothing
 ```
 
@@ -549,8 +564,9 @@ agentos configure search   --search-provider brave --api-key-env BRAVE_SEARCH_AP
 agentos configure channels
 ```
 
-Sections: `provider`, `router`, `channels`, `search`,
-`image-generation`, `memory-embedding`. The Web UI shows the same
+Sections: `provider`, `router`, `channels`, `search`, `x-search`,
+`image-generation` (alias `image`), `memory-embedding` (alias
+`memory`). The Web UI shows the same
 options in Guided setup at `/control/settings/setup`. Provider and
 Router are the two main ones to set up first. Channels, Search, Image
 generation, and Memory embedding have their own Settings sections —
@@ -608,8 +624,9 @@ much more: your provider setup, memory, logs, search, channels,
 sandbox safety, router, image generation, and how to fix problems.
 Press `Ctrl+C` to stop a gateway that is running in your terminal.
 
-Other command groups include `sessions`, `skills`, `memory`,
-`migrate`, `cron`, `channels`, `providers`, `models`, and `cost`. Run
+Other command groups include `sessions`, `projects`, `skills`,
+`memory`, `migrate`, `cron`, `channels`, `providers`, `models`, `cost`,
+`mcp`, `sandbox`, `wallet`, `trade`, `flows`, and `acp`. Run
 `agentos --help` or `agentos <group> --help` to see more.
 
 <details>
@@ -628,8 +645,9 @@ agentos channels status <name> --json
 
 Only treat a channel as connected when the status shows
 `enabled=true`, `configured=true`, and `connected=true`. Discord
-uses websocket mode by default, Telegram uses polling, and Slack can
-use Socket Mode — none of these need a public URL. Telegram webhook
+uses websocket mode by default, Telegram uses polling, Slack can
+use Socket Mode, and Email polls an IMAP inbox — none of these need a
+public URL. Telegram webhook
 mode and Slack webhook mode do need a public URL that the provider
 can reach.
 
@@ -693,12 +711,13 @@ settings are all in `agentos.toml.example`.
 | **Token-efficient routing** | The `Pilot Router` defaults to `pilot-v1`, a small AgentOS-trained local model (MiniLM embeddings + ONNX inference; the `recommended` extra installs its runtime dependencies) that looks at each message — its length, language, code, keywords, and meaning — and picks one of four levels (c0–c3), then routes it to the cheapest model that can still do the job well. This check runs on your own device, so your message never has to leave your computer just to make this choice. The model bundle ships inside the wheel, so this works offline out of the box. Prefer no local model files at all? Pick the `llm_judge` strategy instead (a small LLM call, optionally a local Ollama/LM Studio endpoint). Choose either in onboarding. |
 | **Adaptive reasoning and prompts** | AgentOS only asks for deep, extended thinking when the router sees the message is hard. The system instructions also grow to match: short and simple for easy messages, full and detailed for hard ones. |
 | **20+ LLM providers** | AgentOS can talk to 20+ AI providers — OpenRouter (used by default), the Bankr LLM Gateway, OpenCAP, Surplus Intelligence, OpenAI, Anthropic, Ollama, DeepSeek, Gemini, DashScope/Qwen, Moonshot, Mistral, Groq, Zhipu, SiliconFlow, vLLM, LM Studio, and more. It picks a main provider first, with backups ready if needed. The first-time setup shows you the providers that are fully tested. |
-| **On-demand skills and MCP** | AgentOS comes with 37 built-in skills (coding, GitHub, cron jobs, pptx/docx/xlsx/pdf files, summaries, tmux, weather, and more). Each skill only loads when a task actually needs it. AgentOS can use other MCP tools, and can also act as an MCP tool for others — `agentos mcp-server run` needs no extra install (the MCP SDK is a core dependency). You can write, install, and share your own skills from the CLI. |
+| **Native agentic trading** | AgentOS holds its own EVM wallets in an encrypted vault and trades on Base and Robinhood Chain through the AgentOS DEX: swaps, sends, Base ⇄ Robinhood Chain bridges, Uniswap V4 liquidity, DCA mandates, price triggers, and take-profit/stop-loss brackets, with a ledger that tracks cost basis and PnL. Daily caps and other guardrails bound what the agent may do alone, and larger orders wait for your approval. Use it from the desktop Trading Desk, `agentos wallet` / `agentos trade`, or the bundled trading skills. See [`docs/features/trading.md`](docs/features/trading.md). |
+| **On-demand skills and MCP** | AgentOS comes with 50+ built-in skills (coding, GitHub, cron jobs, pptx/docx/xlsx/pdf files, deep research, trading and market data, video and voice studios, summaries, tmux, weather, and more). Each skill only loads when a task actually needs it. AgentOS can use other MCP tools, and can also act as an MCP tool for others — `agentos mcp-server run` needs no extra install (the MCP SDK is a core dependency). You can write, install, and share your own skills from the CLI. |
 | **Persistent local memory** | AgentOS remembers things between sessions, using a main `MEMORY.md` file plus dated notes in Markdown. You can search this memory two ways: by keyword (SQLite full-text search) or by meaning (`sqlite-vec`). The meaning search runs on your device using a built-in ONNX model, or you can switch to OpenAI or Ollama instead. Old memories can also slowly fade if you turn that on. |
 | **Layered security sandbox** | There are three safety levels: Standard, Strict, and Locked. Each one controls what tools are allowed to do. On Linux, Bubblewrap keeps code running in its own safe space. On macOS, this job is done by `sandbox-exec` (Apple's Seatbelt). Windows does not have this sandbox yet. If AgentOS is denied the same action too many times in a row, it pauses itself automatically and does not keep trying. Any blocked output is deleted right away. Skill details and tool results are also cleaned (escaped) so they can't trick the AI into doing something unsafe. |
-| **Built-in tools** | AgentOS can read, write, and edit files; run shell commands and background tasks; use git; search the web (with Brave or DuckDuckGo) and fetch pages safely (blocking unsafe internal network requests); create spreadsheets, PPTX, and PDF files; generate images; and turn text into speech. |
+| **Built-in tools** | AgentOS can read, write, and edit files; run shell commands and background tasks; use git; search the web (with Brave, Tavily, or DuckDuckGo) and X (through xAI) and fetch pages safely (blocking unsafe internal network requests); drive a real Chromium browser; create spreadsheets, PPTX, and PDF files; generate images; and turn text into speech. |
 | **AgentOS App (desktop)** | A signed, notarized macOS app that installs the engine, supervises the gateway, and offers Chat and the Trading Desk in a native window. It updates itself and the engine together. Download it from [GitHub Releases](https://github.com/use-agent-os/agent-os/releases). |
-| **Unified gateway** | One local web server (built with Starlette) runs at `127.0.0.1:18791`. It uses WebSockets and has a built-in control page at `/control/`. The Web UI, CLI, terminal, websocket, Slack, Telegram, and Discord clients all share one single `TurnRunner` engine underneath. |
+| **Unified gateway** | One local web server (built with Starlette) runs at `127.0.0.1:18791`. It uses WebSockets and has a built-in control page at `/control/`. The AgentOS App, Web UI, CLI, terminal, websocket, Slack, Telegram, Discord, and Email clients all share one single `TurnRunner` engine underneath. |
 | **Durable sessions, subagents, and scheduling** | Sessions, chat history, and replay data are all saved in SQLite, and each agent gets its own workspace folder. An agent can start smaller "subagent" helpers, up to a limited depth. A `SchedulerEngine`, with its own built-in cron reader, runs jobs on a schedule through `agentos cron`. |
 | **Operator controls** | A person can review and approve risky tool calls before they run. You can see how many tokens and how much cost each turn and each session used, with `agentos cost`. More diagnostic tools are available from both the CLI and the Web UI. |
 
