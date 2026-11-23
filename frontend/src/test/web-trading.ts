@@ -107,8 +107,9 @@ export function portfolio(over: Partial<Portfolio> = {}): Portfolio {
 export function order(over: Partial<Order> = {}): Order {
   return {
     orderId: 'ord_1',
-    createdAt: NOW - 600,
-    updatedAt: NOW - 590,
+    // Milliseconds, as the engine sends order and ledger times.
+    createdAt: (NOW - 600) * 1000,
+    updatedAt: (NOW - 590) * 1000,
     chainId: 8453,
     wallet: WALLET_A,
     kind: 'swap',
@@ -137,7 +138,7 @@ export function order(over: Partial<Order> = {}): Order {
 export function entry(over: Partial<Entry> = {}): Entry {
   return {
     id: 'e1',
-    ts: NOW - 600,
+    ts: (NOW - 600) * 1000,
     chainId: 8453,
     wallet: WALLET_A,
     kind: 'swap',

@@ -150,6 +150,19 @@ describe('TradingPage views', () => {
     expect(link?.getAttribute('href')).toMatch(/^https:\/\/basescan\.org\/tx\/0x[0-9a-f]{64}$/)
   })
 
+  it("heads each day with the entries' own date (the engine sends milliseconds)", async () => {
+    const day = 86_400_000
+    const ts = Date.UTC(2025, 10, 20, 12)
+    const rpc = tradingRpc().handle('trading.history', {
+      entries: [entry({ id: 'a', ts }), entry({ id: 'b', ts: ts - 3 * day })],
+    })
+    renderPage(rpc)
+    await openView(/history/i)
+    const full = new Intl.DateTimeFormat(undefined, { dateStyle: 'full' })
+    expect(await screen.findByRole('region', { name: full.format(ts) })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: full.format(ts - 3 * day) })).toBeInTheDocument()
+  })
+
   it('shows the empty history state', async () => {
     renderPage(tradingRpc().handle('trading.history', { entries: [] }))
     await openView(/history/i)
