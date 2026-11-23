@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Gateway: a turn waiting on another session's task inline
+  (`sessions_yield` with a `session_key`, typically a parent waiting on its
+  own subagent) now gives its concurrency slot back while it waits and takes
+  one back, ahead of queued turns, when the wait ends. Before, each waiting
+  level held a slot: two chains of subagents at the spawn depth limit filled
+  both pools at the default limits, and the deepest children did not start
+  until the inline waits timed out (300 s by default).
+
 ## [2026.11.23] - 2026-11-23
 
 ### Changed

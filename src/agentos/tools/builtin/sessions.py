@@ -1106,10 +1106,20 @@ async def sessions_yield(
             )
         latest = rows[-1]
         latest_task_id = latest.task_id
-        result = await asyncio.wait_for(
-            runtime.wait(latest.task_id),
-            timeout=timeout_seconds,
-        )
+        ctx = current_tool_context.get()
+        waiter_task_id = ctx.task_id if ctx is not None else None
+        wait_inline = getattr(runtime, "wait_inline", None)
+        if waiter_task_id and callable(wait_inline):
+            # This turn holds no slot while it blocks: the awaited task (often
+            # this turn's own child) may need one (#3867).
+            result = await wait_inline(
+                latest.task_id, waiter_task_id=waiter_task_id, timeout=timeout_seconds
+            )
+        else:
+            result = await asyncio.wait_for(
+                runtime.wait(latest.task_id),
+                timeout=timeout_seconds,
+            )
         return json.dumps(
             {
                 "session_key": session_key,
