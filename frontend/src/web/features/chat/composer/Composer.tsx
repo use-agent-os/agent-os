@@ -484,7 +484,7 @@ export function Composer(props: ComposerProps) {
         <ul
           role="listbox"
           aria-label={t('webChat.slashMenu')}
-          className="anim-scale-in mb-2 max-h-64 origin-bottom overflow-y-auto rounded-overlay border border-border bg-surface-overlay p-1 shadow-overlay"
+          className="chat-menu anim-scale-in mb-2 max-h-64 origin-bottom overflow-y-auto rounded-overlay border border-border bg-surface-overlay p-1 shadow-overlay"
         >
           {matches.map((cmd, i) => (
             <li
@@ -662,7 +662,7 @@ function RoutePicker({ sessionKey }: { sessionKey: string }) {
           className="ml-0.5 min-w-0 shrink"
         />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
+      <DropdownMenuContent align="start" className="chat-menu max-h-80 overflow-y-auto">
         <CheckItem checked={!pin.isPinned} onSelect={() => pin.clear()}>
           {unpinned}
         </CheckItem>
@@ -746,7 +746,7 @@ function CapabilityMenu({
           <Settings2 aria-hidden />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
+      <DropdownMenuContent align="start" className="chat-menu">
         <CheckItem checked={plan.on} onCheckedChange={(v) => void plan.set(Boolean(v))}>
           {t('webChat.planMode')}
         </CheckItem>

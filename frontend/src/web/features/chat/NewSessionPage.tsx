@@ -374,7 +374,10 @@ export function NewSessionPage() {
                     }
                   />
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="max-h-80 min-w-56 overflow-y-auto">
+                <DropdownMenuContent
+                  align="start"
+                  className="chat-menu max-h-80 min-w-56 overflow-y-auto"
+                >
                   <DropdownMenuLabel>{t('webChat.newAgent')}</DropdownMenuLabel>
                   <DropdownMenuRadioGroup value={chosenAgent ?? ''} onValueChange={setAgent}>
                     {(agents.data ?? []).map((a) => (
@@ -402,7 +405,10 @@ export function NewSessionPage() {
                     }
                   />
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="max-h-80 min-w-56 overflow-y-auto">
+                <DropdownMenuContent
+                  align="start"
+                  className="chat-menu max-h-80 min-w-56 overflow-y-auto"
+                >
                   <DropdownMenuLabel>{t('webChat.newProject')}</DropdownMenuLabel>
                   <DropdownMenuRadioGroup value={chosenProject} onValueChange={setProject}>
                     <PickItem value="">

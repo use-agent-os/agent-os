@@ -218,7 +218,7 @@ export function ChatHeader(props: ChatHeaderProps) {
             </Button>
           </DropdownMenuTrigger>
         </SimpleTooltip>
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent align="end" className="chat-menu">
           <DropdownMenuItem
             className="chat-menu-item"
             onSelect={() => {
