@@ -129,7 +129,12 @@ export function ChainChip({ chainId }: { chainId: number }) {
   )
 }
 
-/** An outbound explorer link: built by `safety.ts`, never from a payload URL. */
+/**
+ * An outbound explorer link: built by `safety.ts`, never from a payload URL.
+ * Its accessible name starts with the visible text (the short address or
+ * hash) and adds `label` after it, so a voice user can say what they see
+ * (WCAG 2.5.3); only an icon-only link takes `label` as its whole name.
+ */
 export function ExplorerLink({
   href,
   label,
@@ -146,10 +151,11 @@ export function ExplorerLink({
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      aria-label={label}
+      aria-label={children ? undefined : label}
       title={label}
     >
       {children}
+      {children ? <span className="sr-only">, {label}</span> : null}
       <ExternalLink aria-hidden className="size-3.5 shrink-0" />
     </a>
   )

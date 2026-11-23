@@ -683,3 +683,23 @@ describe('TradingPage connection lost', () => {
     await waitFor(() => expect(screen.queryByText(/Connection to the gateway lost/)).toBeNull())
   })
 })
+
+describe('TradingPage explorer links', () => {
+  it('give each link an accessible name that starts with its visible text', async () => {
+    renderPage()
+    await screen.findByTestId('trd-overview')
+    const walletLink = screen
+      .getAllByRole('link')
+      .find((a) => a.getAttribute('href')?.includes('/address/'))!
+    expect(walletLink).not.toHaveAttribute('aria-label')
+    const visible = walletLink.querySelector('.trd-mono')!.textContent!
+    expect(walletLink).toHaveAccessibleName(`${visible}, View Main on the Base explorer`)
+
+    await openView(/orders/i)
+    const txLink = (await screen.findAllByRole('link')).find((a) =>
+      a.getAttribute('href')?.includes('/tx/'),
+    )!
+    const hash = txLink.querySelector('.trd-mono')!.textContent!
+    expect(txLink).toHaveAccessibleName(`${hash}, Open the transaction on the explorer`)
+  })
+})
