@@ -2,7 +2,7 @@ import { Eye, EyeOff, Lock, Power, Info, Vault, Wallet as WalletIcon } from 'luc
 import { useId, useState, type ReactNode } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webTrading'
-import { activeFirst, errorText, sameAddress, walletLabel } from '@/views/trading/logic'
+import { activeFirst, errorText, sameAddress, syncShown, walletLabel } from '@/views/trading/logic'
 import { Button } from '@/web/components/ui/button'
 import { PageHeader } from '@/web/components/ui/page-header'
 import { SegmentedControl } from '@/web/components/ui/segmented-control'
@@ -10,6 +10,7 @@ import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/component
 import { PAGE_CLASS } from '@/web/features/home/overview-ui'
 import '@/web/styles/page-trading.css'
 import {
+  useChainReadProblems,
   usePortfolio,
   useTradingInvalidation,
   useTradingStatus,
@@ -82,6 +83,10 @@ export function TradingPage() {
   const [view, setView] = useState<TradingView>('overview')
   const ready = open && wallets.wallets.length > 0
   const portfolio = usePortfolio(wallet || undefined, ready)
+  const atTotals = view === 'overview' || view === 'holdings'
+  const problems = useChainReadProblems(wallet || undefined, ready && atTotals)
+  // As the desktop desk: the portfolio's or the engine's waited-on pass.
+  const syncing = syncShown(portfolio.data) || syncShown(status.data)
   const pickerId = useId()
 
   let body: ReactNode
@@ -181,9 +186,9 @@ export function TradingPage() {
         ) : !portfolio.data ? (
           <PageLoading />
         ) : view === 'overview' ? (
-          <OverviewView portfolio={portfolio.data} />
+          <OverviewView portfolio={portfolio.data} syncing={syncing} problems={problems} />
         ) : view === 'holdings' ? (
-          <HoldingsView portfolio={portfolio.data} />
+          <HoldingsView portfolio={portfolio.data} syncing={syncing} problems={problems} />
         ) : null}
       </>
     )

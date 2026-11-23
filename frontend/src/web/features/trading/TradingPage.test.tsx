@@ -12,6 +12,7 @@ import {
   ETH,
   WALLET_A,
   WALLET_B,
+  chainRead,
   entry,
   holding,
   lpBook,
@@ -502,5 +503,102 @@ describe('TradingPage wallet removed elsewhere', () => {
     act(() => rpc.emit('_hello'))
     await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue(''))
     await waitFor(() => expect(rpc.callsTo('trading.portfolio').at(-1)).toEqual({}))
+  })
+})
+
+describe('TradingPage unfinished or failed chain reads', () => {
+  const RPC_429 = 'base: HTTP 429 from https://mainnet.base.org Too Many Requests'
+
+  function emptyPortfolio(over: Parameters<typeof portfolio>[0] = {}) {
+    return portfolio({ holdings: [], totals: totals({ valueUsd: 0 }), ...over })
+  }
+
+  it('says a sync is running beside the totals, and that an empty list is not final', async () => {
+    const rpc = tradingRpc().handle(
+      'trading.portfolio',
+      emptyPortfolio({ syncing: true, syncKind: 'initial' }),
+    )
+    renderPage(rpc)
+    const overview = await screen.findByTestId('trd-overview')
+    expect(within(overview).getByRole('status')).toHaveTextContent('Syncing with the chain…')
+    await openView(/holdings/i)
+    expect(await screen.findByText('Not read from the chain yet')).toBeInTheDocument()
+    expect(screen.queryByText('No holdings')).toBeNull()
+  })
+
+  it('keeps a background pass quiet, as the desktop does', async () => {
+    const rpc = tradingRpc().handle(
+      'trading.portfolio',
+      portfolio({ syncing: true, syncKind: 'background' }),
+    )
+    renderPage(rpc)
+    await screen.findByTestId('trd-overview')
+    expect(screen.queryByText('Syncing with the chain…')).toBeNull()
+  })
+
+  it('warns, naming the network, when a read failed, with the reason as inert text', async () => {
+    const rpc = tradingRpc()
+      .handle('trading.portfolio', emptyPortfolio())
+      .handle('wallet.balances', {
+        balances: [],
+        chains: [chainRead({ status: 'failed', reason: RPC_429 })],
+      })
+    renderPage(rpc)
+    const warning = await screen.findByTestId('trd-read-warning')
+    expect(warning).toHaveAttribute('role', 'note')
+    expect(warning).toHaveTextContent('Could not fully read Base.')
+    expect(warning).toHaveTextContent(RPC_429)
+    expect(warning.querySelector('a')).toBeNull()
+    // Read without ever asking the engine to go to the chain.
+    expect(rpc.callsTo('wallet.balances').every((p) => !('refresh' in p))).toBe(true)
+
+    // Holdings: the warning, and no "No holdings" as a final word.
+    await openView(/holdings/i)
+    expect(await screen.findByText('Not read from the chain yet')).toBeInTheDocument()
+    expect(screen.queryByText('No holdings')).toBeNull()
+    expect(screen.getByTestId('trd-read-warning')).toBeInTheDocument()
+
+    // With the amounts hidden the warning stays: it names no amount.
+    fireEvent.click(screen.getByRole('button', { name: /hide amounts/i }))
+    expect(screen.getByTestId('trd-read-warning')).toHaveTextContent('Could not fully read Base.')
+  })
+
+  it('clamps a long reason', async () => {
+    const rpc = tradingRpc().handle('wallet.balances', {
+      chains: [chainRead({ status: 'partial', reason: 'x'.repeat(5000) })],
+    })
+    renderPage(rpc)
+    const warning = await screen.findByTestId('trd-read-warning')
+    expect(warning.textContent!.length).toBeLessThan(400)
+  })
+
+  it("shows only the picked wallet's failed reads", async () => {
+    const rpc = tradingRpc()
+      .handle('wallet.list', {
+        wallets: [wallet(WALLET_A, 'Main', true), wallet(WALLET_B, 'Side')],
+        primary: WALLET_A,
+      })
+      .handle('wallet.balances', {
+        chains: [
+          chainRead(),
+          chainRead({ wallet: WALLET_B, status: 'failed', reason: 'rpc down' }),
+        ],
+      })
+    renderPage(rpc)
+    expect(await screen.findByTestId('trd-read-warning')).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: WALLET_A } })
+    await waitFor(() =>
+      expect(rpc.callsTo('wallet.balances')).toContainEqual({ address: WALLET_A }),
+    )
+    await waitFor(() => expect(screen.queryByTestId('trd-read-warning')).toBeNull())
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: WALLET_B } })
+    expect(await screen.findByTestId('trd-read-warning')).toHaveTextContent('rpc down')
+  })
+
+  it('keeps the plain empty state once every read is good and no sync runs', async () => {
+    renderPage(tradingRpc().handle('trading.portfolio', emptyPortfolio()))
+    await openView(/holdings/i)
+    expect(await screen.findByText('No holdings')).toBeInTheDocument()
+    expect(screen.queryByTestId('trd-read-warning')).toBeNull()
   })
 })

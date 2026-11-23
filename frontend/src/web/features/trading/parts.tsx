@@ -1,10 +1,16 @@
-import { ExternalLink, TriangleAlert } from 'lucide-react'
+import { ExternalLink, LoaderCircle, TriangleAlert } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { t, type MessageKey } from '@/i18n'
 import '@/i18n/en/webTrading'
 import { cn } from '@/lib/utils'
 import { chainName, chainShort, formatUsd, pnlTone } from '@/views/trading/logic'
-import type { OrderStatus, TriggerStatus, MandateStatus, LpStatus } from '@/views/trading/types'
+import type {
+  ChainRead,
+  OrderStatus,
+  TriggerStatus,
+  MandateStatus,
+  LpStatus,
+} from '@/views/trading/types'
 import { Badge } from '@/web/components/ui/badge'
 import { BALANCE_MASK, clampSym, clampText, useBalancePrivacy } from './safety'
 
@@ -131,6 +137,62 @@ export function ExplorerLink({
       {children}
       <ExternalLink aria-hidden className="size-3.5 shrink-0" />
     </a>
+  )
+}
+
+/**
+ * "Syncing" beside the totals while a pass someone waits on runs (the shared
+ * `syncShown`, as the desktop's hero shows it). A status, not an alert: it
+ * is read when reached, never interrupts.
+ */
+export function SyncNote({ syncing }: { syncing: boolean }) {
+  if (!syncing) return null
+  return (
+    <p className="trd-sync" role="status">
+      <LoaderCircle aria-hidden className="trd-sync__spin size-3.5 shrink-0" />
+      {t('webTrading.syncing')}
+    </p>
+  )
+}
+
+const REASON_MAX = 160
+
+/**
+ * A warning that some chain reads of the shown wallets failed or stopped
+ * part way, so the figures may be short. It names networks only, never an
+ * amount, so it stays with the amounts hidden. The engine's reasons are
+ * untrusted text (often an RPC URL): clamped, plain, never a link. A note,
+ * not a live region, so a poll does not announce it again.
+ */
+export function ChainReadWarning({ problems }: { problems: readonly ChainRead[] }) {
+  if (problems.length === 0) return null
+  const chains = [...new Set(problems.map((p) => p.chainId))].map(chainName)
+  const reasons = [
+    ...new Set(
+      problems.map((p) => {
+        const reason = clampText(p.reason, REASON_MAX)
+        const chain = chainName(p.chainId)
+        return reason
+          ? t('webTrading.readReason', { chain, reason })
+          : t('webTrading.readReasonNone', { chain })
+      }),
+    ),
+  ]
+  return (
+    <div className="trd-callout trd-read-warn" role="note" data-testid="trd-read-warning">
+      <p className="trd-read-warn__head">
+        <TriangleAlert aria-hidden className="size-4 shrink-0" />
+        {t('webTrading.readIncomplete', { chains: chains.join(', ') })}
+      </p>
+      <details className="trd-read-warn__details">
+        <summary>{t('webTrading.readReasons')}</summary>
+        <ul>
+          {reasons.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      </details>
+    </div>
   )
 }
 

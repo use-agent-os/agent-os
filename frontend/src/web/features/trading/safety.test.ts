@@ -41,6 +41,7 @@ describe('trading read guard', () => {
         'trading.portfolio',
         'trading.status',
         'trading.trigger.list',
+        'wallet.balances',
         'wallet.list',
         'wallet.status',
       ].sort(),
@@ -59,6 +60,8 @@ describe('trading read guard', () => {
     const rpc = new FakeRpc().handle('wallet.balances', {}).handle('trading.lp.book', {})
     await read(rpc, 'trading.lp.book', { wallet: ADDR, refresh: true, checkRpc: true, full: true })
     expect(rpc.callsTo('trading.lp.book')).toEqual([{ wallet: ADDR }])
+    await read(rpc, 'wallet.balances', { address: ADDR, refresh: true })
+    expect(rpc.callsTo('wallet.balances')).toEqual([{ address: ADDR }])
   })
 
   it('never names a trading or wallet method outside the allow-list, nor passes refresh', () => {

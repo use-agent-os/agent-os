@@ -2,10 +2,10 @@ import { Coins, Flame, TrendingUp, Wallet as WalletIcon } from 'lucide-react'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webTrading'
 import { allocationSegments, chainName, shortAddress, walletLabel } from '@/views/trading/logic'
-import type { Portfolio } from '@/views/trading/types'
+import type { ChainRead, Portfolio } from '@/views/trading/types'
 import { Card, CardHeader } from '@/web/components/ui/card'
 import { IconTile, STAT_LABEL } from '@/web/features/home/overview-ui'
-import { ChainChip, ExplorerLink, Money } from './parts'
+import { ChainChip, ChainReadWarning, ExplorerLink, Money, SyncNote } from './parts'
 import { addressUrl, clampSym, clampText, useBalancePrivacy } from './safety'
 
 // The overview: the totals across the shown wallets, how the value splits
@@ -35,12 +35,22 @@ function Figure({
   )
 }
 
-export function OverviewView({ portfolio }: { portfolio: Portfolio }) {
+export function OverviewView({
+  portfolio,
+  syncing,
+  problems,
+}: {
+  portfolio: Portfolio
+  syncing: boolean
+  problems: readonly ChainRead[]
+}) {
   const { totals } = portfolio
   const hidden = useBalancePrivacy((s) => s.hidden)
   const segments = allocationSegments(portfolio.holdings)
   return (
     <div className="flex flex-col gap-5" data-testid="trd-overview">
+      <ChainReadWarning problems={problems} />
+      <SyncNote syncing={syncing} />
       <div className="trd-figures">
         <Figure label={t('webTrading.totalValue')} icon={<WalletIcon />} tone="accent">
           <Money value={totals.valueUsd} />

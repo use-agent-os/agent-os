@@ -44,7 +44,15 @@ export const webTrading = defineNamespace('webTrading', {
   gasSpent: 'Gas spent',
   unpriced_one: '{count} holding has no price and is not counted.',
   unpriced_other: '{count} holdings have no price and are not counted.',
-  syncing: 'Syncing',
+  syncing: 'Syncing with the chain…',
+  readIncomplete:
+    'Could not fully read {chains}. The figures here may be incomplete or out of date.',
+  readReasons: 'What the engine reported',
+  readReason: '{chain}: {reason}',
+  readReasonNone: '{chain}: no reason given',
+  holdingsUnread: 'Not read from the chain yet',
+  holdingsUnreadBody:
+    'The engine has not finished reading this wallet’s tokens, so an empty list here does not mean it holds nothing.',
   allocation: 'Allocation',
   other: 'Other',
   wallets: 'Wallets',

@@ -10,11 +10,11 @@ import {
   sortHoldings,
   splitDust,
 } from '@/views/trading/logic'
-import type { Holding, Portfolio } from '@/views/trading/types'
+import type { ChainRead, Holding, Portfolio } from '@/views/trading/types'
 import { Button } from '@/web/components/ui/button'
 import { Card } from '@/web/components/ui/card'
 import { EmptyState } from '@/web/components/ui/states'
-import { Amount, Money, TokenCell } from './parts'
+import { Amount, ChainReadWarning, Money, SyncNote, TokenCell } from './parts'
 import { PriceChart } from './PriceChart'
 import { clampSym } from './safety'
 
@@ -71,23 +71,41 @@ function Row({ h, onChart }: { h: Holding; onChart: (h: Holding) => void }) {
   )
 }
 
-export function HoldingsView({ portfolio }: { portfolio: Portfolio }) {
+export function HoldingsView({
+  portfolio,
+  syncing,
+  problems,
+}: {
+  portfolio: Portfolio
+  syncing: boolean
+  problems: readonly ChainRead[]
+}) {
   const [showDust, setShowDust] = useState(false)
   const [charted, setCharted] = useState<Holding | null>(null)
   const { kept, dust } = splitDust(sortHoldings(portfolio.holdings, 'value'))
   const rows = showDust ? [...kept, ...dust] : kept
 
-  if (portfolio.holdings.length === 0)
+  // An empty list is only final once the chain was read: while a sync runs
+  // or a read failed, it says so instead of "no holdings".
+  if (portfolio.holdings.length === 0) {
+    const unread = syncing || problems.length > 0
     return (
-      <EmptyState
-        icon={<Coins />}
-        title={t('webTrading.holdingsEmpty')}
-        description={t('webTrading.holdingsEmptyBody')}
-      />
+      <div className="flex flex-col gap-4">
+        <ChainReadWarning problems={problems} />
+        <SyncNote syncing={syncing} />
+        <EmptyState
+          icon={<Coins />}
+          title={t(unread ? 'webTrading.holdingsUnread' : 'webTrading.holdingsEmpty')}
+          description={t(unread ? 'webTrading.holdingsUnreadBody' : 'webTrading.holdingsEmptyBody')}
+        />
+      </div>
     )
+  }
 
   return (
     <div className="flex flex-col gap-4" data-testid="trd-holdings">
+      <ChainReadWarning problems={problems} />
+      <SyncNote syncing={syncing} />
       {charted ? (
         <PriceChart
           key={holdingKey(charted)}

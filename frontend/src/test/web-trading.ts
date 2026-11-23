@@ -2,6 +2,7 @@
 // FakeRpc that answers every read of the page's allow-list with small,
 // realistic figures, each overridable per test.
 import type {
+  ChainRead,
   Entry,
   Holding,
   LpBook,
@@ -231,6 +232,11 @@ export function lpBook(
   } as LpBook
 }
 
+/** One chain read as `wallet.balances` reports it; `ok` unless overridden. */
+export function chainRead(over: Partial<ChainRead> = {}): ChainRead {
+  return { chainId: 8453, wallet: WALLET_A, status: 'ok', reason: null, readAt: NOW, ...over }
+}
+
 export function tradingStatus(over: Partial<TradingStatus> = {}): TradingStatus {
   return {
     enabled: true,
@@ -275,6 +281,7 @@ export function tradingRpc(): FakeRpc {
     .handle('wallet.status', vaultStatus())
     .handle('wallet.list', { wallets: [wallet(WALLET_A, 'Main', true)], primary: WALLET_A })
     .handle('trading.portfolio', portfolio())
+    .handle('wallet.balances', { balances: [], chains: [chainRead()], updatedAt: NOW })
     .handle('trading.orders.list', { orders: [order()] })
     .handle('trading.history', { entries: [entry()] })
     .handle('trading.chart', {

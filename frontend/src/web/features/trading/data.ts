@@ -3,9 +3,10 @@ import { useEffect, useMemo } from 'react'
 import { useRpc } from '@/app/providers'
 import type { WsRpcClient } from '@/lib/ws-rpc'
 import { useConnection } from '@/stores/connection'
-import { errorCode } from '@/views/trading/logic'
+import { errorCode, sameAddress } from '@/views/trading/logic'
 import type {
   BracketListPayload,
+  ChainRead,
   Chart,
   ChartRange,
   Entry,
@@ -34,6 +35,7 @@ export const TRADING_READ_METHODS = [
   'trading.status',
   'wallet.status',
   'wallet.list',
+  'wallet.balances',
   'trading.portfolio',
   'trading.orders.list',
   'trading.history',
@@ -84,6 +86,7 @@ export const TRADING_KEYS = {
   vault: [ROOT, 'vault'] as const,
   wallets: [ROOT, 'wallets'] as const,
   portfolio: (wallet?: string) => [ROOT, 'portfolio', wallet ?? 'all'] as const,
+  chainReads: (wallet?: string) => [ROOT, 'chain-reads', wallet ?? 'all'] as const,
   orders: (wallet?: string) => [ROOT, 'orders', wallet ?? 'all'] as const,
   history: (wallet?: string, chainId?: number) =>
     [ROOT, 'history', wallet ?? 'all', chainId ?? 'all'] as const,
@@ -174,6 +177,39 @@ export function usePortfolio(wallet: string | undefined, enabled: boolean) {
     queryFn: () => read(rpc, 'trading.portfolio', wallet ? { wallet } : {}),
     refetchInterval: 20_000,
   })
+}
+
+/**
+ * How the engine's last chain read of each shown wallet and network went, from
+ * `wallet.balances` (the ledger's view, as the desktop's `useBalances` reads
+ * it; never with `refresh`). Only reads that went wrong are returned: a
+ * failed or partial read leaves the figures at their last good values, or at
+ * nothing on a first sync. A failure of this read itself hides nothing.
+ */
+export function useChainReadProblems(wallet: string | undefined, enabled: boolean): ChainRead[] {
+  const rpc = useRpc()
+  const connected = useConnected()
+  const query = useQuery<{ chains?: ChainRead[] }>({
+    queryKey: TRADING_KEYS.chainReads(wallet),
+    enabled: connected && enabled,
+    queryFn: () => read(rpc, 'wallet.balances', wallet ? { address: wallet } : {}),
+    refetchInterval: 60_000,
+    retry: false,
+  })
+  return useMemo(() => chainReadProblems(query.data?.chains, wallet), [query.data, wallet])
+}
+
+/** The failed and partial reads among `reads`, for `wallet` when one is picked. */
+export function chainReadProblems(reads: unknown, wallet: string | undefined): ChainRead[] {
+  if (!Array.isArray(reads)) return []
+  return (reads as ChainRead[]).filter(
+    (r) =>
+      r &&
+      typeof r === 'object' &&
+      typeof r.chainId === 'number' &&
+      (r.status === 'failed' || r.status === 'partial') &&
+      (!wallet || sameAddress(r.wallet, wallet)),
+  )
 }
 
 export function useOrders(wallet: string | undefined, enabled: boolean) {
