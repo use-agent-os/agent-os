@@ -44,6 +44,7 @@ import {
   sortHoldings,
   toRaw,
   walletLabel,
+  walletMatches,
 } from './logic'
 import type { Entry, Holding, Token } from './types'
 
@@ -188,6 +189,27 @@ describe('formatting', () => {
       '0x1234…5678',
     )
     expect(walletLabel({ label: 'Main', address: '0x0' })).toBe('Main')
+  })
+  it('finds a wallet by label or by any form of its address', () => {
+    const w = { label: 'CAP 05', address: '0xDd58aBcDeF0123456789aBcDeF012345679b19' }
+    // Label, any case, any run of it.
+    expect(walletMatches(w, 'cap')).toBe(true)
+    expect(walletMatches(w, ' cap 05 ')).toBe(true)
+    expect(walletMatches(w, 'OS 05')).toBe(false)
+    // The address whole, a fragment, with or without 0x, checksummed or not.
+    expect(walletMatches(w, w.address.toLowerCase())).toBe(true)
+    expect(walletMatches(w, '0xdd58')).toBe(true)
+    expect(walletMatches(w, 'DD58AB')).toBe(true)
+    expect(walletMatches(w, '9b19')).toBe(true)
+    // Pasted the way the desk prints it, or typed with dots.
+    expect(walletMatches(w, '0xDd58…9b19')).toBe(true)
+    expect(walletMatches(w, 'dd58...9b19')).toBe(true)
+    expect(walletMatches(w, '0xdd58 … 9b19')).toBe(true)
+    expect(walletMatches(w, '0xDd58…0000')).toBe(false)
+    expect(walletMatches(w, '…')).toBe(false)
+    // Nothing typed matches everything.
+    expect(walletMatches(w, '')).toBe(true)
+    expect(walletMatches(w, '   ')).toBe(true)
   })
   it('formats a clock', () => {
     expect(formatClock(0)).toBe('0:00')

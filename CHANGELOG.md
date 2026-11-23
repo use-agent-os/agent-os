@@ -21,6 +21,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   non-OpenRouter provider without a `base_url`, rotate that provider's API
   key.
 
+### Added
+- Desktop app, Trade tab: a long wallet list (six wallets or more) now has a
+  search field, in the desk's wallet rail and in the wallet switcher above the
+  chat's BOOK alike. Type part of a wallet's label or address, with or without
+  `0x`, or paste the short form the desk prints (`0xDd58…9b19`); Return picks
+  the first match. Opening a wallet menu from a button also puts the keyboard
+  in the menu again, which a menu's first frame had been refusing.
+
 ### Changed
 - Web UI: the chat has a fresh look. A new chat opens on a two-tone headline
   and the brand mark, with keyboard hints floating beside it. The composer is

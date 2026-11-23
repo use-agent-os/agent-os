@@ -12,15 +12,24 @@ import {
   QrCode,
   Settings2,
 } from 'lucide-react'
-import { MenuItem, MenuSep, PopMenu } from '~/components/menu/PopMenu'
+import { MenuItem, MenuNote, MenuSep, PopMenu } from '~/components/menu/PopMenu'
+import { useState } from 'react'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { useBalanceMask, useBalancePrivacy } from '~/stores/balance-privacy'
 import { blockieDataUrl } from './blockie'
 import { copyAddress, usePopUp, WalletMenuItems } from './WalletMenu'
-import { activeFirst, formatUsd, sameAddress, shortAddress, walletLabel } from './logic'
+import {
+  activeFirst,
+  formatUsd,
+  sameAddress,
+  shortAddress,
+  walletLabel,
+  walletMatches,
+} from './logic'
 import type { ChainStatus, Totals, Wallet } from './types'
 import type { WalletAction, WalletSelection } from './WalletRail'
+import { WALLET_SEARCH_MIN, WalletSearch } from './WalletSearch'
 
 /**
  * Who you are looking at, above what it is worth.
@@ -84,7 +93,7 @@ export function WalletHead({
   const allUsd = [...totals.values()].reduce((sum, tt) => sum + tt.valueUsd, 0)
 
   const markSize = compact ? 30 : 40
-  const { hidden, mask } = useBalanceMask()
+  const { hidden } = useBalanceMask()
   const toggleHidden = useBalancePrivacy((s) => s.toggle)
 
   return (
@@ -139,40 +148,14 @@ export function WalletHead({
             label={t('trading.head.switch')}
             className="trd-head__switcher"
           >
-            {many ? (
-              <>
-                <MenuItem
-                  role="menuitemradio"
-                  checked={selected === 'all'}
-                  label={t('trading.rail.all')}
-                  aside={
-                    <span className="trd-mono">{mask(formatUsd(allUsd, { compact: true }))}</span>
-                  }
-                  onSelect={() => onSelect('all')}
-                />
-                <MenuSep />
-              </>
-            ) : null}
-            {/* The wallets scroll; the "all" row and the commands stay in reach. */}
-            <div className="trd-head__wallets">
-              {ordered.map((w) => {
-                const tt = totals.get(w.address.toLowerCase())
-                return (
-                  <MenuItem
-                    key={w.address}
-                    role="menuitemradio"
-                    checked={selected !== 'all' && sameAddress(selected, w.address)}
-                    label={walletLabel(w)}
-                    aside={
-                      <span className="trd-mono">
-                        {tt ? mask(formatUsd(tt.valueUsd, { compact: true })) : ''}
-                      </span>
-                    }
-                    onSelect={() => onSelect(w.address)}
-                  />
-                )
-              })}
-            </div>
+            <SwitcherWallets
+              wallets={ordered}
+              selected={selected}
+              onSelect={onSelect}
+              onClose={closeSwitcher}
+              totals={totals}
+              allUsd={allUsd}
+            />
             <MenuSep />
             <MenuItem
               icon={Plus}
@@ -291,5 +274,89 @@ export function WalletHead({
         ) : null}
       </div>
     </header>
+  )
+}
+
+/**
+ * The switcher's wallet rows, under a search once there are enough of them to
+ * hunt through. Its own component so the query lives only while the menu is
+ * open: the next opening starts from the whole list.
+ */
+function SwitcherWallets({
+  wallets,
+  selected,
+  onSelect,
+  onClose,
+  totals,
+  allUsd,
+}: {
+  /** Already in display order (the active wallet first). */
+  wallets: Wallet[]
+  selected: WalletSelection
+  onSelect: (selection: WalletSelection) => void
+  onClose: () => void
+  totals: Map<string, Totals>
+  allUsd: number
+}) {
+  const [query, setQuery] = useState('')
+  const { mask } = useBalanceMask()
+  const searchable = wallets.length >= WALLET_SEARCH_MIN
+  const searching = searchable && query.trim() !== ''
+  const shown = searching ? wallets.filter((w) => walletMatches(w, query)) : wallets
+  return (
+    <>
+      {searchable ? (
+        <WalletSearch
+          className="trd-head__search"
+          value={query}
+          onChange={setQuery}
+          menuFocus
+          onSubmit={() => {
+            const first = shown[0]
+            if (!first) return
+            onClose()
+            onSelect(first.address)
+          }}
+        />
+      ) : null}
+      {/* "All" is no wallet a search can find: it steps aside while one runs. */}
+      {wallets.length > 1 && !searching ? (
+        <>
+          <MenuItem
+            role="menuitemradio"
+            checked={selected === 'all'}
+            label={t('trading.rail.all')}
+            aside={<span className="trd-mono">{mask(formatUsd(allUsd, { compact: true }))}</span>}
+            onSelect={() => onSelect('all')}
+          />
+          <MenuSep />
+        </>
+      ) : null}
+      {/* The wallets scroll; the "all" row and the commands stay in reach. */}
+      <div className="trd-head__wallets">
+        {shown.map((w) => {
+          const tt = totals.get(w.address.toLowerCase())
+          return (
+            <MenuItem
+              key={w.address}
+              role="menuitemradio"
+              checked={selected !== 'all' && sameAddress(selected, w.address)}
+              label={walletLabel(w)}
+              // Searching by address needs the address in sight to confirm it.
+              detail={searching ? shortAddress(w.address) : undefined}
+              aside={
+                <span className="trd-mono">
+                  {tt ? mask(formatUsd(tt.valueUsd, { compact: true })) : ''}
+                </span>
+              }
+              onSelect={() => onSelect(w.address)}
+            />
+          )
+        })}
+        {searching && shown.length === 0 ? (
+          <MenuNote>{t('trading.rail.search.none')}</MenuNote>
+        ) : null}
+      </div>
+    </>
   )
 }
