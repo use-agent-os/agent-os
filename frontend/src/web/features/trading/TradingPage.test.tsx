@@ -9,6 +9,8 @@ import { renderWeb } from '@/test/render-web'
 import { useConnection } from '@/stores/connection'
 import {
   ETH,
+  WALLET_A,
+  WALLET_B,
   entry,
   holding,
   lpBook,
@@ -19,6 +21,7 @@ import {
   tradingRpc,
   tradingStatus,
   vaultStatus,
+  wallet,
 } from '@/test/web-trading'
 import { BALANCE_MASK, reloadBalancePrivacy } from './safety'
 import { TradingPage } from './TradingPage'
@@ -264,5 +267,33 @@ describe('TradingPage untrusted and edge-case figures', () => {
     const before = rpc.callsTo('trading.portfolio').length
     act(() => rpc.emit('trading.changed'))
     await waitFor(() => expect(rpc.callsTo('trading.portfolio').length).toBeGreaterThan(before))
+  })
+})
+
+describe('TradingPage wallet switch', () => {
+  it("never shows one wallet's figures while another wallet's read is in flight", async () => {
+    let releaseB: (() => void) | null = null
+    const rpc = tradingRpc()
+      .handle('wallet.list', {
+        wallets: [wallet(WALLET_A, 'Main', true), wallet(WALLET_B, 'Side')],
+        primary: WALLET_A,
+      })
+      .handle('trading.portfolio', (params: Record<string, unknown>) =>
+        params.wallet === WALLET_B
+          ? new Promise((resolve) => {
+              releaseB = () =>
+                resolve(portfolio({ totals: totals({ valueUsd: 77 }), holdings: [] }))
+            })
+          : portfolio(),
+      )
+    renderPage(rpc)
+    expect(await screen.findAllByText('$12,480.52')).not.toHaveLength(0)
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: WALLET_B } })
+    await waitFor(() => expect(releaseB).not.toBeNull())
+    expect(screen.queryByText('$12,480.52')).toBeNull()
+
+    act(() => releaseB!())
+    expect(await screen.findAllByText('$77.00')).not.toHaveLength(0)
   })
 })

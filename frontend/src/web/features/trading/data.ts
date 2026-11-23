@@ -162,6 +162,8 @@ export function useWallets(enabled: boolean) {
   return { ...query, wallets }
 }
 
+// The wallet-keyed reads keep no placeholder from the previous key: while
+// wallet B loads, wallet A's figures must not stand under B's name.
 export function usePortfolio(wallet: string | undefined, enabled: boolean) {
   const rpc = useRpc()
   const connected = useConnected()
@@ -170,7 +172,6 @@ export function usePortfolio(wallet: string | undefined, enabled: boolean) {
     enabled: connected && enabled,
     queryFn: () => read(rpc, 'trading.portfolio', wallet ? { wallet } : {}),
     refetchInterval: 20_000,
-    placeholderData: (prev) => prev,
   })
 }
 
@@ -182,7 +183,6 @@ export function useOrders(wallet: string | undefined, enabled: boolean) {
     enabled: connected && enabled,
     queryFn: () => read(rpc, 'trading.orders.list', { ...(wallet ? { wallet } : {}), limit: 50 }),
     refetchInterval: 15_000,
-    placeholderData: (prev) => prev,
   })
   const orders = useMemo(() => query.data?.orders ?? [], [query.data])
   return { ...query, orders }
@@ -201,7 +201,6 @@ export function useHistory(wallet: string | undefined, chainId: number | undefin
         limit: 100,
       }),
     refetchInterval: 30_000,
-    placeholderData: (prev) => prev,
   })
   const entries = useMemo(() => query.data?.entries ?? [], [query.data])
   return { ...query, entries }
@@ -241,7 +240,6 @@ export function useLpBook(wallet: string | undefined, on: boolean) {
     enabled: connected && on,
     queryFn: () => read(rpc, 'trading.lp.book', wallet ? { wallet } : {}),
     refetchInterval: 30_000,
-    placeholderData: (prev) => prev,
   })
 }
 
