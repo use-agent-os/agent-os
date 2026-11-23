@@ -67,7 +67,17 @@ def build_terminal_reply(
         # A spend ceiling is a deliberate refusal, not a failure. Keep the
         # message that names the scope and the number instead of collapsing it
         # into generic failure text the operator cannot act on.
-        return error_message or "The task stopped because a spend budget limit was reached."
+        return (
+            _text(record_or_payload, "error_message")
+            or "The task stopped because a spend budget limit was reached."
+        )
+    if error_class == "request_vetoed":
+        # So is a request hook's veto (a spend gate, a policy check): the
+        # hook's reason is what the user can act on.
+        return (
+            _text(record_or_payload, "error_message")
+            or "A request hook stopped the task before it could finish."
+        )
     if status == AgentTaskStatus.FAILED.value or reason in {"error", "tool_error"}:
         return "The task failed before it could finish."
     if status == AgentTaskStatus.SUCCEEDED.value or reason in {"completed", "done"}:
@@ -164,9 +174,7 @@ def is_context_payload_too_large(record_or_payload: Any) -> bool:
 
 def _is_provider_output_truncated(record_or_payload: Any) -> bool:
     if isinstance(record_or_payload, str):
-        return "provider output limit reached before completion" in _normalize(
-            record_or_payload
-        )
+        return "provider output limit reached before completion" in _normalize(record_or_payload)
     reason = _normalize(_read_value(record_or_payload, "terminal_reason"))
     error_class = _normalize(_read_value(record_or_payload, "error_class"))
     message = _normalize(_read_value(record_or_payload, "error_message"))
@@ -221,6 +229,13 @@ def _read_value(record_or_payload: Any, field: str) -> Any:
     if isinstance(record_or_payload, Mapping):
         return record_or_payload.get(field)
     return getattr(record_or_payload, field, None)
+
+
+def _text(record_or_payload: Any, field: str) -> str:
+    """A field's text as written (stripped, not lowercased), or ``""``."""
+
+    value = _read_value(record_or_payload, field)
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _normalize(value: Any) -> str:

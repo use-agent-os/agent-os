@@ -404,7 +404,9 @@ class SpendGate:
   - An amendment is added after the cached prompt prefix, for that request
     only, and is not persisted.
   - A veto ends the turn with error code `request_vetoed` and outcome
-    `blocked`.
+    `blocked`. The user sees the veto's reason as the turn's final message.
+    The task is still recorded as `failed`, with `error_class` set to
+    `request_vetoed` and the reason in `error_message`.
 - **Errors in a hook** are logged and treated as "no decision". With
   `fail_closed = True`, a failing `before_tool` blocks the call, a failing
   `after_tool` withholds the result (the model gets an error,

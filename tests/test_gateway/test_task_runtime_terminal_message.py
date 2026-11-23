@@ -480,3 +480,46 @@ async def test_task_runtime_rolls_back_persisted_user_on_provider_budget_error()
     assert "automatic context compaction" in payload["terminal_message"]
     assert "send less text" not in payload["terminal_message"]
     assert "failed before" not in payload["terminal_message"]
+
+
+@pytest.mark.asyncio
+async def test_a_turn_a_request_hook_vetoed_ends_with_the_hooks_reason() -> None:
+    reason = "The daily spend limit is reached."
+    emitted: list[tuple[str, str, dict[str, Any]]] = []
+
+    async def _emitter(session_key: str, event_name: str, payload: dict[str, Any]) -> None:
+        emitted.append((session_key, event_name, payload))
+
+    async def _stream():
+        # What the engine yields when a ``before_request`` hook returns ``Veto``.
+        yield ErrorEvent(message=reason, code="request_vetoed")
+
+    async def _handler(run: Any) -> None:
+        await _emit_task_runtime_stream_events(
+            _stream(),
+            run.session_key,
+            _emitter,
+            stream_event_sink=None,
+            idle_timeout=1.0,
+            heartbeat_interval=0.0,
+        )
+
+    runtime = _make_runtime(_handler, event_emitter=_emitter)
+    handle = await runtime.enqueue(_make_envelope(), "hello")
+    record = await runtime.wait(handle.task_id, timeout=2.0)
+
+    # The stream's error frame, and the runtime's owed terminal frame (this
+    # rig does not share the dispatcher's one-frame-per-run bookkeeping).
+    errors = [payload for _, name, payload in emitted if name == "session.event.error"]
+    assert errors and all(payload["code"] == "request_vetoed" for payload in errors)
+    assert all(payload["message"] == payload["terminal_message"] == reason for payload in errors)
+    assert errors[0]["error_message"] == reason
+    (failed,) = [payload for _, name, payload in emitted if name == "task.failed"]
+    assert failed["terminal_message"] == reason
+    assert record.error_class == "request_vetoed"
+    assert record.error_message == reason
+    assert record.details is not None
+    assert record.details["turn_outcome"]["kind"] == "blocked"
+    # The task status itself is unchanged (an open decision: a status of its
+    # own is a new value every client would have to learn).
+    assert record.status == AgentTaskStatus.FAILED

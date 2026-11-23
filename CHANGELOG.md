@@ -14,6 +14,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   level held a slot: two chains of subagents at the spawn depth limit filled
   both pools at the default limits, and the deepest children did not start
   until the inline waits timed out (300 s by default).
+- Gateway: a turn that a request hook vetoed (a spend gate or a policy check,
+  for example) now ends with the hook's reason instead of "The task failed
+  before it could finish." This applies in chat, the CLI and channel replies.
+  The task's status is unchanged (`failed`, `error_class: request_vetoed`).
+  A spend-budget stop's message also keeps its original capitalization: it
+  used to be shown in lowercase.
 
 ## [2026.11.23] - 2026-11-23
 
