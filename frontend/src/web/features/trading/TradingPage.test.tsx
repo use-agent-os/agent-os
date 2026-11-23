@@ -232,6 +232,31 @@ describe('TradingPage untrusted and edge-case figures', () => {
     )
   })
 
+  it("masks a trigger's action, which names an amount, behind the privacy switch", async () => {
+    const trigger = {
+      id: 'trg_1',
+      name: 'Dip buy',
+      status: 'armed',
+      chain: { id: 8453 },
+      token: token('ETH'),
+      bracket: null,
+      condition: { label: 'under $3,800' },
+      action: { label: 'buy $50 of ETH with USDC' },
+    }
+    const rpc = tradingRpc().handle('trading.trigger.list', {
+      kind: 'triggers',
+      triggers: [trigger],
+      totals: { count: 1, armed: 1, awaiting: 0, triggered: 0 },
+    })
+    renderPage(rpc)
+    await openView(/orders/i)
+    const row = await screen.findByTestId('trd-automation-trigger')
+    expect(row.textContent).toContain('buy $50 of ETH')
+    fireEvent.click(screen.getByRole('button', { name: /hide/i }))
+    await waitFor(() => expect(row.textContent).not.toContain('$50'))
+    expect(row.textContent).toContain('under $3,800')
+  })
+
   it('refetches what is on screen after a trading event', async () => {
     const rpc = tradingRpc()
     renderPage(rpc)

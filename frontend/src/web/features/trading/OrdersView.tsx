@@ -114,7 +114,8 @@ function AutomationRow({ a }: { a: Automation }) {
       },
     )}`
   else if (a.type === 'trigger')
-    detail = `${clampText(a.item.condition.label, 40)} · ${clampText(a.item.action.label, 48)}`
+    // The action names what it moves ("buy $50 of ETH"): a figure like any other.
+    detail = `${clampText(a.item.condition.label, 40)} · ${mask(clampText(a.item.action.label, 48))}`
   else
     detail = t('webTrading.bracketLines', {
       tp: clampText(a.item.lines.takeProfitLabel, 24),
