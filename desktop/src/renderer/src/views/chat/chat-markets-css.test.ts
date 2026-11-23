@@ -18,7 +18,7 @@ import {
 // so the DOM and the stylesheet cannot drift apart silently.
 
 const css = readFileSync('src/renderer/src/views/chat/chat.css', 'utf8')
-const FIXTURE = 'src/renderer/src/views/trading/__fixtures__/markets/nvda.json'
+const FIXTURE = '../frontend/src/views/trading/__fixtures__/markets/nvda.json'
 const NOW = Date.parse('2026-10-06T04:14:00Z')
 const ZERO = '0x0000000000000000000000000000000000000000'
 

@@ -311,7 +311,7 @@ describe('Book · rejecting from the Orders tab', () => {
 
 describe('Book · Markets and swaps asked for from anywhere', () => {
   const MARKETS = JSON.parse(
-    readFileSync('src/renderer/src/views/trading/__fixtures__/markets/nvda.json', 'utf8'),
+    readFileSync('../frontend/src/views/trading/__fixtures__/markets/nvda.json', 'utf8'),
   ) as MarketsPayload
   const NVDA: Token = {
     chainId: 4663,
