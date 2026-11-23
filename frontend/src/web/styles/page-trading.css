@@ -38,6 +38,10 @@
   [data-series='s6'] {
     --trd-c: var(--hl-keyword);
   }
+  /* The folded tail: neutral, so it never takes a holding's colour. */
+  [data-series='other'] {
+    --trd-c: var(--text-muted);
+  }
 
   /* ---- Header note, toolbar --------------------------------------------- */
   .trd-readonly {

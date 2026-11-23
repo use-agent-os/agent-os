@@ -108,6 +108,16 @@ describe('TradingPage views', () => {
     expect(localStorage.getItem('agentos-web.trading.balancesHidden')).toBe('true')
   })
 
+  it('gives the folded "other" slice its own colour, never a holding\'s', async () => {
+    const holdings = ['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((sym, i) =>
+      holding(token(sym), { allocationPct: 30 - i * 3 }),
+    )
+    renderPage(tradingRpc().handle('trading.portfolio', portfolio({ holdings })))
+    const legend = await screen.findByText('Other')
+    const item = legend.closest('li')!
+    expect(item.querySelector('[data-series]')).toHaveAttribute('data-series', 'other')
+  })
+
   it('shows the empty holdings state', async () => {
     const rpc = tradingRpc().handle(
       'trading.portfolio',

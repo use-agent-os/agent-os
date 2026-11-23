@@ -76,7 +76,7 @@ export function OverviewView({ portfolio }: { portfolio: Portfolio }) {
                 <span
                   key={s.key}
                   className="trd-alloc__seg"
-                  data-series={`s${(i % 6) + 1}`}
+                  data-series={s.key === 'other' ? 'other' : `s${(i % 6) + 1}`}
                   style={{ flexGrow: s.pct }}
                 />
               ))}
@@ -84,7 +84,11 @@ export function OverviewView({ portfolio }: { portfolio: Portfolio }) {
             <ul className="trd-alloc__legend">
               {segments.map((s, i) => (
                 <li key={s.key}>
-                  <span className="trd-swatch" data-series={`s${(i % 6) + 1}`} aria-hidden />
+                  <span
+                    className="trd-swatch"
+                    data-series={s.key === 'other' ? 'other' : `s${(i % 6) + 1}`}
+                    aria-hidden
+                  />
                   <span className="truncate">
                     {s.key === 'other' ? t('webTrading.other') : clampSym(s.symbol)}
                   </span>
