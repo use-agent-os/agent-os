@@ -37,6 +37,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   The task's status is unchanged (`failed`, `error_class: request_vetoed`).
   A spend-budget stop's message also keeps its original capitalization: it
   used to be shown in lowercase.
+- Scheduler: a cron script killed at its timeout, or because its run was
+  cancelled, has now exited before the run ends. The wait after the kill used
+  to give up after one second whether or not the script had exited, so on a
+  busy Windows machine a run recorded as failed could end while its script
+  was still running and able to write. Only the wait for the script's output
+  pipes, which a process it started can hold open, is still limited to a
+  second.
 
 ## [2026.11.23] - 2026-11-23
 

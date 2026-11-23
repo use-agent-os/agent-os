@@ -120,6 +120,7 @@ async def test_script_exit_racing_with_cleanup_preserves_original_outcome(
     scripts.mkdir()
     (scripts / "exited.py").write_text("pass", encoding="utf-8")
     proc = SimpleNamespace(
+        returncode=0,
         kill=Mock(side_effect=ProcessLookupError),
         communicate=AsyncMock(
             side_effect=[asyncio.CancelledError if cancelled else TimeoutError, (b"", b"")]
@@ -141,6 +142,106 @@ async def test_script_exit_racing_with_cleanup_preserves_original_outcome(
         )
     proc.kill.assert_called_once_with()
     assert proc.communicate.await_count == 2
+
+
+class _SlowToDie:
+    """A live child whose kill takes effect only when the test lands it.
+
+    ``TerminateProcess`` only starts a termination and returns, and a loaded
+    Windows runner took longer than the reap grace to finish one. This keeps
+    the child running after ``kill()`` until :meth:`land_kill`, and stands in
+    for the run's own deadline with :meth:`expire`, so neither depends on how
+    fast the runner is.
+    """
+
+    def __init__(self, proc: asyncio.subprocess.Process) -> None:
+        self.proc = proc
+        self.pid = proc.pid
+        self.kill_requested = False
+        self.reap_gave_up = asyncio.Event()
+        self._deadline = asyncio.Event()
+
+    @property
+    def returncode(self) -> int | None:
+        return self.proc.returncode
+
+    def expire(self) -> None:
+        self._deadline.set()
+
+    def kill(self) -> None:
+        self.kill_requested = True
+
+    def land_kill(self) -> None:
+        self.proc.kill()
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        if not self.kill_requested:
+            # The run's own wait: only the test's deadline or a cancel ends it.
+            await self._deadline.wait()
+            raise TimeoutError
+        try:
+            return await self.proc.communicate()
+        except asyncio.CancelledError:
+            self.reap_gave_up.set()
+            raise
+
+
+@pytest.mark.parametrize("ending", ["timeout", "cancellation"])
+async def test_run_does_not_end_until_a_slow_kill_lands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ending: str
+) -> None:
+    """The reap grace bounds the wait for the child's pipes, which an orphaned
+    grandchild can hold open; it must not bound the wait for the child itself.
+    Until the child has exited it can still write, so the run may not end."""
+    monkeypatch.setenv("AGENTOS_STATE_DIR", str(tmp_path))
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "gated.py").write_text(_GATED_SCRIPT, encoding="utf-8")
+    # Only how soon the drain gives up; nothing below waits on this clock.
+    monkeypatch.setattr(scripts_module, "_REAP_GRACE_S", 0.01)
+    # Windows has no process-group sweep. On POSIX its SIGTERM would land the
+    # kill itself and hide the gap this test is about.
+    monkeypatch.setattr(scripts_module, "_kill_process_group", AsyncMock())
+
+    children: list[_SlowToDie] = []
+    spawn = asyncio.create_subprocess_exec
+
+    async def spawn_slow_to_die(*args, **kwargs):
+        children.append(_SlowToDie(await spawn(*args, **kwargs)))
+        return children[-1]
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn_slow_to_die)
+    pending = asyncio.create_task(run_job_script("gated.py", timeout=30))
+    try:
+        await asyncio.wait_for(_wait_for_file(scripts / "ready"), timeout=10)
+        (child,) = children
+        if ending == "timeout":
+            child.expire()
+        else:
+            pending.cancel()
+        await asyncio.wait_for(child.reap_gave_up.wait(), timeout=10)
+
+        assert child.kill_requested
+        assert not pending.done(), "the run ended while the script it killed was still running"
+
+        child.land_kill()
+        if ending == "timeout":
+            outcome = await asyncio.wait_for(pending, timeout=10)
+            assert outcome == (False, "Script timed out after 30s: gated.py")
+        else:
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(pending, timeout=10)
+        assert child.returncode is not None
+        (scripts / "release").touch()
+        assert not (scripts / "late-write").exists()
+    finally:
+        if not pending.done():
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+        for child in children:
+            if child.returncode is None:
+                child.proc.kill()
+            await child.proc.communicate()
 
 
 _WRAPPER_SCRIPT = (

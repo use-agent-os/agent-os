@@ -334,9 +334,22 @@ def _redact(text: str) -> str:
 #: scheduler shutdown may hang on it.
 _REAP_GRACE_S = 1.0
 
+#: How often the reap checks for the exit of a killed child that outlasted
+#: the grace.
+_EXIT_POLL_S = 0.05
+
 
 async def _kill_and_reap(proc: asyncio.subprocess.Process) -> None:
-    """Kill *proc* and wait briefly for it, tolerating a child that already exited.
+    """Kill *proc* and wait until it has exited, tolerating one that already had.
+
+    Only the wait for the pipes is bounded (see :data:`_REAP_GRACE_S`). The
+    wait for the child itself is not: a kill only starts its termination
+    (``TerminateProcess`` returns at once, and a loaded Windows runner has
+    not reported the exit within the grace), and until the child has exited
+    it can still write, behind a run already recorded as failed. A kill
+    cannot be caught or ignored, so that wait ends. It watches
+    ``returncode``, which is set as soon as the exit is seen, because
+    ``wait()`` also waits for the pipes.
 
     Reaping matters even after a kill: an unreaped child leaves the event
     loop warning about a pending transport on the next GC pass. ``kill`` on a
@@ -352,6 +365,10 @@ async def _kill_and_reap(proc: asyncio.subprocess.Process) -> None:
         await asyncio.wait_for(proc.communicate(), timeout=_REAP_GRACE_S)
     except Exception:
         pass
+    if proc.returncode is None:
+        log.warning("cron.script.exit_pending_after_kill", pid=proc.pid, grace_s=_REAP_GRACE_S)
+        while proc.returncode is None:
+            await asyncio.sleep(_EXIT_POLL_S)
 
 
 async def run_job_script(
