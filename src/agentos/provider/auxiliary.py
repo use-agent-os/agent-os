@@ -316,6 +316,9 @@ class AuxiliaryClient:
                 org_id=inherit.org_id,
                 proxy=inherit.proxy or proxy,
                 provider_routing=dict(inherit.provider_routing or routing),
+                credential_provider=(
+                    getattr(inherit, "credential_provider", "") if inherit.api_key else ""
+                ),
             )
         return ProviderConfig(
             provider=target.provider,
@@ -428,12 +431,16 @@ class AuxiliaryClient:
         )
         self._require_credentials(task, cfg)
         try:
-            provider = self.provider_factory(
-                provider=cfg.provider,
-                model=cfg.model,
-                api_key=cfg.api_key,
-                base_url=cfg.base_url,
-            )
+            factory_kwargs: dict[str, Any] = {
+                "provider": cfg.provider,
+                "model": cfg.model,
+                "api_key": cfg.api_key,
+                "base_url": cfg.base_url,
+            }
+            if cfg.credential_provider:
+                # Whose key this is, when inherited from a router tier.
+                factory_kwargs["credential_provider"] = cfg.credential_provider
+            provider = self.provider_factory(**factory_kwargs)
         except Exception as exc:
             raise AuxiliaryError(
                 f"auxiliary task {task!r} could not build provider {cfg.provider!r}: {exc}",

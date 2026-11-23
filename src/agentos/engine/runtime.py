@@ -1810,6 +1810,12 @@ def _derive_router_tier_fallbacks(
                 org_id=getattr(primary_cfg, "org_id", ""),
                 proxy=getattr(primary_cfg, "proxy", ""),
                 provider_routing=getattr(primary_cfg, "provider_routing", {}),
+                # The primary's key, whichever provider the tier names.
+                credential_provider=str(
+                    getattr(primary_cfg, "credential_provider", "")
+                    or getattr(primary_cfg, "provider", "")
+                    or ""
+                ),
             )
         )
 

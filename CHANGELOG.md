@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+- Provider keys: with `[llm] provider` set to anything but `openrouter` and no
+  `base_url`, AgentOS sent every model request, with that provider's API key
+  in its `Authorization` and `x-api-key` headers, to OpenRouter
+  (`https://openrouter.ai/api/v1`) instead of the provider, in the gateway
+  and in `agentos agent` alike (OpenRouter answered HTTP 401 "Missing
+  Authentication header"). `agentos configure provider` then saved that URL.
+  An unset `base_url` is now the provider's own endpoint, `configure`
+  replaces a saved OpenRouter URL of another provider, and a key of another
+  provider is never sent to an `openrouter.ai` host: such a config fails with
+  a message saying what to change (an OpenRouter key, `sk-or-...`, may still
+  go there under an OpenAI-compatible provider name). If you ran a
+  non-OpenRouter provider without a `base_url`, rotate that provider's API
+  key.
+
 ### Fixed
 - Gateway: a parent session whose interrupted turn restart recovery could
   not resume (tombstoned after its attempts, or the resume was cancelled by
