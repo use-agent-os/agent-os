@@ -15,10 +15,8 @@
   /* One shape language for the whole chat, shared with the composer card:
    * large-radius cards, round icon tiles and pill actions. Buttons inside a
    * chat card read as pills (the same family as the composer's chips). */
-  :root {
-    --chat-radius-card: 20px;
-    --chat-radius-inner: 14px;
-  }
+  /* The radii (--chat-radius-card, --chat-radius-inner) are set in shell.css,
+   * so the frame around the chat shares them. */
   :where(.chat-card, .chat-turn-error, .chat-approval, .chat-side-head) :where(button, a) {
     --radius-control: 9999px;
   }

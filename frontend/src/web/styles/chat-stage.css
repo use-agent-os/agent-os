@@ -1122,23 +1122,3 @@
     display: none;
   }
 }
-
-/* Unlayered: the chat's menus (route and agent pickers, options, slash
- * commands, session actions) share the composer card's shape: a larger
- * radius, a glass surface and rounder rows. */
-.chat-menu {
-  padding: 6px;
-  border-radius: 18px;
-  border-color: color-mix(in oklab, var(--border-control), transparent 40%);
-  background-color: color-mix(in oklab, var(--surface-overlay), transparent 6%);
-  backdrop-filter: blur(18px) saturate(1.2);
-}
-.chat-menu
-  :is([role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio'], [role='option']) {
-  border-radius: 12px;
-}
-@media (forced-colors: active) {
-  .chat-menu {
-    border: 1px solid CanvasText;
-  }
-}
