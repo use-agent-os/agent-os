@@ -14,6 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   level held a slot: two chains of subagents at the spawn depth limit filled
   both pools at the default limits, and the deepest children did not start
   until the inline waits timed out (300 s by default).
+- Sessions: counting the tokens of text that quotes a tokenizer delimiter such
+  as `<|endoftext|>` no longer raises. Such a message failed its turn before
+  it ran, and once the spelling was in a session's transcript (a fetched page
+  about tokenizers, say) every later turn of that session failed too. The
+  spelling is now counted as ordinary text, never as a special token.
 
 ## [2026.11.23] - 2026-11-23
 

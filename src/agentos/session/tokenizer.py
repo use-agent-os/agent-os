@@ -34,10 +34,15 @@ def _get_encoding():
 
 
 def estimate_tokens(text: str) -> int:
-    """Estimate token count. Uses tiktoken cl100k_base if available, else len//4."""
+    """Estimate token count. Uses tiktoken cl100k_base if available, else len//4.
+
+    Text that quotes a special token's spelling (``<|endoftext|>``, ...) is
+    counted as the ordinary text it is: tiktoken would otherwise refuse it,
+    and it must never become a special token either.
+    """
     if len(text) > _FAST_ESTIMATE_CHAR_LIMIT:
         return max(1, len(text) // 4)
     enc = _get_encoding()
     if enc is not None:
-        return max(1, len(enc.encode(text)))
+        return max(1, len(enc.encode(text, disallowed_special=())))
     return max(1, len(text) // 4)
