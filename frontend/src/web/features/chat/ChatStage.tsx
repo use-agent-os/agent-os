@@ -29,7 +29,7 @@ export function StageBackdrop({ className }: { className?: string }) {
 }
 
 /** The AgentOS mark in its lit tile, breathing gently. */
-export function StageMark({ size = 'lg' }: { size?: 'md' | 'lg' }) {
+export function StageMark({ size = 'lg' }: { size?: 'md' | 'lg' | 'xl' }) {
   return (
     <span aria-hidden className="stage-mark" data-size={size}>
       <span className="shell-brand-mark" />
@@ -37,7 +37,21 @@ export function StageMark({ size = 'lg' }: { size?: 'md' | 'lg' }) {
   )
 }
 
-/** The display heading: the greeting (with a lime full stop) over the question. */
+/**
+ * The mark as the stage's mascot: the lit tile with the keyboard hints
+ * floating around it as small bubbles (a plain row on narrow screens; hidden
+ * on touch, where there is no keyboard to hint at).
+ */
+export function StageMascot({ className }: { className?: string }) {
+  return (
+    <div className={cn('stage-mascot', className)}>
+      <StageMark size="xl" />
+      <KeyHints />
+    </div>
+  )
+}
+
+/** The display heading: the greeting (muted, with a lime full stop) over the question. */
 export function StageHeading({ as: Tag = 'h1', sub }: { as?: 'h1' | 'h2'; sub?: ReactNode }) {
   // Read once: the greeting does not flip while the page is open.
   const [greeting] = useState(() => greetingFor(new Date().getHours()))
@@ -69,7 +83,7 @@ export function KeyHints({ className }: { className?: string }) {
   return (
     <ul aria-label={t('webChat.stageHints')} className={cn('stage-hints', className)}>
       {hints.map(([keys, label]) => (
-        <li key={label} className="flex items-center gap-1.5">
+        <li key={label} className="stage-hint">
           <span className="flex items-center gap-0.5">
             {keys.map((k) => (
               <Kbd key={k}>{k}</Kbd>
@@ -84,16 +98,15 @@ export function KeyHints({ className }: { className?: string }) {
 
 /**
  * An existing session with no messages: the new-session stage's language
- * (mark, display heading, hints) above the docked composer, so "new" and
- * "empty" read as one product.
+ * (display heading, the mascot and its hint bubbles) above the docked
+ * composer, so "new" and "empty" read as one product.
  */
 export function EmptyConversation() {
   return (
     <div className="stage-enter relative my-auto flex flex-col items-center gap-6 py-12 text-center">
       <StageBackdrop className="stage-backdrop-contained" />
-      <StageMark />
       <StageHeading as="h2" sub={t('webChat.emptyBody')} />
-      <KeyHints />
+      <StageMascot />
     </div>
   )
 }

@@ -152,6 +152,99 @@
     width: 24px;
     height: 24px;
   }
+  .stage-mark[data-size='xl'] {
+    width: 76px;
+    height: 76px;
+    border-radius: 24px;
+  }
+  .stage-mark[data-size='xl'] > .shell-brand-mark {
+    width: 38px;
+    height: 38px;
+  }
+  @media (max-width: 639px) {
+    .stage-mark[data-size='xl'] {
+      width: 60px;
+      height: 60px;
+      border-radius: 19px;
+    }
+    .stage-mark[data-size='xl'] > .shell-brand-mark {
+      width: 30px;
+      height: 30px;
+    }
+  }
+
+  /* ---- The mascot and its hint bubbles --------------------------------- */
+
+  .stage-mascot {
+    position: relative;
+    display: flex;
+    width: 100%;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+  /* With room and a keyboard, the hints float around the mark as bubbles,
+   * each tied to it by a small dot; elsewhere they are a centred row. */
+  @media (min-width: 640px) and (pointer: fine) {
+    .stage-mascot {
+      min-height: 140px;
+      justify-content: center;
+    }
+    .stage-mascot > .stage-hints {
+      position: absolute;
+      inset: 0;
+      display: block;
+      pointer-events: none;
+    }
+    .stage-mascot .stage-hint {
+      --bubble-float: calc(var(--stage-drift, 26s) / 4);
+      position: absolute;
+      animation: stage-float var(--bubble-float) var(--ease-in-out) infinite alternate;
+    }
+    .stage-mascot .stage-hint:nth-child(1) {
+      top: 30%;
+      right: calc(50% + 70px);
+      border-bottom-right-radius: 6px;
+    }
+    .stage-mascot .stage-hint:nth-child(2) {
+      top: 6%;
+      left: calc(50% + 70px);
+      border-bottom-left-radius: 6px;
+      animation-delay: calc(var(--bubble-float) / -2);
+    }
+    .stage-mascot .stage-hint:nth-child(3) {
+      bottom: 8%;
+      left: calc(50% + 86px);
+      border-top-left-radius: 6px;
+      animation-delay: calc(var(--bubble-float) / -3);
+    }
+    /* The dot that ties a bubble to the mark. */
+    .stage-mascot .stage-hint::after {
+      content: '';
+      position: absolute;
+      width: 5px;
+      height: 5px;
+      border-radius: 9999px;
+      background: var(--border-strong);
+    }
+    .stage-mascot .stage-hint:nth-child(1)::after {
+      right: -9px;
+      bottom: -5px;
+    }
+    .stage-mascot .stage-hint:nth-child(2)::after {
+      left: -9px;
+      bottom: -5px;
+    }
+    .stage-mascot .stage-hint:nth-child(3)::after {
+      left: -9px;
+      top: -5px;
+    }
+  }
+  @keyframes stage-float {
+    to {
+      transform: translateY(-4px);
+    }
+  }
   /* The breathing halo behind the tile. */
   .stage-mark::before {
     content: '';
@@ -190,12 +283,13 @@
 
   /* ---- Display heading ------------------------------------------------- */
 
+  /* Two tones: the greeting recedes (muted), the question carries the line. */
   .stage-title {
     max-width: 18em;
-    font-size: clamp(1.75rem, 1.05rem + 2.3vw, 2.75rem);
+    font-size: clamp(1.875rem, 1.05rem + 2.5vw, 3rem);
     font-weight: 600;
-    line-height: 1.1;
-    letter-spacing: -0.034em;
+    line-height: 1.12;
+    letter-spacing: -0.036em;
   }
   .stage-title-lead,
   .stage-title-rest {
@@ -206,16 +300,16 @@
   .stage-title-lead {
     background-image: linear-gradient(
       180deg,
-      var(--text) 30%,
-      color-mix(in oklab, var(--text), var(--text-muted) 45%)
+      color-mix(in oklab, var(--text), var(--text-muted) 70%),
+      var(--text-muted)
     );
   }
   .stage-title-rest {
     display: block;
     background-image: linear-gradient(
       180deg,
-      color-mix(in oklab, var(--text), var(--text-muted) 55%),
-      var(--text-muted)
+      var(--text) 35%,
+      color-mix(in oklab, var(--text), var(--text-muted) 35%)
     );
   }
   .stage-title-dot {
@@ -325,9 +419,33 @@
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 6px 20px;
+    gap: 8px;
     color: var(--text-muted);
     font-size: 12px;
+  }
+  /* Each hint is a small glass bubble. */
+  .stage-hint {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px 5px 6px;
+    border-radius: 9999px;
+    border: 1px solid var(--border);
+    background: color-mix(in oklab, var(--surface-2), transparent 30%);
+    box-shadow:
+      var(--highlight),
+      0 8px 22px -12px hsl(var(--shadow-color) / 0.5);
+    backdrop-filter: blur(10px);
+    white-space: nowrap;
+  }
+  .stage-hint > span {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  :root[data-theme='light'] .stage-hint {
+    background: color-mix(in oklab, var(--surface-1), transparent 15%);
+    box-shadow: 0 6px 18px -10px hsl(var(--shadow-color) / 0.25);
   }
   @media (pointer: coarse) {
     .stage-hints {

@@ -1,5 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Check, Loader2, Paperclip, Pencil, Route, Settings2, Trash2 } from 'lucide-react'
+import {
+  Check,
+  ListChecks,
+  Loader2,
+  Paperclip,
+  Pencil,
+  Route,
+  Settings2,
+  Trash2,
+} from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -59,7 +68,7 @@ import {
 } from './drafts'
 import { composerEnterAction } from './keys'
 import { enqueueMessage, readQueue, useQueue, writeQueue } from './queue'
-import { AttachmentTray, isUploading, SendButton, ToolbarChip } from './parts'
+import { AttachmentTray, isUploading, SendButton, ToolbarButton, ToolbarChip } from './parts'
 import { useTrayClearance } from './tray-clearance'
 
 const MAX_HEIGHT_PX = 240
@@ -547,16 +556,14 @@ export function Composer(props: ComposerProps) {
               e.target.value = ''
             }}
           />
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label={t('webChat.attach')}
+          <ToolbarButton
+            icon={<Paperclip aria-hidden />}
+            label={t('webChat.attach')}
+            collapse
             onClick={() => fileInput.current?.click()}
-            className="chat-tool-icon size-8 hover:text-text"
-          >
-            <Paperclip />
-          </Button>
+          />
           <RoutePicker sessionKey={sessionKey} />
+          <PlanToggle sessionKey={sessionKey} />
           <CapabilityMenu
             sessionKey={sessionKey}
             visualEffects={visualEffects}
@@ -699,6 +706,23 @@ function RoutePicker({ sessionKey }: { sessionKey: string }) {
   )
 }
 
+/**
+ * Plan mode as a pill toggle beside the route: the composer's quick switch
+ * for the same `plan.mode.*` state the Capabilities menu (and `/plan`) sets.
+ */
+function PlanToggle({ sessionKey }: { sessionKey: string }) {
+  const plan = usePlanMode(sessionKey)
+  return (
+    <ToolbarButton
+      icon={<ListChecks aria-hidden />}
+      label={t('webChat.planMode')}
+      collapse
+      pressed={plan.on}
+      onClick={() => void plan.set(!plan.on)}
+    />
+  )
+}
+
 function CapabilityMenu({
   sessionKey,
   visualEffects,
@@ -714,14 +738,13 @@ function CapabilityMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          size="icon-sm"
-          variant="ghost"
+        <button
+          type="button"
           aria-label={t('webChat.capabilities')}
-          className="chat-tool-icon size-8 hover:text-text data-[state=open]:bg-surface-3 data-[state=open]:text-text"
+          className="chat-tool-icon target"
         >
-          <Settings2 />
-        </Button>
+          <Settings2 aria-hidden />
+        </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
         <CheckItem checked={plan.on} onCheckedChange={(v) => void plan.set(Boolean(v))}>
