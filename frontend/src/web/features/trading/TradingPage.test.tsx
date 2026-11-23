@@ -94,7 +94,7 @@ describe('TradingPage views', () => {
   it('lists holdings and hides every figure behind the privacy switch', async () => {
     renderPage()
     await openView(/holdings/i)
-    const table = await screen.findByRole('table')
+    const table = await screen.findByRole('table', { name: 'Holdings' })
     expect(within(table).getAllByText('ETH')).not.toHaveLength(0)
     expect(within(table).getByText('$4,800.00')).toBeInTheDocument()
 
@@ -220,6 +220,8 @@ describe('TradingPage views', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: ' NVDA ' } })
     fireEvent.submit(screen.getByRole('search'))
     expect((await screen.findAllByTestId('trd-pool')).length).toBeGreaterThan(0)
+    for (const table of screen.getAllByRole('table'))
+      expect(table).toHaveAccessibleName(/priced in/i)
     expect(rpc.callsTo('trading.markets')[0]).toMatchObject({ target: 'NVDA', chainId: 8453 })
     expect(screen.queryByRole('button', { name: /swap/i })).toBeNull()
   })
@@ -232,6 +234,7 @@ describe('TradingPage views', () => {
     renderPage(rpc)
     await openView(/liquidity/i)
     expect(await screen.findAllByTestId('trd-lp')).toHaveLength(2)
+    expect(screen.getByRole('table', { name: 'Liquidity' })).toBeInTheDocument()
     expect(screen.getByText('1 position out of range')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /collect|remove/i })).toBeNull()
     for (const params of rpc.callsTo('trading.lp.book'))
@@ -279,7 +282,7 @@ describe('TradingPage untrusted and edge-case figures', () => {
     const rpc = tradingRpc().handle('trading.portfolio', portfolio({ holdings: [holding(evil)] }))
     renderPage(rpc)
     await openView(/holdings/i)
-    const table = await screen.findByRole('table')
+    const table = await screen.findByRole('table', { name: 'Holdings' })
     expect(table.querySelector('script, img')).toBeNull()
     const name = within(table).getByText(/^<script>/)
     expect(name.textContent!.length).toBeLessThanOrEqual(28)
@@ -299,7 +302,7 @@ describe('TradingPage untrusted and edge-case figures', () => {
     )
     renderPage(rpc)
     await openView(/holdings/i)
-    const table = await screen.findByRole('table')
+    const table = await screen.findByRole('table', { name: 'Holdings' })
     expect(table.textContent).not.toMatch(/\de[+-]?\d/i)
     expect(table.textContent).not.toMatch(/NaN|Infinity|undefined/)
   })
@@ -307,7 +310,7 @@ describe('TradingPage untrusted and edge-case figures', () => {
   it('tones an unchanged price flat, not as a gain (the shared pnlTone)', async () => {
     renderPage()
     await openView(/holdings/i)
-    const table = await screen.findByRole('table')
+    const table = await screen.findByRole('table', { name: 'Holdings' })
     const usdc = within(table)
       .getAllByRole('row')
       .find((r) => /USDC/.test(r.textContent ?? ''))!

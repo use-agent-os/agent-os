@@ -153,7 +153,7 @@ export function LiquidityView({ wallet }: { wallet?: string }) {
         <section aria-label={t('webTrading.viewLiquidity')}>
           <CardHeader title={t('webTrading.viewLiquidity')} className="px-4 pt-4" />
           <p className="trd-note px-4 pb-2">{t('webTrading.liquidityActionsNote')}</p>
-          <table className="trd-table">
+          <table className="trd-table" aria-label={t('webTrading.viewLiquidity')}>
             <thead>
               <tr>
                 <th scope="col" data-col="asset">

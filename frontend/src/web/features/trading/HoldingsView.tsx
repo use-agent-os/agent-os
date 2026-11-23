@@ -98,7 +98,7 @@ export function HoldingsView({ portfolio }: { portfolio: Portfolio }) {
         />
       ) : null}
       <Card padding="none" className="trd-table-wrap">
-        <table className="trd-table">
+        <table className="trd-table" aria-label={t('webTrading.viewHoldings')}>
           <thead>
             <tr>
               <th scope="col" data-col="asset">

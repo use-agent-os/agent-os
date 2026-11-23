@@ -87,7 +87,7 @@ function PoolTable({
     <Card asChild padding="none" className="trd-table-wrap">
       <section aria-label={title}>
         <CardHeader title={title} className="px-4 pt-4" />
-        <table className="trd-table">
+        <table className="trd-table" aria-label={title}>
           <thead>
             <tr>
               <th scope="col" data-col="asset">
