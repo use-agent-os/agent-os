@@ -220,6 +220,18 @@ describe('TradingPage untrusted and edge-case figures', () => {
     expect(table.textContent).not.toMatch(/NaN|Infinity|undefined/)
   })
 
+  it('tones an unchanged price flat, not as a gain (the shared pnlTone)', async () => {
+    renderPage()
+    await openView(/holdings/i)
+    const table = await screen.findByRole('table')
+    const usdc = within(table)
+      .getAllByRole('row')
+      .find((r) => /USDC/.test(r.textContent ?? ''))!
+    expect(usdc.querySelector('[data-col="change"] .trd-num')!.getAttribute('data-tone')).toBe(
+      'flat',
+    )
+  })
+
   it('refetches what is on screen after a trading event', async () => {
     const rpc = tradingRpc()
     renderPage(rpc)

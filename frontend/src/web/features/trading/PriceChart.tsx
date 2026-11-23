@@ -4,7 +4,7 @@ import { t } from '@/i18n'
 import '@/i18n/en/webTrading'
 import { useTheme } from '@/stores/theme'
 import { chartTheme } from '@/views/chat/transcript/chart'
-import { errorText, formatPct, formatPrice } from '@/views/trading/logic'
+import { errorText, formatPct, formatPrice, pnlTone } from '@/views/trading/logic'
 import type { ChartRange } from '@/views/trading/types'
 import { Button } from '@/web/components/ui/button'
 import { Card, CardHeader } from '@/web/components/ui/card'
@@ -136,7 +136,7 @@ export function PriceChart({
             </span>
             <span
               className="trd-num"
-              data-tone={change === null ? undefined : change >= 0 ? 'up' : 'down'}
+              data-tone={pnlTone(change)}
               title={t('webTrading.chartRangeChange')}
             >
               {formatPct(change, { signed: true })}

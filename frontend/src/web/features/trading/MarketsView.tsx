@@ -2,7 +2,7 @@ import { Search, Store } from 'lucide-react'
 import { useId, useState, type FormEvent } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webTrading'
-import { chainName, errorText, formatPct, formatPrice } from '@/views/trading/logic'
+import { chainName, errorText, formatPct, formatPrice, pnlTone } from '@/views/trading/logic'
 import {
   dexLabel,
   feeLabel,
@@ -59,12 +59,7 @@ function PoolRows({ pools, symbol }: { pools: MarketsPool[]; symbol: string }) {
               <span className="trd-num">{formatUsdShort(p.volume24hUsd)}</span>
             </td>
             <td data-col="change" className="trd-cell-num">
-              <span
-                className="trd-num"
-                data-tone={
-                  p.change24hPct === null ? undefined : p.change24hPct >= 0 ? 'up' : 'down'
-                }
-              >
+              <span className="trd-num" data-tone={pnlTone(p.change24hPct)}>
                 {formatPct(p.change24hPct, { signed: true })}
               </span>
             </td>

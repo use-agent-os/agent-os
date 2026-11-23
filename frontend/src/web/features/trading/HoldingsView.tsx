@@ -6,6 +6,7 @@ import {
   formatAmount,
   formatPct,
   formatPrice,
+  pnlTone,
   sortHoldings,
   splitDust,
 } from '@/views/trading/logic'
@@ -48,10 +49,7 @@ function Row({ h, onChart }: { h: Holding; onChart: (h: Holding) => void }) {
         <Money value={h.valueUsd} />
       </td>
       <td data-col="change" className="trd-cell-num">
-        <span
-          className="trd-num"
-          data-tone={h.change24hPct === null ? undefined : h.change24hPct >= 0 ? 'up' : 'down'}
-        >
+        <span className="trd-num" data-tone={pnlTone(h.change24hPct)}>
           {formatPct(h.change24hPct, { signed: true })}
         </span>
       </td>
