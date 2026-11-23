@@ -7,7 +7,9 @@ OS, the shards are exactly 1..N, every shard collected the same number of
 tests, no test file ran in two shards, and the kept counts add up to the
 collection, i.e. the shards partition the suite. ``fit`` folds the reports'
 per-file durations into ``.github/ci-test-timings.json`` so the next split is
-balanced on fresh numbers; OS tables the reports do not cover are kept.
+balanced on fresh numbers; OS tables the reports do not cover are kept. Give it
+the reports of several runs: each shard runs on a runner of its own, whose
+speed varies from run to run, so a file's timing is its median over them.
 
 Standard library only, so it runs on a bare runner without the project env.
 """
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -64,12 +67,16 @@ def check_partition(reports: list[dict[str, Any]]) -> list[str]:
 def fit_timings(
     reports: dict[str, list[dict[str, Any]]], existing: dict[str, dict[str, float]]
 ) -> dict[str, dict[str, float]]:
+    """Each reported OS's table, a file's median over the reports naming it."""
     tables = dict(existing)
     for system, system_reports in reports.items():
-        table: dict[str, float] = {}
+        samples: defaultdict[str, list[float]] = defaultdict(list)
         for report in system_reports:
-            table.update({str(k): round(float(v), 2) for k, v in report["files"].items()})
-        tables[system] = dict(sorted(table.items()))
+            for name, seconds in report["files"].items():
+                samples[str(name)].append(float(seconds))
+        tables[system] = {
+            name: round(statistics.median(values), 2) for name, values in sorted(samples.items())
+        }
     return dict(sorted(tables.items()))
 
 
@@ -85,7 +92,9 @@ def main(argv: list[str] | None = None) -> int:
         metavar="OS",
         help="fail if no report covers this platform.system() name",
     )
-    fit = sub.add_parser("fit", help="refit the committed timings from shard reports")
+    fit = sub.add_parser(
+        "fit", help="refit the committed timings from shard reports (of one run or several)"
+    )
     fit.add_argument("reports", nargs="+", type=Path)
     fit.add_argument("--out", type=Path, default=TIMINGS_PATH)
     args = parser.parse_args(argv)

@@ -114,3 +114,29 @@ async def test_list_by_state_and_prune(storage: SessionStorage) -> None:
     assert await storage.prune_subagent_wakes(_T0 + 50) == 3
     left = {key for key in ("a1", "d1", "x1", "p1", "d2") if await storage.get_subagent_wake(key)}
     assert left == {"p1", "d2"}
+
+
+async def test_list_filters_by_parent_and_reason(storage: SessionStorage) -> None:
+    for key, parent, reason in (
+        ("held", PARENT, "parent_recovering"),
+        ("aborted", PARENT, "parent_aborted"),
+        ("other", OTHER, "parent_recovering"),
+    ):
+        await storage.record_subagent_wake(
+            group_key=key,
+            parent_session_key=parent,
+            parent_task_id=key,
+            message="",
+            provenance={},
+            payloads=[],
+            now_ms=_T0,
+            state="dropped",
+            reason=reason,
+        )
+
+    rows = await storage.list_subagent_wakes(
+        "dropped", parent_session_key=PARENT, reason="parent_recovering"
+    )
+    assert [row["group_key"] for row in rows] == ["held"]
+    assert len(await storage.list_subagent_wakes("dropped", parent_session_key=PARENT)) == 2
+    assert len(await storage.list_subagent_wakes("dropped")) == 3

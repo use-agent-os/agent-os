@@ -1579,13 +1579,29 @@ class SessionStorage:
             rows = await cur.fetchall()
         return [_subagent_wake_row(row) for row in rows]
 
-    async def list_subagent_wakes(self, state: str, limit: int = 200) -> list[dict[str, Any]]:
-        """Wake rows in *state*, oldest first."""
+    async def list_subagent_wakes(
+        self,
+        state: str,
+        limit: int = 200,
+        *,
+        parent_session_key: str | None = None,
+        reason: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Wake rows in *state*, oldest first, optionally of one parent / reason."""
 
+        where = "state = ?"
+        params: list[Any] = [state]
+        if parent_session_key is not None:
+            where += " AND parent_session_key = ?"
+            params.append(parent_session_key)
+        if reason is not None:
+            where += " AND reason = ?"
+            params.append(reason)
+        params.append(limit)
         async with self.conn.execute(
             f"SELECT {', '.join(_SUBAGENT_WAKE_COLUMNS)} FROM subagent_wakes "
-            "WHERE state = ? ORDER BY created_at ASC, rowid ASC LIMIT ?",
-            (state, limit),
+            f"WHERE {where} ORDER BY created_at ASC, rowid ASC LIMIT ?",
+            params,
         ) as cur:
             rows = await cur.fetchall()
         return [_subagent_wake_row(row) for row in rows]
