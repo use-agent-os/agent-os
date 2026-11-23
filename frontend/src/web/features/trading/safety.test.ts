@@ -74,6 +74,12 @@ describe('trading read guard', () => {
       // Every gateway call goes through read(); nothing else touches the client.
       if (file !== path.join(FEATURE_DIR, 'data.ts') && /\brpc\.call\b|\.call\(\s*['"`]/.test(text))
         offenders.push(`${file}: direct rpc.call`)
+      // Inside data.ts the one call is read()'s, on the checked method and stripped params.
+      if (file === path.join(FEATURE_DIR, 'data.ts')) {
+        const calls = [...text.matchAll(/\.call\b/g)].length
+        if (calls !== 1 || !/\brpc\.call<T>\(method, clean\)/.test(text))
+          offenders.push(`${file}: ${calls} gateway calls, expected only read()'s`)
+      }
     }
     expect(offenders).toEqual([])
   })
