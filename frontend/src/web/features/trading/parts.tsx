@@ -178,3 +178,33 @@ export function initiatorLabel(initiator: string): string {
   if (initiator === 'external') return t('webTrading.byExternal')
   return t('webTrading.byYou')
 }
+
+const WHEN = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+
+/** A ledger time (ms, or seconds from older rows) as a local date and time. */
+export function formatWhen(ts: number | string | null | undefined): string {
+  if (ts === null || ts === undefined || ts === '') return '—'
+  const n = typeof ts === 'string' ? Date.parse(ts) : ts < 1e12 ? ts * 1000 : ts
+  return Number.isFinite(n) ? WHEN.format(n) : '—'
+}
+
+const KIND: Record<string, MessageKey> = {
+  swap: 'webTrading.kindSwap',
+  send: 'webTrading.kindSend',
+  revoke: 'webTrading.kindRevoke',
+  bridge: 'webTrading.kindBridge',
+  lp_add: 'webTrading.kindLpAdd',
+  lp_collect: 'webTrading.kindLpCollect',
+  lp_remove: 'webTrading.kindLpRemove',
+  deposit: 'webTrading.kindDeposit',
+  withdraw: 'webTrading.kindWithdraw',
+  approval: 'webTrading.kindApproval',
+  gas: 'webTrading.kindGas',
+  unwrap: 'webTrading.kindUnwrap',
+}
+
+/** An order or ledger entry kind as a word; unknown kinds as their (clamped) id. */
+export function kindLabel(kind: string | null | undefined): string {
+  const key = KIND[kind ?? 'swap']
+  return key ? t(key) : clampText(kind, 16)
+}

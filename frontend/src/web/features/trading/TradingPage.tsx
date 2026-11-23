@@ -17,6 +17,7 @@ import {
   useWallets,
 } from './data'
 import { HoldingsView } from './HoldingsView'
+import { OrdersView } from './OrdersView'
 import { OverviewView } from './OverviewView'
 import { clampText, useBalancePrivacy } from './safety'
 
@@ -26,11 +27,12 @@ import { clampText, useBalancePrivacy } from './safety'
 // says at each one why nothing shows and where to change that; it never
 // offers the change itself. Every gateway call goes through `data.ts`.
 
-export type TradingView = 'overview' | 'holdings'
+export type TradingView = 'overview' | 'holdings' | 'orders'
 
 const VIEWS: readonly { value: TradingView; key: Parameters<typeof t>[0] }[] = [
   { value: 'overview', key: 'webTrading.viewOverview' },
   { value: 'holdings', key: 'webTrading.viewHoldings' },
+  { value: 'orders', key: 'webTrading.viewOrders' },
 ]
 
 function PrivacyToggle() {
@@ -140,7 +142,9 @@ export function TradingPage() {
             </select>
           </label>
         </div>
-        {portfolio.isError && !portfolio.data ? (
+        {view === 'orders' ? (
+          <OrdersView wallet={wallet || undefined} />
+        ) : portfolio.isError && !portfolio.data ? (
           <ErrorState
             title={t('webTrading.errorTitle')}
             message={errorText(portfolio.error)}
