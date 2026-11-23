@@ -195,8 +195,10 @@ function Automations() {
 
 export function OrdersView({ wallet }: { wallet: string | undefined }) {
   const query = useOrders(wallet, true)
-  const open = query.orders.filter(isOrderLive)
-  const finished = query.orders.filter((o) => !isOrderLive(o))
+  // An order waiting for approval has not finished: it can still execute.
+  const isOpen = (o: Order) => isOrderLive(o) || isAwaitingApproval(o)
+  const open = query.orders.filter(isOpen)
+  const finished = query.orders.filter((o) => !isOpen(o))
   const awaiting = open.filter(isAwaitingApproval).length
 
   let orders

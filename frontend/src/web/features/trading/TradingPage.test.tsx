@@ -15,6 +15,7 @@ import {
   holding,
   lpBook,
   lpPosition,
+  order,
   portfolio,
   token,
   totals,
@@ -126,6 +127,18 @@ describe('TradingPage views', () => {
       expect(screen.queryByRole('button', { name })).toBeNull()
     }
     expect(rpc.callsTo('trading.dca.list')).toEqual([{ all: true }])
+  })
+
+  it('lists an order awaiting approval as open and points to the desktop app', async () => {
+    const rpc = tradingRpc().handle('trading.orders.list', {
+      orders: [order({ orderId: 'w1', status: 'awaiting_approval' })],
+    })
+    renderPage(rpc)
+    await openView(/orders/i)
+    const open = await screen.findByRole('region', { name: 'Open orders' })
+    expect(within(open).getAllByTestId('trd-order')).toHaveLength(1)
+    expect(screen.queryByRole('region', { name: 'Finished orders' })).toBeNull()
+    expect(screen.getByRole('note')).toHaveTextContent(/1 order waits for approval/)
   })
 
   it('shows the orders error state', async () => {
