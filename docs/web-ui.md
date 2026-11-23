@@ -138,7 +138,7 @@ The console is chat-first. On screens wider than 768 px it has three columns:
   (with a badge counting approvals, agent questions and runtime issues) and the
   status menu (connection state, theme, keyboard shortcuts, Settings).
 - **List pane**: the Sessions list or the Pages catalog. The catalog is a
-  compact list in two groups (Overview: Home, Usage, Inbox; Work: Sessions,
+  compact list in two groups (Overview: Home, Usage, Trading, Inbox; Work: Sessions,
   Projects, Automations) with Settings at the foot; Sessions shows the session
   count (with a live dot while one runs) and Inbox how many items wait. Arrow
   keys, Home and End move between its links. Activate the selected
@@ -196,6 +196,7 @@ deep links, through reload and browser history.
 | `/projects` | Projects. |
 | `/projects/<project>` | One project. |
 | `/usage` | Usage. |
+| `/trading` | Trading (read-only). |
 | `/automations` | Automations (scheduled jobs). |
 | `/inbox` | Inbox. |
 | `/settings` | Settings. |
@@ -249,6 +250,7 @@ Chat is the center of the console; everything else is a page in the rail's
 | Sessions | `/sessions` | Every session in one list: a summary line (the total, an open/completed/failed/aborted breakdown and how many are executing now), search and filter menus for agent, project and status, a lifecycle chip per row, inline rename, a row menu with Open chat and Open in new tab, bulk delete, move to a project, a new-session dialog that can create an agent, orphan flags. |
 | Projects | `/projects` | A gallery of projects; group sessions, edit each project's shared knowledge (injected into every member session), and start a new chat inside a project at once, under the project's agent. A project's page switches to another project from its breadcrumb. |
 | Usage | `/usage` | Spend for the sessions active in a range as the lead figure, with sessions, the average and the token mix (input, output, cache read, cache write) as one stacked bar; the top sessions charted beside spend by model (a ring and a ranked list); the sessions table; CSV export. The sessions table fits its card: a narrower one drops the cache columns, a phone-width one shows each session as a card of labelled values. |
+| Trading | `/trading` | The trading engine's wallets, read-only: an overview (total value, 24h change, unrealized and realized PnL, gas, the allocation across tokens and each wallet with its networks), holdings with a price chart, orders with DCA plans, price triggers and brackets, the ledger history with PnL, the markets a token trades in, and liquidity positions as a list. A **Hide amounts** switch masks every figure and is remembered in this browser. It says why nothing shows when trading is off, no vault exists, the vault is locked or there is no wallet, and where to change that; swaps, sends, approvals, order changes and every wallet or vault action stay in the desktop app. |
 | Automations | `/automations` | What runs next and the next 24 hours as lanes, then scheduled jobs and their run health; create (blank or from a template), edit, run now, pause, delete, run history. |
 | Inbox | `/inbox` | Everything waiting on you, grouped into approvals, agent questions and runtime issues, answered in place. |
 

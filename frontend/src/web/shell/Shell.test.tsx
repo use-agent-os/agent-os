@@ -140,7 +140,7 @@ describe('pages and titles', () => {
       within(within(pages).getByRole('region', { name }))
         .getAllByRole('link')
         .map((l) => l.querySelector('[data-page-label]')?.textContent)
-    expect(group('Overview')).toEqual(['Home', 'Usage', 'Inbox'])
+    expect(group('Overview')).toEqual(['Home', 'Usage', 'Trading', 'Inbox'])
     expect(group('Work')).toEqual(['Sessions', 'Projects', 'Automations'])
     expect(within(pages).getAllByRole('link').at(-1)).toHaveAccessibleName('Settings')
     // The description is no longer a second line of text: it is the link's
