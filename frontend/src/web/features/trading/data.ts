@@ -3,6 +3,7 @@ import { useEffect, useMemo } from 'react'
 import { useRpc } from '@/app/providers'
 import type { WsRpcClient } from '@/lib/ws-rpc'
 import { useConnection } from '@/stores/connection'
+import { errorCode } from '@/views/trading/logic'
 import type {
   BracketListPayload,
   Chart,
@@ -229,6 +230,58 @@ export function useMarkets(params: MarketsParams | null) {
     refetchOnWindowFocus: false,
     retry: false,
   })
+}
+
+/** A token the engine offers when a symbol names several on one network. */
+export interface SymbolCandidate {
+  address: string
+  symbol: string
+  name: string
+}
+
+/** How many of the engine's candidates the page lists. */
+export const CANDIDATES_MAX = 8
+
+const CANDIDATE_ADDRESS = /^0x[0-9a-fA-F]{40}$/
+
+/**
+ * The tokens an ambiguous symbol could mean, from a `trading.markets` failure
+ * (`trading.invalid` with `details.candidates`, src/agentos/trading/service.py
+ * `resolve_token`), or null for any other failure. The list is third-party
+ * data: only well-formed addresses on the asked network are kept, and only
+ * text fields; the logo URL is never read. Null when none survives, so the
+ * plain error shows instead of an empty choice.
+ */
+export function ambiguousCandidates(
+  err: unknown,
+  chainId: number,
+): { shown: SymbolCandidate[]; omitted: number } | null {
+  if (errorCode(err) !== 'trading.invalid') return null
+  const details = (err as { details?: unknown }).details
+  if (!details || typeof details !== 'object') return null
+  const raw = (details as { candidates?: unknown }).candidates
+  if (!Array.isArray(raw)) return null
+  const seen = new Set<string>()
+  const valid: SymbolCandidate[] = []
+  for (const c of raw as unknown[]) {
+    if (!c || typeof c !== 'object') continue
+    const { address, symbol, name, chainId: chain } = c as Record<string, unknown>
+    if (typeof address !== 'string' || !CANDIDATE_ADDRESS.test(address)) continue
+    if (chain !== undefined && chain !== chainId) continue
+    const key = address.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    valid.push({
+      address,
+      symbol: typeof symbol === 'string' ? symbol : '',
+      name: typeof name === 'string' ? name : '',
+    })
+  }
+  if (valid.length === 0) return null
+  return {
+    shown: valid.slice(0, CANDIDATES_MAX),
+    omitted: Math.max(0, valid.length - CANDIDATES_MAX),
+  }
 }
 
 /** The engine reads LP positions only while asked: keep this off unless its view is open. */

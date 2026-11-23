@@ -401,6 +401,33 @@
     min-width: min(100%, 14rem);
     flex: 1;
   }
+  .trd-candidates {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .trd-candidate {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--border-control);
+    border-radius: 14px;
+    background: color-mix(in oklab, var(--surface-1), transparent 25%);
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .trd-candidate:hover {
+    background: color-mix(in oklab, var(--accent) 8%, var(--surface-2));
+  }
+  .trd-candidate__address {
+    margin-left: auto;
+    flex-shrink: 0;
+  }
   .trd-table [data-col='dex'] {
     max-width: 12rem;
     white-space: nowrap;

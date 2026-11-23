@@ -65,11 +65,14 @@ describe('trading read guard', () => {
     const allowed = new Set<string>(TRADING_READ_METHODS)
     const events =
       /^(trading\.(changed|order\.finished|(dca|trigger|bracket)\.changed|trigger\.fired))$/
+    // Engine error codes the page reads (an ambiguous symbol's candidates), not methods.
+    const errorCodes = /^trading\.invalid$/
     const offenders: string[] = []
     for (const { file, text } of featureSources()) {
       for (const m of text.matchAll(/['"`]((?:trading|wallet)\.[a-zA-Z_.]+)['"`]/g)) {
         const name = m[1] as string
-        if (!allowed.has(name) && !events.test(name)) offenders.push(`${file}: ${name}`)
+        if (!allowed.has(name) && !events.test(name) && !errorCodes.test(name))
+          offenders.push(`${file}: ${name}`)
       }
       if (/refresh\s*:\s*true/.test(text)) offenders.push(`${file}: refresh: true`)
       // Every gateway call goes through read(); nothing else touches the client.

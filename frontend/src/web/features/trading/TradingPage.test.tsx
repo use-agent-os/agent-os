@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import marketsFixture from '@/views/trading/__fixtures__/markets/nvda.json'
 import '@/test/web'
 import { renderWeb } from '@/test/render-web'
+import { RpcError } from '@/lib/ws-rpc'
 import { useConnection } from '@/stores/connection'
 import {
   ETH,
@@ -228,6 +229,106 @@ describe('TradingPage views', () => {
       expect(table).toHaveAccessibleName(/priced in/i)
     expect(rpc.callsTo('trading.markets')[0]).toMatchObject({ target: 'NVDA', chainId: 8453 })
     expect(screen.queryByRole('button', { name: /swap/i })).toBeNull()
+  })
+
+  describe('an ambiguous symbol', () => {
+    const AERO = `0x${'3f'.repeat(20)}`
+    const AERO_FAKE = `0x${'4e'.repeat(20)}`
+
+    function ambiguous(candidates: unknown[], code = 'trading.invalid') {
+      const err = new RpcError("Symbol 'AERO' is ambiguous on Base; pass the address")
+      err.code = code
+      err.details = { candidates }
+      return err
+    }
+
+    function candidate(address: string, over: Record<string, unknown> = {}) {
+      return {
+        chainId: 8453,
+        address,
+        symbol: 'AERO',
+        name: 'Aero',
+        decimals: 18,
+        logoUrl: 'https://evil.example/logo.png',
+        ...over,
+      }
+    }
+
+    async function search(rpc: ReturnType<typeof tradingRpc>, text = 'AERO') {
+      renderPage(rpc)
+      await openView(/markets/i)
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: text } })
+      fireEvent.submit(screen.getByRole('search'))
+    }
+
+    it('lists the candidates, with no Retry, and reads the picked one by address', async () => {
+      const rpc = tradingRpc().handle('trading.markets', (p: Record<string, unknown>) => {
+        if (p.target === 'AERO')
+          throw ambiguous([candidate(AERO), candidate(AERO_FAKE, { name: 'Aero Classic' })])
+        return marketsFixture
+      })
+      await search(rpc)
+      expect(await screen.findByText('Several tokens use this symbol. Pick one:')).toBeVisible()
+      expect(screen.queryByRole('button', { name: /retry/i })).toBeNull()
+      const list = screen.getByRole('list', { name: /several tokens/i })
+      const picks = within(list).getAllByRole('button')
+      expect(picks).toHaveLength(2)
+      expect(picks[0]).toHaveAccessibleName(new RegExp(AERO))
+      expect(picks[0]).toHaveTextContent('0x3f3f…3f3f')
+      expect(document.querySelector('img')).toBeNull()
+
+      fireEvent.click(within(list).getByRole('button', { name: /Aero Classic/ }))
+      expect((await screen.findAllByTestId('trd-pool')).length).toBeGreaterThan(0)
+      expect(rpc.callsTo('trading.markets').at(-1)).toEqual({ target: AERO_FAKE, chainId: 8453 })
+      for (const params of rpc.callsTo('trading.markets'))
+        expect(params).not.toHaveProperty('refresh')
+    })
+
+    it('shows a hostile name as clamped, inert text', async () => {
+      const hostile = `<img src=x onerror="alert(1)">‮DSU​${'A'.repeat(80)}`
+      const rpc = tradingRpc().handle('trading.markets', () => {
+        throw ambiguous([candidate(AERO, { name: hostile, symbol: 'AE‮RO' })])
+      })
+      await search(rpc)
+      const pick = await screen.findByRole('button', { name: /AERO/ })
+      expect(document.querySelector('img')).toBeNull()
+      expect(pick.textContent).not.toMatch(/[‮​]/)
+      expect(pick.textContent).toContain('…')
+      expect(pick.textContent).not.toContain('A'.repeat(60))
+    })
+
+    it('offers no malformed address, and lists at most eight', async () => {
+      const many = Array.from({ length: 10 }, (_, i) =>
+        candidate(`0x${String(i).repeat(40)}`, { name: `Aero ${i}` }),
+      )
+      const rpc = tradingRpc().handle('trading.markets', () => {
+        throw ambiguous([candidate('0xnot-an-address', { name: 'Bad' }), ...many])
+      })
+      await search(rpc)
+      const list = await screen.findByRole('list', { name: /several tokens/i })
+      expect(within(list).getAllByRole('button')).toHaveLength(8)
+      expect(within(list).queryByText('Bad')).toBeNull()
+      expect(screen.getByText(/2 more matches are not listed/)).toBeInTheDocument()
+    })
+
+    it('falls back to the error when no candidate is valid', async () => {
+      const rpc = tradingRpc().handle('trading.markets', () => {
+        throw ambiguous([candidate('0x1234')])
+      })
+      await search(rpc)
+      expect(await screen.findByText('Could not read the markets')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+    })
+
+    it('keeps the plain error state for any other failure', async () => {
+      const rpc = tradingRpc().handle('trading.markets', () => {
+        throw ambiguous([candidate(AERO)], 'trading.unavailable')
+      })
+      await search(rpc)
+      expect(await screen.findByText('Could not read the markets')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+      expect(screen.queryByText(/several tokens/i)).toBeNull()
+    })
   })
 
   it('lists liquidity positions from the cached book, never a fresh scan', async () => {

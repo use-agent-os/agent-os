@@ -1,8 +1,15 @@
 import { Search, Store } from 'lucide-react'
 import { useId, useState, type FormEvent } from 'react'
-import { t } from '@/i18n'
+import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webTrading'
-import { chainName, errorText, formatPct, formatPrice, pnlTone } from '@/views/trading/logic'
+import {
+  chainName,
+  errorText,
+  formatPct,
+  formatPrice,
+  pnlTone,
+  shortAddress,
+} from '@/views/trading/logic'
 import {
   dexLabel,
   feeLabel,
@@ -16,8 +23,8 @@ import { Button } from '@/web/components/ui/button'
 import { Card, CardHeader } from '@/web/components/ui/card'
 import { Input } from '@/web/components/ui/input'
 import { EmptyState, ErrorState, Skeleton } from '@/web/components/ui/states'
-import { useMarkets } from './data'
-import { TokenCell } from './parts'
+import { ambiguousCandidates, useMarkets, type SymbolCandidate } from './data'
+import { TokenCell, TokenMark } from './parts'
 import { PriceChart } from './PriceChart'
 import { clampSym, clampText } from './safety'
 
@@ -119,6 +126,60 @@ function PoolTable({
   )
 }
 
+/**
+ * A symbol several tokens share: the engine names them and the user picks
+ * one, which reads the same network by address. Text only, no logos.
+ */
+function CandidatePicker({
+  candidates,
+  omitted,
+  onPick,
+}: {
+  candidates: SymbolCandidate[]
+  omitted: number
+  onPick: (address: string) => void
+}) {
+  const heading = useId()
+  return (
+    <Card className="flex flex-col gap-3" data-testid="trd-candidates">
+      <p id={heading} className="font-medium">
+        {t('webTrading.marketsAmbiguous')}
+      </p>
+      <ul className="trd-candidates" aria-labelledby={heading}>
+        {candidates.map((c) => (
+          <li key={c.address.toLowerCase()}>
+            <button
+              type="button"
+              className="trd-row-button trd-candidate"
+              title={c.address}
+              onClick={() => onPick(c.address)}
+            >
+              <TokenMark symbol={c.symbol} address={c.address} />
+              <span className="trd-token__text">
+                <span className="trd-token__symbol">
+                  <span className="truncate">{clampSym(c.symbol || c.address.slice(0, 8))}</span>
+                </span>
+                {c.name ? (
+                  <span className="trd-token__sub">
+                    <span className="truncate">{clampText(c.name, 40)}</span>
+                  </span>
+                ) : null}
+              </span>
+              <span className="trd-num trd-mono trd-note trd-candidate__address" aria-hidden>
+                {shortAddress(c.address)}
+              </span>
+              <span className="sr-only">{c.address}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {omitted > 0 ? (
+        <p className="trd-note">{tPlural('webTrading.marketsAmbiguousMore', omitted)}</p>
+      ) : null}
+    </Card>
+  )
+}
+
 export function MarketsView({ chains }: { chains: readonly number[] }) {
   const defaultChain = chains[0] ?? 8453
   const [draft, setDraft] = useState('')
@@ -133,6 +194,9 @@ export function MarketsView({ chains }: { chains: readonly number[] }) {
     const target = draft.trim().slice(0, TARGET_MAX)
     if (target) setParams({ target, chainId })
   }
+
+  const choices =
+    markets.isError && params ? ambiguousCandidates(markets.error, params.chainId) : null
 
   const data = markets.data
   const symbol = data ? clampSym(data.token.symbol) : ''
@@ -183,6 +247,12 @@ export function MarketsView({ chains }: { chains: readonly number[] }) {
           icon={<Store />}
           title={t('webTrading.viewMarkets')}
           description={t('webTrading.marketsIntro')}
+        />
+      ) : choices ? (
+        <CandidatePicker
+          candidates={choices.shown}
+          omitted={choices.omitted}
+          onPick={(address) => setParams({ target: address, chainId: params.chainId })}
         />
       ) : markets.isError ? (
         <ErrorState

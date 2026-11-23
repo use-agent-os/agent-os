@@ -150,6 +150,9 @@ export const webTrading = defineNamespace('webTrading', {
   colTvl: 'TVL',
   colVolume: 'Volume 24h',
   marketsPartial: 'The read stopped early; some pools may be missing.',
+  marketsAmbiguous: 'Several tokens use this symbol. Pick one:',
+  marketsAmbiguousMore_one: '{count} more match is not listed. Search by address to see it.',
+  marketsAmbiguousMore_other: '{count} more matches are not listed. Search by address to see them.',
 
   // Liquidity
   liquidityEmpty: 'No liquidity positions',
