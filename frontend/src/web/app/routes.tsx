@@ -15,7 +15,16 @@ export interface RouteHandle {
 }
 
 export type Destination =
-  'chat' | 'new' | 'home' | 'sessions' | 'projects' | 'usage' | 'trading' | 'automations' | 'inbox' | 'settings'
+  | 'chat'
+  | 'new'
+  | 'home'
+  | 'sessions'
+  | 'projects'
+  | 'usage'
+  | 'trading'
+  | 'automations'
+  | 'inbox'
+  | 'settings'
 
 /** Redirect a legacy URL (by path and query) before rendering a current route. */
 function LegacyAware({ children }: { children: ReactNode }) {
