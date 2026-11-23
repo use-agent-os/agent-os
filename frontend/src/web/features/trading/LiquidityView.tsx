@@ -52,7 +52,9 @@ function Row({ p }: { p: LpPosition }) {
             {p.staked ? <Badge tone="accent">{t('webTrading.lpStaked')}</Badge> : null}
           </span>
           {range ? <span className="trd-note trd-num">{range}</span> : null}
-          {share ? <span className="trd-note trd-num">{share}</span> : null}
+          {share ? (
+            <span className="trd-note trd-num">{t('webTrading.lpShare', { share })}</span>
+          ) : null}
         </span>
       </td>
       <td data-col="amount" className="trd-cell-num">
@@ -68,7 +70,15 @@ function Row({ p }: { p: LpPosition }) {
         <Money value={p.valueUsd} />
       </td>
       <td data-col="fees" className="trd-cell-num">
-        {p.fees ? <Money value={p.fees.usd} /> : <span className="trd-note">—</span>}
+        <span className="flex flex-col items-end">
+          {p.fees ? <Money value={p.fees.usd} /> : <span className="trd-note">—</span>}
+          {p.rewards ? (
+            <Amount
+              className="trd-note"
+              text={`${formatAmountCompact(p.rewards.amount.human)} ${clampSym(p.rewards.token.symbol)}`}
+            />
+          ) : null}
+        </span>
       </td>
     </tr>
   )
@@ -119,6 +129,14 @@ export function LiquidityView({ wallet }: { wallet?: string }) {
               <Money value={totals.feesUsd} />
             </dd>
           </div>
+          {totals.rewardsUsd ? (
+            <div>
+              <dt>{t('webTrading.lpRewards')}</dt>
+              <dd>
+                <Money value={totals.rewardsUsd} />
+              </dd>
+            </div>
+          ) : null}
           <div>
             <dt>{t('webTrading.lpPositions')}</dt>
             <dd className="trd-num">{totals.count}</dd>

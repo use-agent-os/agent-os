@@ -168,6 +168,8 @@ export const webTrading = defineNamespace('webTrading', {
   lpFull: 'Full range',
   lpClosed: 'Closed',
   lpStaked: 'Staked',
+  lpShare: '{share} of pool',
+  lpRewards: 'Rewards',
   outOfRange_one: '{count} position out of range',
   outOfRange_other: '{count} positions out of range',
 } as const)

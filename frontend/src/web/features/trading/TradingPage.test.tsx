@@ -238,6 +238,31 @@ describe('TradingPage views', () => {
       expect(params).not.toHaveProperty('refresh')
   })
 
+  it("labels a pair's pool share and shows gauge rewards, masked with the amounts", async () => {
+    const staked = lpPosition({
+      share: 0.0123,
+      staked: true,
+      rewards: {
+        token: { address: '0xaero', symbol: 'AERO', decimals: 18, priceUsd: 1.1 },
+        amount: { raw: '12500000000000000000', human: '12.5', usd: 13.75 },
+      },
+    })
+    const book = lpBook([staked])
+    book.totals.rewardsUsd = 13.75
+    renderPage(tradingRpc().handle('trading.lp.book', book))
+    await openView(/liquidity/i)
+    const row = await screen.findByTestId('trd-lp')
+    expect(row.textContent).toContain('1.23% of pool')
+    expect(row.textContent).toContain('12.5 AERO')
+    const summary = screen.getByTestId('trd-liquidity')
+    expect(within(summary).getByText('Rewards')).toBeInTheDocument()
+    expect(within(summary).getByText('$13.75')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /hide amounts/i }))
+    expect(row.textContent).not.toContain('12.5 AERO')
+    expect(within(summary).queryByText('$13.75')).toBeNull()
+  })
+
   it('shows the empty liquidity state', async () => {
     renderPage(tradingRpc().handle('trading.lp.book', lpBook([])))
     await openView(/liquidity/i)
