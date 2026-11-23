@@ -65,6 +65,7 @@ export const webTrading = defineNamespace('webTrading', {
   colStatus: 'Status',
   colWhen: 'When',
   colWallet: 'Wallet',
+  colChart: 'Chart',
   unverified: 'Unverified token',
   dustShow_one: 'Show {count} small balance',
   dustShow_other: 'Show {count} small balances',

@@ -257,4 +257,66 @@
   .trd-link:hover {
     color: var(--accent);
   }
+
+  /* ---- Tables ----------------------------------------------------------- */
+  .trd-table-wrap {
+    container: trd-table / inline-size;
+    overflow: hidden;
+  }
+  .trd-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    text-align: left;
+    font-size: var(--text-ui, 0.875rem);
+  }
+  .trd-table th {
+    padding: 12px 12px 8px;
+    color: var(--text-muted);
+    font-size: var(--text-small, 0.8125rem);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .trd-table td {
+    padding: 8px 12px;
+    box-shadow: inset 0 1px 0 var(--border);
+    vertical-align: middle;
+  }
+  .trd-table td:first-child,
+  .trd-table th:first-child {
+    padding-left: 16px;
+  }
+  .trd-table td:last-child,
+  .trd-table th:last-child {
+    padding-right: 12px;
+  }
+  .trd-table tbody tr:hover td {
+    background: color-mix(in oklab, var(--text) 3%, transparent);
+  }
+  .trd-table [data-col='asset'] {
+    max-width: 16rem;
+  }
+  .trd-cell-num {
+    text-align: right;
+    white-space: nowrap;
+  }
+  .trd-cell-action {
+    width: 1%;
+    text-align: right;
+  }
+
+  /* Narrow cards drop the secondary columns; a phone keeps asset, value, PnL. */
+  @container trd-table (max-width: 44rem) {
+    .trd-table :is([data-col='price'], [data-col='change'], [data-col='network']) {
+      display: none;
+    }
+  }
+  @container trd-table (max-width: 30rem) {
+    .trd-table :is([data-col='amount'], [data-col='when'], [data-col='wallet']) {
+      display: none;
+    }
+    .trd-table [data-col='asset'] {
+      max-width: 10rem;
+    }
+  }
 }
