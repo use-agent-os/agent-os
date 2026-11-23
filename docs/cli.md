@@ -1272,7 +1272,8 @@ operator by the token alone. An agent-bound connection is an agent whatever it d
 (`--as-agent` only forces the agent rules for a person). For the agent: an
 order above `trading.approval_threshold_usd` (default 100) or above
 `trading.agent_max_price_impact_pct` (default 5; "price impact" is the
-price vs reference, venue fee and feed skew included) waits as
+price vs reference, venue fee and feed skew included; an order worth at most
+`trading.agent_price_impact_floor_usd`, default 1, skips that check) waits as
 `awaiting_approval` for `trading.approval_ttl_seconds` (15 minutes); an
 order that would push a wallet past `trading.daily_cap_usd` (default 1,000
 per wallet per calendar day — `--all-wallets` spends up to N caps — with an
@@ -1603,7 +1604,8 @@ EIP-55 checksum; set it as a JSON list of the verified addresses, e.g.
 balance read still tries the chain's public node first),
 `approval_threshold_usd`, `daily_cap_usd` (0 = agent swaps off),
 `approval_ttl_seconds`, `agent_max_price_impact_pct`,
-`agent_max_slippage_pct`, `default_slippage_pct` (unset = provider auto),
+`agent_price_impact_floor_usd` (orders worth at most this skip the impact
+ceiling; 0 = none do), `agent_max_slippage_pct`, `default_slippage_pct` (unset = provider auto),
 `unlock_mode` (`auto` | `manual`; the default for `wallet setup` without
 `--mode`, and with `manual` the vault never reads or writes `unlock.key`:
 auto setup or `wallet mode auto` is refused, `wallet.unlock_mode_policy`, and

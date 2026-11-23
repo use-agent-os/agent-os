@@ -20,6 +20,12 @@ Initiator = Literal["manual", "agent"]
 DEFAULT_AGENT_MAX_PRICE_IMPACT_PCT = 5.0
 # An agent may not set slippage above this; the order is refused, not queued.
 DEFAULT_AGENT_MAX_SLIPPAGE_PCT = 5.0
+# An agent order worth at most this many dollars skips the price-impact checks.
+# It cannot move a pool, so ``1 - out_usd / in_usd`` on it measures the route's
+# fee and the reference feed's lag, not impact -- a $0.05 DCA buy parked at
+# 5-9% and expired unattended. The most it can lose to its route is its own
+# value, and the daily cap still bounds the day.
+DEFAULT_AGENT_PRICE_IMPACT_FLOOR_USD = 1.0
 
 
 def _usd(value: float | None) -> float | None:
@@ -72,6 +78,7 @@ def evaluate(
     spent_today_usd: float,
     price_impact_pct: float | None = None,
     max_price_impact_pct: float = DEFAULT_AGENT_MAX_PRICE_IMPACT_PCT,
+    price_impact_floor_usd: float = DEFAULT_AGENT_PRICE_IMPACT_FLOOR_USD,
 ) -> GuardVerdict:
     """Decide what happens to a swap worth ``value_usd``.
 
@@ -86,6 +93,9 @@ def evaluate(
     * Above the per-order threshold, or above the price-impact ceiling, the
       swap waits for a human — and so does one whose price impact could not
       be computed at all.
+    * An order worth at most ``price_impact_floor_usd`` skips the price-impact
+      checks (over the ceiling, unknown, not finite): it is too small to move
+      a pool. ``0`` applies them to every order.
     """
     priced = _usd(value_usd)
     spent_known = _usd(spent_today_usd)
@@ -129,6 +139,9 @@ def evaluate(
             "needs_approval",
             f"order {value:.2f} USD is above the {threshold:.2f} USD threshold",
         )
+    floor = float(price_impact_floor_usd)
+    if floor > 0 and value <= floor:
+        return verdict("allow", f"within limits (under the {floor:.2f} USD price-impact floor)")
     if price_impact_pct is not None and not math.isfinite(float(price_impact_pct)):
         # A quote can carry a "NaN" impact straight through, and a NaN makes
         # the ceiling test below false; it is no more known than a missing one.

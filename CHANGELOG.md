@@ -31,6 +31,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   rounded shapes.
 
 ### Fixed
+- Trading: a tiny agent swap, such as a $0.05 DCA buy, no longer waits for
+  approval because of its price impact. On an order that small the figure is
+  the route's fee and the price feed's lag, not impact, and it often went
+  over the 5% ceiling: the buy parked for approval and, unanswered, expired,
+  so the DCA skipped that run. An agent order worth at most
+  `trading.agent_price_impact_floor_usd` (default 1 USD) now skips the
+  price-impact check; the approval threshold, the daily cap and the
+  unpriced-order rule still apply. Set it to 0 to check every order as
+  before. `trade status` and `trade limits` report it as
+  `agentPriceImpactFloorUsd`.
 - Gateway: a parent session whose interrupted turn restart recovery could
   not resume (tombstoned after its attempts, or the resume was cancelled by
   your message) is now woken once for the subagents the restart abandoned.
