@@ -1184,6 +1184,7 @@ class TradingService:
             "dailyCapUsd": float(getattr(self.config, "daily_cap_usd", 1000.0)),
             "approvalTtlSeconds": int(getattr(self.config, "approval_ttl_seconds", 900)),
             "agentMaxPriceImpactPct": self._agent_max_price_impact(),
+            "agentPriceImpactFloorUsd": self._agent_price_impact_floor(),
             "agentMaxSlippagePct": self._agent_max_slippage(),
         }
 
@@ -1193,6 +1194,15 @@ class TradingService:
                 self.config,
                 "agent_max_price_impact_pct",
                 guardrails.DEFAULT_AGENT_MAX_PRICE_IMPACT_PCT,
+            )
+        )
+
+    def _agent_price_impact_floor(self) -> float:
+        return float(
+            getattr(
+                self.config,
+                "agent_price_impact_floor_usd",
+                guardrails.DEFAULT_AGENT_PRICE_IMPACT_FLOOR_USD,
             )
         )
 
@@ -1225,6 +1235,7 @@ class TradingService:
             # anything; a provider's figure alone is "unknown" (WAL-06).
             price_impact_pct=quote.price_impact_pct if quote.impact_checked else None,
             max_price_impact_pct=self._agent_max_price_impact(),
+            price_impact_floor_usd=self._agent_price_impact_floor(),
         )
 
     def _wallet_lock(self, key: str) -> asyncio.Lock:

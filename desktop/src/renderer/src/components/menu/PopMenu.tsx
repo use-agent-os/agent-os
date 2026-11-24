@@ -145,10 +145,13 @@ function useMenuRoot(
     closeRef.current = onClose
   }, [onClose])
 
-  // Focus lands on the first row when the menu opens, not on every submenu change.
+  // Focus lands on the first row when the menu opens, not on every submenu
+  // change — or on a field the menu leads with (a search), if it marks one.
   useEffect(() => {
     const root = ref.current
-    if (root) menuItems(root)[0]?.focus()
+    if (!root) return
+    const lead = root.querySelector<HTMLElement>('[data-menu-autofocus]')
+    ;(lead ?? menuItems(root)[0])?.focus()
   }, [ref])
 
   useEffect(() => {
@@ -174,6 +177,9 @@ function useMenuRoot(
         closeRef.current()
         return
       }
+      // In a field the caret owns Home and End; the arrows still reach the rows.
+      const typing = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement
+      if (typing && (e.key === 'Home' || e.key === 'End')) return
       const menu = (inside && active?.closest<HTMLElement>('[role="menu"]')) || root
       const items = menuItems(menu)
       if (items.length === 0) return
@@ -342,9 +348,13 @@ export function PopMenu({
     )
   }, [place])
 
+  // Unmeasured, the menu is transparent rather than `visibility: hidden`: the
+  // opening focus lands in this same commit, before the measure re-renders,
+  // and a browser refuses focus to an element that is not visible. Nothing is
+  // painted in between, since the layout effect places it before paint.
   const style: CSSProperties = pos
     ? { left: pos.left, top: pos.top }
-    : { left: 0, top: 0, visibility: 'hidden' }
+    : { left: 0, top: 0, opacity: 0, pointerEvents: 'none' }
 
   return createPortal(
     <MenuContext.Provider value={ctx}>

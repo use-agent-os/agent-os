@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Web UI: a read-only Trading page at `/trading` shows the trading engine's
+  wallets in six views: Overview (total value, PnL, gas and allocation),
+  Holdings with a price chart, Orders with DCA plans, price triggers and
+  brackets, History with a PnL summary, Markets (the pools a token trades
+  in) and Liquidity positions. **Hide amounts** masks balances, values and
+  PnL and is remembered in the browser. It says why nothing shows when
+  trading is off or the vault is locked. The page has no fund-moving or
+  state-changing actions: swaps, sends, approvals, order changes and every
+  wallet or vault action stay in the desktop app and the CLI. Its reads do
+  what any engine read does: with `unlock_mode = "auto"` a read can unlock
+  the vault, the liquidity book refreshes in the background while shown,
+  and a Markets search queries GeckoTerminal.
+
+### Fixed
+- Desktop: the expand/collapse chevron on each Automations row now sits with
+  the row's action buttons, centred on them, instead of riding high at the
+  end of the name line.
+
+## [2026.11.24] - 2026-11-24
+
 ### Security
 - Provider keys: with `[llm] provider` set to anything but `openrouter` and no
   `base_url`, AgentOS sent every model request, with that provider's API key
@@ -22,18 +43,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   key.
 
 ### Added
-- Web UI: a read-only Trading page at `/trading` shows the trading engine's
-  wallets in six views: Overview (total value, PnL, gas and allocation),
-  Holdings with a price chart, Orders with DCA plans, price triggers and
-  brackets, History with a PnL summary, Markets (the pools a token trades
-  in) and Liquidity positions. **Hide amounts** masks balances, values and
-  PnL and is remembered in the browser. It says why nothing shows when
-  trading is off or the vault is locked. The page has no fund-moving or
-  state-changing actions: swaps, sends, approvals, order changes and every
-  wallet or vault action stay in the desktop app and the CLI. Its reads do
-  what any engine read does: with `unlock_mode = "auto"` a read can unlock
-  the vault, the liquidity book refreshes in the background while shown,
-  and a Markets search queries GeckoTerminal.
+- Desktop app, Trade tab: the holdings table (six rows or more) now has a
+  small search field in the bar above it, on the desk and in the chat's BOOK
+  alike. Type part of a token's symbol or name, or a `0x` run of its contract
+  address; Return opens the first match's chart and Escape clears. The search
+  narrows what the dust, unverified and junk chips show and never unfolds
+  them; when only a folded row matches, the table says so.
+- Desktop app, Trade tab: a long wallet list (six wallets or more) now has a
+  search field, in the desk's wallet rail and in the wallet switcher above the
+  chat's BOOK alike. Type part of a wallet's label or address, with or without
+  `0x`, or paste the short form the desk prints (`0xDd58…9b19`); Return picks
+  the first match. Opening a wallet menu from a button also puts the keyboard
+  in the menu again, which a menu's first frame had been refusing.
 
 ### Changed
 - Web UI: the chat has a fresh look. A new chat opens on a two-tone headline
@@ -43,8 +64,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   The thread, menus, session sidebar and icon rail, session dialogs, chat
   header, side panel, pending queue and approval card all share the same
   rounded shapes.
+- Desktop trading: Holdings now hides unverified tokens (the ones marked ⚠,
+  on no token list) by default. A new "unverified" chip in the Hidden bar
+  shows how many there are and brings them back into the table. They still
+  count in the portfolio totals; only junk and dust are left out of those.
 
 ### Fixed
+- Trading: a tiny agent swap, such as a $0.05 DCA buy, no longer waits for
+  approval because of its price impact. On an order that small the figure is
+  the route's fee and the price feed's lag, not impact, and it often went
+  over the 5% ceiling: the buy parked for approval and, unanswered, expired,
+  so the DCA skipped that run. An agent order worth at most
+  `trading.agent_price_impact_floor_usd` (default 1 USD) now skips the
+  price-impact check; the approval threshold, the daily cap and the
+  unpriced-order rule still apply. Set it to 0 to check every order as
+  before. `trade status` and `trade limits` report it as
+  `agentPriceImpactFloorUsd`.
 - Gateway: a parent session whose interrupted turn restart recovery could
   not resume (tombstoned after its attempts, or the resume was cancelled by
   your message) is now woken once for the subagents the restart abandoned.

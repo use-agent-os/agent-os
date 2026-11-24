@@ -368,6 +368,24 @@ export function splitDust(holdings: readonly Holding[]): { kept: Holding[]; dust
   return { kept, dust }
 }
 
+/** A token on none of the chain's lists: the ⚠ beside its ticker. Folded away
+ *  by default so a launch someone airdropped does not sit next to ETH, but
+ *  (unlike junk) still counted in the totals: the engine kept it because it
+ *  trades, or because the wallet touched it. The native coin is never one. */
+export function isUnverified(h: Holding): boolean {
+  return !h.token.verified && !h.token.native
+}
+
+export function splitUnverified(holdings: readonly Holding[]): {
+  kept: Holding[]
+  unverified: Holding[]
+} {
+  const kept: Holding[] = []
+  const unverified: Holding[] = []
+  for (const h of holdings) (isUnverified(h) ? unverified : kept).push(h)
+  return { kept, unverified }
+}
+
 export function sortHoldings(
   holdings: readonly Holding[],
   key: HoldingSort,
@@ -552,6 +570,44 @@ export function sameAddress(a: string | null | undefined, b: string | null | und
  */
 export function activeFirst<T extends { primary: boolean }>(wallets: readonly T[]): T[] {
   return [...wallets].sort((a, b) => Number(b.primary) - Number(a.primary))
+}
+
+/**
+ * Whether a wallet answers a search typed over the wallet list: its label, or
+ * its address, whole or any run of it, with or without the 0x, or written
+ * short the way the desk prints it ("0xDd58…9b19", "dd58...9b19"). Case never
+ * matters: addresses come checksummed and get typed lowercase.
+ */
+export function walletMatches(wallet: { label: string; address: string }, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  if (wallet.label.toLowerCase().includes(q)) return true
+  const address = wallet.address.toLowerCase()
+  if (address.includes(q)) return true
+  const parts = q.split(/\s*(?:…|\.{2,})\s*/)
+  if (parts.length !== 2) return false
+  const bare = address.replace(/^0x/, '')
+  const head = (parts[0] ?? '').replace(/^0x/, '')
+  const tail = parts[1] ?? ''
+  if (!head && !tail) return false
+  return bare.startsWith(head) && bare.endsWith(tail) && head.length + tail.length <= bare.length
+}
+
+/**
+ * Whether a holding answers a search typed over the holdings table: its
+ * symbol or its name, any run of either, case aside. A query that starts with
+ * 0x is a contract address, whole or any run of it; short queries never go
+ * looking inside addresses, where nearly any two letters would match.
+ */
+export function holdingMatches(
+  holding: { token: { symbol: string; name: string; address: string } },
+  query: string,
+): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  const { symbol, name, address } = holding.token
+  if (symbol.toLowerCase().includes(q) || name.toLowerCase().includes(q)) return true
+  return q.startsWith('0x') && q.length > 2 && address.toLowerCase().includes(q)
 }
 
 /** A sane label for a wallet with none. */

@@ -212,6 +212,7 @@ approval_threshold_usd = 100.0       # agent orders above this wait for approval
 daily_cap_usd = 1000.0               # per wallet, agent-initiated swaps only; 0 = agent swaps off
 approval_ttl_seconds = 900           # unanswered approvals expire
 agent_max_price_impact_pct = 5.0     # agent orders above this wait for approval even under the threshold
+agent_price_impact_floor_usd = 1.0   # agent orders worth at most this skip the impact ceiling; 0 = none do
 agent_max_slippage_pct = 5.0         # an agent asking for more slippage is refused
 default_slippage_pct = 0.5           # omit to let the provider pick (auto slippage)
 unlock_mode = "auto"                 # or "manual": the vault never stores its password, and auto is refused
@@ -469,7 +470,7 @@ Code-enforced, and applied to agent-initiated swaps only.
 | --- | --- | --- |
 | Per-order threshold | 100 USD | order parks as `awaiting_approval`; desktop notifies you |
 | Daily cap per wallet | 1,000 USD (local calendar day) | order is `rejected` outright, not queued; the cap is per wallet, so `--all-wallets` spends up to N caps; an order counts as max(in, out) in USD — but only while the sell side has a feed price; `spentTodayUsd` counts confirmed spend plus orders still in flight, so a burst cannot race its own confirmations; **0 switches agent swaps off** (there is no "unlimited") |
-| Price-impact ceiling | 5 % (`agent_max_price_impact_pct`) | order parks as `awaiting_approval` even under the USD threshold. "Price impact" here is the price vs reference (it includes the venue fee and feed skew), not pool depth alone. A provider's own figure (Uniswap's `priceImpact`) is cross-checked against the engine's feed and the larger one counts; when the feed cannot price a side the impact is unknown and the order parks, whichever provider quoted it |
+| Price-impact ceiling | 5 % (`agent_max_price_impact_pct`) | order parks as `awaiting_approval` even under the USD threshold. "Price impact" here is the price vs reference (it includes the venue fee and feed skew), not pool depth alone. A provider's own figure (Uniswap's `priceImpact`) is cross-checked against the engine's feed and the larger one counts; when the feed cannot price a side the impact is unknown and the order parks, whichever provider quoted it. An order worth at most `agent_price_impact_floor_usd` (1 USD; 0 = none) skips this check: it cannot move a pool, so what the check measures on it is the fee and the feed's lag, and a $0.05 DCA buy would otherwise park and expire |
 | Slippage ceiling | 5 % (`agent_max_slippage_pct`) | quote or swap refused with `trading.slippage_too_high`; nothing is queued |
 | Unpriced order | — | treated as above threshold (fails closed). An agent swap whose **sell** side has no usable feed price (none, zero or non-finite) is unpriced even when the buy side has one: the token you receive never sizes the order on its own. The order shows its value as unknown, not $0 |
 | Approval TTL | 15 min | `expired`; agent is told |
@@ -488,7 +489,8 @@ order re-quotes it; if the market moved that much since you approved, it
 goes back to `awaiting_approval` with reason `price moved since approval;
 please re-approve` instead of executing. `trading.limits` and
 `trading.status` report every limit (`approvalThresholdUsd`, `dailyCapUsd`,
-`approvalTtlSeconds`, `agentMaxPriceImpactPct`, `agentMaxSlippagePct`) and
+`approvalTtlSeconds`, `agentMaxPriceImpactPct`, `agentPriceImpactFloorUsd`,
+`agentMaxSlippagePct`) and
 `spentTodayUsd`.
 
 Every quote result and order carries `provider` (`aggregator` / `uniswap`),

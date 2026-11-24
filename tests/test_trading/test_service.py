@@ -96,6 +96,7 @@ class TestStatusAndWallets:
             "dailyCapUsd": 1000.0,
             "approvalTtlSeconds": 900,
             "agentMaxPriceImpactPct": 5.0,
+            "agentPriceImpactFloorUsd": 1.0,
             "agentMaxSlippagePct": 5.0,
         }
         assert status["initialized"] is False and status["unlocked"] is False
@@ -1275,6 +1276,30 @@ class TestSafetyRails:
         )
         assert orders[0]["status"] == "awaiting_approval"
         assert "impact" in orders[0]["reason"]
+
+    async def test_a_tiny_agent_order_is_not_parked_for_its_impact(
+        self, funded_service: TradingService, fake_aggregator: FakeAggregator
+    ) -> None:
+        # The same 7.5% haircut on $0.50 is fee and feed lag, not impact: a
+        # DCA buy this size parked for approval and expired unattended.
+        service = funded_service
+        fake_aggregator.amount_out = 231_250_000_000_000
+        orders = await service.swap(
+            chain=BASE,
+            wallets=None,
+            token_in="USDC",
+            token_out="WETH",
+            amount_in="0.5",
+            amount_pct=None,
+            slippage_pct=None,
+            initiator="agent",
+            session_key=None,
+            note=None,
+        )
+        assert orders[0]["status"] == "submitted"
+        row = service.ledger.get_order(orders[0]["orderId"])
+        assert row is not None and row["price_impact_pct"] > 5.0
+        assert service._limits_dict()["agentPriceImpactFloorUsd"] == 1.0
 
     async def test_zero_cap_switches_agent_swaps_off(self, funded_service: TradingService) -> None:
         service = funded_service

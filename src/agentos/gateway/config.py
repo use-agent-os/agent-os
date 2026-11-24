@@ -2672,6 +2672,10 @@ class TradingConfig(BaseSettings):
     # Agent orders above this price impact wait for approval even under the
     # USD threshold; an agent asking for more slippage than this is refused.
     agent_max_price_impact_pct: float = Field(default=5.0, ge=0, le=100)
+    # Agent orders worth at most this many USD skip the price-impact ceiling:
+    # too small to move a pool, their "impact" is the route's fee and the
+    # price feed's lag. 0 applies the ceiling to every order.
+    agent_price_impact_floor_usd: float = Field(default=1.0, ge=0)
     agent_max_slippage_pct: float = Field(default=5.0, ge=0, le=50)
     # None = the AgentOS DEX default (0.5%).
     default_slippage_pct: float | None = Field(default=None, ge=0, le=50)

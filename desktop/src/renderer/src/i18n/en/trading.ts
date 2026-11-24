@@ -53,6 +53,9 @@ export const trading = {
   'trading.rail.export': 'Export',
   'trading.rail.remove': 'Remove',
   'trading.rail.explorer': 'View on explorer',
+  'trading.rail.search': 'Search label or address',
+  'trading.rail.search.clear': 'Clear search',
+  'trading.rail.search.none': 'No wallet matches',
 
   // Overview
   'trading.head.switch': 'Switch wallet',
@@ -83,8 +86,14 @@ export const trading = {
   'trading.holdings.empty': 'Nothing held yet',
   'trading.holdings.empty.body': 'Send ETH or USDC to a wallet address and it shows up here.',
   'trading.holdings.hidden.label': 'Hidden',
+  'trading.holdings.search': 'Search assets',
+  'trading.holdings.search.none': 'No asset matches',
+  'trading.holdings.search.folded': '{count} more folded away under the chips',
   'trading.holdings.hidden.dust': 'dust',
   'trading.holdings.hidden.dust.help': 'Positions worth under',
+  'trading.holdings.hidden.unverified': 'unverified',
+  'trading.holdings.hidden.unverified.help':
+    'Tokens on no token list (marked ⚠). Folded away by default, still counted in the totals.',
   'trading.holdings.hidden.junk': 'junk',
   'trading.holdings.hidden.junk.help':
     'Airdrops nobody lists or trades and you never touched. Shown rows are marked and never counted.',

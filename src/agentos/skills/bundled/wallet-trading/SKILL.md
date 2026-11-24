@@ -120,7 +120,7 @@ Enforced by the engine (`limits`):
 |---|---|---|
 | Approval threshold | `trading.approval_threshold_usd` (100) | above it → `awaiting_approval`, expires after `trading.approval_ttl_seconds` (15 min) |
 | Daily cap per wallet | `trading.daily_cap_usd` (1,000) | over it → `rejected` `daily cap …`; value = max(in, out), in-flight orders count; `--all-wallets` = N caps; `0` = agent swaps off |
-| Price-impact ceiling | `trading.agent_max_price_impact_pct` (5) | above it → waits for approval |
+| Price-impact ceiling | `trading.agent_max_price_impact_pct` (5) | above it → waits (≤ $1 exempt) |
 | Slippage ceiling | `trading.agent_max_slippage_pct` (5) | above it → `trading.slippage_too_high`, nothing queued |
 | Unpriced order | — | no USD price → waits for approval |
 

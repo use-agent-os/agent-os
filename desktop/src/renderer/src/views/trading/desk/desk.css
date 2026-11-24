@@ -3653,12 +3653,29 @@ button.trd-tool[data-tone='danger']:hover {
   font-size: 12px;
   font-weight: 600;
 }
+/* The disclosure chevron sits last in the controls column, so it centres
+   on the same line as the action buttons instead of riding the name row. */
 .trd-auto__chev {
+  display: grid;
   flex-shrink: 0;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   color: var(--dim);
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.trd-auto__chev:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+.trd-auto__chev svg {
   transition: transform 140ms ease-out;
 }
-.trd-auto__item[data-open] .trd-auto__chev {
+.trd-auto__item[data-open] .trd-auto__chev svg {
   transform: rotate(180deg);
 }
 .trd-auto__line {
