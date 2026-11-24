@@ -21,6 +21,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   and a Markets search queries GeckoTerminal.
 
 ### Fixed
+- Desktop: the Trade tab beside the chat no longer shows the allocation bar
+  under the portfolio figures. The column is too narrow to label its
+  segments, so it read as unlabelled grey blocks. The full Desk keeps the
+  bar with its legend.
 - Desktop: the expand/collapse chevron on each Automations row now sits with
   the row's action buttons, centred on them, instead of riding high at the
   end of the name line.

@@ -42,7 +42,6 @@ import { Liquidity } from '../Liquidity'
 import { Markets } from '../Markets'
 import { NetworkPips } from '../NetworkPips'
 import {
-  allocationSegments,
   EMPTY_TOTALS,
   errorText,
   formatPct,
@@ -215,7 +214,6 @@ export function Book({
   const deltaTone = balancesHidden ? 'flat' : pnlTone(totals.change24hUsd)
   const Arrow = deltaTone === 'down' ? TrendingDown : TrendingUp
   const unpriced = portfolio.data?.unpricedCount ?? 0
-  const segments = allocationSegments(holdings)
   // The switcher names every wallet and what it holds. A portfolio scoped to
   // one wallet only carries that one, and a dropdown that showed one figure
   // beside "All wallets" would be lying, so the unscoped totals are fetched
@@ -463,18 +461,6 @@ export function Book({
                   <Stat label={t('trading.overview.realized')} value={totals.realizedUsd} toned />
                   <Stat label={t('trading.overview.cost')} value={totals.costUsd} />
                   <Stat label={t('trading.overview.gas')} value={totals.gasUsd} />
-                </div>
-                <div className="trd-alloc">
-                  <div className="trd-alloc__bar" aria-hidden>
-                    {segments.map((s, i) => (
-                      <span
-                        key={s.key}
-                        style={{ ['--i' as string]: i, flexBasis: `${s.pct}%` }}
-                        data-other={s.symbol === 'other' ? 'true' : undefined}
-                        title={`${s.symbol} ${formatPct(s.pct)}`}
-                      />
-                    ))}
-                  </div>
                 </div>
               </section>
 

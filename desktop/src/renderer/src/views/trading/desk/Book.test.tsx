@@ -170,6 +170,25 @@ describe('Book · the desk beside the chat', () => {
     expect(screen.getByTestId('book-unpriced')).toHaveTextContent('3 unpriced')
   })
 
+  it('leaves the allocation meter to the full desk: the column has no room for its legend', async () => {
+    rpcCall.mockImplementation(async (method: string) => {
+      if (method === 'trading.portfolio')
+        return {
+          totals: totals(900),
+          holdings: [holding({ token: USDC })],
+          wallets: [{ wallet: WALLET, totals: totals(900) }],
+          unpricedCount: 0,
+          syncing: false,
+        }
+      if (method === 'trading.status') return { enabled: true, chains: [], providers: [] }
+      if (method === 'wallet.list') return { wallets: [WALLET], primary: WALLET.address }
+      return {}
+    })
+    render()
+    const hero = (await screen.findByTestId('book-delta')).closest('.trd-hero')!
+    expect(hero.querySelector('.trd-alloc')).toBeNull()
+  })
+
   it('says nothing about unpriced positions when every one has a price', async () => {
     render()
     await screen.findByTestId('wallet-switcher')
