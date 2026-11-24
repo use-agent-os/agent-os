@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Desktop: the expand/collapse chevron on each Automations row now sits with
+  the row's action buttons, centred on them, instead of riding high at the
+  end of the name line.
+
 ## [2026.11.24] - 2026-11-24
 
 ### Security
