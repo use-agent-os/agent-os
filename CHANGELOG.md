@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Web UI: a read-only Trading page at `/trading` shows the trading engine's
+  wallets in six views: Overview (total value, PnL, gas and allocation),
+  Holdings with a price chart, Orders with DCA plans, price triggers and
+  brackets, History with a PnL summary, Markets (the pools a token trades
+  in) and Liquidity positions. **Hide amounts** masks balances, values and
+  PnL and is remembered in the browser. It says why nothing shows when
+  trading is off or the vault is locked. The page has no fund-moving or
+  state-changing actions: swaps, sends, approvals, order changes and every
+  wallet or vault action stay in the desktop app and the CLI. Its reads do
+  what any engine read does: with `unlock_mode = "auto"` a read can unlock
+  the vault, the liquidity book refreshes in the background while shown,
+  and a Markets search queries GeckoTerminal.
+
 ### Fixed
 - Desktop: the expand/collapse chevron on each Automations row now sits with
   the row's action buttons, centred on them, instead of riding high at the

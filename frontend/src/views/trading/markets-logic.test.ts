@@ -26,7 +26,7 @@ import {
 } from './markets-logic'
 import type { MarketsPayload, SearchToken } from './types'
 
-const FIXTURE = 'src/renderer/src/views/trading/__fixtures__/markets/nvda.json'
+const FIXTURE = 'src/views/trading/__fixtures__/markets/nvda.json'
 const NVDA_MARKETS = JSON.parse(readFileSync(FIXTURE, 'utf8')) as MarketsPayload
 const NVDA_ADDRESS = '0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec'
 

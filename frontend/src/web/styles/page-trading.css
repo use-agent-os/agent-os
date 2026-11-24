@@ -1,0 +1,516 @@
+/* Trading (read-only): figures, allocation bar, wallet rows, tables, chips
+ * and the chart frame. Imported by the Trading feature only, so it ships with
+ * its lazy chunk. Cards here take the chat stage's glass (a translucent
+ * surface lit from the top) at the console's 20px card / 14px row radii.
+ * Colours come from the tokens; the global reduced-motion rule in base.css
+ * makes every transition instant. */
+
+@layer components {
+  [data-testid='trading-page'] [data-slot='card'] {
+    border-color: color-mix(in oklab, var(--border-control), transparent 50%);
+    border-radius: 20px;
+    background-color: color-mix(in oklab, var(--surface-1), transparent 12%);
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--surface-2), transparent 30%),
+      transparent 70%
+    );
+    backdrop-filter: blur(18px) saturate(1.2);
+  }
+
+  /* ---- Series colours (allocation) -------------------------------------- */
+  .trd-alloc__seg,
+  .trd-swatch {
+    --trd-c: var(--accent);
+  }
+  [data-series='s2'] {
+    --trd-c: var(--info);
+  }
+  [data-series='s3'] {
+    --trd-c: var(--hl-builtin);
+  }
+  [data-series='s4'] {
+    --trd-c: var(--hl-attr);
+  }
+  [data-series='s5'] {
+    --trd-c: var(--hl-number);
+  }
+  [data-series='s6'] {
+    --trd-c: var(--hl-keyword);
+  }
+  /* The folded tail: neutral, so it never takes a holding's colour. */
+  [data-series='other'] {
+    --trd-c: var(--text-muted);
+  }
+
+  /* ---- Header note, toolbar --------------------------------------------- */
+  .trd-readonly {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: var(--text-small, 0.8125rem);
+  }
+  .trd-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .trd-views {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .trd-select {
+    height: 32px;
+    max-width: min(18rem, 100%);
+    padding: 0 30px 0 12px;
+    border: 1px solid var(--border-control);
+    border-radius: 9999px;
+    background: color-mix(in oklab, var(--surface-1), transparent 25%);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--text-ui, 0.875rem);
+    text-overflow: ellipsis;
+  }
+  .trd-select:focus-visible,
+  .trd-link:focus-visible,
+  .trd-row-button:focus-visible {
+    outline: 2px solid var(--focus-ring, var(--accent));
+    outline-offset: 2px;
+  }
+
+  /* ---- Figures ---------------------------------------------------------- */
+  .trd-figures {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+    gap: 12px;
+  }
+  .trd-figure {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    container-type: inline-size;
+  }
+  /* Scales with its card so a five-figure total fits a narrow column. */
+  .trd-figure__value {
+    overflow: hidden;
+    font-size: clamp(1.125rem, 12cqi, var(--text-stat, 1.5rem));
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .trd-num {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .trd-num[data-tone='up'] {
+    color: var(--ok);
+  }
+  .trd-num[data-tone='down'] {
+    color: var(--danger);
+  }
+  .trd-num[data-masked] {
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+  }
+  .trd-mono {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+  }
+  .trd-note {
+    color: var(--text-muted);
+    font-size: var(--text-small, 0.8125rem);
+  }
+  .trd-sync {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: var(--text-small, 0.8125rem);
+  }
+  .trd-sync__spin {
+    animation: trd-spin 1s linear infinite;
+  }
+  @keyframes trd-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .trd-sync__spin {
+      animation: none;
+    }
+  }
+  .trd-offline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .trd-offline > svg {
+    color: var(--warn);
+  }
+  .trd-read-warn {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+  .trd-read-warn__head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .trd-read-warn__head > svg {
+    margin-top: 1px;
+    color: var(--warn);
+  }
+  .trd-read-warn__details {
+    color: var(--text-muted);
+  }
+  .trd-read-warn__details > summary {
+    cursor: pointer;
+    width: fit-content;
+    border-radius: 4px;
+  }
+  .trd-read-warn__details > summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .trd-read-warn__details ul {
+    margin-top: 4px;
+    padding-left: 18px;
+    list-style: disc;
+    overflow-wrap: anywhere;
+  }
+
+  /* ---- Allocation ------------------------------------------------------- */
+  .trd-alloc {
+    display: flex;
+    height: 10px;
+    gap: 3px;
+    overflow: hidden;
+    border-radius: 9999px;
+  }
+  .trd-alloc__seg {
+    min-width: 3px;
+    flex-basis: 0;
+    border-radius: 9999px;
+    background: var(--trd-c);
+  }
+  .trd-alloc__legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    font-size: var(--text-small, 0.8125rem);
+  }
+  .trd-alloc__legend li {
+    display: flex;
+    min-width: 0;
+    max-width: 12rem;
+    align-items: center;
+    gap: 6px;
+  }
+  .trd-swatch {
+    width: 0.625rem;
+    height: 0.625rem;
+    flex-shrink: 0;
+    border-radius: 3px;
+    background: var(--trd-c);
+  }
+
+  /* ---- Rows ------------------------------------------------------------- */
+  .trd-rows {
+    display: flex;
+    flex-direction: column;
+    padding: 4px 8px 8px;
+  }
+  .trd-row {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 8px;
+    border-radius: 14px;
+  }
+  .trd-row + .trd-row {
+    box-shadow: inset 0 1px 0 var(--border);
+  }
+  .trd-wallet__name {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .trd-wallet__chains {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .trd-wallet__value {
+    min-width: 6rem;
+    text-align: right;
+    font-weight: 600;
+  }
+
+  /* ---- Token cell, chips, links ---------------------------------------- */
+  .trd-token {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 10px;
+  }
+  .trd-token-mark {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    place-items: center;
+    border-radius: 9999px;
+    background: color-mix(in oklab, var(--accent) 14%, var(--surface-2));
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .trd-token__text {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+  }
+  .trd-token__symbol {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 4px;
+    font-weight: 600;
+  }
+  .trd-token__warn {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--warn);
+  }
+  .trd-token__sub {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: var(--text-small, 0.8125rem);
+  }
+  .trd-chain {
+    flex-shrink: 0;
+    padding: 0 6px;
+    border: 1px solid var(--border-strong);
+    border-radius: 9999px;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 18px;
+  }
+  .trd-link {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: 4px;
+    border-radius: 6px;
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+  .trd-link:hover {
+    color: var(--accent);
+  }
+
+  /* ---- Tables ----------------------------------------------------------- */
+  .trd-table-wrap {
+    container: trd-table / inline-size;
+    overflow: hidden;
+  }
+  .trd-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    text-align: left;
+    font-size: var(--text-ui, 0.875rem);
+  }
+  .trd-table th {
+    padding: 12px 12px 8px;
+    color: var(--text-muted);
+    font-size: var(--text-small, 0.8125rem);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .trd-table td {
+    padding: 8px 12px;
+    box-shadow: inset 0 1px 0 var(--border);
+    vertical-align: middle;
+  }
+  .trd-table td:first-child,
+  .trd-table th:first-child {
+    padding-left: 16px;
+  }
+  .trd-table td:last-child,
+  .trd-table th:last-child {
+    padding-right: 12px;
+  }
+  .trd-table tbody tr:hover td {
+    background: color-mix(in oklab, var(--text) 3%, transparent);
+  }
+  .trd-table [data-col='asset'] {
+    max-width: 16rem;
+  }
+  .trd-cell-num {
+    text-align: right;
+    white-space: nowrap;
+  }
+  .trd-cell-action {
+    width: 1%;
+    text-align: right;
+  }
+
+  /* Narrow cards drop the secondary columns; a phone keeps asset, value, PnL. */
+  @container trd-table (max-width: 44rem) {
+    .trd-table :is([data-col='price'], [data-col='change'], [data-col='network']) {
+      display: none;
+    }
+  }
+  @container trd-table (max-width: 30rem) {
+    .trd-table :is([data-col='amount'], [data-col='when'], [data-col='wallet']) {
+      display: none;
+    }
+    .trd-table [data-col='asset'] {
+      max-width: 10rem;
+    }
+  }
+
+  /* ---- Orders and automations ------------------------------------------ */
+  .trd-order {
+    align-items: flex-start;
+  }
+  .trd-order__main {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .trd-order__title,
+  .trd-order__legs {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+  .trd-order__note {
+    overflow-wrap: anywhere;
+    color: var(--text-muted);
+    font-size: var(--text-small, 0.8125rem);
+  }
+  .trd-order__side {
+    display: flex;
+    flex-shrink: 0;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    text-align: right;
+  }
+  .trd-callout {
+    padding: 10px 14px;
+    border: 1px solid color-mix(in oklab, var(--warn), transparent 70%);
+    border-radius: 14px;
+    background: color-mix(in oklab, var(--warn) 10%, transparent);
+    font-size: var(--text-small, 0.8125rem);
+  }
+  @media (max-width: 40rem) {
+    .trd-order {
+      flex-direction: column;
+    }
+    .trd-order__side {
+      align-items: flex-start;
+      text-align: left;
+    }
+  }
+
+  /* ---- History ---------------------------------------------------------- */
+  .trd-pnl {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+    gap: 12px;
+  }
+  .trd-pnl dt {
+    color: var(--text-muted);
+    font-size: var(--text-small, 0.8125rem);
+  }
+  .trd-pnl dd {
+    font-size: 1.125rem;
+    font-weight: 600;
+  }
+
+  /* ---- Markets ---------------------------------------------------------- */
+  .trd-search {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+  .trd-search__input {
+    min-width: min(100%, 14rem);
+    flex: 1;
+  }
+  .trd-candidates {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .trd-candidate {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--border-control);
+    border-radius: 14px;
+    background: color-mix(in oklab, var(--surface-1), transparent 25%);
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .trd-candidate:hover {
+    background: color-mix(in oklab, var(--accent) 8%, var(--surface-2));
+  }
+  .trd-candidate__address {
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+  .trd-table [data-col='dex'] {
+    max-width: 12rem;
+    white-space: nowrap;
+  }
+  @container trd-table (max-width: 44rem) {
+    .trd-table [data-col='volume'] {
+      display: none;
+    }
+  }
+  @container trd-table (max-width: 30rem) {
+    .trd-table [data-col='dex'] {
+      display: none;
+    }
+  }
+
+  /* ---- Liquidity -------------------------------------------------------- */
+  .trd-table [data-col='range'] {
+    max-width: 14rem;
+  }
+  @container trd-table (max-width: 44rem) {
+    .trd-table [data-col='fees'] {
+      display: none;
+    }
+  }
+}

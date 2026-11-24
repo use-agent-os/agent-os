@@ -27,6 +27,7 @@ import { webSetConfig } from './webSetConfig'
 import { webSetSystem } from './webSetSystem'
 import { webSettings } from './webSettings'
 import { webShell } from './webShell'
+import { webTrading } from './webTrading'
 
 /**
  * Every English namespace in one object.
@@ -73,4 +74,5 @@ export const en = {
   webSetSystem,
   webSettings,
   webShell,
+  webTrading,
 } as const

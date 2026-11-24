@@ -16,7 +16,7 @@ vi.mock('~/lib/desktop-api', () => ({
   isDesktop: () => true,
 }))
 
-const FIXTURE = 'src/renderer/src/views/trading/__fixtures__/markets/nvda.json'
+const FIXTURE = '../frontend/src/views/trading/__fixtures__/markets/nvda.json'
 const NVDA_MARKETS = JSON.parse(readFileSync(FIXTURE, 'utf8')) as MarketsPayload
 const NVDA_ADDRESS = NVDA_MARKETS.token.address
 

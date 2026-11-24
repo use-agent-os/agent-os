@@ -15,7 +15,16 @@ export interface RouteHandle {
 }
 
 export type Destination =
-  'chat' | 'new' | 'home' | 'sessions' | 'projects' | 'usage' | 'automations' | 'inbox' | 'settings'
+  | 'chat'
+  | 'new'
+  | 'home'
+  | 'sessions'
+  | 'projects'
+  | 'usage'
+  | 'trading'
+  | 'automations'
+  | 'inbox'
+  | 'settings'
 
 /** Redirect a legacy URL (by path and query) before rendering a current route. */
 function LegacyAware({ children }: { children: ReactNode }) {
@@ -46,6 +55,9 @@ const HomePage = lazy(async () => ({
 }))
 const UsagePage = lazy(async () => ({
   default: (await import('@/web/features/usage/UsagePage')).UsagePage,
+}))
+const TradingPage = lazy(async () => ({
+  default: (await import('@/web/features/trading/TradingPage')).TradingPage,
 }))
 const InboxPage = lazy(async () => ({
   default: (await import('@/web/features/inbox/InboxPage')).InboxPage,
@@ -141,6 +153,14 @@ export const DESTINATION_ROUTES: RouteObject[] = [
     'webShell.pageUsage',
     <Lazy>
       <UsagePage />
+    </Lazy>,
+  ),
+  destination(
+    'trading',
+    'trading',
+    'webShell.pageTrading',
+    <Lazy>
+      <TradingPage />
     </Lazy>,
   ),
   destination(

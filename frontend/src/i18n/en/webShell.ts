@@ -16,6 +16,8 @@ export const webShell = defineNamespace('webShell', {
   pageProjectsDescription: 'Group sessions and shared knowledge',
   pageUsage: 'Usage',
   pageUsageDescription: 'Spend and tokens by session and model',
+  pageTrading: 'Trading',
+  pageTradingDescription: 'Wallets, holdings and orders, read-only',
   pageAutomations: 'Automations',
   pageAutomationsDescription: 'Scheduled jobs and their runs',
   pageInbox: 'Inbox',
