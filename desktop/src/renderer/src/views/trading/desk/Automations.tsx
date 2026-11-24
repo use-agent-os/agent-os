@@ -381,7 +381,6 @@ function Item({
         <span className="trd-auto__name" title={d.reason ? `${d.word} · ${d.reason}` : d.word}>
           {itemName(item)}
         </span>
-        <ChevronDown className="trd-auto__chev size-3.5" strokeWidth={1.75} aria-hidden />
       </button>
       <div className="trd-auto__line">
         <span className="trd-auto__word" data-testid="auto-word">
@@ -405,6 +404,17 @@ function Item({
       <div className="trd-auto__foot">
         <Elsewhere sessionKey={elsewhere} onOpen={onOpenSession} />
         <Controls item={item} missions={missions} running={running} />
+        <button
+          type="button"
+          className="trd-auto__chev app-no-drag"
+          aria-expanded={open}
+          aria-label={t('trading.auto.history')}
+          title={t('trading.auto.history')}
+          onClick={() => setOpen((v) => !v)}
+          data-testid="auto-chev"
+        >
+          <ChevronDown className="size-3.5" strokeWidth={1.75} aria-hidden />
+        </button>
       </div>
       {open ? <HistoryList item={item} /> : null}
     </li>

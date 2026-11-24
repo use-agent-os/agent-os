@@ -444,6 +444,31 @@ describe('Automations tab', () => {
     expect(within(mission).getByTestId('auto-run')).toHaveTextContent('Reported.')
   })
 
+  it('puts the disclosure chevron in the controls column, and it opens the history too', async () => {
+    renderDesk(
+      <Automations
+        missions={missions()}
+        sessionKey={SESSION}
+        pendingApprovals={0}
+        enabled
+        onOpenSession={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(screen.getAllByTestId('auto-item').length).toBe(6))
+    const mine = screen.getAllByTestId('auto-item').find((el) => el.dataset.id === 'dca_1a2b3c4d')!
+    const chev = within(mine).getByTestId('auto-chev')
+    // Beside the action buttons, not riding the name row.
+    expect(chev.closest('.trd-auto__foot')).not.toBeNull()
+    expect(chev.closest('.trd-auto__head')).toBeNull()
+    expect(chev).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(chev)
+    expect(chev).toHaveAttribute('aria-expanded', 'true')
+    expect(within(mine).getByTestId('auto-toggle')).toHaveAttribute('aria-expanded', 'true')
+    expect(within(mine).getAllByTestId('auto-run').length).toBeGreaterThan(0)
+    fireEvent.click(chev)
+    expect(within(mine).queryByTestId('auto-run')).toBeNull()
+  })
+
   it('says so when nothing runs on its own', async () => {
     rpcCall.mockImplementation(async (method: string) => {
       if (method === 'cron.list') return []
