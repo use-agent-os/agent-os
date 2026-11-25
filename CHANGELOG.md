@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.26] - 2026-11-26
+
 ### Added
 - Desktop: **Files** (⌘⇧E, or the sidebar) browses the agent's workspace in a
   read-only panel and previews Markdown, text, code, images and PDFs. Folders
