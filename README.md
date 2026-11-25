@@ -1,13 +1,13 @@
-# AgentOS — Local-First Agentic Trading AI Agent, Token-Efficient by Design
+# AgentOS — The AI Agent That Trades for You, on Your Machine, with Your Keys
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-hero-banner.jpg" alt="AgentOS — Local-first agentic trading, minimum tokens.">
 </p>
 
 <p align="center">
-  <b>Local-first agentic trading, minimum tokens.</b><br>
-  An AI agent with native agentic trading that runs on your own machine, across CLI, Web UI, and chat channels.<br>
-  An on-device Pilot Router classifies each task locally and routes it to the cheapest capable model.
+  <b>Local-first agentic trading.</b><br>
+  Your agent swaps, bridges, DCAs, and sets stop-losses on Base and Robinhood Chain.<br>
+  The keys stay in an encrypted vault on your machine, and guardrails bound every order.
 </p>
 
 <p align="center">
@@ -19,230 +19,146 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-CCFF00?style=for-the-badge" alt="Apache-2.0 License"></a>
 </p>
 
----
-
-## Overview
-
-AgentOS is an AI agent. It saves tokens, so it costs less to run.
-It has a small core. A local Pilot Router picks the cheapest model
-that can do each job. AgentOS also
-has memory that stays after you close it, a safe sandbox with many
-layers, built-in web search, and on-device embeddings.
-
-AgentOS trades natively, too. It keeps its own EVM wallets in an
-encrypted vault and swaps, sends, and bridges tokens on Base and
-Robinhood Chain through the AgentOS DEX. Guardrails bound every order
-the agent places, and larger ones wait for your approval.
-
-You can use AgentOS from the AgentOS App on your desktop, the Web UI,
-the CLI, or chat apps. All of them use the same core loop. This means tool calls, retries, and logs
-work the same way everywhere. AgentOS can talk to many AI providers.
-By default it uses OpenRouter. It can also use the Bankr LLM Gateway, OpenCAP,
-Surplus Intelligence, OpenAI, Anthropic, Ollama, DeepSeek, Gemini,
-Qwen/DashScope, and 20+ other providers. You do not need to change your code or config to
-switch providers.
-
-AgentOS 2026.11.24 is the current release. The project website is
-[useagentos.dev](https://useagentos.dev). Follow
-[@useAgentOS](https://x.com/useAgentOS) on X for updates.
-
-For step-by-step guides, start with the
-[AgentOS Product Guide](README.product.md) or the
-[documentation index](docs/README.md). You can find past releases in
-[`CHANGELOG.md`](CHANGELOG.md) and [`RELEASES.md`](RELEASES.md).
-
----
-
-## AgentOS App
-
-AgentOS App is the native desktop app for macOS. It is the easiest way to
-run AgentOS: download it, open it, and it installs the engine and starts
-the gateway for you. Signed builds for Apple silicon and Intel are
-published on every release.
-
 <p align="center">
-  <a href="https://github.com/use-agent-os/agent-os/releases"><b>Download AgentOS App from GitHub Releases &rarr;</b></a>
+  <a href="https://github.com/use-agent-os/agent-os/releases/latest"><b>Download AgentOS for Mac &rarr;</b></a>
+  &nbsp;·&nbsp;
+  <a href="#installation">Windows and Linux</a>
+  &nbsp;·&nbsp;
+  <a href="docs/features/trading.md">Trading guide</a>
 </p>
 
-- **One-click install.** On first launch the app installs the `use-agent-os`
-  engine and starts the local gateway. No terminal, Python, or `uv` needed.
-- **Chat and Trading in one window.** A desktop chat with the same sessions,
-  approvals, and scheduled jobs as the Web UI, plus the Trading Desk.
-- **Self-updating.** New releases show up as an **Update** pill inside the
-  app; the app and the engine update together.
-- **Signed and notarized.** Opens on macOS 13 or newer without any
-  Gatekeeper workaround.
+---
 
-Each release page lists the app builds next to the Windows portable zip and
-the Python wheel: `AgentOS-<version>-arm64.dmg` for Apple silicon and
-`AgentOS-<version>.dmg` for Intel. See
-[AgentOS for Mac](#agentos-for-mac) for install steps,
-[`docs/desktop-app.md`](docs/desktop-app.md) for a tour of the app, and
-[`desktop/README.md`](desktop/README.md) for how the app is built.
+## What it does
+
+AgentOS is an open-source AI agent that holds its own EVM wallets and
+trades through the [AgentOS DEX](#agentos-dex). Ask it in chat, or run the same order
+yourself from the desktop Trading Desk or the CLI:
+
+```sh
+agentos trade swap --chain base --in ETH --out USDC --usd 5                # swap $5 of ETH
+agentos trade dca create <token> --usd 20 --every 1w --cap 500              # buy $20 a week, stop at $500
+agentos trade trigger create <token> --below 10% --sell --pct 50            # sell half if it drops 10%
+agentos trade bridge quote --chain base --to-chain robinhood --token ETH --usd 20
+```
+
+- **Swaps and sends** on Base and Robinhood Chain, quoted across 0x and Uniswap.
+- **Bridges** between Base and Robinhood Chain, through whichever of Relay or Across delivers more.
+- **DCA mandates, price triggers, and take-profit/stop-loss brackets** that run on a schedule, without you watching.
+- **Uniswap V4 liquidity**: read pools and ranges, add, collect, and remove positions.
+- **A ledger** that tracks cost basis and PnL for every wallet.
+
+AgentOS 2026.11.24 is the current release. See the
+[trading guide](docs/features/trading.md) for the full feature set and
+the [CLI reference](docs/cli.md) for every command.
 
 ---
 
-## Architecture
+## Your keys, your limits
 
-Every client — the AgentOS App, the Web UI, the CLI, and the chat
-channels — talks to one local gateway. This gateway handles sessions, approvals, and
-scheduling. It sends each turn to the Pilot Router, which picks the
-model. Then it runs tool calls inside the safe sandbox, and trades through
-the engine's own wallets on Base and Robinhood Chain.
+- **Keys never leave your machine.** Wallets live in a password-encrypted
+  vault on your disk. The AgentOS DEX returns unsigned calldata; signing
+  happens locally. The service holds no key and never broadcasts.
+- **The gateway enforces the limits, not the model.** A prompt cannot talk
+  its way past them.
+- **You approve what matters.** Larger orders wait for you in the desktop
+  app or the CLI.
+
+| Guardrail | Default | What happens |
+| --- | --- | --- |
+| Per-order threshold | 100 USD | The order waits for your approval |
+| Daily cap per wallet | 1,000 USD | The order is rejected |
+| Price impact | 5 % | The order waits for your approval |
+| Bridges and liquidity changes from an agent | always | The order waits for your approval |
+
+> [!WARNING]
+> Swaps move real money and cannot be undone. Start with small amounts,
+> keep the daily cap low, and treat the vault directory like an SSH key.
+
+Details: [guardrails](docs/features/trading.md#guardrails) ·
+[approvals and permissions](docs/approvals-and-permissions.md) ·
+[security policy](SECURITY.md).
+
+---
+
+## AgentOS DEX
+
+[AgentOS DEX](https://dex.useagentos.dev/) is the trading venue behind
+AgentOS. It is built into the AgentOS Desktop App from the first launch,
+and the trading features of AgentOS run through it: swaps, bridges, DCA
+mandates, price triggers, and brackets. It needs no API key.
+
+| Through AgentOS DEX | Fee | How you see it |
+| --- | --- | --- |
+| Swap | 20 bps (0.20 %) | Shown in every quote, already deducted from the output |
+| Bridge (Base ⇄ Robinhood Chain) | 5 bps (0.05 %) | Shown in the bridge quote |
+
+Network gas and the underlying bridge's own costs are paid as usual.
+
+**Everything else is free.** AgentOS is Apache-2.0 licensed, and you bring
+your own model provider key. The on-device Pilot Router sends each message
+to the cheapest model that can handle it, so easy turns do not pay for a
+large model.
+
+---
+
+## Also a full agent
+
+Trading runs on a general-purpose agent, so the same assistant can research
+a token, schedule a report, and message you the result.
+
+| Capability | What it does |
+| --- | --- |
+| **Pilot Router** | Classifies each message and picks one of four tiers. The default is a small local model: it runs offline, and your message does not leave your computer for this choice. You can switch to [Jev](https://typesafe.ai/), typesafe.ai's hosted classifier (experimental; needs `TYPESAFE_API_KEY` and sends the current turn text to typesafe.ai). See [`docs/features/agentos-router.md`](docs/features/agentos-router.md#the-jev-strategy). |
+| **20+ LLM providers** | OpenRouter (default), the Bankr LLM Gateway, OpenCAP, Surplus Intelligence, OpenAI, Anthropic, Ollama, DeepSeek, Gemini, Qwen/DashScope, and more, with fallbacks. No code or config rewrite to switch. |
+| **50+ skills and MCP** | Coding, GitHub, deep research, market data, office files, and more, loaded only when a task needs them. AgentOS uses MCP tools and can serve as one. |
+| **Local memory** | Markdown memory that persists between sessions, searchable by keyword and by meaning with an on-device embedding model. |
+| **Sandbox** | Three safety levels. Bubblewrap on Linux and Seatbelt on macOS isolate tool runs; Windows has no OS sandbox yet. |
+| **Every surface** | The AgentOS App, Web UI, CLI, Telegram, Slack, Discord, and Email share one gateway and one turn loop. |
+| **Sessions and scheduling** | Durable sessions in SQLite, subagents, cron jobs, human approvals, and per-turn cost tracking. |
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-architecture.png" alt="AgentOS architecture: the Web UI, CLI, chat channels, and the AgentOS App for macOS connect to the gateway (sessions, approvals, scheduler), which drives the Pilot Router (OpenRouter, Bankr LLM Gateway, OpenAI, Anthropic), the sandboxed tools layer, and the wallet and trading engine (Base, Robinhood Chain)">
 </p>
 
-Here is what happens to one message: it comes in through a channel,
-goes through the gateway into the shared turn loop, gets sent to the
-cheapest model that can handle it, runs any tools in the sandbox, and
-the reply goes back the same way:
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-message-lifecycle.png" alt="Message lifecycle: user, channel, gateway, agent, router, tools — with the reply returning to the user">
-</p>
+More: [feature overview](docs/features.md) · [documentation index](docs/README.md) ·
+[product guide](README.product.md).
 
 ---
 
 ## Installation
 
-AgentOS works on Windows, macOS, and Linux. Pick the option that
-fits what you need.
-
-Windows portable and Quick terminal install give you a ready-made
-**release**. You do not need Git for these. The other two — Install
-from source and Develop from source — need a **Git checkout**
-(`git clone` + Git LFS).
-
-Release installs use files from GitHub releases. The Windows
-portable zip also has a short link at `/releases/latest/download/`
-for the newest release. Python wheel installs use file names with
-version numbers, because the installer checks the version in the
-file name.
-
-| Path | Audience | When to use |
+| Path | For | Needs |
 | --- | --- | --- |
-| [AgentOS for Mac](#agentos-for-mac) | macOS users | A signed desktop app that installs the engine for you and updates itself |
-| [Windows portable](#windows-portable-no-python) | Windows users | No Python needed; just unzip and run |
-| [Quick terminal install](#quick-terminal-install) **(recommended)** | End users on any OS | Install a release from a terminal |
-| [Install from source](#install-from-source) | Users who want the latest `main` code | Run from a Git checkout, but don't edit it |
-| [Develop from source](#develop-from-source) | Contributors | Edit, test, or debug the code |
+| [AgentOS for Mac](#agentos-for-mac) | macOS users | macOS 13 or newer |
+| [Windows portable](#windows-portable) | Windows users | Nothing; Python is bundled |
+| [Quick terminal install](#quick-terminal-install) | Any OS | `uv` (installed below) |
+| [From source](#from-source) | Latest `main`, contributors | Git, Git LFS, Node.js 22+, `uv` |
 
-### Prerequisites
-
-| Requirement | Windows portable | Quick terminal install | Install from source | Develop from source |
-| --- | :---: | :---: | :---: | :---: |
-| Python 3.12+ | bundled | via `uv` | via `uv` or system | via `uv` |
-| Git + Git LFS | — | — | required | required |
-| `uv` | — | installed if missing | recommended | required |
-
-The default `recommended` profile installs **Pilot Router** — AgentOS's
-own on-device model router (strategy `pilot-v1`) — along with the Python
-dependencies it needs (ONNX Runtime, NumPy, Tokenizers). Its model
-bundle ships inside the wheel, so routing works offline with no extra
-download. If you install from a source checkout, run
-`git lfs pull` first; without it the bundle is only pointer stubs, and the
-router degrades gracefully — it logs a warning at boot and pins every turn to
-the default tier (c1) rather than crashing. The `llm_judge` strategy needs no
-local model files at all (it routes via a small LLM call, optionally against a
-local Ollama/LM Studio endpoint) — pick it during onboarding or set
-`agentos_router.strategy = "llm_judge"`.
-Set `AGENTOS_INSTALL_PROFILE=core` to skip the router dependencies, or use
-the `--router disabled` flag during first-time setup to keep them installed
-but turn the router off.
-
-On Windows, Pilot Router needs the Visual C++ runtime too (it comes
-with the ONNX engine inside Pilot Router). The Windows portable
-launcher and the from-source PowerShell installer install this
-runtime for you, using `winget`. The **Quick terminal install**
-(`uv tool install`) does not do this step. If you see a
-`DLL load failed` error in the logs, install it by hand (see
-[Troubleshooting](#troubleshooting)). AgentOS still works without
-it — it just routes every turn to one single model instead.
-
-Install links: [Git](https://git-scm.com/downloads) ·
-[Git LFS](https://git-lfs.com/) ·
-[uv](https://docs.astral.sh/uv/getting-started/installation/).
+The [install guide](docs/install.md) covers prerequisites, installer
+options, Docker, and public network binding.
 
 ### AgentOS for Mac
 
-The desktop app for macOS 13 or newer, Apple silicon and Intel. It is
-signed with a Developer ID and notarized, so it opens without any
-Gatekeeper workaround.
+Download the dmg from the
+[latest release](https://github.com/use-agent-os/agent-os/releases/latest):
+`AgentOS-<version>-arm64.dmg` for Apple silicon, `AgentOS-<version>.dmg`
+for Intel. Drag it into Applications and open it. The app is signed and
+notarized, installs the engine, starts the gateway, and updates itself.
+See [`docs/desktop-app.md`](docs/desktop-app.md) for a tour.
 
-1. Download the dmg for your Mac from the
-   [latest release](https://github.com/use-agent-os/agent-os/releases/latest)
-   (or pick a version from the
-   [releases page](https://github.com/use-agent-os/agent-os/releases)):
-   `AgentOS-<version>-arm64.dmg` for Apple silicon, `AgentOS-<version>.dmg`
-   for Intel. The number in the file name is the app's build version; the
-   release it belongs to is the tag.
-2. Drag AgentOS into Applications and open it. On first launch it installs
-   the engine (the same `use-agent-os` package the terminal install uses)
-   and starts the gateway for you.
-3. Later releases show up inside the app as an **Update** pill; nothing
-   downloads or installs until you click it. See
-   [`desktop/README.md`](desktop/README.md) for how the app and the engine
-   update together.
+### Windows portable
 
-### Windows portable (no Python)
-
-This is the fastest way to start on Windows. The zip file has its
-own copy of Python inside, so you don't need to install Python
-yourself.
-
-1. Download the current portable zip:
-   <https://github.com/use-agent-os/agent-os/releases/latest/download/AgentOS-windows-x64-portable.zip>
-2. Unzip it into a folder you can write to, like Downloads or
-   Documents. Then right-click `Start AgentOS.cmd` and choose
-   **Run as administrator**.
-3. Finish the first-time setup. Then open
-   <http://127.0.0.1:18791/control/> in your browser.
-
-> [!NOTE]
-> Preview builds are not signed, so you need to run them as
-> administrator. If Windows SmartScreen shows a warning, click
-> **More info**, then **Run anyway**. If your device blocks unsigned
-> apps completely, use [Quick terminal install](#quick-terminal-install)
-> instead.
-
-<details>
-<summary>Advanced portable usage</summary>
-
-You can set an OpenRouter key before the first start:
-
-```powershell
-$env:OPENROUTER_API_KEY="sk-..."
-Set-ExecutionPolicy -Scope Process Bypass
-.\start.ps1
-```
-
-If `OPENROUTER_API_KEY` is set and there is no config file yet, the
-launcher writes a config that points to this key. Then it starts the
-gateway right away, with no questions asked. If the key is not set,
-the setup wizard asks you to pick a provider.
-
-The portable zip does not add a global `agentos` command to your
-system. If you want a terminal where `agentos …` works, run
-`AgentOS Shell.cmd`. Or call the launcher directly, like this:
-
-```powershell
-.\agentos.cmd onboard --provider openrouter --api-key-env OPENROUTER_API_KEY
-```
-
-</details>
+Download
+<https://github.com/use-agent-os/agent-os/releases/latest/download/AgentOS-windows-x64-portable.zip>,
+unzip it into a folder you can write to, and run `Start AgentOS.cmd`.
+Preview builds are not signed yet; the
+[install guide](docs/install.md#windows-portable-no-python) explains the
+SmartScreen prompt and the alternatives.
 
 ### Quick terminal install
 
-This is the best path for Windows, macOS, and Linux. `uv` installs
-AgentOS in its own space and manages its own Python. You do not need
-Python on your system already. This path only installs official
-releases. If you want `main`, other branches, or a local checkout,
-use [Install from source](#install-from-source) instead.
-
-**1. Install `uv`.** Skip this if `uv --version` already works for
-you.
+**1. Install `uv`.** Skip this if `uv --version` already works.
 
 Linux / macOS:
 
@@ -258,494 +174,93 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 $env:Path = "$env:USERPROFILE\.local\bin;" + $env:Path
 ```
 
-**2. Install AgentOS.** This command is the same on every system.
+**2. Install and run AgentOS.**
 
 ```sh
 uv tool install --python 3.12 "use-agent-os[recommended]"
-```
-
-This installs the latest AgentOS release from PyPI. Then `uv`
-downloads whatever else that install needs. The default
-`recommended` extra brings in local memory embedding's tools, like ONNX
-Runtime, NumPy, and tokenizers. So the first install needs internet
-access, unless these files are already saved on your computer.
-
-**3. Set up and run.**
-
-```sh
 agentos onboard
 agentos gateway run
 ```
 
-> [!NOTE]
-> If `agentos` is not found right after installing with `uv`, open a
-> new terminal window. Or run the PATH command from step 1 again.
+Then open <http://127.0.0.1:18791/control/>. If `agentos` is not found,
+open a new terminal window.
 
-For an install pinned to one exact version, add `==<version>` — for
-example `uv tool install --python 3.12 "use-agent-os[recommended]==2026.11.24"` —
-or use the GitHub release wheel link directly:
+To pin one exact version, add `==<version>` — for example
+`uv tool install --python 3.12 "use-agent-os[recommended]==2026.11.24"` —
+or use the release wheel directly:
 `https://github.com/use-agent-os/agent-os/releases/download/v2026.11.24/use_agent_os-2026.11.24-py3-none-any.whl`.
 
 > [!NOTE]
 > Release install commands use published GitHub release assets.
-> Python wheel installs use versioned wheel filenames — for example
-> `use_agent_os-2026.11.24-py3-none-any.whl` — because the installers validate the
-> version segment inside the wheel filename, so there is no `latest`
-> wheel alias. Only the Windows portable zip has a version-independent
-> `releases/latest/download/` alias.
+> Python wheel installs use versioned wheel filenames, so there is no
+> `latest` wheel alias. Only the Windows portable zip has a
+> version-independent `releases/latest/download/` alias.
+
+### From source
+
+```sh
+git lfs install
+git clone https://github.com/use-agent-os/agent-os.git
+cd agent-os
+git lfs pull --include="src/agentos/memory/models/**"
+git lfs pull --include="src/agentos/agentos_router/models/**"
+bash scripts/install_source.sh
+```
+
+On Windows, run
+`powershell -ExecutionPolicy Bypass -File ./scripts/install_source.ps1`
+instead of the last line. To change the code, see
+[Develop from source](docs/install.md#develop-from-source).
 
 ### Upgrade
-
-The primary path is the built-in command, which detects how AgentOS was
-installed, upgrades it, and — crucially — restarts the managed gateway so it
-runs the new code (a "successful" upgrade that leaves the daemon on old code is
-the #1 documented upgrade regret):
 
 ```sh
 agentos upgrade
 ```
 
-On a `uv tool` or `pipx` install this first snapshots your config and state
-databases into `~/.agentos/state/snapshots/`, then installs the published
-release of `use-agent-os[recommended]` for you (`uv tool install --force
---python <running> …`). The release comes from PyPI, or from the GitHub
-release wheel when GitHub is ahead or PyPI cannot be reached. It then restarts
-the gateway and **verifies** the running gateway reports the new version before
-printing `Gateway: restarted and verified (<version>)`, and checks the state
-databases. It prints the `old → new` versions on success.
+This snapshots your config and state, installs the latest release, restarts
+the gateway, and verifies it runs the new version. Your data in `~/.agentos/`
+is not touched. Source installs re-run `bash scripts/install_source.sh`
+instead. See the [upgrade reference](docs/install.md#upgrade) for flags,
+manual upgrade commands, and version-skew rules.
 
-`agentos upgrade` always installs the release, never a local checkout — the PyPI
-wheel ships a control UI built in CI, while reinstalling a checkout would
-re-package whatever browser bundle happens to be on disk. If you installed from
-source, run `bash scripts/install_source.sh` again instead; it rebuilds the
-control UI first. The command says so when it detects a checkout-backed install.
+### Coming from OpenClaw or Hermes Agent?
 
-Flags:
-
-| Flag | Effect |
-|---|---|
-| `--check` | Report whether a newer release exists on PyPI or GitHub Releases; change nothing. Offline → `could not check (offline)`, exit 0. |
-| `--dry-run` | Print the exact upgrade command that would run; touch nothing. |
-| `--source <auto\|pypi\|github>` | Where to install from. `auto` (default) prefers PyPI and falls back to the GitHub release wheel. |
-| `--no-snapshot` | Skip the pre-upgrade snapshot of config and state databases (taken by default; the newest three are kept). |
-| `--no-restart` | Upgrade the package but leave the gateway running the OLD code. Prints an unmissable warning; you must then run `agentos gateway restart` yourself. |
-| `--timeout <s>` | Upgrade-subprocess timeout (default 600s). On timeout the tool's process group is killed and recovery guidance is printed — never a half-state. |
-| `--verify-data` | Only check the state databases (`PRAGMA quick_check`); change nothing. |
-| `--restore-snapshot <dir\|latest>` | Put a pre-upgrade snapshot back (the gateway must be stopped) and exit. |
-| `--json` | Machine-readable output. |
-
-See [`docs/cli.md`](docs/cli.md#upgrade) for the full upgrade reference.
-
-For a plain-`pip`, Windows portable, editable, or unclassifiable install,
-`agentos upgrade` will **not** fake it — it prints the exact manual command and
-exits non-zero. Run it yourself (the portable venv has no pip, so its command
-restores it with `python -m ensurepip` first):
+Run a dry run first, then apply:
 
 ```sh
-# pip install
-python -m pip install --user --upgrade "use-agent-os[recommended]"
-
-# install from source
-cd agent-os
-git pull
-git lfs pull --include="src/agentos/memory/models/**"
-git lfs pull --include="src/agentos/agentos_router/models/**"
-bash scripts/install_source.sh        # Windows: scripts/install_source.ps1
+agentos migrate openclaw --json
+agentos migrate openclaw --apply
 ```
 
-**Version skew.** Commands that talk to the gateway compare the CLI and gateway
-versions once per run. A gateway running an *older* version than the CLI (the
-normal state right after a package upgrade, before a restart) prints a warning
-but never blocks. A gateway running a *newer* version than the CLI (you
-downgraded the CLI, or are driving a newer gateway from a stale environment) is
-**refused** — a newer gateway may have written config with a newer schema, so
-acting on it from an older CLI risks corruption. Fix it by upgrading the CLI or
-restarting the gateway from this environment; in an emergency, set
-`AGENTOS_ALLOW_VERSION_SKEW=1` to override.
-
-**Update notices.** On gateway-connected commands the CLI checks PyPI at most
-once every 24h and, if a newer release exists, prints a one-line notice on
-stderr. It is suppressed on non-interactive / CI runs, and you can turn it off
-entirely with `updates.notify = false` (see
-[docs/configuration.md](docs/configuration.md#update-notifications) or the
-setup UI's Finish step).
-
-**Config & data are safe.** Your configuration and data in `~/.agentos/` are
-not touched by upgrades. Config migrations run at gateway start and write a
-timestamped backup before rewriting any file. A version-pinned install
-(`==<version>`) stays on its pin — to move it, re-run the install command with
-the new version. To check the installed version, run `agentos gateway status`
-(shows both the CLI and running-gateway versions) or `uv tool list`.
-
-### Install from source
-
-Use this path to run AgentOS from a Git checkout, without changing
-the code. The checkout is just the source the installer reads from.
-After install, use the `agentos` command — do not use `uv run`. If
-you plan to change the code, use
-[Develop from source](#develop-from-source) instead.
-
-1. **Clone the code, with the large files too**
-
-   Source installs build the bundled Control UI and therefore require
-   **Node.js 22 or newer** in addition to Python 3.12+, Git, Git LFS, and `uv`.
-
-   ```sh
-   git lfs install
-   git clone https://github.com/use-agent-os/agent-os.git
-   cd agent-os
-   git lfs pull --include="src/agentos/memory/models/**"
-   git lfs pull --include="src/agentos/agentos_router/models/**"
-   ```
-
-2. **Run the installer**
-
-   **macOS / Linux**
-
-   ```sh
-   bash scripts/install_source.sh
-   ```
-
-   **Windows PowerShell**
-
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File ./scripts/install_source.ps1
-   ```
-
-   This script first builds and verifies the React Control UI, then installs
-   `.[recommended]` (Pilot Router + memory + local models). It uses `uv tool
-   install`, in its own environment. If
-   `uv` is not there, it falls back to `python -m pip install
-   --user`. If `agentos` is not found after install, open a new
-   terminal.
-
-3. **(optional) Install extra features.** Telegram, Slack, Discord, and
-   Email already work with the base install. The remaining opt-in extra is
-   `document-extras`, which adds PDF generation through WeasyPrint.
-
-   ```sh
-   AGENTOS_INSTALL_EXTRAS=document-extras bash scripts/install_source.sh        # macOS / Linux
-   ```
-
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File ./scripts/install_source.ps1 -Extras document-extras   # Windows
-   ```
-
-4. **Set up and run** — see [Configuration](#configuration).
-
-<details>
-<summary>Install from source — terminal prerequisites and installer options</summary>
-
-**Install Git, Git LFS, Node.js 22+, and uv from a terminal**
-
-Windows PowerShell:
-
-```powershell
-winget install --id Git.Git -e
-winget install --id GitHub.GitLFS -e
-powershell -ExecutionPolicy Bypass -c "irm https://astral.sh/uv/install.ps1 | iex"
-git lfs install
-```
-
-macOS (Homebrew):
-
-```sh
-brew install git git-lfs uv
-git lfs install
-```
-
-Debian / Ubuntu:
-
-```sh
-sudo apt update && sudo apt install -y git git-lfs
-curl -LsSf https://astral.sh/uv/install.sh | sh
-git lfs install
-```
-
-On Fedora, use `sudo dnf install -y git git-lfs`. On Arch, use
-`sudo pacman -S --needed git git-lfs`. Then install `uv` with the
-`curl` command above. After running these installers, PATH changes
-only apply in new terminal windows.
-
-**Installer environment variables and PATH checks**
-
-```sh
-AGENTOS_INSTALL_PROFILE=core   bash scripts/install_source.sh   # small install, no Pilot Router
-AGENTOS_INSTALL_DRY_RUN=1      bash scripts/install_source.sh   # just show the plan, don't install
-```
-
-To check which `agentos` your shell is using, run `command -v
-agentos` (macOS/Linux) or `where.exe agentos` (Windows). If it is
-not on your PATH, run `uv tool update-shell`. If you reinstall from
-a local checkout, restart the gateway so it uses the new files.
-
-</details>
-
-### Develop from source
-
-Use this path when you want to change AgentOS's code: writing
-changes, running tests, or checking behavior in this checkout. This
-is not the normal way to install AgentOS. Unlike
-[Install from source](#install-from-source), this path needs `uv`:
-`uv sync` builds a `.venv` folder inside the repo, and `uv run` runs
-commands using the files in this checkout.
-
-```sh
-uv sync --extra recommended --extra dev
-python scripts/build_control_ui.py build
-uv run agentos --help
-```
-
-The `recommended` extra also brings Pilot Router here. The `dev` extra
-adds the test, lint, and type-check tools. The build command uses Node.js 22+
-to produce and verify the React Control UI served by the local gateway. To add
-more extras to
-this same setup:
-
-```sh
-uv sync --extra recommended --extra dev --extra document-extras
-uv run agentos channels types --json
-```
-
-In this mode, add `uv run` before every `agentos` command shown in
-[Configuration](#configuration). Do not test a development checkout
-through a normal, user-installed `agentos` command — that command
-uses a different Python setup.
+Use `hermes` in place of `openclaw`, or `agentos migrate --source
+openclaw,hermes --apply` for both. See [`MIGRATION.md`](MIGRATION.md).
 
 ---
 
 ## Configuration
 
-### First-run setup
-
-`agentos onboard` is the wizard you run the first time. It writes
-your config file. It keeps provider secret keys as environment
-variables, if you pass `--api-key-env`. The router is set to
-`recommended` by default (this means Pilot Router, on the providers it
-supports). Pass `--router disabled` if you want one single model
-with no routing.
-
 ```sh
-agentos onboard                # full interactive wizard
-agentos onboard --if-needed    # safe to run again; does nothing if already set up
-agentos onboard --minimal      # only sets the provider and router; skips channels and search
-agentos onboard status         # shows every setup section, but changes nothing
+agentos onboard                    # first-run wizard: provider, router, channels, search
+agentos configure provider         # change one section later
+agentos gateway start --json       # run in the background at 127.0.0.1:18791
+agentos chat                       # interactive chat in your terminal
+agentos doctor                     # check providers, memory, sandbox, router, channels
 ```
 
-If you are using SSH, CI, or any place without a normal terminal
-screen, use the non-interactive form. Keep the secret key as an
-environment variable, and pass its **name** — not the key itself:
-
-**Linux / macOS**
+For SSH or CI, pass the **name** of the environment variable that holds
+your key, not the key itself:
 
 ```sh
-export OPENROUTER_API_KEY="sk-..."
 agentos onboard --provider openrouter --api-key-env OPENROUTER_API_KEY
 ```
 
-**Windows PowerShell**
-
-```powershell
-$env:OPENROUTER_API_KEY="sk-..."
-agentos onboard --provider openrouter --api-key-env OPENROUTER_API_KEY
-```
-
-OpenRouter is just one example — you can use any supported provider
-and its own API key variable instead.
-
-You can change one part of the setup later, without doing the whole
-wizard again. (These examples assume you already have the API key
-set as an environment variable.)
-
-```sh
-agentos configure provider --provider openai --model gpt-4o --api-key-env OPENAI_API_KEY
-agentos configure router --router recommended
-agentos configure search   --search-provider brave --api-key-env BRAVE_SEARCH_API_KEY
-agentos configure channels
-```
-
-Sections: `provider`, `router`, `channels`, `search`, `x-search`,
-`image-generation` (alias `image`), `memory-embedding` (alias
-`memory`). The Web UI shows the same
-options in Guided setup at `/control/settings/setup`. Provider and
-Router are the two main ones to set up first. Channels, Search, Image
-generation, and Memory embedding have their own Settings sections —
-you can set these up later.
-If you leave channels empty, that's fine — it just means you chose
-not to use them.
-
-**Config file order:** AgentOS checks these one after another, and
-uses the first one it finds: `AGENTOS_GATEWAY_CONFIG_PATH` →
-`./agentos.toml` → `~/.agentos/config.toml` → its own
-built-in defaults. But secret values set as environment variables
-always win over anything in a file.
-
-### Migrate from OpenClaw or Hermes Agent
-
-If you already have data in `~/.openclaw` or `~/.hermes`, run a dry
-run first. This shows you a report without changing anything. Then
-run it again to actually apply the changes:
-
-```sh
-agentos migrate openclaw --json
-agentos migrate openclaw --apply
-
-agentos migrate hermes --json
-agentos migrate hermes --apply
-```
-
-Use `agentos migrate --source openclaw,hermes --apply` to bring in
-data from both at once. Only add `--migrate-secrets` after you have
-checked the dry-run report. See [`MIGRATION.md`](MIGRATION.md) for
-custom paths and how conflicts are handled.
-
-### Run
-
-```sh
-agentos gateway run                # runs in this terminal, at 127.0.0.1:18791
-agentos gateway start --json       # runs in the background, waits until healthy
-agentos chat                       # opens an interactive chat in your terminal
-agentos agent -m "your prompt"     # runs one task and stops; good for scripts
-```
-
-Open the Web UI at <http://127.0.0.1:18791/control/>. The **Health**
-page shows if AgentOS is ready, what is not ready yet, and what to
-do next. From the CLI, you can run:
-
-```sh
-agentos doctor
-agentos doctor --json
-agentos doctor --config ./agentos.toml --json
-```
-
-`/health` and `/healthz` are simple checks — they just say if the
-process is alive. `agentos doctor` and the Web UI's Settings › Health check
-much more: your provider setup, memory, logs, search, channels,
-sandbox safety, router, image generation, and how to fix problems.
-Press `Ctrl+C` to stop a gateway that is running in your terminal.
-
-Other command groups include `sessions`, `projects`, `skills`,
-`memory`, `migrate`, `cron`, `channels`, `providers`, `models`, `cost`,
-`mcp`, `sandbox`, `wallet`, `trade`, `flows`, and `acp`. Run
-`agentos --help` or `agentos <group> --help` to see more.
-
-<details>
-<summary>Advanced configuration — verify a channel, public network binding, Docker</summary>
-
-**Connect and check a messaging channel**
-
-Saving a channel's settings does not mean it is actually connected
-and working. After you change channel settings, restart the
-gateway. Then check the real, live status:
-
-```sh
-agentos gateway restart
-agentos channels status <name> --json
-```
-
-Only treat a channel as connected when the status shows
-`enabled=true`, `configured=true`, and `connected=true`. Discord
-uses websocket mode by default, Telegram uses polling, Slack can
-use Socket Mode, and Email polls an IMAP inbox — none of these need a
-public URL. Telegram webhook
-mode and Slack webhook mode do need a public URL that the provider
-can reach.
-
-**Public network binding**
-
-To open the Web UI from another computer, bind the gateway to all
-network interfaces, and use this computer's public IP address:
-
-```sh
-agentos gateway run --listen 0.0.0.0 --port 18791
-```
-
-To let other computers in, you also need to open this port in your
-firewall or cloud security settings. Do not run the gateway with
-`[auth] mode = "none"` while doing this — set up token login first,
-before you bind to `0.0.0.0`.
-
-**Docker**
-
-A prebuilt multi-arch image (linux/amd64 and linux/arm64) is published
-for every release. Point Compose at it and set a gateway token, which it
-requires, and nothing has to be built:
-
-```sh
-cat > .env <<EOF
-AGENTOS_GATEWAY_IMAGE=ghcr.io/use-agent-os/agent-os:latest
-AGENTOS_AUTH_TOKEN=$(openssl rand -hex 32)
-EOF
-docker compose up -d
-```
-
-[Run the gateway in a container](docs/container-gateway.md) covers the rest:
-providers, reaching it from another machine, connecting the desktop app,
-upgrades and backups.
-
-Without `AGENTOS_GATEWAY_IMAGE`, the Compose setup runs an `agentos:local`
-image that you build yourself. Build it from a source checkout, after pulling
-the Git LFS embedding-model files (see [Install from source](#install-from-source)
-for the clone and `git lfs pull` steps):
-
-```sh
-docker build -t agentos:local .
-```
-
-`./start.sh` (or `start.ps1` on Windows) then runs `docker compose
-up -d` and shows the gateway logs. Docker means you don't need
-Python installed on your computer — pull the published image or build
-one locally first.
-
-</details>
-
-Provider tiers, sandbox settings, image generation, and concurrency
-settings are all in `agentos.toml.example`.
-
----
-
-## Key Features
-
-| Capability | What it does |
-| --- | --- |
-| **Token-efficient routing** | The `Pilot Router` defaults to `pilot-v1`, a small AgentOS-trained local model (MiniLM embeddings + ONNX inference; the `recommended` extra installs its runtime dependencies) that looks at each message — its length, language, code, keywords, and meaning — and picks one of four levels (c0–c3), then routes it to the cheapest model that can still do the job well. This check runs on your own device, so your message never has to leave your computer just to make this choice. The model bundle ships inside the wheel, so this works offline out of the box. Prefer no local model files at all? Pick the `llm_judge` strategy instead (a small LLM call, optionally a local Ollama/LM Studio endpoint). Choose either in onboarding. |
-| **Adaptive reasoning and prompts** | AgentOS only asks for deep, extended thinking when the router sees the message is hard. The system instructions also grow to match: short and simple for easy messages, full and detailed for hard ones. |
-| **20+ LLM providers** | AgentOS can talk to 20+ AI providers — OpenRouter (used by default), the Bankr LLM Gateway, OpenCAP, Surplus Intelligence, OpenAI, Anthropic, Ollama, DeepSeek, Gemini, DashScope/Qwen, Moonshot, Mistral, Groq, Zhipu, SiliconFlow, vLLM, LM Studio, and more. It picks a main provider first, with backups ready if needed. The first-time setup shows you the providers that are fully tested. |
-| **Native agentic trading** | AgentOS holds its own EVM wallets in an encrypted vault and trades on Base and Robinhood Chain through the AgentOS DEX: swaps, sends, Base ⇄ Robinhood Chain bridges, Uniswap V4 liquidity, DCA mandates, price triggers, and take-profit/stop-loss brackets, with a ledger that tracks cost basis and PnL. Daily caps and other guardrails bound what the agent may do alone, and larger orders wait for your approval. Use it from the desktop Trading Desk, `agentos wallet` / `agentos trade`, or the bundled trading skills. See [`docs/features/trading.md`](docs/features/trading.md). |
-| **On-demand skills and MCP** | AgentOS comes with 50+ built-in skills (coding, GitHub, cron jobs, pptx/docx/xlsx/pdf files, deep research, trading and market data, video and voice studios, summaries, tmux, weather, and more). Each skill only loads when a task actually needs it. AgentOS can use other MCP tools, and can also act as an MCP tool for others — `agentos mcp-server run` needs no extra install (the MCP SDK is a core dependency). You can write, install, and share your own skills from the CLI. |
-| **Persistent local memory** | AgentOS remembers things between sessions, using a main `MEMORY.md` file plus dated notes in Markdown. You can search this memory two ways: by keyword (SQLite full-text search) or by meaning (`sqlite-vec`). The meaning search runs on your device using a built-in ONNX model, or you can switch to OpenAI or Ollama instead. Old memories can also slowly fade if you turn that on. |
-| **Layered security sandbox** | There are three safety levels: Standard, Strict, and Locked. Each one controls what tools are allowed to do. On Linux, Bubblewrap keeps code running in its own safe space. On macOS, this job is done by `sandbox-exec` (Apple's Seatbelt). Windows does not have this sandbox yet. If AgentOS is denied the same action too many times in a row, it pauses itself automatically and does not keep trying. Any blocked output is deleted right away. Skill details and tool results are also cleaned (escaped) so they can't trick the AI into doing something unsafe. |
-| **Built-in tools** | AgentOS can read, write, and edit files; run shell commands and background tasks; use git; search the web (with Brave, Tavily, or DuckDuckGo) and X (through xAI) and fetch pages safely (blocking unsafe internal network requests); drive a real Chromium browser; create spreadsheets, PPTX, and PDF files; generate images; and turn text into speech. |
-| **AgentOS App (desktop)** | A signed, notarized macOS app that installs the engine, supervises the gateway, and offers Chat and the Trading Desk in a native window. It updates itself and the engine together. Download it from [GitHub Releases](https://github.com/use-agent-os/agent-os/releases). |
-| **Unified gateway** | One local web server (built with Starlette) runs at `127.0.0.1:18791`. It uses WebSockets and has a built-in control page at `/control/`. The AgentOS App, Web UI, CLI, terminal, websocket, Slack, Telegram, Discord, and Email clients all share one single `TurnRunner` engine underneath. |
-| **Durable sessions, subagents, and scheduling** | Sessions, chat history, and replay data are all saved in SQLite, and each agent gets its own workspace folder. An agent can start smaller "subagent" helpers, up to a limited depth. A `SchedulerEngine`, with its own built-in cron reader, runs jobs on a schedule through `agentos cron`. |
-| **Operator controls** | A person can review and approve risky tool calls before they run. You can see how many tokens and how much cost each turn and each session used, with `agentos cost`. More diagnostic tools are available from both the CLI and the Web UI. |
-
----
-
-## Troubleshooting
-
-<details>
-<summary>Windows: <code>DLL load failed</code> / Visual C++ runtime</summary>
-
-If the startup log shows `DLL load failed while importing
-onnxruntime_pybind11_state`, AgentOS still works — but the built-in
-local memory embedding (the on-device ONNX model) stays off and
-memory falls back to keyword search until you install the Visual C++
-Redistributable for Visual Studio 2015–2022 (x64).
-
-The Windows portable launcher and the from-source PowerShell
-installer both try to install this for you, using `winget`. If you
-used Quick terminal install, or if `winget` is not available on your
-computer, install it yourself and then restart PowerShell:
-<https://aka.ms/vs/17/release/vc_redist.x64.exe>.
-After that, restart the gateway:
-
-```powershell
-agentos gateway restart
-```
-
-</details>
+AgentOS reads the first config file it finds:
+`AGENTOS_GATEWAY_CONFIG_PATH` → `./agentos.toml` → `~/.agentos/config.toml`
+→ built-in defaults. Secrets set as environment variables always win. See
+[`docs/configuration.md`](docs/configuration.md),
+[`agentos.toml.example`](agentos.toml.example), and
+[`docs/troubleshooting.md`](docs/troubleshooting.md).
 
 ---
 
@@ -760,15 +275,11 @@ tools and code used inside AgentOS are credited in
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and the root
 [`NOTICE`](NOTICE) file.
 
----
-
 ## Contributing
 
-We welcome all kinds of help — bug reports, new ideas, better docs,
-new provider or channel support, new skills, and core code work. See
-[`CONTRIBUTING.md`](CONTRIBUTING.md), then open an issue or pull
-request on
-[GitHub](https://github.com/use-agent-os/agent-os).
+We welcome bug reports, ideas, docs, new providers, channels, skills, and
+core work. See [`CONTRIBUTING.md`](CONTRIBUTING.md), then open an issue or
+pull request on [GitHub](https://github.com/use-agent-os/agent-os).
 
 [Code of Conduct](CODE_OF_CONDUCT.md) · [Security](SECURITY.md) ·
 [Support](SUPPORT.md) · [License](LICENSE) (Apache-2.0)
