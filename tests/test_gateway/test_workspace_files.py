@@ -38,7 +38,8 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 def root(tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    (workspace / "MEMORY.md").write_text("# Memory\n\nhello\n", encoding="utf-8")
+    # Bytes, not text: on Windows write_text would turn "\n" into "\r\n".
+    (workspace / "MEMORY.md").write_bytes(b"# Memory\n\nhello\n")
     (workspace / "notes.txt").write_text("plain", encoding="utf-8")
     (workspace / "data.json").write_text('{"a": 1}', encoding="utf-8")
     (workspace / "pic.png").write_bytes(PNG)
