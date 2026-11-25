@@ -82,6 +82,10 @@ desktop/
             ├── views/jobs/   #   Scheduled jobs panel (a layer over the window, not a
             │                 #   route): job list + blueprints, detail pane, create/edit
             │                 #   sheet with the natural schedule builder
+            ├── views/files/  #   Files panel (a layer over the window, ⌘⇧E): the agent
+            │                 #   workspace, read-only, over `workspace.files.*`. render.ts
+            │                 #   is the only place file content becomes markup; PdfView
+            │                 #   (pdf.js, lazy chunk) draws PDFs to canvas
             ├── views/flows/  #   Image Flows: home (`/flows`, list + templates) and the
             │                 #   node editor (`/flows/:id`, @xyflow/react) over `flows.*`
             ├── views/projects/ # Project page (`/projects/:id`): renamable title,

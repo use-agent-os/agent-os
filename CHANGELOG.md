@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Desktop: **Files** (⌘⇧E, or the sidebar) browses the agent's workspace in a
+  read-only panel and previews Markdown, text, code, images and PDFs. Folders
+  load as they are opened. Hidden files, keys, credential files, databases
+  and lock files are neither listed nor openable, and links are never
+  followed out of the workspace.
+- Gateway: `workspace.files.list`, `workspace.files.read` and
+  `workspace.files.download` back that panel. They are Control-surface
+  methods, refused to an agent's connection, and have no write counterpart.
+  Images and PDFs are served through the existing ticketed download route.
 - Web UI: a read-only Trading page at `/trading` shows the trading engine's
   wallets in six views: Overview (total value, PnL, gas and allocation),
   Holdings with a price chart, Orders with DCA plans, price triggers and

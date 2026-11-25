@@ -54,7 +54,7 @@ THUMBNAIL_SOURCE_FORMATS = frozenset({"PNG", "JPEG", "WEBP"})
 #: bound to one would never be revoked by a disconnect.
 _NON_SOCKET_CONN_IDS = frozenset({"", "http", "_http", "channel", "system"})
 
-GrantKind = Literal["artifact", "attachment"]
+GrantKind = Literal["artifact", "attachment", "workspace"]
 
 SANDBOX_HEADERS: dict[str, str] = {
     "Content-Security-Policy": "default-src 'none'; sandbox",
@@ -383,6 +383,8 @@ def register_download_routes(
         grant = grants.lookup(conn_id, ticket)
         if grant is None or not _alive(conn_id):
             return _not_found()
+        if grant.kind == "workspace":
+            return await _workspace_download(request, grant)
         try:
             if grant.kind == "artifact":
                 ref, path = await resolve_artifact_download(
@@ -425,6 +427,34 @@ def register_download_routes(
             return _json_error(400, ErrorCode.INVALID_REQUEST, f"Unknown variant {variant!r}")
         headers["Content-Disposition"] = content_disposition(name)
         return _SingleRangeFileResponse(path, media_type=mime, headers=headers)
+
+    async def _workspace_download(request: Request, grant: DownloadGrant) -> Response:
+        """A workspace image or PDF: re-resolved under the browser's rules.
+
+        The bytes are read through the descriptor the checks ran on and
+        answered from memory (the kind's size cap bounds them), so the file
+        cannot be swapped for a link between the check and the send.
+        """
+        from agentos.gateway.rpc_workspace import workspace_root
+        from agentos.gateway.workspace_files import (
+            WorkspaceFileError,
+            parse_relative_path,
+            read_download,
+        )
+
+        if request.query_params.get("variant"):
+            return _json_error(400, ErrorCode.INVALID_REQUEST, "Unknown variant")
+        try:
+            parts = parse_relative_path(grant.target_id)
+            root = workspace_root(config, grant.session_key or "main")
+            found = await anyio.to_thread.run_sync(read_download, root, parts)
+        except WorkspaceFileError:
+            return _not_found()
+        headers = dict(SANDBOX_HEADERS)
+        headers["Content-Disposition"] = content_disposition(found.name)
+        headers["Content-Length"] = str(found.size)
+        body = b"" if request.method == "HEAD" else found.data
+        return Response(body, media_type=found.mime, headers=headers)
 
     async def contained(request: Request) -> Response:
         # Reachable without a token: an unexpected failure is logged by type

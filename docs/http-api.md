@@ -165,7 +165,7 @@ catch up on what happened while the socket was down.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `POST` | `/api/v1/files/upload` | Upload a file; returns an opaque id for `chat.send`. |
-| `GET`, `HEAD` | `/api/v1/artifacts/download/{conn_id}/{ticket}` | Fetch an artifact or attachment through a ticket minted with the `artifacts.download` RPC. No `Authorization` header. |
+| `GET`, `HEAD` | `/api/v1/artifacts/download/{conn_id}/{ticket}` | Fetch an artifact or attachment through a ticket minted with the `artifacts.download` RPC, or a workspace image or PDF through one minted with `workspace.files.download`. No `Authorization` header. |
 | `GET` | `/api/v1/attachments/{sha256}?sessionKey=` | Deprecated: fetch an attachment by content hash. |
 | `GET` | `/api/v1/artifacts/{artifact_id}?sessionKey=` | Deprecated: fetch a generated artifact. |
 | `POST` | `/api/audio/transcribe` | Transcribe audio to text. |
