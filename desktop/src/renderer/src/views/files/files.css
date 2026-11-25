@@ -1,0 +1,678 @@
+/* Files — Finder's column posture: the workspace outline on the left, the
+   selected file on the right. Colour comes only from the palette tokens.
+
+   Every box that holds file-supplied text (names, paths, lines of code, table
+   cells) has a width it cannot exceed and a rule for what happens past it:
+   ellipsis for one-liners, a scrollbar of its own for code and tables, wrap
+   for prose. Nothing a file contains can widen the panel. */
+
+/* ── Panel over the window ───────────────────────────────────────────────── */
+
+.files-panel__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 44px 28px 28px;
+  background: color-mix(in srgb, var(--background) 45%, transparent);
+  backdrop-filter: blur(6px) saturate(0.9);
+}
+.files-panel {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border-radius: var(--radius-dialog);
+  background: color-mix(in srgb, var(--popover) 96%, transparent);
+  box-shadow:
+    0 0 0 0.5px var(--border),
+    inset 0 1px 0 color-mix(in srgb, var(--foreground) 5%, transparent),
+    0 30px 80px rgba(0, 0, 0, 0.45),
+    0 4px 14px rgba(0, 0, 0, 0.2);
+  outline: none;
+  overflow: hidden;
+  /* The two-pane / one-pane switch follows the panel's own width, not the
+     screen's: the sidebar and the window both change it. */
+  container-type: inline-size;
+  container-name: files-panel;
+}
+.files-panel__head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 16px 10px 22px;
+}
+.files-panel__head h1 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+.files-panel__head p {
+  margin-top: 1px;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files {
+  display: grid;
+  grid-template-columns: minmax(220px, 288px) minmax(0, 1fr);
+  min-height: 0;
+  flex: 1;
+  border-top: 1px solid var(--hairline);
+}
+
+/* ── Centered states (empty, loading, failed, offline) ───────────────────── */
+
+.files-state {
+  display: flex;
+  min-height: 100%;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+.files-state__title {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.files-state__body {
+  max-width: 340px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* ── Tree column ─────────────────────────────────────────────────────────── */
+
+.files-tree {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border-right: 1px solid var(--hairline);
+}
+.files-tree__head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 10px 8px 12px;
+}
+.files-tree__scroll {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 8px 16px;
+}
+.files-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding-right: 8px;
+  border-radius: var(--radius-control);
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--foreground);
+  transition: background-color 80ms ease-out;
+}
+.files-row:hover {
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+.files-row[aria-selected='true'] {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  font-weight: 500;
+}
+.files-row[aria-selected='true'] .files-row__icon {
+  color: var(--primary);
+}
+.files-row[aria-disabled='true'] {
+  cursor: default;
+  color: var(--dim);
+}
+.files-row[aria-disabled='true']:hover {
+  background: transparent;
+}
+.files-row:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.files-row__chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--dim);
+  transition: transform 120ms ease-out;
+}
+.files-row__chevron[data-open='true'] {
+  transform: rotate(90deg);
+}
+.files-row__chevron[data-hidden='true'] {
+  visibility: hidden;
+}
+.files-row__icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+.files-row__name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.files-tree__hint {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding-right: 8px;
+  font-size: 11.5px;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.files-tree__hint[data-tone='danger'] {
+  color: var(--danger);
+}
+.files-tree__note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.files-tree__note-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.files-link {
+  align-self: flex-start;
+  border-radius: var(--radius-compact);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--primary);
+}
+.files-link:hover {
+  text-decoration: underline;
+}
+.files-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.files-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px 8px;
+}
+.files-skeleton span {
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  animation: files-pulse 1.4s ease-in-out infinite;
+}
+@keyframes files-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .files-skeleton span {
+    animation: none;
+  }
+  .files-row__chevron {
+    transition: none;
+  }
+}
+
+/* ── Preview column ──────────────────────────────────────────────────────── */
+
+.files-preview {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+.files-back {
+  display: none;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  height: 28px;
+  margin: 6px 0 0 12px;
+  padding: 0 8px 0 4px;
+  border-radius: var(--radius-control);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--primary);
+}
+.files-back:hover {
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+.files-back:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.files-preview__head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 12px 8px 20px;
+  border-bottom: 1px solid var(--hairline);
+}
+.files-preview__title {
+  min-width: 0;
+  flex: 1;
+}
+.files-preview__title h2,
+.files-preview__title p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.files-preview__title h2 {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.files-preview__title p {
+  margin-top: 1px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
+.files-preview__actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+}
+.files-seg {
+  display: inline-flex;
+  margin-right: 6px;
+  padding: 2px;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+.files-seg button {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: calc(var(--radius-control) - 2px);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+}
+.files-seg button[aria-checked='true'] {
+  background: var(--popover);
+  color: var(--foreground);
+  box-shadow:
+    0 0 0 0.5px var(--border),
+    0 1px 2px rgba(0, 0, 0, 0.18);
+}
+.files-seg button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.files-preview__body {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: auto;
+  /* Scrolled content never drags the page behind the sheet. */
+  overscroll-behavior: contain;
+}
+
+/* Plain text wraps: there is no syntax to keep aligned. */
+.files-text {
+  margin: 0;
+  padding: 16px 20px 28px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  tab-size: 4;
+}
+/* Code keeps its lines and scrolls sideways inside the preview body. */
+.files-code {
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+  padding: 16px 20px 28px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre;
+  tab-size: 4;
+}
+.files-code code,
+.files-code .hljs,
+.files-md pre code,
+.files-md pre .hljs {
+  display: block;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+}
+
+/* ── Rendered Markdown ───────────────────────────────────────────────────── */
+
+.files-md {
+  width: 100%;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 20px 28px 40px;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+.files-md > :first-child {
+  margin-top: 0;
+}
+.files-md :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.5em 0 0.5em;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+.files-md h1 {
+  font-size: 1.55em;
+}
+.files-md h2 {
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 1.28em;
+}
+.files-md h3 {
+  font-size: 1.1em;
+}
+.files-md :is(h4, h5, h6) {
+  font-size: 1em;
+}
+.files-md :is(p, ul, ol, blockquote, pre, .files-md__table) {
+  margin: 0 0 0.9em;
+}
+.files-md :is(ul, ol) {
+  padding-left: 1.5em;
+}
+.files-md ul {
+  list-style: disc;
+}
+.files-md ol {
+  list-style: decimal;
+}
+.files-md li + li {
+  margin-top: 0.2em;
+}
+.files-md li > :is(ul, ol) {
+  margin: 0.2em 0 0;
+}
+.files-md blockquote {
+  padding: 2px 0 2px 14px;
+  border-left: 3px solid var(--hairline);
+  color: var(--muted-foreground);
+}
+.files-md hr {
+  margin: 1.6em 0;
+  border: 0;
+  border-top: 1px solid var(--hairline);
+}
+.files-md a[href] {
+  color: var(--primary);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--primary) 45%, transparent);
+  text-underline-offset: 2px;
+}
+.files-md a[href]:hover {
+  text-decoration-color: currentColor;
+}
+.files-md :not(pre) > code {
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+.files-md pre {
+  max-width: 100%;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--hairline);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow-wrap: normal;
+  tab-size: 4;
+}
+.files-md img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+}
+.files-md__table {
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 1px var(--hairline);
+}
+/* As wide as its content needs, at least the column: a table too wide for
+   the pane scrolls in its wrapper instead of crushing its cells. */
+.files-md table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.files-md :is(th, td) {
+  max-width: 340px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+.files-md :is(th, td)[align='right'] {
+  text-align: right;
+}
+.files-md :is(th, td)[align='center'] {
+  text-align: center;
+}
+.files-md th {
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.files-md tbody tr:last-child td {
+  border-bottom: 0;
+}
+.files-md__blocked {
+  display: inline-block;
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  font-size: 0.88em;
+  color: var(--muted-foreground);
+}
+
+/* ── Images and PDFs ─────────────────────────────────────────────────────── */
+
+.files-image {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.files-image img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+  box-shadow: 0 0 0 1px var(--hairline);
+  /* A transparent image stays visible on either theme. */
+  background: repeating-conic-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent) 0% 25%,
+      transparent 0% 50%
+    )
+    0 0 / 16px 16px;
+}
+.files-pdf {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px 28px;
+}
+.files-pdf__count {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
+.files-pdf__page {
+  max-width: 100%;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  background: #fff;
+  box-shadow:
+    0 0 0 1px var(--hairline),
+    0 2px 10px rgba(0, 0, 0, 0.18);
+}
+.files-pdf__page canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Light theme: highlight.js tokens ────────────────────────────────────── */
+
+/* The stylesheet highlight.js ships is github-dark; on the light theme its
+   colours wash out. Same palette swap the chat's code blocks use. */
+:root[data-theme='light'] .files-preview :is(.hljs-doctag, .hljs-keyword, .hljs-template-tag),
+:root[data-theme='light'] .files-preview :is(.hljs-template-variable, .hljs-type),
+:root[data-theme='light'] .files-preview .hljs-meta .hljs-keyword,
+:root[data-theme='light'] .files-preview .hljs-variable.language_ {
+  color: #d73a49;
+}
+:root[data-theme='light']
+  .files-preview
+  :is(.hljs-title, .hljs-title.class_, .hljs-title.function_) {
+  color: #6f42c1;
+}
+:root[data-theme='light']
+  .files-preview
+  :is(.hljs-attr, .hljs-attribute, .hljs-literal, .hljs-meta),
+:root[data-theme='light'] .files-preview :is(.hljs-number, .hljs-operator, .hljs-variable),
+:root[data-theme='light'] .files-preview :is(.hljs-selector-attr, .hljs-selector-class),
+:root[data-theme='light'] .files-preview .hljs-selector-id {
+  color: #005cc5;
+}
+:root[data-theme='light'] .files-preview :is(.hljs-regexp, .hljs-string),
+:root[data-theme='light'] .files-preview .hljs-meta .hljs-string {
+  color: #032f62;
+}
+:root[data-theme='light'] .files-preview :is(.hljs-built_in, .hljs-symbol) {
+  color: #e36209;
+}
+:root[data-theme='light'] .files-preview :is(.hljs-comment, .hljs-code, .hljs-formula) {
+  color: #6a737d;
+}
+:root[data-theme='light'] .files-preview :is(.hljs-name, .hljs-quote, .hljs-selector-tag),
+:root[data-theme='light'] .files-preview .hljs-selector-pseudo {
+  color: #22863a;
+}
+:root[data-theme='light'] .files-preview :is(.hljs-section, .hljs-bullet) {
+  color: #005cc5;
+}
+:root[data-theme='light'] .files-preview :is(.hljs-subst, .hljs-emphasis, .hljs-strong) {
+  color: var(--foreground);
+}
+:root[data-theme='light'] .files-preview .hljs-addition {
+  background: #f0fff4;
+  color: #22863a;
+}
+:root[data-theme='light'] .files-preview .hljs-deletion {
+  background: #ffeef0;
+  color: #b31d28;
+}
+
+/* ── Narrow panel: one pane at a time ────────────────────────────────────── */
+
+@container files-panel (max-width: 680px) {
+  .files {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .files-tree {
+    border-right: 0;
+  }
+  .files[data-pane='tree'] .files-preview,
+  .files[data-pane='preview'] .files-tree {
+    display: none;
+  }
+  .files-back {
+    display: inline-flex;
+  }
+  .files-preview__head {
+    padding-left: 16px;
+  }
+  .files-md {
+    padding: 16px 16px 32px;
+  }
+  .files-text,
+  .files-code {
+    padding: 14px 16px 24px;
+  }
+}
+@media (max-width: 620px) {
+  .files-panel__overlay {
+    padding: 40px 10px 10px;
+  }
+}

@@ -57,6 +57,11 @@ interface UiStore {
   skillsOpen: boolean
   /** A status filter the Skills sheet should open on; read once on open. */
   skillsStatus: 'needs-setup' | null
+  /** Files is one too: the agent workspace, read-only. */
+  filesOpen: boolean
+  /** The file being previewed and the folders disclosed; kept while the app runs. */
+  filesSelected: string | null
+  filesExpanded: ReadonlySet<string>
   /** Settings is a sheet over the window too; remembers the section between opens. */
   settingsOpen: boolean
   settingsSection: SettingsSection
@@ -94,6 +99,11 @@ interface UiStore {
   openSkillsNeedingSetup(): void
   closeSkills(): void
   toggleSkills(): void
+  openFiles(): void
+  closeFiles(): void
+  toggleFiles(): void
+  selectFile(path: string | null): void
+  setFilesExpanded(paths: ReadonlySet<string>): void
   openSettings(section?: SettingsSection): void
   closeSettings(): void
   toggleSettings(): void
@@ -117,6 +127,9 @@ export const useUi = create<UiStore>((set) => ({
   jobsOpen: false,
   skillsOpen: false,
   skillsStatus: null,
+  filesOpen: false,
+  filesSelected: null,
+  filesExpanded: new Set(),
   settingsOpen: false,
   settingsSection: DEFAULT_SECTION,
   pendingPrompt: null,
@@ -135,27 +148,68 @@ export const useUi = create<UiStore>((set) => ({
     set({ sidebarWidth: SIDEBAR_DEFAULT, sidebarOpen: true })
   },
   setSessionQuery: (sessionQuery) => set({ sessionQuery }),
-  // One sheet at a time: opening any of Jobs, Skills or Settings closes the others.
-  openJobs: () => set({ jobsOpen: true, skillsOpen: false, settingsOpen: false }),
+  // One sheet at a time: opening any of Jobs, Skills, Files or Settings closes the others.
+  openJobs: () => set({ jobsOpen: true, skillsOpen: false, filesOpen: false, settingsOpen: false }),
   closeJobs: () => set({ jobsOpen: false }),
-  toggleJobs: () => set((s) => ({ jobsOpen: !s.jobsOpen, skillsOpen: false, settingsOpen: false })),
+  toggleJobs: () =>
+    set((s) => ({
+      jobsOpen: !s.jobsOpen,
+      skillsOpen: false,
+      filesOpen: false,
+      settingsOpen: false,
+    })),
   openSkills: () =>
-    set({ skillsOpen: true, skillsStatus: null, jobsOpen: false, settingsOpen: false }),
+    set({
+      skillsOpen: true,
+      skillsStatus: null,
+      jobsOpen: false,
+      filesOpen: false,
+      settingsOpen: false,
+    }),
   openSkillsNeedingSetup: () =>
-    set({ skillsOpen: true, skillsStatus: 'needs-setup', jobsOpen: false, settingsOpen: false }),
+    set({
+      skillsOpen: true,
+      skillsStatus: 'needs-setup',
+      jobsOpen: false,
+      filesOpen: false,
+      settingsOpen: false,
+    }),
   closeSkills: () => set({ skillsOpen: false, skillsStatus: null }),
   toggleSkills: () =>
-    set((s) => ({ skillsOpen: !s.skillsOpen, jobsOpen: false, settingsOpen: false })),
+    set((s) => ({
+      skillsOpen: !s.skillsOpen,
+      jobsOpen: false,
+      filesOpen: false,
+      settingsOpen: false,
+    })),
+  openFiles: () =>
+    set({ filesOpen: true, jobsOpen: false, skillsOpen: false, settingsOpen: false }),
+  closeFiles: () => set({ filesOpen: false }),
+  toggleFiles: () =>
+    set((s) => ({
+      filesOpen: !s.filesOpen,
+      jobsOpen: false,
+      skillsOpen: false,
+      settingsOpen: false,
+    })),
+  selectFile: (filesSelected) => set({ filesSelected }),
+  setFilesExpanded: (paths) => set({ filesExpanded: new Set(paths) }),
   openSettings: (section) =>
     set((s) => ({
       settingsOpen: true,
       jobsOpen: false,
       skillsOpen: false,
+      filesOpen: false,
       settingsSection: section ?? s.settingsSection,
     })),
   closeSettings: () => set({ settingsOpen: false }),
   toggleSettings: () =>
-    set((s) => ({ settingsOpen: !s.settingsOpen, jobsOpen: false, skillsOpen: false })),
+    set((s) => ({
+      settingsOpen: !s.settingsOpen,
+      jobsOpen: false,
+      skillsOpen: false,
+      filesOpen: false,
+    })),
   setSettingsSection: (settingsSection) => set({ settingsSection }),
   setPendingPrompt: (pendingPrompt) => set({ pendingPrompt }),
   requestComposerFocus: () => set((s) => ({ composerFocusRequest: s.composerFocusRequest + 1 })),

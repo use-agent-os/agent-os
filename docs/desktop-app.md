@@ -177,6 +177,32 @@ as the Web UI and `agentos cron`, with a natural-language schedule builder.
 See [Scheduling](scheduling.md). **Skills** (⌘⇧K) browses and installs
 skills; see [Skills](features/skills.md).
 
+## Files
+
+**Files** (⌘⇧E) opens the agent's workspace as a panel over the current view:
+the folder tree on the left, the selected file on the right. It is read-only;
+nothing in it can create, change or delete a file.
+
+- **Previews.** Markdown renders (switch to **Source** for the raw text),
+  text and code show with syntax colouring, images display to fit, and PDFs
+  draw page by page. Text previews stop at 1 MB, images at 20 MB and PDFs at
+  30 MB. Anything else says it has no preview.
+- **What is left out.** Hidden files and folders (names starting with a dot,
+  such as `.env` and `.git`), keys and certificates, credential files,
+  databases and lock files are neither listed nor openable. Links are listed
+  but never followed, so nothing outside the workspace can be reached through
+  one.
+- **Nothing in a file runs.** An HTML or SVG file is shown as source or as a
+  still image. A Markdown file's remote images are not loaded; a link to each
+  is shown instead, since loading one would tell its host the file was opened.
+- **Folders load as you open them**, 500 items at a time, so a large project
+  folder does not slow the panel down. **Refresh** re-reads what is open.
+
+The files come from the gateway, so against a
+[gateway on another machine](#using-a-gateway-on-another-machine) you browse
+that machine's workspace. A gateway older than this feature shows a note
+asking for an update.
+
 ## Quick Ask
 
 Press **⌥ Space** in any app to open a small prompt over it, the way
@@ -401,6 +427,7 @@ The full list is in Settings › Shortcuts.
 | ⌘, | Open settings |
 | ⌘⇧K | Open skills |
 | ⌘⇧J | Open scheduled jobs |
+| ⌘⇧E | Open files |
 | ⌘⇧T | Switch Chat / Trade |
 | ⌘⇧S | Show or hide the sidebar |
 | ⌘+ / ⌘− / ⌘0 | Larger UI / smaller UI / actual size |

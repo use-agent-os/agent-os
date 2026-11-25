@@ -1,4 +1,11 @@
-import { CalendarClock, PenSquare, Sparkles, Workflow, type LucideIcon } from 'lucide-react'
+import {
+  CalendarClock,
+  FolderOpen,
+  PenSquare,
+  Sparkles,
+  Workflow,
+  type LucideIcon,
+} from 'lucide-react'
 import { Link } from 'react-router'
 import { t, type MessageKey } from '~/i18n'
 import { useUi } from '~/stores/ui'
@@ -10,7 +17,7 @@ interface Action {
   /** Navigate here (never shown as the selected place). */
   to?: string
   /** Or open a panel over the window instead of navigating. */
-  panel?: 'jobs' | 'skills'
+  panel?: 'jobs' | 'skills' | 'files'
 }
 
 /** Trading is not here on purpose: it is a mode of the chat (the pill at the top). */
@@ -18,6 +25,7 @@ export const QUICK_ACTIONS: readonly Action[] = [
   { to: '/sessions', label: 'sidebar.new', icon: PenSquare, shortcut: ['⌘', 'N'] },
   { panel: 'skills', label: 'sidebar.skills', icon: Sparkles },
   { panel: 'jobs', label: 'sidebar.jobs', icon: CalendarClock },
+  { panel: 'files', label: 'sidebar.files', icon: FolderOpen },
   { to: '/flows', label: 'sidebar.flows', icon: Workflow },
 ]
 
@@ -27,10 +35,13 @@ export function QuickActions() {
   const skillsOpen = useUi((s) => s.skillsOpen)
   const openJobs = useUi((s) => s.openJobs)
   const openSkills = useUi((s) => s.openSkills)
+  const filesOpen = useUi((s) => s.filesOpen)
+  const openFiles = useUi((s) => s.openFiles)
   const requestComposerFocus = useUi((s) => s.requestComposerFocus)
   const panels = {
     jobs: { open: jobsOpen, show: openJobs },
     skills: { open: skillsOpen, show: openSkills },
+    files: { open: filesOpen, show: openFiles },
   } as const
 
   return (

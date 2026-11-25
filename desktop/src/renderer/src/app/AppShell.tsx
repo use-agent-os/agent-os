@@ -19,6 +19,7 @@ import { useTradingUi } from '~/stores/trading-ui'
 import { useUi } from '~/stores/ui'
 import { bindUpdateEvents } from '~/stores/updates'
 import { bindBootstrapEvents } from '~/stores/bootstrap'
+import { FilesPanel } from '~/views/files/FilesPanel'
 import { SetupOverlay } from '~/views/setup/SetupOverlay'
 import { JobsPanel } from '~/views/jobs/JobsPanel'
 import { SettingsPanel } from '~/views/settings/SettingsPanel'
@@ -52,6 +53,7 @@ export function AppShell() {
       {/* Layers over the whole window, whichever route is showing. */}
       <JobsPanel />
       <SkillsPanel />
+      <FilesPanel />
       <SettingsPanel />
       <PetOverlay />
       {/* First run: installs the engine before anything else is usable. */}
@@ -68,7 +70,7 @@ function useOpenSettingsFromMenu() {
   useEffect(() => desktopApi().settings.onOpenRequested(() => openSettings()), [openSettings])
 }
 
-/** ⌘, settings · ⌘N new session · ⌘⇧S sidebar · ⌘⇧K skills · ⌘⇧J jobs.
+/** ⌘, settings · ⌘N new session · ⌘⇧S sidebar · ⌘⇧K skills · ⌘⇧J jobs · ⌘⇧E files.
  *  Registered with the console's registry so they show in its cheat sheet
  *  and respect open overlays. */
 export function useShellShortcuts() {
@@ -77,6 +79,7 @@ export function useShellShortcuts() {
   const toggleSidebar = useUi((s) => s.toggleSidebar)
   const toggleSkills = useUi((s) => s.toggleSkills)
   const toggleJobs = useUi((s) => s.toggleJobs)
+  const toggleFiles = useUi((s) => s.toggleFiles)
   const desk = useDeskToggle()
   const category = t('settings.shortcuts.app')
 
@@ -106,6 +109,19 @@ export function useShellShortcuts() {
     (e) => {
       e.preventDefault()
       toggleJobs()
+    },
+  )
+  useKeyboardShortcut(
+    {
+      combo: 'mod+shift+e',
+      description: t('settings.shortcuts.files'),
+      category,
+      allowInInputs: true,
+      allowWithOverlays: true,
+    },
+    (e) => {
+      e.preventDefault()
+      toggleFiles()
     },
   )
 

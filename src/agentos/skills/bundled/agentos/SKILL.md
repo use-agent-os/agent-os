@@ -886,6 +886,8 @@ secrets, env, trading, restarts and deletes answer 403 `FORBIDDEN`),
 the resolved policy), `POST /api/v1/hooks/*` (inbound webhooks, `[hooks]
 token`), and `WS /ws` (primary RPC transport; `projects.*` CRUD lives there
 alongside `sessions.*`; `artifacts.download` mints ticketed file URLs,
+`workspace.files.list|read|download` are the desktop app's read-only workspace
+browser (user only: refused to an agent's connection, no write method),
 `push.web.*` manages approval push subscriptions, `config.changed` reports
 edits of the config file the gateway applied or skipped). On loopback binds
 auth is optional; on public binds the `[auth]` token gates every request

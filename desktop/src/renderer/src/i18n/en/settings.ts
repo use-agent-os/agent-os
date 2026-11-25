@@ -595,6 +595,7 @@ export const settings = {
   'settings.shortcuts.settings': 'Open settings',
   'settings.shortcuts.skills': 'Open skills',
   'settings.shortcuts.jobs': 'Open scheduled jobs',
+  'settings.shortcuts.files': 'Open files',
   'settings.shortcuts.closeSheet': 'Close a sheet',
   'settings.shortcuts.toggleSidebar': 'Show or hide the sidebar',
   'settings.shortcuts.zoomIn': 'Larger UI',
