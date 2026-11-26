@@ -93,8 +93,10 @@ export function Markets({ deskChain = null }: { deskChain?: ChainId | null }) {
   // other matches stays on offer.
   const isSymbol = committed.length > 0 && !ADDRESS_RE.test(committed)
   const search = useTokenSearch(chain, isSymbol ? committed : '')
+  // Settled once the lookup has answered; a background refresh of that answer
+  // (stale, refocused) keeps the board up instead of dropping to "Looking up…".
   const settled =
-    !isSymbol || committed.length < 2 || (search.debounced === committed && !search.isFetching)
+    !isSymbol || committed.length < 2 || (search.debounced === committed && !search.isLoading)
   const picked =
     isSymbol && settled ? pickMarketsTarget(committed, search.tokens, chain, explicit) : null
   const resolved: MarketsTarget | null = !committed

@@ -1204,7 +1204,10 @@ export function useTokenSearch(first: number, query: string) {
   }, [query])
   const results = useQueries({
     queries: CHAINS.map((c) => ({
-      queryKey: ['trading', 'tokens', c.id, debounced.toLowerCase()],
+      // Outside the `trading` prefix, like Markets: what a symbol means does
+      // not move with an order, and every `trading.*` event refetching six
+      // lookups made the Markets board fall back to "Looking up…" each time.
+      queryKey: ['trading-tokens', c.id, debounced.toLowerCase()],
       enabled: connected && debounced.length >= 2,
       queryFn: async () => {
         await rpc.waitForConnection()
@@ -1218,6 +1221,9 @@ export function useTokenSearch(first: number, query: string) {
     })),
   })
   const isFetching = results.some((r) => r.isFetching)
+  // A first read with nothing in hand yet. A background refresh of an answer
+  // already shown is `isFetching` but not this, so callers can keep showing it.
+  const isLoading = results.some((r) => r.isLoading)
   // `results` is a new array on every render, so memoising on it would never
   // hit. The stamps are what actually change when a chain answers.
   const stamps = results.map((r) => r.dataUpdatedAt).join(',')
@@ -1229,7 +1235,7 @@ export function useTokenSearch(first: number, query: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [stamps, first, debounced],
   )
-  return { isFetching, tokens, debounced }
+  return { isFetching, isLoading, tokens, debounced }
 }
 
 /* ── Markets (docs/markets.md) ───────────────────────────────────────────── */
