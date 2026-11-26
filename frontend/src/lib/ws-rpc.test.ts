@@ -140,6 +140,25 @@ describe('handshake', () => {
     expect(client.hasCapability('nope')).toBe(false)
   })
 
+  it('exposes hello-ok methods, and null when the gateway lists none', () => {
+    const { client, ws } = newClient()
+    expect(client.methods).toBeNull()
+    ws.serverSend({ type: 'event', event: 'connect.challenge', payload: { nonce: 'n1' } })
+    ws.serverSend({
+      protocol: 3,
+      auth: { nonce: 'n1' },
+      features: { methods: ['browser.status', 7, 'health'], events: [], capabilities: [] },
+      policy: {},
+    })
+    expect(client.methods).toEqual(['browser.status', 'health'])
+
+    const other = newClient()
+    other.ws.serverSend({ type: 'event', event: 'connect.challenge', payload: { nonce: 'n2' } })
+    other.ws.serverSend({ protocol: 3, auth: { nonce: 'n2' }, features: {}, policy: {} })
+    expect(other.client.state).toBe('connected')
+    expect(other.client.methods).toBeNull()
+  })
+
   it('refuses a hello-ok that echoes another challenge nonce', () => {
     const { client, ws } = newClient()
     const errors: unknown[] = []

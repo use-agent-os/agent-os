@@ -65,6 +65,7 @@ export class WsRpcClient {
   private tickTimeoutMs = 60000
   private challengeNonce: string | null = null
   private capabilitiesValue: string[] = []
+  private methodsValue: readonly string[] | null = null
   private clientInfo: ClientInfo
   /** Set while a handshake refused with STARTUP_SIDECARS is being retried. */
   private startupRetry = false
@@ -172,6 +173,15 @@ export class WsRpcClient {
     return this.capabilitiesValue.includes(name)
   }
 
+  /**
+   * `hello-ok.features.methods`: every RPC method the gateway registered, or
+   * null before a handshake (or from a gateway that does not list them).
+   * Null means unknown, not none: callers fall back to METHOD_NOT_FOUND.
+   */
+  get methods(): readonly string[] | null {
+    return this.methodsValue
+  }
+
   waitForConnection(): Promise<void> {
     if (this.stateValue === 'connected') return Promise.resolve()
     return new Promise((resolve) => {
@@ -277,10 +287,14 @@ export class WsRpcClient {
           this.ws?.close()
           return
         }
-        const features = (data.features as { capabilities?: unknown } | undefined) ?? {}
+        const features =
+          (data.features as { capabilities?: unknown; methods?: unknown } | undefined) ?? {}
         this.capabilitiesValue = Array.isArray(features.capabilities)
           ? features.capabilities.filter((c): c is string => typeof c === 'string')
           : []
+        this.methodsValue = Array.isArray(features.methods)
+          ? features.methods.filter((m): m is string => typeof m === 'string')
+          : null
         this.policyValue = (data.policy as Record<string, unknown>) ?? null
         for (const [id, p] of this.pending) {
           this.pending.delete(id)

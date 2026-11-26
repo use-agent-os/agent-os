@@ -4,6 +4,7 @@ import { act, screen } from '@testing-library/react'
 import { usePreferences, DEFAULT_PREFERENCES } from '@/stores/preferences'
 import { resetStagedAttachmentsForTests } from '@/web/features/chat/composer/drafts'
 import { resetQueuesForTests } from '@/web/features/chat/composer/queue'
+import { resetFilesForTests } from '@/web/features/chat/panels/files/files-store'
 import { resetPanelsForTests } from '@/web/features/chat/panels/panel-store'
 import type { FakeRpc } from './fake-rpc'
 import { renderShell, resetShellState, sessionRow, shellRpc } from './web-shell'
@@ -14,6 +15,7 @@ export const CHAT_PATH = '/chat/main/webchat/t1'
 export function resetChatState(): void {
   resetShellState()
   resetPanelsForTests()
+  resetFilesForTests()
   resetStagedAttachmentsForTests()
   resetQueuesForTests()
   usePreferences.setState({ ...DEFAULT_PREFERENCES })

@@ -4,7 +4,13 @@ import { comboParts } from '@/components/shortcut-combo'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/web/components/ui/dialog'
 import { Kbd } from '@/web/components/ui/kbd'
 import { SectionHeader } from '@/web/components/ui/section-header'
-import { COMPOSER_BINDINGS, GLOBAL_BINDINGS, NAVIGATION_CHORDS, type Binding } from './bindings'
+import {
+  CHAT_BINDINGS,
+  COMPOSER_BINDINGS,
+  GLOBAL_BINDINGS,
+  NAVIGATION_CHORDS,
+  type Binding,
+} from './bindings'
 
 function Keys({ combo }: { combo: string }) {
   const steps = combo.split(' ')
@@ -58,6 +64,7 @@ export function ShortcutOverview({ open, onClose }: { open: boolean; onClose: ()
         <div className="grid gap-6 md:grid-cols-2">
           <div className="flex flex-col gap-6">
             <Section title={t('webPalette.categoryGlobal')} bindings={GLOBAL_BINDINGS} />
+            <Section title={t('webPalette.categoryChat')} bindings={CHAT_BINDINGS} />
             <Section title={t('webPalette.categoryComposer')} bindings={COMPOSER_BINDINGS} />
           </div>
           <Section title={t('webPalette.categoryNavigation')} bindings={NAVIGATION_CHORDS} />

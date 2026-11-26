@@ -23,6 +23,7 @@ import { pathToSessionKey, sessionKeyToPath } from '@/web/shell/session-url'
 import { usePhone } from '@/web/shell/use-media-query'
 import { useShell } from '@/web/shell/shell-store'
 import { buildActions } from './actions'
+import { PANEL_TOGGLE_ID, usePanels } from '@/web/features/chat/panels/panel-store'
 
 const MAX_SESSIONS = 50
 
@@ -134,6 +135,10 @@ export function CommandPalette({
         )
     },
     exportSession: (key) => void exportSessionMarkdown(rpc, key),
+    // The chat binds its session's layout; the palette only runs on a chat page.
+    togglePanel: () => usePanels.getState().toggle(document.getElementById(PANEL_TOGGLE_ID)),
+    openPanelTool: (kind) =>
+      usePanels.getState().openTool(kind, document.getElementById(PANEL_TOGGLE_ID)),
   })
 
   return (

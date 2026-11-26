@@ -429,7 +429,7 @@ shortcut overview, which shows the keys for your platform.
 `Mod+K`, or the rail's **Search** button, opens the command palette. Type to
 search, in labelled groups, across **Sessions** (titles and keys), **Pages**,
 **Settings** sections and **Actions**: New session, Toggle sidebar, Switch to
-system / light / dark theme, Open keyboard shortcuts, Retry connection, Open Inbox, Compact current session and Export current session. An
+system / light / dark theme, Open keyboard shortcuts, Retry connection, Open Inbox, Compact current session, Export current session, Toggle workspace panel, and Open Files or Open Browser in the workspace panel. An
 action that cannot run right now is listed as disabled with its reason (for
 example, Compact while a turn is running). Arrow keys move, `Enter` runs,
 `Escape` closes and returns focus to where it was. If sessions cannot be
@@ -471,6 +471,12 @@ Press `g`, then a destination key within **1.5 seconds**:
 | `g v` | Settings › Approvals |
 | `g o` | Home (the former Overview chord) |
 
+### Chat
+
+| Keys | Action |
+| --- | --- |
+| `Mod+\` | Show or hide the workspace panel |
+
 ### Composer
 
 | Keys | Action |
@@ -485,7 +491,7 @@ Press `g`, then a destination key within **1.5 seconds**:
 > [!NOTE]
 > Single-key shortcuts and chords are ignored while focus is in a text field
 > and while a dialog is open. `Mod+` shortcuts (the palette, the sidebar, the
-> overview, New session) also work from the composer.
+> overview, New session, the workspace panel) also work from the composer.
 
 ## Settings
 
@@ -741,7 +747,7 @@ that folds into one line (**Worked for …**) when the turn ends. Hover or focus
 a message to copy it as Markdown or see when it was sent. The header shows the session title (its
 name, else its first message, else **New conversation**; activate it to rename
 in place), the agent, channel and project, the session ID (activate it to copy
-the full key), a **Panels** toggle and a ⋯ menu (Rename, Compact, Reset
+the full key), the workspace panel toggle and a ⋯ menu (Rename, Compact, Reset
 session (confirmed first), Export as Markdown, Copy session key). It stays visible while the transcript scrolls.
 
 Opening, reloading or switching to a session lands on its latest message.
@@ -845,11 +851,53 @@ last event seen. If live updates were missed, a toast says so and the
 conversation is reloaded, and a running turn with no events for 210 seconds is
 checked against the gateway again. Long replies are drawn once per frame.
 
-### Side panel and approvals
+### Workspace panel
 
-The side panel opens beside the transcript for full tool output, artifacts and
-reasoning, one tab per item. Drag its edge to resize it (the width is
-remembered); Escape closes it and returns focus to the control that opened it.
+The workspace panel opens beside the conversation with the panel toggle in
+the chat header (or `Mod+\`). It holds tools and transcript items as tabs in
+one strip:
+
+- **Files** browses the session agent's workspace, read-only: a tree that
+  loads each folder as you open it, a name filter for the open folders,
+  Refresh, and the selected file with its path as breadcrumbs. Source is
+  shown with line numbers and syntax colours, Markdown rendered (or as
+  source), images inline; PDFs open in a new tab. A binary file, or text
+  past the first 1 MB, says so instead of showing garbage. Copy path and
+  Download sit beside the file. Credentials, keys, dotfiles, databases and
+  links never appear, as for the desktop's file browser. A tool row that
+  read or wrote a workspace file (`read_file`, `write_file`, `edit_file`,
+  `list_dir`, `publish_artifact`, `apply_patch`) offers **Open in Files**;
+  a relative link in a Markdown file opens its target there too.
+- **Browser** shows the browser the session's agent drives with its
+  browser tool: a page image refreshed every two seconds while the tab is
+  on screen, the browser's tabs, an address bar, Back, Forward, Reload and
+  Open in your browser. It says so when the browser tool is turned off,
+  the engine is not installed or attach mode is unconfirmed; a session with
+  no browser yet offers **Start browser**. Addresses go through the browser
+  tool's own allowlist and private-network checks, and a page on a private
+  address is not captured. Clicks and typing on the page stay with the
+  agent: the view does not forward input. A browser tool row offers **Show
+  browser**.
+- **Tool output**, **artifact** and **reasoning** tabs open from the
+  transcript (**Open in side panel** on a long result, an artifact card).
+
+The **+** button opens a tool; a gateway too old to offer one lists it as
+unavailable. Drag a tab to reorder it (or `Ctrl+Shift+←`/`→` on a focused
+tab), close it with its × (or Delete), and use the arrow keys to move
+between tabs. Closing the last tab closes the panel. The panel's layout
+menu docks it to the right or the bottom, or expands it over the chat;
+drag its edge or use the arrow keys on it to resize (both follow the
+page's reading direction). When the chat pane is too small to share, the
+panel takes its place until there is room again. Escape, or the panel's
+hide button, hides it and returns focus to where you were.
+
+Each session keeps its own panel layout in the browser: whether it is
+showing, the open tools and their order, the selected tab, size and dock.
+A session with no saved layout starts with the panel closed. Tool output,
+artifact and reasoning tabs last until you leave the session. On phones the
+panel is a full-screen sheet.
+
+### Approvals
 
 When the open session's turn needs an approval, the request docks above the
 composer with the decisions it allows, and the turn shows **Waiting for

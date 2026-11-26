@@ -21,6 +21,7 @@ import { webConnection } from './webConnection'
 import { webPagesOverview } from './webPagesOverview'
 import { webPagesWork } from './webPagesWork'
 import { webPalette } from './webPalette'
+import { webPanel } from './webPanel'
 import { webSetAccess } from './webSetAccess'
 import { webSetCapabilities } from './webSetCapabilities'
 import { webSetConfig } from './webSetConfig'
@@ -68,6 +69,7 @@ export const en = {
   webPagesOverview,
   webPagesWork,
   webPalette,
+  webPanel,
   webSetAccess,
   webSetCapabilities,
   webSetConfig,

@@ -167,7 +167,7 @@ describe('tool rows', () => {
     })
     await user.click(await within(log()).findByRole('button', { name: /bash/ }))
     await user.click(screen.getByRole('button', { name: 'Open in side panel' }))
-    const panel = screen.getByRole('complementary', { name: 'Side panel' })
+    const panel = screen.getByRole('complementary', { name: 'Workspace panel' })
     expect(within(panel).getByRole('tabpanel')).toHaveTextContent(long)
   })
 
@@ -651,7 +651,7 @@ describe('side panel', () => {
     const { composer } = await openChat(rpc)
     await user.type(composer, 'my draft')
     await user.click(await within(log()).findByRole('button', { name: 'Open report.md' }))
-    const panel = screen.getByRole('complementary', { name: 'Side panel' })
+    const panel = screen.getByRole('complementary', { name: 'Workspace panel' })
     expect(within(panel).getByRole('tab', { name: 'report.md' })).toHaveAttribute(
       'aria-selected',
       'true',
