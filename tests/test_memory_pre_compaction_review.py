@@ -17,6 +17,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator, Callable
+from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -189,6 +190,28 @@ def _auxiliary_client(monkeypatch: pytest.MonkeyPatch) -> None:
             provider_factory=lambda **_kwargs: _AUX_PROVIDER["provider"],
         ),
     )
+
+
+class _FrozenDatetime(datetime):
+    """``datetime`` whose ``now()`` never moves."""
+
+    @classmethod
+    def now(cls, tz: tzinfo | None = None) -> _FrozenDatetime:
+        frozen = cls(2026, 1, 15, 9, 30, tzinfo=UTC)
+        return frozen if tz is None else frozen.astimezone(tz)
+
+
+@pytest.fixture(autouse=True)
+def _frozen_turn_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the per-turn runtime context's clock.
+
+    Each turn's request carries the current minute. Tests here compare the
+    requests of two separate runs, which flaked whenever the runs straddled
+    a minute boundary.
+    """
+    from agentos.engine import agent
+
+    monkeypatch.setattr(agent, "datetime", _FrozenDatetime)
 
 
 # -- the runtime -----------------------------------------------------------------

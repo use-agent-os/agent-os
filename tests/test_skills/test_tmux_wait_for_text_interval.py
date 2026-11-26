@@ -177,6 +177,56 @@ def test_a_missing_pattern_still_times_out_with_its_own_message(run) -> None:
     assert polls >= 2, "the poll loop should have run more than once"
 
 
+# `date +%s` stub: the first read is the start, each later read is one whole
+# second on -- the clock a start at x.95s sees.
+_TICKING_DATE = """\
+date() {
+  local n
+  n=$(cat "$DATE_TICKS")
+  echo $((n + 1)) > "$DATE_TICKS"
+  echo $((1000 + n))
+}
+export -f date
+"""
+
+
+def test_a_start_just_before_a_second_boundary_does_not_time_out_early(
+    tmp_path: Path,
+) -> None:
+    """Whole-second epochs: a start at x.95 used to reach ``start + 1`` 50 ms
+    into a one-second wait and give up after a single poll."""
+    if _no_usable_bash():
+        return
+    wrapper = tmp_path / "run.sh"
+    wrapper.write_text(_TICKING_DATE + _WRAPPER, encoding="utf-8")
+    pane = tmp_path / "pane.txt"
+    pane.write_text("nothing here\n", encoding="utf-8")
+    calls = tmp_path / "calls.txt"
+    calls.write_text("", encoding="utf-8")
+    ticks = tmp_path / "ticks.txt"
+    ticks.write_text("0", encoding="utf-8")
+    env = {
+        **os.environ,
+        "SCRIPT": str(SCRIPT),
+        "PANE_FIXTURE": str(pane),
+        "TMUX_CALLS": str(calls),
+        "DATE_TICKS": str(ticks),
+    }
+
+    result = subprocess.run(
+        ["bash", str(wrapper), "-t", "s", "-p", "READY", "-T", "1", "-i", "0.01"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    polls = len([ln for ln in calls.read_text(encoding="utf-8").splitlines() if ln])
+    assert result.returncode == 1
+    assert "Timed out after 1s" in result.stderr
+    assert polls == 2, "the one-second wait ended before a full second could have passed"
+
+
 def test_the_siblings_are_still_validated(run) -> None:
     """Guard: these passed before the fix and must keep passing."""
     if _no_usable_bash():

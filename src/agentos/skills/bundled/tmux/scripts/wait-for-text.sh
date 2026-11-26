@@ -69,9 +69,15 @@ if ! command -v tmux >/dev/null 2>&1; then
   exit 1
 fi
 
-# End time in epoch seconds (integer, good enough for polling)
+# End time in epoch seconds. `date +%s` only counts whole seconds, so a start
+# at x.95 reached `start + timeout` after 0.05s of a 1s wait and gave up after
+# a single poll. One extra tick means the timeout never fires early; it can run
+# up to a second long instead. `-T 0` still means one poll, then give up.
 start_epoch=$(date +%s)
 deadline=$((start_epoch + timeout))
+if (( timeout > 0 )); then
+  deadline=$((deadline + 1))
+fi
 
 while true; do
   # -J joins wrapped lines, -S uses negative index to read last N lines

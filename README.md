@@ -1,7 +1,7 @@
 # AgentOS — The AI Agent That Trades for You, on Your Machine, with Your Keys
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-hero-banner.jpg" alt="AgentOS — Local-first agentic trading, minimum tokens.">
+  <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-thumbnail.webp" alt="AgentOS — The AI agent that trades for you. Your machine, your keys.">
 </p>
 
 <p align="center">
