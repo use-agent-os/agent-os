@@ -937,9 +937,15 @@
     display: flex;
     flex-shrink: 0;
     gap: 4px;
-    padding: 8px 12px 0;
+    padding: 8px 24px 0 12px;
     overflow-x: auto;
     scrollbar-width: none;
+    /* A soft end edge: a strip that scrolls reads as one. */
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  }
+  [dir='rtl'] .ws-btabs {
+    padding: 8px 12px 0 24px;
+    mask-image: linear-gradient(to left, #000 calc(100% - 24px), transparent);
   }
   .ws-btab {
     display: flex;
