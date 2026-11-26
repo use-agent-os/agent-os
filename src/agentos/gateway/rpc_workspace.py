@@ -1,12 +1,13 @@
 """RPC handlers for the operator's read-only workspace file browser.
 
 ``workspace.files.list`` lists one directory of an agent's workspace,
-``workspace.files.read`` returns a text file, and ``workspace.files.download``
-mints a ticketed URL (``gateway.download_grants``) for an image or a PDF.
-There is no write method. The filesystem rules are in
+``workspace.files.read`` returns a text file, ``workspace.files.download``
+mints a ticketed URL (``gateway.download_grants``) for an image or a PDF, and
+``workspace.files.resolve`` maps a path a tool call carried to the browser's
+relative form. There is no write method. The filesystem rules are in
 ``agentos.gateway.workspace_files``.
 
-All three are Control-surface methods and are refused to a connection the
+All four are Control-surface methods and are refused to a connection the
 gateway recognizes as an agent's: an agent reads files through its file tool,
 under that tool's policy and approvals, not through the operator's browser.
 """
@@ -31,6 +32,7 @@ from agentos.gateway.workspace_files import (
     list_directory,
     parse_relative_path,
     read_text,
+    relative_location,
     stat_download,
 )
 from agentos.session.keys import normalize_agent_id
@@ -119,6 +121,31 @@ async def _handle_workspace_files_read(params: dict | None, ctx: RpcContext) -> 
     except WorkspaceFileError as exc:
         raise to_rpc_error(exc) from exc
     return {**result, "agentId": agent_id}
+
+
+@_d.method("workspace.files.resolve", CONTROL_ONLY)
+async def _handle_workspace_files_resolve(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """Map a path a tool call carried to the browser's relative form.
+
+    Params: ``path`` (relative, absolute, ``~/...`` or a ``/workspace/...``
+    alias, as the file tools accept it), ``agentId``. Answers ``path: null``
+    with a ``reason`` (``outside``, ``denied``, ``invalid_path``) instead of an
+    error: a transcript names files the browser cannot show, and that is not
+    a failure. Purely lexical; it reads nothing in the workspace.
+    """
+    _refuse_agent_caller(ctx)
+    body = _params(params)
+    agent_id = _agent_id(body)
+    root = workspace_root(ctx.config, agent_id)
+    try:
+        relative: str | None = relative_location(body.get("path"), root)
+        reason = None
+    except WorkspaceFileError as exc:
+        relative, reason = None, exc.code
+    payload: dict[str, Any] = {"agentId": agent_id, "path": relative}
+    if reason is not None:
+        payload["reason"] = reason
+    return payload
 
 
 @_d.method("workspace.files.download", CONTROL_ONLY)
