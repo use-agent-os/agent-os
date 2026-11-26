@@ -100,7 +100,4 @@ export const DESKTOP_REQUIRED_METHODS: readonly string[] = [
   'wallet.setUnlockMode',
   'wallet.setup',
   'wallet.unlock',
-  'workspace.files.download',
-  'workspace.files.list',
-  'workspace.files.read',
 ]

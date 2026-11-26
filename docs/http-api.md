@@ -533,6 +533,30 @@ longer names a row. Assistant text, in history and in `text_delta` frames, is
 display-ready: reply directives, generated-artifact markers and leaked
 tool-protocol text are removed by the gateway.
 
+### Workspace files and the browser view (`workspace.files.*`, `browser.*`)
+
+Control-surface only, and refused to a connection the gateway recognizes as
+an agent's: an agent reads files and drives the browser through its own
+tools, under their policy. WebSocket only (not in the HTTP allowlist).
+
+| Method | Purpose |
+| --- | --- |
+| `workspace.files.list` | One directory of an agent's workspace (`path`, `agentId`). Hidden files, keys, credential files, databases and lock files are never listed; links are listed but never followed. |
+| `workspace.files.read` | A text file's content, at most 1 MiB (`truncated` past that); `previewable: false` with a `reason` for binary data, images and PDFs. |
+| `workspace.files.download` | A ticketed URL (see [Ticketed downloads](#ticketed-downloads)) for an image or a PDF, bound to this connection. |
+| `workspace.files.resolve` | Map a path a tool call carried (relative, absolute inside the workspace, `~/…`, `/workspace/…`) to the relative form, lexically. `path: null` with a `reason` (`outside`, `denied`, `invalid_path`) when the browser cannot show it. |
+| `browser.status` | Whether the browser tool is enabled and installed, its mode, and whether the session (`sessionKey`) has a browser running. Never runs the engine. |
+| `browser.snapshot` | The running browser's tabs and a JPEG of the active tab (`image: false` skips it). `running: false` when there is none; `withheld: "private"` instead of an image for a page on a private address (managed mode). Neither starts a browser nor extends an idle one's TTL. |
+| `browser.start` | Start the session's browser on `about:blank`. |
+| `browser.navigate` | Open an `http(s)` URL (or `about:blank`) in the active tab, through the browser tool's allowlist and private-network check. |
+| `browser.history` | `action`: `back`, `forward` or `reload`. |
+| `browser.tabs.select` | Bring a listed tab (`tabId`: `t1`, `t2`, …) to the front. |
+
+Refusals carry `details.code`: `workspace.*` (`denied`, `unsafe`,
+`not_found`, `too_large`, `unsupported`, `invalid_path`) and `browser.*`
+(`disabled`, `not_installed`, `attach_unconfirmed`, `not_running`,
+`blocked`, `too_large`, `failed`).
+
 ### Environment variables (`env.*`)
 
 Control-surface only. Values never appear in a listing.

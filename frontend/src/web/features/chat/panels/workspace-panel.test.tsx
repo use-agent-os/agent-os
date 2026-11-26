@@ -302,7 +302,7 @@ describe('Files tab', () => {
               type: 'tool_use',
               tool_use_id: 'w',
               name: 'write_file',
-              input: { path: '/home/someone/.agentos/workspace/src/report.py', content: 'x' },
+              input: { path: '/var/lib/agentos/workspace/src/report.py', content: 'x' },
             },
             {
               type: 'tool_result',
@@ -320,7 +320,7 @@ describe('Files tab', () => {
     await user.click(await within(log).findByRole('button', { name: /write_file/ }))
     await user.click(within(log).getByRole('button', { name: 'Open in Files' }))
     expect(rpc.callsTo('workspace.files.resolve')).toEqual([
-      { path: '/home/someone/.agentos/workspace/src/report.py', agentId: 'main' },
+      { path: '/var/lib/agentos/workspace/src/report.py', agentId: 'main' },
     ])
     expect(await within(panel()).findByRole('region', { name: 'report.py' })).toHaveTextContent(
       'def build',
