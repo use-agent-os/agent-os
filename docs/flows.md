@@ -45,6 +45,13 @@ Two things make a flow worth having over a one-off `image_generate` call:
 | `image` | `prompt`, `images` (optional, several links), `model`, `aspect` / `resolution` / `size` / `quality` / `background` (shown when the model has them), `count` (1-4), `variation` | `IMAGE` | Text to image with nothing linked to `images`; edit / multi-reference with 1..n images linked. `variation = new` always calls the model again; `keep` reuses the cached result for the same inputs. Paid. |
 | `save` | `images` (several links), `name` (default `{flow}_{run}_{n}`) | none | Writes PNG files that carry the flow inside them (an `agentos-flow` text chunk with the flow id, revision, run id and graph; never a key). |
 
+Surplus ignores `aspect` and `resolution` on an edit with two or more
+reference images. To keep the aspect, the `image` node adds one line naming
+it to the prompt (when that fits Surplus's 4,000-character prompt limit) and,
+for the Nano Banana models, sends a blank frame of that aspect as the last
+reference. The resolution of such an edit is the provider's default. When a
+result still has another shape, the node says so in its note.
+
 `agentos flows nodes` lists them from the running gateway.
 
 In the desktop editor, each image on a Save node has a download button, and so

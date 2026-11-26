@@ -524,3 +524,66 @@ async def test_end_to_end_run_on_surplus_records_the_header_cost(tmp_path, monke
         assert (image["width"], image["height"]) == (48, 32)  # read from the bytes
     finally:
         await service.close()
+
+
+def _image_size(data: bytes) -> tuple[int, int]:
+    import io
+
+    from PIL import Image
+
+    return Image.open(io.BytesIO(data)).size
+
+
+async def test_a_multi_image_edit_pins_the_aspect_itself(monkeypatch) -> None:
+    """Surplus strips ``aspect_ratio`` from an edit with several source images
+    (live 2026-11-26: ``x-si-adapted-params: aspect_ratio,resolution`` and a
+    1024x1024 answer to 16:9), so the prompt names it and a blank frame goes last."""
+    seen = _install(monkeypatch, lambda request: _ok())
+    adapter = ProviderImageAdapter(resolve=_surplus(monkeypatch))
+    nb2 = BY_ID["surplus/nano-banana-2"]
+    refs = [(PNG, "image/png"), (PNG, "image/png")]
+
+    await adapter.generate(nb2, AdapterRequest(prompt="a poster", images=refs, aspect_ratio="16:9"))
+    parts = _form_fields(seen[-1])
+    fields = dict(parts)
+    assert fields["aspect_ratio"] == b"16:9"
+    assert fields["prompt"].startswith(b"a poster") and b"16:9" in fields["prompt"]
+    images = [value for name, value in parts if name == "image"]
+    assert images[:2] == [PNG, PNG] and len(images) == 3
+    width, height = _image_size(images[2])
+    assert abs(width / height - 16 / 9) < 0.01
+
+    # One source image keeps its aspect on Surplus: nothing is added.
+    await adapter.generate(
+        nb2, AdapterRequest(prompt="a poster", images=refs[:1], aspect_ratio="16:9")
+    )
+    parts = _form_fields(seen[-1])
+    assert dict(parts)["prompt"] == b"a poster"
+    assert len([1 for name, _ in parts if name == "image"]) == 1
+
+    # No aspect asked for: nothing is added either.
+    await adapter.generate(nb2, AdapterRequest(prompt="a poster", images=refs))
+    parts = _form_fields(seen[-1])
+    assert dict(parts)["prompt"] == b"a poster"
+    assert len([1 for name, _ in parts if name == "image"]) == 2
+
+
+def test_the_aspect_pin_respects_the_prompt_ceiling_and_the_image_limit() -> None:
+    import dataclasses
+
+    from agentos.gateway.flows_wiring import SURPLUS_PROMPT_MAX, pin_multi_image_aspect
+
+    nb2 = BY_ID["surplus/nano-banana-2"]
+    refs = [(PNG, "image/png"), (PNG, "image/png")]
+    long_prompt = "x" * SURPLUS_PROMPT_MAX
+    prompt, images = pin_multi_image_aspect(nb2, long_prompt, refs, "16:9")
+    assert prompt == long_prompt and len(images) == 3
+
+    full = dataclasses.replace(nb2, max_images=2)
+    prompt, images = pin_multi_image_aspect(full, "a poster", refs, "16:9")
+    assert images == refs and "16:9" in prompt and "blank" not in prompt
+
+    # The blank frame is a Gemini-image behaviour; other families get the prompt line only.
+    gpt = BY_ID["surplus/gpt-image-2"]
+    prompt, images = pin_multi_image_aspect(gpt, "a poster", refs, "3:2")
+    assert images == refs and "3:2" in prompt

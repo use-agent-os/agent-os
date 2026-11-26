@@ -104,6 +104,65 @@ def request_params(entry: ModelEntry, request: AdapterRequest, *, edit: bool) ->
     return params
 
 
+#: Surplus's default prompt ceiling (a longer prompt is refused with a 400).
+SURPLUS_PROMPT_MAX = 4000
+#: Short side of the blank frame that carries the aspect of a multi-image edit.
+ASPECT_FRAME_SHORT_SIDE = 768
+
+
+def blank_frame(aspect_ratio: str) -> tuple[bytes, str] | None:
+    """A white PNG of *aspect_ratio* (``W:H``), or ``None`` when it does not parse."""
+    try:
+        wide, _, tall = aspect_ratio.partition(":")
+        ratio = float(wide) / float(tall)
+    except (ValueError, ZeroDivisionError):
+        return None
+    if not 0.2 <= ratio <= 5:
+        return None
+    import io
+
+    from PIL import Image
+
+    short = ASPECT_FRAME_SHORT_SIDE
+    size = (round(short * ratio), short) if ratio >= 1 else (short, round(short / ratio))
+    buffer = io.BytesIO()
+    Image.new("RGB", size, (255, 255, 255)).save(buffer, format="PNG")
+    return buffer.getvalue(), "image/png"
+
+
+def pin_multi_image_aspect(
+    entry: ModelEntry, prompt: str, images: list[tuple[bytes, str]], aspect_ratio: str
+) -> tuple[str, list[tuple[bytes, str]]]:
+    """The prompt and source images of a multi-image Surplus edit that keep *aspect_ratio*.
+
+    Surplus drops ``aspect_ratio`` (and ``resolution``) from an edit with two or
+    more source images: the answer carries ``x-si-adapted-params:
+    aspect_ratio,resolution`` and the model picks its own shape (live
+    2026-11-26, ``nano-banana-2-edit``: 1024x1024 for 16:9, by multipart, by
+    JSON ``input_images`` and through ``/v1/images/generations`` alike). Two
+    things restored 16:9 in the same test, and both are applied:
+
+    * the prompt names the aspect, when that still fits the prompt ceiling;
+    * for the Gemini image family a blank frame of that aspect goes last (the
+      model takes its output shape from the last image), when the model still
+      accepts one more image.
+
+    ``resolution`` has no such workaround: a multi-image edit comes back at the
+    provider's default tier.
+    """
+    frame = blank_frame(aspect_ratio) if entry.family == "gemini-image" else None
+    if frame is not None and len(images) >= entry.max_images:
+        frame = None
+    hint = f"\n\nOutput image aspect ratio: {aspect_ratio}."
+    if frame is not None:
+        hint += (
+            " The last attached image is a blank frame of that aspect ratio:"
+            " use it only for the output shape."
+        )
+    pinned = prompt + hint if len(prompt) + len(hint) <= SURPLUS_PROMPT_MAX else prompt
+    return pinned, [*images, frame] if frame is not None else list(images)
+
+
 class ProviderImageAdapter:
     """One ``image`` node call against the configured image providers."""
 
@@ -126,13 +185,16 @@ class ProviderImageAdapter:
             raise NodeError("unavailable", f"No image provider registered for {entry.provider}")
         edit = bool(request.images)
         params = request_params(entry, request, edit=edit)
+        prompt, images = request.prompt, list(request.images)
+        if entry.provider == "surplus" and len(images) > 1 and params["aspect_ratio"]:
+            prompt, images = pin_multi_image_aspect(entry, prompt, images, params["aspect_ratio"])
         provider_request = ImageGenerationRequest(
-            prompt=request.prompt,
+            prompt=prompt,
             model=entry.api_model_for(edit=edit),
             size=params["size"] or ("auto" if entry.provider == "surplus" else "1024x1024"),
             output_format="png",
             timeout_seconds=float(request.timeout_s or entry.timeout_s),
-            images=list(request.images),
+            images=images,
             n=max(1, int(request.n)),
             quality=params["quality"],
             background=params["background"],

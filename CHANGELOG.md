@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Image Flows: an `image` node with two or more reference images on a
+  Surplus model came back square (or in another shape the model chose)
+  whatever `aspect` was set, because Surplus drops `aspect_ratio` from a
+  multi-image edit. The node now names the aspect in the prompt and, for the
+  Nano Banana models, adds a blank frame of that aspect as the last
+  reference. `resolution` is still dropped by the provider for these edits.
+
 ## [2026.11.26] - 2026-11-26
 
 ### Added
