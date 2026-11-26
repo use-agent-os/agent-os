@@ -400,6 +400,20 @@ class TestStart:
         assert agent_browser.get_session(KEY) is not None
 
     @pytest.mark.asyncio
+    async def test_attach_mode_starts_in_a_new_tab(self, engine: Path) -> None:
+        # The user's own Chrome: the tab they are on is never sent to about:blank.
+        binary = str(engine / "agent-browser")
+        browser_tool.configure_browser(
+            SimpleNamespace(enabled=True, binary_path=binary, cdp_port=9222, attach_confirmed=True)
+        )
+        res = await _call("browser.start", {"sessionKey": KEY})
+        assert res.ok, res.error
+        assert res.payload["mode"] == "attach"
+        first = _log(engine)[0]
+        assert first[-2:] == ["tab", "new"]
+        assert "open" not in _commands(engine)
+
+    @pytest.mark.asyncio
     async def test_starting_twice_opens_once(self, engine: Path) -> None:
         await _start(engine)
         await _start(engine)

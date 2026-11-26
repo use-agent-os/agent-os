@@ -547,7 +547,7 @@ tools, under their policy. WebSocket only (not in the HTTP allowlist).
 | `workspace.files.resolve` | Map a path a tool call carried (relative, absolute inside the workspace, `~/…`, `/workspace/…`) to the relative form, lexically. `path: null` with a `reason` (`outside`, `denied`, `invalid_path`) when the browser cannot show it. |
 | `browser.status` | Whether the browser tool is enabled and installed, its mode, and whether the session (`sessionKey`) has a browser running. Never runs the engine. |
 | `browser.snapshot` | The running browser's tabs and a JPEG of the active tab (`image: false` skips it). `running: false` when there is none; `withheld: "private"` instead of an image for a page on a private address (managed mode). Neither starts a browser nor extends an idle one's TTL. |
-| `browser.start` | Start the session's browser on `about:blank`. |
+| `browser.start` | Start the session's browser on `about:blank` (in attach mode, a new tab: the tab you are on is left alone). |
 | `browser.navigate` | Open an `http(s)` URL (or `about:blank`) in the active tab, through the browser tool's allowlist and private-network check. |
 | `browser.history` | `action`: `back`, `forward` or `reload`. |
 | `browser.tabs.select` | Bring a listed tab (`tabId`: `t1`, `t2`, …) to the front. |

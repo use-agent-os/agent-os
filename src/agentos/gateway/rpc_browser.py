@@ -10,7 +10,8 @@ person needs to follow along:
   command against an unknown session launches a browser.
 * ``browser.snapshot`` -- the running browser's tabs and a JPEG of the active
   tab. It neither starts a browser nor extends an idle one's life.
-* ``browser.start`` -- start the session's browser on ``about:blank``.
+* ``browser.start`` -- start the session's browser on ``about:blank`` (a new
+  tab in attach mode, never the tab the user is on).
 * ``browser.navigate`` -- open a URL in the active tab.
 * ``browser.history`` -- back, forward or reload.
 * ``browser.tabs.select`` -- bring a listed tab to the front.
@@ -300,12 +301,19 @@ async def _handle_browser_snapshot(params: dict | None, ctx: RpcContext) -> dict
 
 @_d.method("browser.start", CONTROL_ONLY)
 async def _handle_browser_start(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
-    """Start the session's browser on ``about:blank``. Params: ``sessionKey``."""
+    """Start the session's browser on ``about:blank``. Params: ``sessionKey``.
+
+    In attach mode the browser is the user's own Chrome: a new blank tab is
+    opened rather than sending whatever tab they are on to ``about:blank``.
+    """
     _refuse_agent_caller(ctx)
     key = _session_key(_params(params))
     _require_usable()
     if agent_browser.get_session(key) is None:
-        result = await agent_browser.run_command(key, "open", ["about:blank"])
+        command, args = (
+            ("tab", ["new"]) if agent_browser.is_attach_mode() else ("open", ["about:blank"])
+        )
+        result = await agent_browser.run_command(key, command, args)
         if not result.get("success"):
             # A browser that failed to come up must not read as running.
             await anyio.to_thread.run_sync(agent_browser.close_session, key)
