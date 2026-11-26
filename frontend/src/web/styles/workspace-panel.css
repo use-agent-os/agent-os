@@ -604,14 +604,10 @@
     min-height: 0;
     padding: 6px 6px 12px;
   }
-  .ws-tree,
-  .ws-tree [role='group'] {
+  .ws-tree {
     margin: 0;
     padding: 0;
     list-style: none;
-  }
-  .ws-tree-item {
-    outline: none;
   }
   .ws-tree-row {
     display: flex;
@@ -631,15 +627,15 @@
     }
   }
   @media (hover: hover) {
-    .ws-tree-item > .ws-tree-row:hover {
+    .ws-tree-row:hover {
       background: var(--surface-3);
     }
   }
-  .ws-tree-item[aria-selected='true'] > .ws-tree-row {
+  .ws-tree-row[aria-selected='true'] {
     background: var(--accent-tint);
     box-shadow: inset 2px 0 0 var(--ring);
   }
-  .ws-tree-item:focus-visible > .ws-tree-row {
+  .ws-tree-row:focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: -2px;
   }

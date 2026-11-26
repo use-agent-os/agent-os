@@ -118,7 +118,10 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
     panelAxis === 'x'
       ? fittedSize('x', panelWidth, room.width)
       : fittedSize('y', panelHeight, room.height)
-  const panelCovers = panelOpen && (presentation === 'expanded' || presentation === 'takeover')
+  // Over the chat (expanded, taken over, a phone's sheet): the covered pane is out of reach.
+  const panelCovers =
+    panelOpen &&
+    (presentation === 'expanded' || presentation === 'takeover' || presentation === 'sheet')
   const [followSignal, setFollowSignal] = useState(0)
   const navigate = useNavigate()
   const { search } = useLocation()

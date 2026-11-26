@@ -257,8 +257,9 @@ describe('Files tab', () => {
     expect(within(tree).getByRole('treeitem', { name: /guide\.md/ })).toBeInTheDocument()
     expect(within(tree).queryByRole('treeitem', { name: 'src' })).toBeNull()
     expect(within(tree).queryByRole('treeitem', { name: /README/ })).toBeNull()
-    // A file row is named by its name and size, not by its children or icon.
-    expect(within(tree).getByRole('treeitem', { name: 'guide.md 40 B' })).toBeInTheDocument()
+    // A row is named by itself: an open folder's name is not its contents.
+    expect(within(tree).getByRole('treeitem', { name: /^guide\.md\s?40 B$/ })).toBeInTheDocument()
+    expect(within(tree).getByRole('treeitem', { name: 'docs' })).toHaveAttribute('aria-level', '1')
   })
 
   it('says why a binary file is not shown', async () => {

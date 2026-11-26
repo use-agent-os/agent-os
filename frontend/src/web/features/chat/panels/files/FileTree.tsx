@@ -10,7 +10,7 @@ import {
   LoaderCircle,
 } from 'lucide-react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { useEffect, useId, useRef, type KeyboardEvent } from 'react'
+import { useEffect, useRef, type KeyboardEvent } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webCommon'
 import '@/i18n/en/webPanel'
@@ -215,8 +215,14 @@ function Level(props: TreeProps & { path: string; level: number }) {
   }
   return (
     <>
-      {entries.map((entry) => (
-        <Row key={entry.path} {...props} entry={entry} />
+      {entries.map((entry, index) => (
+        <Row
+          key={entry.path}
+          {...props}
+          entry={entry}
+          position={index + 1}
+          count={entries.length}
+        />
       ))}
       {listing.data.truncated ? (
         <li role="none" className="ws-tree-note" style={indent}>
@@ -227,58 +233,51 @@ function Level(props: TreeProps & { path: string; level: number }) {
   )
 }
 
-function Row(props: TreeProps & { entry: FileEntry; level: number }) {
+/**
+ * One row of a flat tree: an open folder's rows follow it as siblings one
+ * level deeper (`aria-level`), so every item is named by its own row alone.
+ */
+function Row(
+  props: TreeProps & { entry: FileEntry; level: number; position: number; count: number },
+) {
   const { entry, level } = props
   const isDir = entry.type === 'directory'
   const open = isDir && props.expanded.has(entry.path)
   const blocked = blockedReason(entry)
   const selected = props.selected === entry.path
-  // Named by its own row (name, then size): an open folder's rows are not part of it.
-  const nameId = useId()
-  const sizeId = useId()
-  const sized = !isDir && entry.size !== undefined
   return (
-    <li
-      role="treeitem"
-      aria-labelledby={sized ? `${nameId} ${sizeId}` : nameId}
-      aria-level={level}
-      aria-expanded={isDir ? open : undefined}
-      aria-selected={selected}
-      aria-disabled={blocked ? true : undefined}
-      data-path={entry.path}
-      data-type={entry.type}
-      tabIndex={-1}
-      title={blocked ?? undefined}
-      onClick={(e) => {
-        e.stopPropagation()
-        if (blocked) return
-        if (isDir) props.onToggle(entry.path)
-        else props.onOpen(entry)
-      }}
-      className="ws-tree-item"
-    >
-      <div
-        className={cn('ws-tree-row', blocked && 'ws-tree-row--blocked')}
+    <>
+      <li
+        role="treeitem"
+        aria-level={level}
+        aria-setsize={props.count}
+        aria-posinset={props.position}
+        aria-expanded={isDir ? open : undefined}
+        aria-selected={selected}
+        aria-disabled={blocked ? true : undefined}
+        data-path={entry.path}
+        data-type={entry.type}
+        tabIndex={-1}
+        title={blocked ?? undefined}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (blocked) return
+          if (isDir) props.onToggle(entry.path)
+          else props.onOpen(entry)
+        }}
+        className={cn('ws-tree-item ws-tree-row', blocked && 'ws-tree-row--blocked')}
         style={{ paddingInlineStart: `${8 + (level - 1) * 16}px` }}
       >
         <span className="ws-tree-chevron" aria-hidden>
           {isDir ? <ChevronRight data-open={open || undefined} /> : null}
         </span>
         <EntryIcon entry={entry} open={open} className="ws-tree-icon" />
-        <span id={nameId} className="ws-tree-name">
-          {entry.name}
-        </span>
-        {sized ? (
-          <span id={sizeId} className="ws-tree-size">
-            {formatBytes(entry.size)}
-          </span>
+        <span className="ws-tree-name">{entry.name}</span>
+        {!isDir && entry.size !== undefined ? (
+          <span className="ws-tree-size">{formatBytes(entry.size)}</span>
         ) : null}
-      </div>
-      {open ? (
-        <ul role="group">
-          <Level {...props} path={entry.path} level={level + 1} />
-        </ul>
-      ) : null}
-    </li>
+      </li>
+      {open ? <Level {...props} path={entry.path} level={level + 1} /> : null}
+    </>
   )
 }
