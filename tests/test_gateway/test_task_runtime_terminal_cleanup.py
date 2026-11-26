@@ -312,6 +312,11 @@ async def test_exception_path_clears_dicts() -> None:
 # ---------------------------------------------------------------------------
 
 
+# A perf test: ~8 s alone on a fast machine, several times that under
+# tracemalloc on a busy Windows xdist worker, where the old 30 s wait ran out.
+# It runs in the serial slow shard, and the deadline only guards against a
+# hang -- what it checks is the dict sizes, not the speed.
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_no_leak_under_load(monkeypatch: pytest.MonkeyPatch) -> None:
     """10 000 tasks, each <=50 ms; dict sizes after GC must be within ±2 of baseline."""
@@ -347,7 +352,7 @@ async def test_no_leak_under_load(monkeypatch: pytest.MonkeyPatch) -> None:
         handles.append(h)
 
     # Wait for all to complete.
-    await asyncio.gather(*(rt.wait(h.task_id, timeout=30.0) for h in handles))
+    await asyncio.wait_for(asyncio.gather(*(rt.wait(h.task_id) for h in handles)), timeout=300.0)
 
     # --- post-GC snapshot ---
     gc.collect()

@@ -81,6 +81,11 @@ _BACKGROUND_KILL_TIMEOUT = 1.0
 _MAX_BACKGROUND_OUTPUT_CHARS = 1_000_000
 _EXEC_TERMINATE_TIMEOUT = 0.25
 _EXEC_KILL_TIMEOUT = 0.25
+# ``taskkill /T /F`` is a process launch plus a tree walk. On a loaded Windows
+# host that takes well over the quarter second a signal gets, and killing it
+# halfway leaves the caller with the bare ``proc.kill()`` fallback, which
+# reaches only ``cmd.exe`` and orphans everything below it.
+_WINDOWS_TREE_KILL_TIMEOUT = 5.0
 _COMMAND_AUDIT_MAX_CHARS = 4096
 _SANDBOX_NETWORK_HINT = (
     "Hint: sandboxed shell/code has no network. Use http_request or web_fetch, "
@@ -789,7 +794,7 @@ async def _kill_windows_process_tree(proc: Any) -> bool:
     except OSError:
         return False
     try:
-        await asyncio.wait_for(killer.wait(), timeout=_EXEC_KILL_TIMEOUT)
+        await asyncio.wait_for(killer.wait(), timeout=_WINDOWS_TREE_KILL_TIMEOUT)
     except TimeoutError:
         with contextlib.suppress(ProcessLookupError):
             killer.kill()
