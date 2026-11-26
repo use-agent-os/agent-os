@@ -162,7 +162,9 @@ def test_react_chat_public_controls_work_without_sending_to_provider(
                 send: await send.count(),
                 capabilities: await page.getByRole("button", { name: "Capabilities" }).count(),
                 route: await page.getByRole("button", { name: /^Model route:/ }).count(),
-                panels: await page.getByRole("button", { name: "Show workspace panel", exact: true }).count(),
+                panels: await page
+                  .getByRole("button", { name: "Show workspace panel", exact: true })
+                  .count(),
               };
 
               await page.getByRole("button", { name: "Capabilities" }).click();
