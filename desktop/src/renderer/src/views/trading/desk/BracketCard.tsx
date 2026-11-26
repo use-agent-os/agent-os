@@ -14,6 +14,7 @@ import {
   rewardRiskText,
 } from './bracket-logic'
 import { priceText, usdText } from './trigger-logic'
+import { useCmdEnter } from '../cmd-enter'
 
 /** "Oct 5 08:00": short enough to sit whole beside its label. */
 function shortDate(iso: string | null): string {
@@ -150,8 +151,13 @@ export function BracketCard({
     trades ? 'trading.bracket.card.enforced' : 'trading.bracket.card.enforcedAlert',
   )
 
+  // ⌘↵ while focus is in this card (it lands on Reject when the card
+  // arrives) presses Approve, arming first where a click would.
+  const cardRef = useRef<HTMLElement>(null)
+  useCmdEnter(() => cardRef.current)
   return (
     <article
+      ref={cardRef}
       className="trd-card trd-trigger trd-bracket"
       data-kind="bracket"
       data-action={b.kind}
@@ -235,6 +241,7 @@ export function BracketCard({
           data-touch-id={prompting || undefined}
           aria-busy={prompting || undefined}
           data-testid="bracket-approve"
+          data-cmd-enter
         >
           {prompting ? t('trading.touchId.prompting') : t('trading.trigger.card.approve')}
         </Button>

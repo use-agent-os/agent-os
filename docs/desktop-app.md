@@ -436,6 +436,7 @@ The full list is in Settings › Shortcuts.
 | ↑ / ↓ | Previous or next message you sent |
 | / | Slash commands |
 | ⌘S | Save a project brief now |
+| ⌘Return (Trade) | Press the focused ticket's, sheet's or card's action: review, swap, bridge, send, approve (never a destructive button) |
 
 ## Troubleshooting
 

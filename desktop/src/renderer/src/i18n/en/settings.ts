@@ -608,6 +608,9 @@ export const settings = {
   'settings.shortcuts.history': 'Previous or next message you sent',
   'settings.shortcuts.slash': 'Slash commands',
   'settings.shortcuts.saveBrief': 'Save a project brief now',
+  'settings.shortcuts.trade': 'Trade',
+  'settings.shortcuts.tradeCommit':
+    'Review, swap, bridge, send or approve in the focused ticket, sheet or card',
 
   // Advanced
   'settings.advanced.files': 'Files',

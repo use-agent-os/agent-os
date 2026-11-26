@@ -31,6 +31,7 @@ import {
   type Fact,
   type LpStampKey,
 } from './desk-logic'
+import { useCmdEnter } from '../cmd-enter'
 
 const ARM_RESET_MS = 4000
 
@@ -218,8 +219,13 @@ export function ApprovalCard({
       order.status)
     : order.status
 
+  // ⌘↵ while focus is in this card (it lands on Reject when the card
+  // arrives) presses Approve, arming first where a click would.
+  const cardRef = useRef<HTMLElement>(null)
+  useCmdEnter(() => cardRef.current)
   return (
     <article
+      ref={cardRef}
       className="trd-card"
       data-risk={risk}
       data-kind={kind}
@@ -350,6 +356,7 @@ export function ApprovalCard({
             data-touch-id={prompting || undefined}
             aria-busy={prompting || undefined}
             data-testid="card-approve"
+            data-cmd-enter={rejecting ? undefined : true}
           >
             {prompting
               ? t('trading.touchId.prompting')

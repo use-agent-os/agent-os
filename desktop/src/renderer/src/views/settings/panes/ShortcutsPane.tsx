@@ -28,6 +28,9 @@ const CHAT: readonly Shortcut[] = [
   { keys: ['⌘', 'S'], label: 'settings.shortcuts.saveBrief' },
 ]
 
+// ⌘↵ presses the action of whatever trade surface has focus (cmd-enter.ts).
+const TRADE: readonly Shortcut[] = [{ keys: ['⌘', '↩'], label: 'settings.shortcuts.tradeCommit' }]
+
 /** The keys the app answers to. Static on purpose: nothing here is rebindable. */
 export function ShortcutsPane() {
   const enterToSend = useSettings((s) => s.settings.general.enterToSend)
@@ -54,6 +57,7 @@ export function ShortcutsPane() {
       <KeyGroup title={t('settings.shortcuts.app')} rows={app} />
       <KeyGroup title={t('settings.shortcuts.chat')} rows={CHAT} />
       <KeyGroup title={t('settings.shortcuts.composer')} rows={composer} />
+      <KeyGroup title={t('settings.shortcuts.trade')} rows={TRADE} />
     </>
   )
 }

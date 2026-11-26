@@ -14,6 +14,7 @@ import { t } from '~/i18n'
 import { cn } from '~/lib/utils'
 import { BALANCE_MASK, useBalancePrivacy } from '~/stores/balance-privacy'
 import { ChainMark } from './ChainMark'
+import { CMD_ENTER_ATTR, lastPressable, useCmdEnter } from './cmd-enter'
 import {
   chainName,
   clampSymbol,
@@ -63,6 +64,20 @@ export function Sheet({
   note?: ReactNode
 }) {
   const titleId = useId()
+  const footRef = useRef<HTMLElement>(null)
+  // ⌘↵ presses the footer's committing button: one marked for it, else the
+  // rightmost primary (Swap, Bridge, Send, Approve). Never a danger button,
+  // so a destructive sheet still takes a deliberate click.
+  useCmdEnter(
+    () => footRef.current?.closest<HTMLElement>('[aria-modal="true"]'),
+    () => {
+      const foot = footRef.current
+      return (
+        lastPressable(foot, `[${CMD_ENTER_ATTR}]`) ??
+        lastPressable(foot, '[data-variant="primary"]')
+      )
+    },
+  )
   return (
     <ModalShell
       role={role}
@@ -84,7 +99,7 @@ export function Sheet({
       </header>
       <div className="trd-modal__body">{children}</div>
       {foot ? (
-        <footer className="trd-modal__foot">
+        <footer ref={footRef} className="trd-modal__foot">
           {note ? <span className="trd-modal__note">{note}</span> : null}
           {foot}
         </footer>
