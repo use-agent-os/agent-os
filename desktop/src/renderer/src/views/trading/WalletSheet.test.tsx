@@ -570,6 +570,86 @@ describe('WalletSheet · manage', () => {
     expect(rpcCall).not.toHaveBeenCalledWith('wallet.removeBatch', expect.anything())
   })
 
+  /* The chat's wallet seat opens this sheet to pick the active wallet, so a
+     long vault gets the same search the rail has. */
+  describe('search', () => {
+    const MANY = [
+      WALLET,
+      ...['OS 06', 'OS 10', 'CAP 05', 'CAP 06', 'MM2'].map((label, i) => ({
+        ...WALLET,
+        address: `0x${String(i + 3).repeat(40)}`,
+        label,
+        primary: false,
+      })),
+    ]
+
+    function mockMany() {
+      mockVault()
+      const vault = rpcCall.getMockImplementation()!
+      rpcCall.mockImplementation(async (method: string, params: unknown) =>
+        method === 'wallet.list'
+          ? { wallets: MANY, primary: WALLET.address }
+          : vault(method, params),
+      )
+    }
+
+    const names = () =>
+      screen
+        .getAllByTestId('manage-address')
+        .map((n) => MANY.find((w) => w.address === n.textContent)?.label)
+
+    it('shows no search while every wallet already fits', async () => {
+      mockVault()
+      renderDesk(<WalletSheet mode={{ kind: 'manage' }} onClose={vi.fn()} />)
+      await screen.findAllByTestId('manage-address')
+      expect(screen.queryByTestId('wallet-search')).toBeNull()
+    })
+
+    it('filters the cards by label or address, and says when nothing matches', async () => {
+      mockMany()
+      renderDesk(<WalletSheet mode={{ kind: 'manage' }} onClose={vi.fn()} />)
+      await screen.findAllByTestId('manage-address')
+      expect(screen.getAllByTestId('manage-address')).toHaveLength(MANY.length)
+
+      fireEvent.change(screen.getByTestId('wallet-search'), { target: { value: 'cap' } })
+      expect(names()).toEqual(['CAP 05', 'CAP 06'])
+
+      fireEvent.change(screen.getByTestId('wallet-search'), { target: { value: '0x5555' } })
+      expect(names()).toEqual(['CAP 05'])
+
+      fireEvent.change(screen.getByTestId('wallet-search'), { target: { value: 'nope' } })
+      expect(screen.queryAllByTestId('manage-address')).toHaveLength(0)
+      expect(screen.getByTestId('manage-no-match')).toHaveTextContent('No wallet matches')
+    })
+
+    it('makes the first match active on Return', async () => {
+      mockMany()
+      renderDesk(<WalletSheet mode={{ kind: 'manage' }} onClose={vi.fn()} />)
+      await screen.findAllByTestId('manage-address')
+      const field = screen.getByTestId('wallet-search')
+      fireEvent.change(field, { target: { value: 'mm2' } })
+      fireEvent.keyDown(field, { key: 'Enter' })
+      await waitFor(() =>
+        expect(rpcCall).toHaveBeenCalledWith('wallet.setPrimary', { address: MANY[5]!.address }),
+      )
+    })
+
+    it('selects all of what the search shows, and nothing it hides', async () => {
+      mockMany()
+      renderDesk(<WalletSheet mode={{ kind: 'manage' }} onClose={vi.fn()} />)
+      await screen.findAllByTestId('manage-address')
+      fireEvent.change(screen.getByTestId('wallet-search'), { target: { value: 'os ' } })
+      fireEvent.click(screen.getByTestId('manage-select'))
+      fireEvent.click(screen.getByTestId('manage-pick-all'))
+      expect(screen.getByTestId('manage-picked-count')).toHaveTextContent('2 selected')
+      fireEvent.click(screen.getByTestId('manage-remove-selected'))
+      const list = screen.getByTestId('remove-many-list')
+      expect(list).toHaveTextContent('OS 06')
+      expect(list).toHaveTextContent('OS 10')
+      expect(list).not.toHaveTextContent('CAP')
+    })
+  })
+
   it('will not bulk-remove while the vault is locked', async () => {
     mockVault(false)
     renderDesk(<WalletSheet mode={{ kind: 'manage' }} onClose={vi.fn()} />)
