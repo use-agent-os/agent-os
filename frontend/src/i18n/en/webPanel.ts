@@ -75,7 +75,8 @@ export const webPanel = defineNamespace('webPanel', {
   filesErrorOutdatedTitle: 'This gateway can’t browse files',
   filesErrorOutdatedBody: 'Update AgentOS on the gateway to browse the workspace here.',
   filesErrorDeniedTitle: 'Not available in the file browser',
-  filesErrorDeniedBody: 'Credentials, keys and internal state stay hidden.',
+  filesErrorDeniedBody:
+    'The gateway can’t read it, or it holds credentials, keys or internal state.',
   filesErrorUnsafeTitle: 'Not opened, for safety',
   filesErrorUnsafeBody: 'Symbolic and hard links aren’t followed.',
   filesErrorNotFoundTitle: 'Not found',

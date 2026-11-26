@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Copy, Download, ExternalLink, FileWarning, Info, RefreshCw } from 'lucide-react'
-import { useEffect, useMemo, useState, type MouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { toast } from 'sonner'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webPanel'
@@ -185,6 +185,11 @@ function MarkdownView({
   path: string
   onReveal(path: string): void
 }) {
+  // A wide code block scrolls on its own: it has to take focus to be scrolled by keyboard.
+  const region = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    for (const pre of region.current?.querySelectorAll('pre') ?? []) pre.tabIndex = 0
+  }, [text])
   const onClickCapture = (e: MouseEvent<HTMLDivElement>) => {
     const anchor = (e.target as HTMLElement).closest('a')
     if (!anchor || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
@@ -195,6 +200,7 @@ function MarkdownView({
   }
   return (
     <div
+      ref={region}
       role="region"
       aria-label={baseName(path)}
       tabIndex={0}
@@ -357,6 +363,10 @@ export function FileViewer(props: ViewerProps) {
       ? result.content.split('\n').length - (result.content.endsWith('\n') ? 1 : 0)
       : 0
 
+  const metaLine = [meta, lineCount ? tPlural('webPanel.filesLines', lineCount) : '']
+    .filter(Boolean)
+    .join(' · ')
+
   return (
     <section className="ws-viewer">
       <div className="ws-toolbar ws-viewer-crumbs">
@@ -371,14 +381,12 @@ export function FileViewer(props: ViewerProps) {
         <span className="chat-tile ws-viewer-tile" aria-hidden>
           <EntryIcon entry={{ type: 'file', kind }} />
         </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="ws-viewer-name" title={path}>
+        <div className="ws-viewer-title">
+          <h2 className="ws-viewer-name" title={path}>
             {name}
-          </h3>
-          <p className="ws-viewer-meta">
-            {[meta, lineCount ? tPlural('webPanel.filesLines', lineCount) : '']
-              .filter(Boolean)
-              .join(' · ')}
+          </h2>
+          <p className="ws-viewer-meta" title={metaLine}>
+            {metaLine}
           </p>
         </div>
         <div className="ws-viewer-actions">

@@ -24,6 +24,8 @@
 
   .ws-panel {
     --ws-radius: 24px;
+    /* The tab strip compacts itself by the panel's own width. */
+    container: ws-panel / inline-size;
     position: relative;
     display: flex;
     flex-direction: column;
@@ -99,6 +101,14 @@
     min-height: 56px;
     padding: 10px 10px 10px 12px;
     border-bottom: 1px solid var(--border);
+  }
+  .ws-panel-label {
+    flex: 1;
+    min-width: 0;
+    padding-inline-start: 4px;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
   }
   .ws-panel-actions {
     display: flex;
@@ -223,6 +233,16 @@
   }
   .ws-tab[data-active='true'] .ws-tab-close svg {
     color: var(--text-muted);
+  }
+
+  /* A narrow panel shows inactive tabs as their icon (named by aria-label). */
+  @container ws-panel (width < 400px) {
+    .ws-tab:not([data-active='true']) .ws-tab-button > span {
+      display: none;
+    }
+    .ws-tab:not([data-active='true']) .ws-tab-button {
+      padding-inline: 9px 2px;
+    }
   }
 
   .ws-menu {
@@ -755,9 +775,16 @@
     white-space: nowrap;
   }
   .ws-viewer-meta {
+    overflow: hidden;
     color: var(--text-muted);
     font-size: 12px;
     font-variant-numeric: tabular-nums;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ws-viewer-title {
+    flex: 1 1 160px;
+    min-width: 0;
   }
   .ws-viewer-actions {
     display: flex;
@@ -814,7 +841,7 @@
     padding-inline: 14px 12px !important;
     border-inline-end: 1px solid var(--border);
     background: var(--code-bg);
-    color: color-mix(in oklab, var(--text-muted), transparent 30%);
+    color: var(--text-muted);
     text-align: end;
     user-select: none;
   }

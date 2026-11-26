@@ -9,12 +9,19 @@ import {
   Link2,
   LoaderCircle,
 } from 'lucide-react'
+import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useEffect, useId, useRef, type KeyboardEvent } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webCommon'
 import '@/i18n/en/webPanel'
 import { cn } from '@/lib/utils'
-import { filterEntries, formatBytes, type FileEntry } from '@/lib/workspace-files'
+import {
+  FILES_QUERY_ROOT,
+  filterEntries,
+  formatBytes,
+  type FileEntry,
+  type Listing,
+} from '@/lib/workspace-files'
 import { failureCopy } from './copy'
 import { useListing } from './queries'
 
@@ -143,8 +150,32 @@ export function FileTree(props: TreeProps) {
   )
 }
 
+/**
+ * Whether an open folder holds a match for the filter in what has been
+ * loaded of it. A folder whose contents are not loaded yet keeps showing.
+ */
+function holdsMatch(
+  client: QueryClient,
+  agentId: string,
+  path: string,
+  needle: string,
+  expanded: ReadonlySet<string>,
+  depth = 0,
+): boolean {
+  const listing = client.getQueryData<Listing>([FILES_QUERY_ROOT, agentId, 'list', path])
+  if (!listing || depth > 16) return true
+  return listing.entries.some(
+    (entry) =>
+      entry.name.toLowerCase().includes(needle) ||
+      (entry.type === 'directory' &&
+        expanded.has(entry.path) &&
+        holdsMatch(client, agentId, entry.path, needle, expanded, depth + 1)),
+  )
+}
+
 function Level(props: TreeProps & { path: string; level: number }) {
   const listing = useListing(props.agentId, props.path)
+  const client = useQueryClient()
   const indent = { paddingInlineStart: `${12 + (props.level - 1) * 16}px` }
 
   if (listing.isPending) {
@@ -168,7 +199,13 @@ function Level(props: TreeProps & { path: string; level: number }) {
       </li>
     )
   }
-  const entries = filterEntries(listing.data.entries, props.query, props.expanded)
+  const needle = props.query.trim().toLowerCase()
+  const entries = filterEntries(listing.data.entries, props.query, props.expanded).filter(
+    (entry) =>
+      !needle ||
+      entry.name.toLowerCase().includes(needle) ||
+      holdsMatch(client, props.agentId, entry.path, needle, props.expanded),
+  )
   if (listing.data.entries.length === 0 && props.level > 1) {
     return (
       <li role="none" className="ws-tree-note" style={indent}>
@@ -196,12 +233,14 @@ function Row(props: TreeProps & { entry: FileEntry; level: number }) {
   const open = isDir && props.expanded.has(entry.path)
   const blocked = blockedReason(entry)
   const selected = props.selected === entry.path
-  // Named by its own label: an open folder's rows are not part of its name.
+  // Named by its own row (name, then size): an open folder's rows are not part of it.
   const nameId = useId()
+  const sizeId = useId()
+  const sized = !isDir && entry.size !== undefined
   return (
     <li
       role="treeitem"
-      aria-labelledby={nameId}
+      aria-labelledby={sized ? `${nameId} ${sizeId}` : nameId}
       aria-level={level}
       aria-expanded={isDir ? open : undefined}
       aria-selected={selected}
@@ -229,8 +268,10 @@ function Row(props: TreeProps & { entry: FileEntry; level: number }) {
         <span id={nameId} className="ws-tree-name">
           {entry.name}
         </span>
-        {!isDir && entry.size !== undefined ? (
-          <span className="ws-tree-size">{formatBytes(entry.size)}</span>
+        {sized ? (
+          <span id={sizeId} className="ws-tree-size">
+            {formatBytes(entry.size)}
+          </span>
         ) : null}
       </div>
       {open ? (

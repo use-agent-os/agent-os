@@ -287,7 +287,17 @@ export function BrowserTab({ sessionKey, active }: ToolTabProps) {
   const refreshError = snapshot.isError ? errorMessage(snapshot.error) : null
 
   let stage: React.ReactNode
-  if (current?.image) {
+  const blank = current !== undefined && (!current.url || current.url === 'about:blank')
+  if (blank) {
+    // A blank tab's frame is a white rectangle: say what it is instead.
+    stage = (
+      <State
+        icon={<Globe />}
+        title={t('webPanel.browserBlankTitle')}
+        body={t('webPanel.browserBlankBody')}
+      />
+    )
+  } else if (current?.image) {
     stage = (
       <img
         src={`data:${current.image.mime};base64,${current.image.data}`}
@@ -298,7 +308,11 @@ export function BrowserTab({ sessionKey, active }: ToolTabProps) {
         }
         className="ws-browser-image"
         // Inline: the base stylesheet caps every image at its box.
-        style={zoom === 'actual' ? { width: 'auto', maxWidth: 'none' } : undefined}
+        style={
+          zoom === 'actual'
+            ? { width: 'auto', maxWidth: 'none', alignSelf: 'flex-start', flexShrink: 0 }
+            : undefined
+        }
         draggable={false}
       />
     )
@@ -308,14 +322,6 @@ export function BrowserTab({ sessionKey, active }: ToolTabProps) {
         icon={<EyeOff />}
         title={t('webPanel.browserWithheldTitle')}
         body={t('webPanel.browserWithheldBody')}
-      />
-    )
-  } else if (current && (!current.url || current.url === 'about:blank') && !current.image) {
-    stage = (
-      <State
-        icon={<Globe />}
-        title={t('webPanel.browserBlankTitle')}
-        body={t('webPanel.browserBlankBody')}
       />
     )
   } else if (snapshot.isError && !current) {
@@ -463,9 +469,9 @@ export function BrowserTab({ sessionKey, active }: ToolTabProps) {
         id={stageId}
         role="region"
         aria-label={t('webPanel.toolBrowser')}
-        tabIndex={current?.image ? 0 : undefined}
+        tabIndex={current?.image && !blank ? 0 : undefined}
         className="ws-browser-stage"
-        data-hug={(current?.image && zoom === 'fit') || undefined}
+        data-hug={(current?.image && !blank && zoom === 'fit') || undefined}
       >
         {stage}
       </div>
@@ -474,7 +480,7 @@ export function BrowserTab({ sessionKey, active }: ToolTabProps) {
         <span>{watching ? t('webPanel.browserLive') : t('webPanel.browserPaused')}</span>
         <span aria-hidden>·</span>
         <span className="min-w-0 flex-1 truncate">{t('webPanel.browserReadOnly')}</span>
-        {current?.image ? (
+        {current?.image && !blank ? (
           <SegmentedControl
             size="sm"
             kind="toggle"

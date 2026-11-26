@@ -244,6 +244,23 @@ describe('Files tab', () => {
     expect(await within(panel()).findByRole('heading', { name: 'Guide' })).toBeInTheDocument()
   })
 
+  it('filters by name and hides an open folder with nothing matching', async () => {
+    const user = userEvent.setup()
+    await openChat(filesRpc())
+    const tree = await openFiles(user)
+    await user.click(within(tree).getByRole('treeitem', { name: 'docs' }))
+    await within(tree).findByRole('treeitem', { name: /guide\.md/ })
+    await user.click(within(tree).getByRole('treeitem', { name: 'src' }))
+    await within(tree).findByRole('treeitem', { name: /report\.py/ })
+    await user.type(within(panel()).getByRole('searchbox', { name: 'Filter files' }), 'guide')
+    expect(within(tree).getByRole('treeitem', { name: 'docs' })).toBeInTheDocument()
+    expect(within(tree).getByRole('treeitem', { name: /guide\.md/ })).toBeInTheDocument()
+    expect(within(tree).queryByRole('treeitem', { name: 'src' })).toBeNull()
+    expect(within(tree).queryByRole('treeitem', { name: /README/ })).toBeNull()
+    // A file row is named by its name and size, not by its children or icon.
+    expect(within(tree).getByRole('treeitem', { name: 'guide.md 40 B' })).toBeInTheDocument()
+  })
+
   it('says why a binary file is not shown', async () => {
     const user = userEvent.setup()
     await openChat(filesRpc())
@@ -455,6 +472,22 @@ describe('Browser tab', () => {
     await waitFor(() =>
       expect(rpc.callsTo('browser.tabs.select')).toEqual([{ sessionKey: KEY, tabId: 't2' }]),
     )
+  })
+
+  it('names a blank tab instead of showing its white frame', async () => {
+    const rpc = chatRpc()
+      .handle('browser.status', status({ running: true, canStart: false }))
+      .handle('browser.snapshot', () =>
+        snapshot({
+          tabs: [{ tabId: 't1', title: '', url: 'about:blank', active: true }],
+          url: 'about:blank',
+          title: '',
+        }),
+      )
+    await openBrowser(rpc)
+    expect(await within(panel()).findByText('Blank page')).toBeInTheDocument()
+    expect(within(panel()).queryByRole('img')).toBeNull()
+    expect(within(panel()).queryByRole('button', { name: '100%' })).toBeNull()
   })
 
   it('reports a refused navigation and a page it does not capture', async () => {

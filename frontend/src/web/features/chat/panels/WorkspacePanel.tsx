@@ -357,6 +357,7 @@ function TabStrip({ announce }: { announce(message: string): void }) {
               role="tab"
               id={domId('ws-tab', tab.id)}
               aria-selected={active}
+              aria-label={title}
               aria-controls={domId('ws-tabpanel', tab.id)}
               aria-keyshortcuts="Delete Control+Shift+ArrowLeft Control+Shift+ArrowRight"
               tabIndex={active ? 0 : -1}
@@ -699,7 +700,11 @@ export function WorkspacePanel(props: WorkspacePanelProps) {
         />
       ) : null}
       <header className="ws-panel-head">
-        {tabs.length ? <TabStrip announce={setAnnouncement} /> : <div className="flex-1" />}
+        {tabs.length ? (
+          <TabStrip announce={setAnnouncement} />
+        ) : (
+          <p className="ws-panel-label">{t('webPanel.region')}</p>
+        )}
         <div className="ws-panel-actions">
           <AddMenu methods={methods} />
           {presentation !== 'sheet' ? <LayoutMenu presentation={presentation} /> : null}
