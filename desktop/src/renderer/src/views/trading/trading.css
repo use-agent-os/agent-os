@@ -2595,13 +2595,13 @@ output.trd-amount {
 .trd-wman {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 .trd-wman__row {
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  padding: 12px 13px;
+  gap: 6px;
+  padding: 10px 12px 8px;
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--foreground) 4%, transparent);
   box-shadow: inset 0 0 0 0.5px var(--hairline);
@@ -2689,13 +2689,12 @@ output.trd-amount {
 .trd-wman__addr {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 8px 7px 10px;
-  border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  gap: 4px;
+  margin: -2px 0;
 }
+/* Still the whole address, but a line of text under the name rather than a
+   boxed field of its own: the card reads as one wallet, not four panels. */
 .trd-wman__addr code {
-  flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
   font-family: var(--font-mono);
@@ -2709,8 +2708,8 @@ output.trd-amount {
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   border-radius: var(--radius-control);
   color: var(--muted-foreground);
   transition:
@@ -2728,7 +2727,9 @@ output.trd-amount {
 .trd-wman__chains {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 2px;
+  min-width: 0;
+  margin-left: -4px;
 }
 /* The badge *is* the explorer link — one control per chain instead of a menu
    item per chain stacked under an already busy card. */
@@ -2747,22 +2748,24 @@ output.trd-amount {
   outline: 2px solid var(--ring);
   outline-offset: 1px;
 }
-/* Five actions on a narrow row: they wrap as whole buttons, never inside a
-   label. A broken "Make / primary" reads as two controls that are not there. */
+/* Chains on the left, actions on the right, one line. On a narrow sheet the
+   actions wrap below as a whole group and stay pinned to the right edge. */
 .trd-wman__acts {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 4px;
-  padding-top: 2px;
-  border-top: 1px solid var(--hairline);
-  margin-top: 1px;
+  justify-content: space-between;
+  gap: 4px 8px;
 }
-/* Destructive action to the end of its row, wrapped or not: an auto margin
-   eats the free space wherever the row happens to break, which a spacer
-   element could only do on the first line. */
-.trd-wman__act--danger {
+.trd-wman__tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   margin-left: auto;
+}
+/* The destructive one stands a little apart from the rest. */
+.trd-wman__tools .trd-wman__act--danger {
+  margin-left: 6px;
 }
 .trd-wman__act {
   display: inline-flex;
@@ -2779,6 +2782,11 @@ output.trd-amount {
   transition:
     color 120ms ease-out,
     background-color 120ms ease-out;
+}
+.trd-wman__act--icon {
+  justify-content: center;
+  width: 26px;
+  padding: 0;
 }
 .trd-wman__act:hover {
   color: var(--foreground);
@@ -2837,6 +2845,11 @@ output.trd-amount {
 }
 .trd-wman__act--end {
   margin-left: auto;
+}
+.trd-wman__search.trd-picker__search {
+  flex: 1 1 220px;
+  height: 28px;
+  padding: 0 8px;
 }
 .trd-wman__pickall {
   display: inline-flex;

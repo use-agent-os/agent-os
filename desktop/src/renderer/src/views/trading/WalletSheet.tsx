@@ -21,6 +21,7 @@ import { toast } from 'sonner'
 import { qrDataUrl } from '@/lib/qr'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
+import { cn } from '~/lib/utils'
 import { isTouchIdDeclined, useTouchIdPrompt } from '~/lib/biometric-gate'
 import { copySecret } from '~/lib/clipboard-secret'
 import { desktopApi } from '~/lib/desktop-api'
@@ -32,10 +33,19 @@ import {
   useWalletStatus,
 } from '~/stores/trading'
 import { ChainBadge } from './ChainMark'
-import { activeFirst, errorText, formatPct, pnlTone, shortAddress, walletLabel } from './logic'
+import {
+  activeFirst,
+  errorText,
+  formatPct,
+  pnlTone,
+  shortAddress,
+  walletLabel,
+  walletMatches,
+} from './logic'
 import { useBalancePrivacy } from '~/stores/balance-privacy'
 import { Money, Sheet } from './parts'
 import type { ChainStatus, Totals, UnlockMode, Wallet } from './types'
+import { WALLET_SEARCH_MIN, WalletSearch } from './WalletSearch'
 import {
   downloadFile,
   MAX_BATCH_CREATE,
@@ -182,6 +192,10 @@ function ReceiveSheet({ wallet, onClose }: { wallet: Wallet; onClose: () => void
  *
  * The active wallet (the vault's primary, the one the agent spends from) is
  * always the first card, so which one it is never takes a scroll to find.
+ *
+ * A long list grows the same search the rail and the head's switcher carry,
+ * since this sheet is also where the chat's wallet seat sends you to pick the
+ * active wallet. Return makes the first match active.
  */
 function ManageSheet({
   onClose,
@@ -202,6 +216,8 @@ function ManageSheet({
   const chains = status.data?.chains ?? []
   const locked = Boolean(vault.data?.initialized && !vault.data.unlocked)
   const listRef = useRef<HTMLDivElement>(null)
+  const write = useWalletMutation()
+  const [query, setQuery] = useState('')
 
   const totalsByWallet = useMemo(() => {
     const m = new Map<string, Totals>()
@@ -211,14 +227,31 @@ function ManageSheet({
   }, [portfolio.data])
 
   const ordered = useMemo(() => activeFirst(wallets), [wallets])
-  // Only wallets still in the vault count: a removal elsewhere (the rail, the
-  // CLI) must not leave a ghost address in the batch.
+  const searchable = wallets.length >= WALLET_SEARCH_MIN
+  const searching = searchable && query.trim() !== ''
+  const shown = useMemo(
+    () => (searching ? ordered.filter((w) => walletMatches(w, query)) : ordered),
+    [ordered, query, searching],
+  )
+  // Only wallets still in the vault — and in view — count: a removal elsewhere
+  // (the rail, the CLI) must not leave a ghost address in the batch, and a
+  // search must not leave a hidden tick in it either. What is removed is what
+  // is on screen.
   const selected = useMemo(
-    () => (picked ? ordered.filter((w) => picked.has(w.address.toLowerCase())) : []),
-    [ordered, picked],
+    () => (picked ? shown.filter((w) => picked.has(w.address.toLowerCase())) : []),
+    [shown, picked],
   )
   const selecting = picked !== null
-  const allPicked = selected.length > 0 && selected.length === ordered.length
+  const allPicked = selected.length > 0 && selected.length === shown.length
+
+  function activateFirstMatch() {
+    const first = shown[0]
+    if (!first || first.primary || write.isPending) return
+    write.mutate(
+      { method: 'wallet.setPrimary', params: { address: first.address } },
+      { onError: (err) => toast.error(`${t('trading.sheet.error')}: ${errorText(err)}`) },
+    )
+  }
 
   function toggle(wallet: Wallet) {
     const key = wallet.address.toLowerCase()
@@ -274,6 +307,14 @@ function ManageSheet({
 
       {!isPending && ordered.length > 1 ? (
         <div className="trd-wman__bulk" data-testid="manage-bulk">
+          {searchable ? (
+            <WalletSearch
+              className="trd-wman__search"
+              value={query}
+              onChange={setQuery}
+              onSubmit={activateFirstMatch}
+            />
+          ) : null}
           {selecting ? (
             <>
               <label className="trd-wman__pickall">
@@ -286,7 +327,7 @@ function ManageSheet({
                   }}
                   onChange={() =>
                     onPick(
-                      allPicked ? new Set() : new Set(ordered.map((w) => w.address.toLowerCase())),
+                      allPicked ? new Set() : new Set(shown.map((w) => w.address.toLowerCase())),
                     )
                   }
                   data-testid="manage-pick-all"
@@ -344,9 +385,13 @@ function ManageSheet({
           <WalletIcon className="size-4" strokeWidth={1.75} aria-hidden />
           {t('trading.sheet.manage.empty')}
         </p>
+      ) : shown.length === 0 ? (
+        <p className="trd-wman__empty" data-testid="manage-no-match">
+          {t('trading.rail.search.none')}
+        </p>
       ) : (
         <div className="trd-wman" ref={listRef}>
-          {ordered.map((w) => (
+          {shown.map((w) => (
             <ManageRow
               key={w.address}
               wallet={w}
@@ -462,98 +507,123 @@ function ManageRow({
         </button>
       </div>
 
-      {wallet.chains.length ? (
-        <div className="trd-wman__chains">
-          {wallet.chains.map((chainId) => {
-            const chain = chains.find((c) => c.chainId === chainId)
-            if (!chain) return <ChainBadge key={chainId} chainId={chainId} />
-            return (
-              <button
-                key={chainId}
-                type="button"
-                className="trd-wman__chain"
-                title={`${t('trading.rail.explorer')} · ${chain.name}`}
-                onClick={() =>
-                  void desktopApi().app.openExternal(`${chain.explorer}/address/${wallet.address}`)
-                }
-              >
-                <ChainBadge chainId={chainId} />
-                <ExternalLink className="size-3 opacity-60" strokeWidth={1.75} aria-hidden />
-              </button>
-            )
-          })}
-        </div>
-      ) : null}
-
+      {/* One line under the address: where it lives on the left, what to do
+          with it on the right. Only "Active" keeps its word — it is the one
+          state the sheet is opened to change; the rest are icons with names. */}
       <footer className="trd-wman__acts">
-        {/* On every card, so "Active" is never a word only the inactive wallets
-            carry. One wallet is always active, so it switches on and not off. */}
-        <button
-          type="button"
-          className="trd-wman__act"
-          aria-pressed={wallet.primary}
-          aria-disabled={wallet.primary || undefined}
-          disabled={!wallet.primary && write.isPending}
-          data-testid="manage-primary"
-          onClick={() => {
-            if (wallet.primary) return
-            write.mutate(
-              { method: 'wallet.setPrimary', params: { address: wallet.address } },
-              {
-                onError: (err) => toast.error(`${t('trading.sheet.error')}: ${errorText(err)}`),
-              },
-            )
-          }}
-        >
-          {wallet.primary ? (
-            <CircleCheck className="size-3.5" strokeWidth={2} aria-hidden />
-          ) : (
-            <Circle className="size-3.5" strokeWidth={1.75} aria-hidden />
-          )}
-          {t('trading.rail.active')}
-        </button>
-        <button
-          type="button"
-          className="trd-wman__act"
-          onClick={() => onOpen({ kind: 'receive', wallet })}
-          data-testid="manage-qr"
-        >
-          <QrCode className="size-3.5" strokeWidth={1.75} aria-hidden />
-          {t('trading.rail.qr')}
-        </button>
-        <button
-          type="button"
-          className="trd-wman__act"
-          onClick={() => onOpen({ kind: 'rename', wallet })}
-          data-testid="manage-rename"
-        >
-          <Pencil className="size-3.5" strokeWidth={1.75} aria-hidden />
-          {t('trading.rail.rename')}
-        </button>
-        <button
-          type="button"
-          className="trd-wman__act"
-          disabled={locked}
-          title={locked ? t('trading.sheet.manage.lockedAction') : undefined}
-          onClick={() => onOpen({ kind: 'export', wallet })}
-          data-testid="manage-export"
-        >
-          <KeyRound className="size-3.5" strokeWidth={1.75} aria-hidden />
-          {t('trading.rail.export')}
-        </button>
-        <button
-          type="button"
-          className="trd-wman__act trd-wman__act--danger"
-          disabled={locked}
-          title={locked ? t('trading.sheet.manage.lockedAction') : undefined}
-          onClick={() => onOpen({ kind: 'remove', wallet })}
-          data-testid="manage-remove"
-        >
-          <Trash2 className="size-3.5" strokeWidth={1.75} aria-hidden />
-          {t('trading.rail.remove')}
-        </button>
+        {wallet.chains.length ? (
+          <div className="trd-wman__chains">
+            {wallet.chains.map((chainId) => {
+              const chain = chains.find((c) => c.chainId === chainId)
+              if (!chain) return <ChainBadge key={chainId} chainId={chainId} />
+              return (
+                <button
+                  key={chainId}
+                  type="button"
+                  className="trd-wman__chain"
+                  title={`${t('trading.rail.explorer')} · ${chain.name}`}
+                  onClick={() =>
+                    void desktopApi().app.openExternal(
+                      `${chain.explorer}/address/${wallet.address}`,
+                    )
+                  }
+                >
+                  <ChainBadge chainId={chainId} />
+                  <ExternalLink className="size-3 opacity-60" strokeWidth={1.75} aria-hidden />
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
+        <div className="trd-wman__tools">
+          {/* On every card, so "Active" is never a word only the inactive wallets
+              carry. One wallet is always active, so it switches on and not off. */}
+          <button
+            type="button"
+            className="trd-wman__act"
+            aria-pressed={wallet.primary}
+            aria-disabled={wallet.primary || undefined}
+            disabled={!wallet.primary && write.isPending}
+            data-testid="manage-primary"
+            onClick={() => {
+              if (wallet.primary) return
+              write.mutate(
+                { method: 'wallet.setPrimary', params: { address: wallet.address } },
+                {
+                  onError: (err) => toast.error(`${t('trading.sheet.error')}: ${errorText(err)}`),
+                },
+              )
+            }}
+          >
+            {wallet.primary ? (
+              <CircleCheck className="size-3.5" strokeWidth={2} aria-hidden />
+            ) : (
+              <Circle className="size-3.5" strokeWidth={1.75} aria-hidden />
+            )}
+            {t('trading.rail.active')}
+          </button>
+          <IconAct
+            icon={QrCode}
+            label={t('trading.rail.qr')}
+            onClick={() => onOpen({ kind: 'receive', wallet })}
+            testId="manage-qr"
+          />
+          <IconAct
+            icon={Pencil}
+            label={t('trading.rail.rename')}
+            onClick={() => onOpen({ kind: 'rename', wallet })}
+            testId="manage-rename"
+          />
+          <IconAct
+            icon={KeyRound}
+            label={t('trading.rail.export')}
+            locked={locked}
+            onClick={() => onOpen({ kind: 'export', wallet })}
+            testId="manage-export"
+          />
+          <IconAct
+            icon={Trash2}
+            label={t('trading.rail.remove')}
+            locked={locked}
+            danger
+            onClick={() => onOpen({ kind: 'remove', wallet })}
+            testId="manage-remove"
+          />
+        </div>
       </footer>
     </section>
+  )
+}
+
+/** A card action as an icon: its name is the tooltip and the accessible name. */
+function IconAct({
+  icon: Icon,
+  label,
+  onClick,
+  testId,
+  locked = false,
+  danger = false,
+}: {
+  icon: typeof QrCode
+  label: string
+  onClick: () => void
+  testId: string
+  /** Needs the vault open: greyed out, and the tooltip says why. */
+  locked?: boolean
+  danger?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      className={cn('trd-wman__act trd-wman__act--icon', danger && 'trd-wman__act--danger')}
+      disabled={locked}
+      title={locked ? t('trading.sheet.manage.lockedAction') : label}
+      aria-label={label}
+      onClick={onClick}
+      data-testid={testId}
+    >
+      <Icon className="size-3.5" strokeWidth={1.75} aria-hidden />
+    </button>
   )
 }
 
