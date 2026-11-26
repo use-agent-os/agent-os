@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -124,6 +125,11 @@ def public_dns(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     monkeypatch.setattr(browser_tool, "validate_http_url_for_fetch", validate)
     return checked
+
+
+def _binary(engine: Path) -> str:
+    """The fake engine ``write_fake_engine`` put in ``engine`` (a .bat on Windows)."""
+    return str(engine / ("agent-browser.bat" if sys.platform == "win32" else "agent-browser"))
 
 
 def _log(engine: Path) -> list[list[str]]:
@@ -271,7 +277,7 @@ class TestStatus:
 
     @pytest.mark.asyncio
     async def test_unconfirmed_attach_mode_cannot_start(self, engine: Path) -> None:
-        binary = str(engine / "agent-browser")
+        binary = _binary(engine)
         browser_tool.configure_browser(
             SimpleNamespace(enabled=True, binary_path=binary, cdp_port=9222)
         )
@@ -402,7 +408,7 @@ class TestStart:
     @pytest.mark.asyncio
     async def test_attach_mode_starts_in_a_new_tab(self, engine: Path) -> None:
         # The user's own Chrome: the tab they are on is never sent to about:blank.
-        binary = str(engine / "agent-browser")
+        binary = _binary(engine)
         browser_tool.configure_browser(
             SimpleNamespace(enabled=True, binary_path=binary, cdp_port=9222, attach_confirmed=True)
         )
@@ -492,7 +498,7 @@ class TestNavigate:
 
     @pytest.mark.asyncio
     async def test_the_tool_allowlist_applies(self, engine: Path, public_dns: list[str]) -> None:
-        binary = str(engine / "agent-browser")
+        binary = _binary(engine)
         browser_tool.configure_browser(
             SimpleNamespace(enabled=True, binary_path=binary, allowed_domains=["example.com"])
         )
