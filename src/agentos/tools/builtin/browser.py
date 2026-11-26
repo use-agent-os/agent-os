@@ -366,6 +366,41 @@ async def _private_page_guard(session_key: str) -> str | None:
     return None
 
 
+def attach_refusal() -> str | None:
+    """The attach-consent refusal for a caller outside a tool turn, else None.
+
+    The tool's own gate (:func:`_attach_gate`) remembers consent per tool
+    session; the operator's browser view has no tool context, so it only asks
+    whether attach mode is configured and unconfirmed.
+    """
+    if agent_browser.is_attach_mode() and not _attach_confirmed:
+        return (
+            "Attach mode is configured (browser.cdp_port is set) but not confirmed. "
+            "Set browser.attach_confirmed = true in config to let AgentOS drive "
+            "your running Chrome."
+        )
+    return None
+
+
+def check_navigable(url: str) -> None:
+    """The tool's navigation policy (allowlist + SSRF), for the operator's view.
+
+    Raises :class:`ToolError` exactly as ``navigate`` would. Resolves DNS, so
+    call it off the event loop.
+    """
+    _check_navigable(url)
+
+
+def url_is_private(url: str) -> bool:
+    """Whether a live page URL is one the tool withholds (see :func:`_url_is_private`)."""
+    return _url_is_private(url)
+
+
+async def ensure_supervisor(session_key: str) -> Any | None:
+    """Attach the dialog supervisor after a navigation, as ``navigate`` does."""
+    return await _ensure_supervisor(session_key)
+
+
 def _wrap(source: str, content: str) -> str:
     return wrap_untrusted_boundary(content, source or "browser")
 

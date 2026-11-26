@@ -553,18 +553,38 @@ async def run_command(
     args: list[str] | None = None,
     *,
     timeout: float | None = None,
+    create: bool = True,
+    touch: bool = True,
 ) -> dict[str, Any]:
     """Run one ``agent-browser`` command and return its parsed JSON result.
 
     Never raises for an engine-level failure: returns
     ``{"success": False, "error": …}`` so the tool layer maps it to a clean
     ``ToolError`` message. Raises only for programmer errors.
+
+    ``create=False`` runs only against a session that already exists: with
+    none, it answers ``{"success": False, "code": "not_running"}`` and spawns
+    nothing (any engine command against an unknown session launches a
+    browser). ``touch=False`` leaves the session's idle clock alone, so a
+    viewer polling the page never keeps a browser alive past its TTL.
     """
     binary = resolve_binary()
     if binary is None:
         return {"success": False, "error": _install_hint()}
 
-    session = get_or_create_session(session_key)
+    if create:
+        session = get_or_create_session(session_key)
+    else:
+        found = get_session(session_key)
+        if found is None:
+            return {
+                "success": False,
+                "code": "not_running",
+                "error": "No browser is running for this session.",
+            }
+        session = found
+        if touch:
+            session.last_used_at = time.time()
     argv = _command_line(binary, session, command, args or [])
     effective_timeout = timeout if timeout is not None else _command_timeout(command, session)
 
@@ -582,7 +602,8 @@ async def run_command(
         log.warning("browser.command_failed", command=command, error_type=type(exc).__name__)
         return {"success": False, "error": f"agent-browser '{command}' failed: {exc}"}
 
-    session.last_used_at = time.time()
+    if touch:
+        session.last_used_at = time.time()
     if command in {"open", "goto", "navigate"}:
         session.first_open_done = True
     return result
