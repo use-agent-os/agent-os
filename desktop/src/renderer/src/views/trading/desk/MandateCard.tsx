@@ -7,6 +7,7 @@ import { initiatorKey, sameAddress, shortAddress, walletLabel } from '../logic'
 import { Sym } from '../parts'
 import type { Mandate, Wallet } from '../types'
 import { everyAfter, everyPhrase, usdShort } from './mandate-logic'
+import { useCmdEnter } from '../cmd-enter'
 
 /** "Sep 29 02:42": short enough to sit whole beside its label. */
 function expiry(iso: string | null): string {
@@ -122,8 +123,13 @@ export function MandateCard({
     facts.push({ key: 'expires', label: t('trading.dca.card.fact.decideBy'), value: expires })
   }
 
+  // ⌘↵ while focus is in this card (it lands on Reject when the card
+  // arrives) presses Approve, arming first where a click would.
+  const cardRef = useRef<HTMLElement>(null)
+  useCmdEnter(() => cardRef.current)
   return (
     <article
+      ref={cardRef}
       className="trd-card trd-mandate"
       data-kind="dca"
       data-status={m.status}
@@ -202,6 +208,7 @@ export function MandateCard({
           data-touch-id={prompting || undefined}
           aria-busy={prompting || undefined}
           data-testid="mandate-approve"
+          data-cmd-enter
         >
           {prompting ? t('trading.touchId.prompting') : t('trading.dca.card.approve')}
         </Button>

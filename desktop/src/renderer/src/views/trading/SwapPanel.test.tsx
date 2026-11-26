@@ -79,6 +79,18 @@ describe('SwapPanel', () => {
     expect(screen.getByTestId('swap-review')).toHaveTextContent('Review swap')
   })
 
+  it('opens the review on ⌘↵ from the amount field once a quote is in', async () => {
+    mount()
+    const amount = screen.getByLabelText('Amount')
+    fireEvent.keyDown(amount, { key: 'Enter', metaKey: true })
+    expect(screen.queryByTestId('confirm-send')).toBeNull()
+
+    fireEvent.change(amount, { target: { value: '0.1' } })
+    await waitFor(() => expect(screen.getByTestId('swap-review')).not.toBeDisabled())
+    fireEvent.keyDown(amount, { key: 'Enter', metaKey: true })
+    expect(await screen.findByTestId('confirm-send')).toBeInTheDocument()
+  })
+
   it('keeps a gas reserve back from Max and 100% when paying in ETH', async () => {
     mount()
     await screen.findByText(/Balance/)

@@ -6,7 +6,7 @@ import {
   TriangleAlert,
   Zap,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { t, type MessageKey } from '~/i18n'
 import { useNow } from '~/lib/use-now'
 import { useBalances, useQuote, type QuoteParams } from '~/stores/trading'
@@ -31,6 +31,7 @@ import {
 } from './logic'
 import { ChainBadge } from './ChainMark'
 import { useBalanceMask } from '~/stores/balance-privacy'
+import { useCmdEnter } from './cmd-enter'
 import { TokenLogo } from './parts'
 import { TicketModes, type TicketMode } from './TicketModes'
 import { nativeToken, TokenPicker } from './TokenPicker'
@@ -260,8 +261,11 @@ export function SwapPanel({
   const outText = fresh && ready ? formatAmount(fresh.amountOut) : quote.isFetching ? '…' : '0'
   const [outRef, outStyle] = useAmountFit<HTMLOutputElement>(outText)
 
+  // ⌘↵ anywhere in the ticket (the amount field, mostly) opens the review.
+  const ticketRef = useRef<HTMLElement>(null)
+  useCmdEnter(() => ticketRef.current)
   return (
-    <aside className="trd-ticket" aria-label={t('trading.swap.title')}>
+    <aside ref={ticketRef} className="trd-ticket" aria-label={t('trading.swap.title')}>
       <div className="trd-ticket__head">
         {onMode ? (
           <TicketModes mode="swap" onMode={onMode} />
@@ -458,6 +462,7 @@ export function SwapPanel({
           className="trd-cta app-no-drag"
           disabled={!canReview}
           data-testid="swap-review"
+          data-cmd-enter
           data-fresh={ready && fresh && !countdown.expired ? 'true' : undefined}
           style={
             {

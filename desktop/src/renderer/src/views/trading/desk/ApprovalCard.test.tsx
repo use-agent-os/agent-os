@@ -68,6 +68,29 @@ describe('ApprovalCard', () => {
     expect(onApprove).toHaveBeenCalledTimes(1)
   })
 
+  it('approves on ⌘↵ from the focused card, but not while a rejection is being written', () => {
+    const onApprove = vi.fn()
+    const onReject = vi.fn()
+    renderDesk(
+      <ApprovalCard
+        order={order({ valueUsd: 120 })}
+        wallets={[WALLET]}
+        deciding={false}
+        onApprove={onApprove}
+        onReject={onReject}
+        focusOnMount
+      />,
+    )
+    const reject = screen.getByTestId('card-reject')
+    expect(document.activeElement).toBe(reject)
+    fireEvent.keyDown(reject, { key: 'Enter', metaKey: true })
+    expect(onApprove).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(reject)
+    fireEvent.keyDown(screen.getByTestId('reject-reason'), { key: 'Enter', metaKey: true })
+    expect(onApprove).toHaveBeenCalledTimes(1)
+  })
+
   it('arms a high-risk approve and executes on the second click within the window', () => {
     vi.useFakeTimers()
     const onApprove = vi.fn()

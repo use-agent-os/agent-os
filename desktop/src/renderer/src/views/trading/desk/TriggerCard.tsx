@@ -16,6 +16,7 @@ import {
   triggerNotes,
   usdText,
 } from './trigger-logic'
+import { useCmdEnter } from '../cmd-enter'
 
 /** "Oct 5 08:00": short enough to sit whole beside its label. */
 function shortDate(iso: string | null): string {
@@ -145,8 +146,13 @@ export function TriggerCard({
   }
   const notes = [...new Set([...warnings, ...triggerNotes(tr, walletName(tr, wallets))])]
 
+  // ⌘↵ while focus is in this card (it lands on Reject when the card
+  // arrives) presses Approve, arming first where a click would.
+  const cardRef = useRef<HTMLElement>(null)
+  useCmdEnter(() => cardRef.current)
   return (
     <article
+      ref={cardRef}
       className="trd-card trd-trigger"
       data-kind="trigger"
       data-action={tr.kind}
@@ -226,6 +232,7 @@ export function TriggerCard({
           data-touch-id={prompting || undefined}
           aria-busy={prompting || undefined}
           data-testid="trigger-approve"
+          data-cmd-enter
         >
           {prompting ? t('trading.touchId.prompting') : t('trading.trigger.card.approve')}
         </Button>

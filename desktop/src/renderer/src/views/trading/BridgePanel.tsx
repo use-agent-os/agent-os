@@ -1,5 +1,5 @@
 import { ArrowDownUp, ChevronDown, CircleCheck, ShieldAlert, TriangleAlert } from 'lucide-react'
-import { useMemo, useState, type CSSProperties } from 'react'
+import { useMemo, useRef, useState, type CSSProperties } from 'react'
 import { t, type MessageKey } from '~/i18n'
 import { useNow } from '~/lib/use-now'
 import { useBalances, useBridgeQuote, type BridgeParams } from '~/stores/trading'
@@ -21,6 +21,7 @@ import {
   sameToken,
   walletLabel,
 } from './logic'
+import { useCmdEnter } from './cmd-enter'
 import { TokenLogo } from './parts'
 import { Leg, useAmountFit } from './SwapPanel'
 import { TicketModes, type TicketMode } from './TicketModes'
@@ -158,8 +159,16 @@ export function BridgePanel({
   const outText = live ? formatAmount(fresh.expectedOut) : ready && quote.isFetching ? '…' : '0'
   const [outRef, outStyle] = useAmountFit<HTMLOutputElement>(outText)
 
+  // ⌘↵ anywhere in the ticket (the amount field, mostly) opens the review.
+  const ticketRef = useRef<HTMLElement>(null)
+  useCmdEnter(() => ticketRef.current)
   return (
-    <aside className="trd-ticket" aria-label={t('trading.bridge.title')} data-mode="bridge">
+    <aside
+      ref={ticketRef}
+      className="trd-ticket"
+      aria-label={t('trading.bridge.title')}
+      data-mode="bridge"
+    >
       <div className="trd-ticket__head">
         {onMode ? (
           <TicketModes mode="bridge" onMode={onMode} />
@@ -355,6 +364,7 @@ export function BridgePanel({
           className="trd-cta app-no-drag"
           disabled={!canReview}
           data-testid="bridge-review"
+          data-cmd-enter
           data-fresh={live && !countdown.expired ? 'true' : undefined}
           style={
             { '--fresh': live && !countdown.expired ? countdown.fraction : 0 } as CSSProperties

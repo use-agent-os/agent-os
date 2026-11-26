@@ -44,6 +44,7 @@ import {
 } from './logic'
 import { Empty, ErrorState, Sym } from './parts'
 import { isWrappedEth, providerLabel, type Order, type OrderStatus } from './types'
+import { useCmdEnter } from './cmd-enter'
 
 /** How long an armed Approve waits for its second click before it relaxes. */
 const ARM_RESET_MS = 4000
@@ -395,6 +396,8 @@ function OrderRow({
   const impact = order.priceImpactPct === null ? null : impactTone(order.priceImpactPct)
   const failed =
     order.status === 'failed' || order.status === 'rejected' || order.status === 'expired'
+  // ⌘↵ while focus is in a waiting row presses its Approve.
+  useCmdEnter(() => rowRef.current)
   return (
     <div
       className="trd-order"
@@ -546,6 +549,7 @@ function OrderRow({
               data-touch-id={prompting || undefined}
               aria-busy={prompting || undefined}
               data-testid="order-approve"
+              data-cmd-enter
             >
               {prompting
                 ? t('trading.touchId.prompting')
