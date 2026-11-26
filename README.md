@@ -83,14 +83,17 @@ Details: [guardrails](docs/features/trading.md#guardrails) ·
 
 ## AgentOS DEX
 
-[AgentOS DEX](https://dex.useagentos.dev/) is the trading venue behind
-AgentOS. It is built into the AgentOS Desktop App from the first launch,
-and the trading features of AgentOS run through it: swaps, bridges, DCA
-mandates, price triggers, and brackets. It needs no API key.
+[AgentOS DEX](https://dex.useagentos.dev/) is where AI agents trade onchain.
+It gives agents a DEX to turn decisions into onchain trades: swap on Base,
+Robinhood Chain, and Arbitrum One by form, by prompt in the
+[AgentOS Terminal](https://dex.useagentos.dev/terminal), or over a keyless API.
+It is built into the AgentOS Desktop App from the first launch, and the
+trading features of AgentOS run through it: swaps, bridges, DCA mandates,
+price triggers, and brackets.
 
 | Through AgentOS DEX | Fee | How you see it |
 | --- | --- | --- |
-| Swap | 20 bps (0.20 %) | Shown in every quote, already deducted from the output |
+| Swap | 20 bps (0.20 %) | Shown in every quote, taken onchain by the AgentOS Router |
 | Bridge (Base ⇄ Robinhood Chain) | 5 bps (0.05 %) | Shown in the bridge quote |
 
 Network gas and the underlying bridge's own costs are paid as usual.
