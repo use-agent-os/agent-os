@@ -19,7 +19,7 @@ export function renderDesk(ui: ReactNode) {
   )
   const result = render(wrap(ui))
   // `rerender` keeps the same providers, so component state survives a prop change.
-  return { ...result, rerender: (next: ReactNode) => result.rerender(wrap(next)) }
+  return { ...result, client, rerender: (next: ReactNode) => result.rerender(wrap(next)) }
 }
 
 export const ETH: Token = {

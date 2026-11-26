@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { invalidateTrading } from '~/stores/trading'
 import { useTradingUi } from '~/stores/trading-ui'
 import { Markets } from './Markets'
 import { renderDesk } from './test-utils'
@@ -113,6 +114,48 @@ describe('Markets · finding the token', () => {
     await screen.findByTestId('markets-head')
     expect(screen.getByTestId('markets-search')).toHaveValue('NVDA')
     expect(marketsCalls()[0]).toMatchObject({ target: NVDA_ADDRESS, chainId: 4663 })
+  })
+})
+
+describe('Markets · staying put once the board is up', () => {
+  function searchCalls() {
+    return rpcCall.mock.calls.filter((c) => c[0] === 'trading.tokens.search').length
+  }
+
+  it('does not look the symbol up again on a trading event', async () => {
+    const { client } = renderDesk(<Markets />)
+    search('NVDA')
+    await screen.findByTestId('markets-head')
+    const before = searchCalls()
+    // Every order, trigger and DCA tick invalidates the `trading` prefix.
+    invalidateTrading(client)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(searchCalls()).toBe(before)
+    expect(screen.getByTestId('markets-head')).toBeInTheDocument()
+  })
+
+  it('keeps the board while the symbol lookup refreshes in the background', async () => {
+    const { client } = renderDesk(<Markets />)
+    search('NVDA')
+    await screen.findByTestId('markets-head')
+    let release = () => {}
+    rpcCall.mockImplementation(async (method: string, params: { chainId?: number }) => {
+      if (method === 'trading.tokens.search') {
+        await new Promise<void>((r) => (release = r))
+        return { tokens: params.chainId === 4663 ? [NVDA_LOOKALIKE, NVDA] : [] }
+      }
+      if (method === 'trading.markets') return NVDA_MARKETS
+      return {}
+    })
+    // The lookup's own refresh (stale, refocused, or a key it shares): data in
+    // hand, a fetch in flight.
+    void client.refetchQueries({
+      predicate: (q) => q.queryKey.some((k) => typeof k === 'string' && k.includes('tokens')),
+    })
+    await waitFor(() => expect(client.isFetching()).toBeGreaterThan(0))
+    expect(screen.queryByTestId('markets-resolving')).toBeNull()
+    expect(screen.getByTestId('markets-head')).toBeInTheDocument()
+    release()
   })
 })
 
