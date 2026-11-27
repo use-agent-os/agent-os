@@ -171,6 +171,62 @@ class TestConsoleCapture:
         assert console[0]["text"] == "boom"
 
 
+class TestNavigationTracking:
+    """What the browser tool waits on before reading a page after an action."""
+
+    @staticmethod
+    def _attached(transport: FakeTransport, session: str = "S1", target: str = "T1") -> None:
+        transport.on_event(
+            "Target.attachedToTarget",
+            {"sessionId": session, "targetInfo": {"targetId": target, "type": "page"}},
+            None,
+        )
+
+    def test_a_main_frame_navigation_is_pending_until_it_stops_loading(self) -> None:
+        transport = FakeTransport()
+        sup = _supervisor(transport)
+        self._attached(transport)
+        assert sup.navigation_pending() is False
+        transport.on_event(
+            "Page.frameRequestedNavigation",
+            {"frameId": "T1", "reason": "formSubmissionPost", "disposition": "currentTab"},
+            "S1",
+        )
+        assert sup.navigation_pending() is True
+        transport.on_event("Page.frameStartedLoading", {"frameId": "T1"}, "S1")
+        assert sup.navigation_pending() is True
+        transport.on_event("Page.frameStoppedLoading", {"frameId": "T1"}, "S1")
+        assert sup.navigation_pending() is False
+
+    def test_iframes_and_new_tabs_do_not_count(self) -> None:
+        transport = FakeTransport()
+        sup = _supervisor(transport)
+        self._attached(transport)
+        transport.on_event("Page.frameStartedLoading", {"frameId": "ad-frame"}, "S1")
+        transport.on_event(
+            "Page.frameRequestedNavigation",
+            {"frameId": "T1", "disposition": "newTab"},
+            "S1",
+        )
+        assert sup.navigation_pending() is False
+
+    def test_a_load_that_never_finishes_stops_counting(self) -> None:
+        transport = FakeTransport()
+        sup = _supervisor(transport)
+        self._attached(transport)
+        transport.on_event("Page.frameStartedLoading", {"frameId": "T1"}, "S1")
+        assert sup.navigation_pending(max_age_s=60.0) is True
+        assert sup.navigation_pending(max_age_s=0.0) is False
+
+    def test_a_detached_page_is_forgotten(self) -> None:
+        transport = FakeTransport()
+        sup = _supervisor(transport)
+        self._attached(transport)
+        transport.on_event("Page.frameStartedLoading", {"frameId": "T1"}, "S1")
+        transport.on_event("Target.detachedFromTarget", {"sessionId": "S1"}, None)
+        assert sup.navigation_pending() is False
+
+
 class TestEvalFraming:
     def test_evaluate_returns_value(self) -> None:
         transport = FakeTransport(evaluate_result="Hello")

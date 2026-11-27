@@ -912,7 +912,7 @@ restrict_evaluate = false
 | `browser.persist_profile` | `false` | `true` keeps cookies/login between sessions (written to disk). |
 | `browser.session_ttl_minutes` | `15` | Idle sessions are reaped after this. Range 1-1440. |
 | `browser.max_sessions` | `3` | Concurrent browser sessions; oldest-idle evicted. Range 1-20. |
-| `browser.snapshot_max_chars` | `24000` | Snapshots over this are truncated with a marker. |
+| `browser.snapshot_max_chars` | `24000` | A snapshot or `get_text` result over this is cut on a line break, with a note saying how to read the rest (narrow it with `selector`/`depth`, or read text with `get_text`). |
 | `browser.dialog_policy` | `must_respond` | `must_respond`, `auto_dismiss`, or `auto_accept` for native dialogs. |
 | `browser.dialog_timeout_s` | `300.0` | Watchdog for an unanswered dialog. Range 1-3600. |
 | `browser.restrict_evaluate` | `false` | `true` blocks sensitive JS primitives in `eval` (off by default — it also blocks ordinary DOM extraction). |
