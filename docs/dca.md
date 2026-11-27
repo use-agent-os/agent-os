@@ -350,8 +350,8 @@ agentos trade dca update <id> [--usd X] [--cap X] [--runs N] [--every 12h] [--ma
   Errors are JSON on stderr under `--json`, never a card.
 - `run --wait` waits for the fired order like `swap --wait`.
 - From an agent shell, `create` always answers `status: "awaiting_approval"`;
-  the agent tells the user the card has an **Approve & start** button and
-  never approves itself (`trading.operator_required` otherwise).
+  the agent tells the user the **Approve & start** button is in the
+  approvals area above the composer and never approves itself (`trading.operator_required` otherwise).
 
 ## Rendering
 
@@ -395,7 +395,9 @@ Root `article.dca-card[data-dca-kind=mandate][data-dca-status=…][data-dca-chai
    $10 → 0.0035 ETH @ $2,860 · ↗` (explorer link). A `parked` run says
    `awaiting approval · #ord_…`.
 7. **Actions** `.dca-actions` (only when `ctx.canWrite`, i.e. desktop):
-   - `awaiting_approval`: **Approve & start** (primary) · Reject
+   - `awaiting_approval`: none. The decision has one place, the desk's
+     approvals region (below); the card shows a one-line
+     `.dca-card__approve-hint` pointing there instead.
    - `active`: Pause · Buy now · Stop
    - `paused`: Resume · Buy now · Stop
    - terminal: none.
@@ -467,6 +469,8 @@ not like the web card. `canWrite` is true only on the desktop desk
   approval cards live) lists pending mandates above pending orders as a
   compact `MandateCard` (what, how much, how often, cap, first buy, expiry,
   warnings; values wrap, never truncate) with **Approve & start** / Reject.
+  This is the only place a pending mandate is approved or rejected: the
+  chat card never repeats the buttons.
 - **Desk ledger** (`ledger.ts`) recognises `agentos trade dca <sub> …` and
   the `dca-cards/` marker, with titles `Start DCA · ETH · $10 / day`,
   `DCA status`, `Pause DCA`, `Buy now`, …
@@ -512,7 +516,7 @@ not like the web card. `canWrite` is true only on the desktop desk
   `ChatView` passes `dcaActions` at the desk only, CSS skin test.
 - **Live** (tester, dust wallet, Base): `agentos trade dca create ETH --usd
   0.05 --every 2m --runs 2 --json` from the desk chat as the agent → card
-  with Approve & start → approve on the desktop → first buy fires within a
-  tick, second after 2 min → mandate `completed`; `Buy now` on a paused
+  in the chat, Approve & start in the approvals region → approve on the
+  desktop → first buy fires within a tick, second after 2 min → mandate `completed`; `Buy now` on a paused
   mandate; the card and the Missions panel agree with `agentos trade dca
   show`. Cost ≈ $0.10 + gas.

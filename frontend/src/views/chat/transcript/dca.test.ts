@@ -1070,16 +1070,10 @@ describe('buildDcaCard — mandates', () => {
   it('offers compact controls per row on the desk', () => {
     const card = render(payload('mandates'), ctx({ canWrite: true }))
     const actions = [...card.querySelectorAll<HTMLElement>('.dca-row .dca-actions--compact')]
-    expect(actions.map((a) => a.dataset.dcaId)).toEqual([
-      'dca_1a2b3c4d',
-      'dca_9e8f7a6b',
-      'dca_3b4c5d6e',
-    ])
-    expect(
-      [...actions[1]!.querySelectorAll<HTMLElement>('[data-dca-action]')].map(
-        (b) => b.dataset.dcaAction,
-      ),
-    ).toEqual(['approve', 'reject'])
+    // The pending proposal (dca_9e8f7a6b) has none: its decision lives in the
+    // desk's approvals region, never a second time in the chat.
+    expect(actions.map((a) => a.dataset.dcaId)).toEqual(['dca_1a2b3c4d', 'dca_3b4c5d6e'])
+    expect(card.querySelector('.dca-row[data-dca-id="dca_9e8f7a6b"] .dca-actions')).toBeNull()
   })
 
   it('says so when there are none', () => {
@@ -1094,7 +1088,7 @@ describe('buildDcaCard — mandates', () => {
 
 describe('controls', () => {
   it('offers the controls each status allows', () => {
-    expect(dcaActionsFor('awaiting_approval')).toEqual(['approve', 'reject'])
+    expect(dcaActionsFor('awaiting_approval')).toEqual([])
     expect(dcaActionsFor('active')).toEqual(['pause', 'run', 'stop'])
     expect(dcaActionsFor('paused')).toEqual(['resume', 'run', 'stop'])
     for (const s of ['completed', 'stopped', 'rejected', 'expired', 'unknown'] as const) {
@@ -1109,17 +1103,18 @@ describe('controls', () => {
   })
 
   it('renders real buttons keyed by action and mandate id', () => {
-    const card = render(payload('mandate-awaiting'), ctx({ canWrite: true }))
-    const buttons = [...card.querySelectorAll<HTMLButtonElement>('.dca-actions [data-dca-action]')]
+    const active = render(payload('mandate-active'), ctx({ canWrite: true }))
+    const buttons = [
+      ...active.querySelectorAll<HTMLButtonElement>('.dca-actions [data-dca-action]'),
+    ]
     expect(
       buttons.map((b) => [b.tagName, b.type, b.dataset.dcaAction, b.dataset.dcaId, b.textContent]),
     ).toEqual([
-      ['BUTTON', 'button', 'approve', 'dca_9e8f7a6b', 'Approve & start'],
-      ['BUTTON', 'button', 'reject', 'dca_9e8f7a6b', 'Reject'],
+      ['BUTTON', 'button', 'pause', 'dca_1a2b3c4d', 'Pause'],
+      ['BUTTON', 'button', 'run', 'dca_1a2b3c4d', 'Buy now'],
+      ['BUTTON', 'button', 'stop', 'dca_1a2b3c4d', 'Stop'],
     ])
-    expect(buttons[0]!.dataset.dcaTone).toBe('primary')
-    const active = render(payload('mandate-active'), ctx({ canWrite: true }))
-    expect(texts(active, '.dca-actions [data-dca-action]')).toEqual(['Pause', 'Buy now', 'Stop'])
+    expect(buttons[2]!.dataset.dcaTone).toBe('danger')
     const error = active.querySelector<HTMLElement>('.dca-actions__error')!
     expect(error.hidden).toBe(true)
     expect(error).toHaveAttribute('role', 'alert')
@@ -1184,23 +1179,23 @@ describe('control → RPC → payload swap', () => {
     mounter.destroyAll()
   })
 
-  it('approves a pending proposal', async () => {
-    const call = vi.fn(() =>
-      Promise.resolve(
-        (() => {
-          const raw = fixture('mandate-awaiting')
-          ;(raw.mandate as Json).status = 'active'
-          return raw
-        })(),
-      ),
-    )
+  it('offers no Approve on a pending proposal; it points at the approvals region', async () => {
+    const call = vi.fn()
     const { host, mounter } = mountWith(fixture('mandate-awaiting'), call)
     await flush()
-    button(host, 'approve').click()
-    await flush()
-    expect(call).toHaveBeenCalledWith('trading.dca.approve', { mandateId: 'dca_9e8f7a6b' })
-    expect(host.querySelector('.dca-card')).toHaveAttribute('data-dca-status', 'active')
+    const card = host.querySelector<HTMLElement>('.dca-card')!
+    expect(card.dataset.dcaStatus).toBe('awaiting_approval')
+    expect(card.querySelector('.dca-actions')).toBeNull()
+    expect(card.querySelector('.dca-card__approve-hint')).toHaveTextContent(
+      'Approve or reject it in the approvals above the message box.',
+    )
+    expect(call).not.toHaveBeenCalled()
     mounter.destroyAll()
+  })
+
+  it('shows no approval hint outside the desk', () => {
+    const card = render(payload('mandate-awaiting'))
+    expect(card.querySelector('.dca-card__approve-hint')).toBeNull()
   })
 
   it('hands a "Buy now" order to the desk', async () => {
@@ -1442,24 +1437,24 @@ describe('live state over the artifact snapshot', () => {
     const read = vi.fn(() => answer.promise)
     const host = placeholder()
     const mounter = createDcaMounter({
-      fetchPayload: () => Promise.resolve(fixture('mandate-awaiting')),
+      fetchPayload: () => Promise.resolve(fixture('mandate-active')),
       call: read,
       actions: { call: vi.fn() },
       now: () => FETCHED_AT,
     })
     mounter.mountDca(document.body)
     await flush()
-    expect(read).toHaveBeenCalledWith('trading.dca.get', { mandateId: 'dca_9e8f7a6b' })
+    expect(read).toHaveBeenCalledWith('trading.dca.get', { mandateId: 'dca_1a2b3c4d' })
     const snapshot = host.querySelector<HTMLElement>('.dca-card')!
-    expect(snapshot.dataset.dcaStatus).toBe('awaiting_approval')
+    expect(snapshot.dataset.dcaStatus).toBe('active')
     expect(snapshot.dataset.dcaStale).toBe('checking')
     // The mount's read is quiet: no dimming, no hint yet.
     expect(snapshot).not.toHaveAttribute('data-dca-refreshing')
     expect(snapshot.querySelector('.dca-card__stale')).toBeNull()
-    expect(button(host, 'approve').disabled).toBe(true)
-    expect(button(host, 'reject').disabled).toBe(true)
+    expect(button(host, 'pause').disabled).toBe(true)
+    expect(button(host, 'stop').disabled).toBe(true)
 
-    answer.resolve(completedFor('mandate-awaiting'))
+    answer.resolve(completedFor('mandate-active'))
     await flush()
     const card = host.querySelector<HTMLElement>('.dca-card')!
     expect(card.dataset.dcaStatus).toBe('completed')
@@ -1472,7 +1467,7 @@ describe('live state over the artifact snapshot', () => {
     const read = vi.fn((): Promise<unknown> => Promise.reject(new Error('gateway down')))
     const host = placeholder()
     const mounter = createDcaMounter({
-      fetchPayload: () => Promise.resolve(fixture('mandate-awaiting')),
+      fetchPayload: () => Promise.resolve(fixture('mandate-active')),
       call: read,
       actions: { call: vi.fn() },
       now: () => FETCHED_AT,
@@ -1480,9 +1475,9 @@ describe('live state over the artifact snapshot', () => {
     mounter.mountDca(document.body)
     await flush()
     const card = host.querySelector<HTMLElement>('.dca-card')!
-    expect(card.dataset.dcaStatus).toBe('awaiting_approval')
+    expect(card.dataset.dcaStatus).toBe('active')
     expect(card.dataset.dcaStale).toBe('failed')
-    expect(button(host, 'approve').disabled).toBe(true)
+    expect(button(host, 'pause').disabled).toBe(true)
     const hint = card.querySelector<HTMLElement>('.dca-card__stale')!
     expect(hint).toHaveTextContent('state may be stale · ↻')
     // It sits right above the footer; a quiet read flashes no footer error.
@@ -1490,7 +1485,7 @@ describe('live state over the artifact snapshot', () => {
     expect(card.querySelector('.dca-card__refresh-error')).toBeNull()
 
     // The hint's ↻ re-reads; a success lifts the stale state.
-    read.mockImplementationOnce(() => Promise.resolve(activeFor('mandate-awaiting')))
+    read.mockImplementationOnce(() => Promise.resolve(activeFor('mandate-active')))
     hint.querySelector<HTMLButtonElement>('.dca-card__stale-refresh')!.click()
     await flush()
     const live = host.querySelector<HTMLElement>('.dca-card')!
@@ -1589,27 +1584,27 @@ describe('live state over the artifact snapshot', () => {
   it('re-reads the card after a control is refused as out of date', async () => {
     const act = vi.fn(() =>
       Promise.reject(
-        Object.assign(new Error('cannot approve dca_9e8f7a6b: it is completed'), {
+        Object.assign(new Error('cannot pause dca_1a2b3c4d: it is completed'), {
           code: 'trading.dca.bad_state',
         }),
       ),
     )
-    const answers = [fixture('mandate-awaiting'), completedFor('mandate-awaiting')]
+    const answers = [fixture('mandate-active'), completedFor('mandate-active')]
     const read = vi.fn(() => Promise.resolve(answers.shift()))
     const host = placeholder()
     const mounter = createDcaMounter({
-      fetchPayload: () => Promise.resolve(fixture('mandate-awaiting')),
+      fetchPayload: () => Promise.resolve(fixture('mandate-active')),
       call: read,
       actions: { call: act },
       now: () => FETCHED_AT,
     })
     mounter.mountDca(document.body)
     await flush()
-    // The mount's read still said awaiting (the engine moved on after it).
-    expect(button(host, 'approve').disabled).toBe(false)
-    button(host, 'approve').click()
+    // The mount's read still said active (the engine moved on after it).
+    expect(button(host, 'pause').disabled).toBe(false)
+    button(host, 'pause').click()
     await flush()
-    expect(act).toHaveBeenCalledWith('trading.dca.approve', { mandateId: 'dca_9e8f7a6b' })
+    expect(act).toHaveBeenCalledWith('trading.dca.pause', { mandateId: 'dca_1a2b3c4d' })
     expect(read).toHaveBeenCalledTimes(2)
     const card = host.querySelector<HTMLElement>('.dca-card')!
     expect(card.dataset.dcaStatus).toBe('completed')

@@ -3780,9 +3780,17 @@
   padding: 8px 0;
   color: var(--muted-foreground);
 }
+/* A pending proposal carries no buttons of its own: its one Approve & start
+   / Reject is the desk's approvals region above the composer. The card only
+   says where to look. */
+.dca-card__approve-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
 /* Actions (desk only: the renderer draws them only when the chat hands it
-   `dcaActions`). Hairline ghost buttons like the LP writes; Approve & start
-   is the one filled control on the card. */
+   `dcaActions`). Hairline ghost buttons like the LP writes: Pause, Buy now,
+   Stop on a live mandate. */
 .dca-actions {
   display: grid;
   gap: 4px;

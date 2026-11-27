@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- Desktop Trading: a DCA mandate the agent proposes in chat is approved in
+  one place only, the approvals area above the composer. The chat card no
+  longer repeats **Approve & start** / **Reject**; it shows the plan and a
+  line pointing to the approvals area (trading agent prompt v30).
+
 ## [2026.11.27] - 2026-11-27
 
 ### Added

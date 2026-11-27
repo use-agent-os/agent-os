@@ -268,6 +268,11 @@ describe('tradingAgentFiles · reading an order', () => {
     expect(agents).toMatch(/"only under 3000".*→ `--max-price 3000`/s)
     expect(agents).toMatch(/`agentos trade dca list --json`/)
     expect(agents).toMatch(/\*\*Approve & start\*\*/)
+    // One decision, one place (v30): the approvals area, never a card button.
+    expect(agents).toMatch(
+      /Its\s+one \*\*Approve & start\*\* button is in the approvals area above the\s+composer/,
+    )
+    expect(TRADING_AGENT_VERSION).toBeGreaterThanOrEqual(30)
     expect(agents).toMatch(/Always report the mandate id/)
     expect(agents).toMatch(/`agentos trade dca approve`/)
     // Every command with the CLI's own flags.
@@ -544,8 +549,8 @@ describe('tradingAgentFiles · naming the markets sections (v27)', () => {
   const tools = files['TOOLS.md'] ?? ''
 
   it('bumped the version', () => {
-    expect(TRADING_AGENT_VERSION).toBe(29)
-    expect(agents).toContain('trading agent v29')
+    expect(TRADING_AGENT_VERSION).toBeGreaterThanOrEqual(29)
+    expect(agents).toContain(`trading agent v${TRADING_AGENT_VERSION}`)
   })
 
   it('says which section is which, and never calls USDG/WETH quote-side markets', () => {

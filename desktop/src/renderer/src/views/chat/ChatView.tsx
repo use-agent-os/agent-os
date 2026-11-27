@@ -278,9 +278,10 @@ function ConnectedChat({
   // (operator) connection; the order parks, and its approval card joins the
   // desk's own asks — it has no session, so the desk is told its id. A plain
   // chat hands the transcript nothing, and the cards carry no buttons. A DCA
-  // card (docs/dca.md) takes the same pair: its Approve & start, Pause, Buy
-  // now and Stop call `trading.dca.*` here, and a Buy now that parks an order
-  // lands on that order's card.
+  // card (docs/dca.md) takes the same pair: its Pause, Buy now and Stop call
+  // `trading.dca.*` here, and a Buy now that parks an order lands on that
+  // order's card. A pending mandate's Approve & start is the desk's approvals
+  // region only, never a second copy on the card.
   const [ownOrderIds, setOwnOrderIds] = useState<ReadonlySet<string>>(() => new Set())
   const atDesk = desk !== null
   const lpActions = useMemo<LpActions | null>(
@@ -288,10 +289,10 @@ function ConnectedChat({
       atDesk
         ? {
             // Every card write goes through the store's one Touch ID door
-            // (TRADING_WRITE_GATES): a DCA card's "Approve & start" and "Buy
-            // now", a trigger card's "Approve & arm" and "Fire now", a bracket
-            // card's "Approve & arm" and "Sell now" ask exactly as the desk's
-            // own buttons do; the object is read first so the sheet can name it.
+            // (TRADING_WRITE_GATES): a DCA card's "Buy now", a trigger card's
+            // "Approve & arm" and "Fire now", a bracket card's "Approve & arm"
+            // and "Sell now" ask exactly as the desk's own buttons do; the
+            // object is read first so the sheet can name it.
             call: (method, params) => gatedCall((m, p) => rpc.call(m, p), method, params),
             onOrder: (orderId) => {
               setOwnOrderIds((prev) => new Set(prev).add(orderId))

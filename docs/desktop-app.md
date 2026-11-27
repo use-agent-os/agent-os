@@ -117,8 +117,9 @@ the file name, a subtitle such as "Spreadsheet · XLSX · 5 KB", and a
 Trading commands run with `--json` publish cards the chat renders live:
 
 - **DCA mandates** show a countdown to the next buy, spent-of-cap progress,
-  average buy price vs now and a buys chart, with **Approve & start**,
-  **Pause**, **Buy now** and **Stop** on the card. See [DCA](dca.md).
+  average buy price vs now and a buys chart, with **Pause**, **Buy now**
+  and **Stop** on the card. A new mandate's **Approve & start** sits in the
+  approvals area above the composer, not on the card. See [DCA](dca.md).
 - **Uniswap V4 liquidity** cards show a pool, its range distribution or a
   position. See [LP cards](lp-cards.md) and [LP writes](lp-write.md).
 
