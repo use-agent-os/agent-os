@@ -15,6 +15,7 @@ from agentos import run_kinds
 from agentos.compat.inspect_utils import accepts_keyword_arg
 from agentos.engine.cache_break_monitor import notify_compaction
 from agentos.engine.start_turn import start_turn_via_runtime
+from agentos.engine.types import ArtifactEvent
 from agentos.gateway import attachment_ingest as _attachment_ingest
 from agentos.gateway.access import CONTROL_AND_CHANNEL, ConnectionSurface
 from agentos.gateway.agent_tasks import get_agent_task_registry
@@ -1603,6 +1604,10 @@ async def _sessions_send_impl(params: dict | None, ctx: RpcContext) -> dict:
             ):
                 event_dict = asdict(event)
                 event_kind = event_dict.pop("kind", event.__class__.__name__)
+                if isinstance(event, ArtifactEvent):
+                    # Built from an artifact ref, it carries the ref's own kind
+                    # (``artifact_ref``); clients listen for ``session.event.artifact``.
+                    event_kind = "artifact"
                 if event_kind == "thinking" and not show_thinking:
                     continue
                 if event_kind == "done" and not show_thinking:

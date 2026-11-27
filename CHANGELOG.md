@@ -60,6 +60,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   through a ticket from `artifacts.download`, as the rest of the console
   does. An artifact tab shows an image, Markdown, plain text or an HTML page
   (sandboxed) and offers any other file, a PDF included, as a download.
+- Gateway: a published artifact streamed as `session.event.artifact_ref`
+  instead of `session.event.artifact`, the name clients, the live-turn
+  snapshot and the text-segment boundary listen for.
 
 ## [2026.11.26] - 2026-11-26
 
