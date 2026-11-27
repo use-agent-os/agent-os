@@ -1029,10 +1029,18 @@
     color: var(--text-muted);
     font-size: 12px;
   }
+  .ws-browser-status {
+    flex: 1;
+    min-width: 0;
+    line-height: 1.45;
+    text-wrap: pretty;
+  }
   .ws-live-dot {
+    display: inline-block;
     width: 7px;
     height: 7px;
-    flex-shrink: 0;
+    margin-inline-end: 6px;
+    vertical-align: 0.05em;
     border-radius: 9999px;
     background: var(--text-muted);
   }

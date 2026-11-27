@@ -476,10 +476,13 @@ export function BrowserTab({ sessionKey, active }: ToolTabProps) {
         {stage}
       </div>
       <div className="ws-browser-foot">
-        <span className="ws-live-dot" data-live={watching || undefined} aria-hidden />
-        <span>{watching ? t('webPanel.browserLive') : t('webPanel.browserPaused')}</span>
-        <span aria-hidden>·</span>
-        <span className="min-w-0 flex-1 truncate">{t('webPanel.browserReadOnly')}</span>
+        {/* One paragraph that wraps on a narrow panel: never cut short. */}
+        <p className="ws-browser-status">
+          <span className="ws-live-dot" data-live={watching || undefined} aria-hidden />
+          {watching ? t('webPanel.browserLive') : t('webPanel.browserPaused')}
+          <span aria-hidden> · </span>
+          {t('webPanel.browserReadOnly')}
+        </p>
         {current?.image && !blank ? (
           <SegmentedControl
             size="sm"

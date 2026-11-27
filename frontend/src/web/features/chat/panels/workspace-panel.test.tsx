@@ -443,6 +443,12 @@ describe('Browser tab', () => {
       'href',
       'https://example.com/',
     )
+    // The status line wraps on a narrow panel instead of being cut short.
+    const statusLine = within(panel()).getByText(
+      /View only: clicks and typing stay with the agent\./,
+    )
+    expect(statusLine).toHaveTextContent('Live · View only: clicks and typing stay with the agent.')
+    expect(statusLine.className).not.toMatch(/\btruncate\b/)
   })
 
   it('navigates, goes back and switches tabs through the gateway', async () => {
