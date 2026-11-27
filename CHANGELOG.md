@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.27] - 2026-11-27
+
 ### Added
 - Web UI: the chat's side panel is now a tabbed **workspace panel**. The
   panel toggle in the chat header (or `Mod+\`, or the command palette)
