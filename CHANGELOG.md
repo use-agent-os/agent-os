@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Web UI: chat cards (DCA, LP, markets, trigger, chart, cards, flow) said
+  "Couldn't load this card: HTTP 404", with or without auth, for saved and
+  live turns alike. They asked for the artifact's bare download URL, which
+  names no session. Cards, their **Refresh**, image previews, artifact
+  downloads and artifact tabs in the workspace panel now load the file
+  through a ticket from `artifacts.download`, as the rest of the console
+  does. An artifact tab shows an image, Markdown, plain text or an HTML page
+  (sandboxed) and offers any other file, a PDF included, as a download.
+- Gateway: a published artifact streamed as `session.event.artifact_ref`
+  instead of `session.event.artifact`, the name clients, the live-turn
+  snapshot and the text-segment boundary listen for.
+
+## [2026.11.27] - 2026-11-27
+
 ### Added
 - Web UI: the chat's side panel is now a tabbed **workspace panel**. The
   panel toggle in the chat header (or `Mod+\`, or the command palette)
@@ -52,17 +67,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   multi-image edit. The node now names the aspect in the prompt and, for the
   Nano Banana models, adds a blank frame of that aspect as the last
   reference. `resolution` is still dropped by the provider for these edits.
-- Web UI: chat cards (DCA, LP, markets, trigger, chart, cards, flow) said
-  "Couldn't load this card: HTTP 404", with or without auth, for saved and
-  live turns alike. They asked for the artifact's bare download URL, which
-  names no session. Cards, their **Refresh**, image previews, artifact
-  downloads and artifact tabs in the workspace panel now load the file
-  through a ticket from `artifacts.download`, as the rest of the console
-  does. An artifact tab shows an image, Markdown, plain text or an HTML page
-  (sandboxed) and offers any other file, a PDF included, as a download.
-- Gateway: a published artifact streamed as `session.event.artifact_ref`
-  instead of `session.event.artifact`, the name clients, the live-turn
-  snapshot and the text-segment boundary listen for.
 
 ## [2026.11.26] - 2026-11-26
 

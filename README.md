@@ -48,7 +48,7 @@ agentos trade bridge quote --chain base --to-chain robinhood --token ETH --usd 2
 - **Uniswap V4 liquidity**: read pools and ranges, add, collect, and remove positions.
 - **A ledger** that tracks cost basis and PnL for every wallet.
 
-AgentOS 2026.11.26 is the current release. See the
+AgentOS 2026.11.27 is the current release. See the
 [trading guide](docs/features/trading.md) for the full feature set and
 the [CLI reference](docs/cli.md) for every command.
 
@@ -189,9 +189,9 @@ Then open <http://127.0.0.1:18791/control/>. If `agentos` is not found,
 open a new terminal window.
 
 To pin one exact version, add `==<version>` — for example
-`uv tool install --python 3.12 "use-agent-os[recommended]==2026.11.26"` —
+`uv tool install --python 3.12 "use-agent-os[recommended]==2026.11.27"` —
 or use the release wheel directly:
-`https://github.com/use-agent-os/agent-os/releases/download/v2026.11.26/use_agent_os-2026.11.26-py3-none-any.whl`.
+`https://github.com/use-agent-os/agent-os/releases/download/v2026.11.27/use_agent_os-2026.11.27-py3-none-any.whl`.
 
 > [!NOTE]
 > Release install commands use published GitHub release assets.
