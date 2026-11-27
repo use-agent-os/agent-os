@@ -1032,6 +1032,9 @@
   .ws-browser-status {
     flex: 1;
     min-width: 0;
+    /* A hanging indent: a second line lines up with the words, not the dot. */
+    padding-inline-start: 13px;
+    text-indent: -13px;
     line-height: 1.45;
     text-wrap: pretty;
   }
