@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  PANEL_ID,
   PANEL_LAYOUT_INDEX,
   PANEL_LAYOUT_LIMIT,
   PANEL_LAYOUT_PREFIX,
+  PANEL_TOGGLE_ID,
   SIDE_PANEL_MAX,
   SIDE_PANEL_MIN,
   SIDE_PANEL_WIDTH_KEY,
@@ -99,6 +101,32 @@ describe('panel store', () => {
     store().revealFile('docs/a.md')
     expect(store().reveal!.nonce).toBe(first.nonce + 1)
     expect(store().activeId).toBe('tool:files')
+  })
+})
+
+describe('focus return', () => {
+  it('keeps the opener from outside the panel when a tool opens from inside it', () => {
+    document.body.innerHTML = `<textarea id="composer"></textarea>
+      <button id="${PANEL_TOGGLE_ID}"></button>
+      <aside id="${PANEL_ID}"><button id="inside"></button></aside>`
+    const composer = document.getElementById('composer')!
+    const inside = document.getElementById('inside')!
+    store().bindSession(A)
+    store().toggle(composer)
+    store().openTool('files', inside)
+    store().openTool('browser', document.getElementById(PANEL_ID))
+    expect(store().opener).toBe(composer)
+    expect(store().dismiss()).toBe(composer)
+    expect(store().visible).toBe(false)
+  })
+
+  it('falls back to the header toggle when the opener is gone', () => {
+    document.body.innerHTML = `<button id="${PANEL_TOGGLE_ID}"></button><button id="gone"></button>`
+    const gone = document.getElementById('gone')!
+    store().bindSession(A)
+    store().openTool('files', gone)
+    gone.remove()
+    expect(store().dismiss()).toBe(document.getElementById(PANEL_TOGGLE_ID))
   })
 })
 

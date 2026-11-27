@@ -55,7 +55,6 @@ import {
   isToolKind,
   PANEL_HEIGHT_MIN,
   PANEL_ID,
-  PANEL_TOGGLE_ID,
   SIDE_PANEL_MIN,
   usePanels,
   type PanelDock,
@@ -473,7 +472,9 @@ function AddMenu({ methods }: { methods: readonly string[] | null }) {
             className="chat-menu-item ws-menu-item"
             onSelect={() => {
               opened.current = tool.kind
-              openTool(tool.kind, document.getElementById(PANEL_TOGGLE_ID))
+              // From inside the panel: focus moves to the new tab, and Escape
+              // still goes back to whatever opened the panel.
+              openTool(tool.kind, document.getElementById(PANEL_ID))
             }}
           >
             <Icon aria-hidden />
@@ -628,7 +629,6 @@ export function WorkspacePanel(props: WorkspacePanelProps) {
   const shown = usePanels((s) => s.visible)
   const dock = usePanels((s) => s.dock)
   const focusTick = usePanels((s) => s.focusTick)
-  const setVisible = usePanels((s) => s.setVisible)
   const setExpanded = usePanels((s) => s.setExpanded)
   const methods = useGatewayMethods()
   const ref = useRef<HTMLElement>(null)
@@ -658,9 +658,7 @@ export function WorkspacePanel(props: WorkspacePanelProps) {
   if (!visible) return null
 
   const hide = () => {
-    const opener = usePanels.getState().opener
-    setVisible(false)
-    const target = opener?.isConnected ? opener : document.getElementById(PANEL_TOGGLE_ID)
+    const target = usePanels.getState().dismiss()
     requestAnimationFrame(() => target?.focus())
   }
   const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {

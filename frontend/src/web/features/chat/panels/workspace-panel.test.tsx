@@ -105,6 +105,40 @@ describe('workspace panel', () => {
     expect(screen.queryByRole('complementary', { name: 'Workspace panel' })).toBeNull()
   })
 
+  it('returns focus to the composer that opened it, after tools opened inside the panel', async () => {
+    const user = userEvent.setup()
+    const { composer } = await openChat(
+      filesRpc().handle('browser.status', {
+        enabled: false,
+        installed: false,
+        running: false,
+        canStart: false,
+      }),
+    )
+    act(() => composer.focus())
+    await user.keyboard('{Control>}\\{/Control}')
+    // A tool from the launcher, another from the + menu, then a click on a tab.
+    await user.click(await within(panel()).findByRole('button', { name: /Files/ }))
+    await user.click(within(panel()).getByRole('button', { name: 'Open a tool' }))
+    await user.click(await screen.findByRole('menuitem', { name: /Browser/ }))
+    await user.click(within(panel()).getByRole('tab', { name: 'Files' }))
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('complementary', { name: 'Workspace panel' })).toBeNull()
+    await waitFor(() => expect(composer).toHaveFocus())
+  })
+
+  it('hides with Mod+\\ from inside the panel and gives focus back to the opener', async () => {
+    const user = userEvent.setup()
+    const { composer } = await openChat(filesRpc())
+    act(() => composer.focus())
+    await user.keyboard('{Control>}\\{/Control}')
+    await user.click(await within(panel()).findByRole('button', { name: /Files/ }))
+    await waitFor(() => expect(within(panel()).getByRole('tab', { name: 'Files' })).toHaveFocus())
+    await user.keyboard('{Control>}\\{/Control}')
+    expect(screen.queryByRole('complementary', { name: 'Workspace panel' })).toBeNull()
+    await waitFor(() => expect(composer).toHaveFocus())
+  })
+
   it('lists a tool the gateway does not offer as unavailable', async () => {
     const user = userEvent.setup()
     const rpc = filesRpc()

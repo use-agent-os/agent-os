@@ -38,6 +38,23 @@ export const PANEL_ID = 'chat-workspace-panel'
 /** The chat header's toggle, where focus goes back when nothing else can take it. */
 export const PANEL_TOGGLE_ID = 'chat-workspace-panel-toggle'
 
+/**
+ * Whether an element is inside the panel. Opening a tool from inside the
+ * panel (its launcher, its + menu) is not what opened the panel: the element
+ * focus goes back to stays the one outside it.
+ */
+export function insidePanel(element: Element | null | undefined): boolean {
+  return Boolean(element?.closest?.(`#${PANEL_ID}`))
+}
+
+/** The element an opener's action should give focus back to, if it can. */
+function outsideOpener(
+  opener: HTMLElement | null | undefined,
+  current: HTMLElement | null,
+): HTMLElement | null {
+  return opener && !insidePanel(opener) ? opener : current
+}
+
 export const SIDE_PANEL_WIDTH_KEY = 'agentos.ui.sidePanelWidth'
 export const PANEL_LAYOUT_PREFIX = 'agentos.ui.panelLayout.v1:'
 export const PANEL_LAYOUT_INDEX = 'agentos.ui.panelLayout.v1.index'
@@ -217,6 +234,11 @@ interface PanelState extends PanelLayout {
   moveTab(id: string, toIndex: number): void
   /** Show or hide the panel, keeping its tabs. */
   toggle(opener?: HTMLElement | null): void
+  /**
+   * Hide the panel and name the element focus goes back to: whatever opened
+   * it from outside, else the chat header's toggle.
+   */
+  dismiss(): HTMLElement | null
   setVisible(visible: boolean): void
   setWidth(width: number, persist?: boolean): void
   setHeight(height: number, persist?: boolean): void
@@ -259,7 +281,7 @@ export const usePanels = create<PanelState>((set, get) => {
         tabs: next,
         activeId: tab.id,
         visible: true,
-        opener: opener ?? get().opener,
+        opener: outsideOpener(opener, get().opener),
         focusTick: opener ? get().focusTick + 1 : get().focusTick,
       })
     },
@@ -306,9 +328,16 @@ export const usePanels = create<PanelState>((set, get) => {
       else
         commit({
           visible: true,
-          opener: opener ?? get().opener,
+          opener: outsideOpener(opener, get().opener),
           focusTick: get().focusTick + 1,
         })
+    },
+    dismiss() {
+      const { opener } = get()
+      commit({ visible: false })
+      return opener?.isConnected && !insidePanel(opener)
+        ? opener
+        : document.getElementById(PANEL_TOGGLE_ID)
     },
     setVisible(visible) {
       commit({ visible })

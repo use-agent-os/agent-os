@@ -35,7 +35,7 @@ import type { Turn } from './model/types'
 import { useElementSize, useGatewayMethods } from './panels/hooks'
 import { fittedSize, presentationFor } from './panels/layout'
 import { PANEL_TOGGLE_KEY, resolveWorkspacePath, writtenFileCount } from './panels/open-paths'
-import { usePanels } from './panels/panel-store'
+import { insidePanel, usePanels } from './panels/panel-store'
 import { WorkspacePanel } from './panels/WorkspacePanel'
 import { ChatActionsContext, type ChatActions } from './transcript/context'
 import { TranscriptView } from './transcript/TranscriptView'
@@ -250,7 +250,14 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
     (e) => {
       e.preventDefault()
       const focused = document.activeElement
-      usePanels.getState().toggle(focused instanceof HTMLElement ? focused : null)
+      const panels = usePanels.getState()
+      if (panels.visible && insidePanel(focused)) {
+        // Hidden from inside: focus goes back, as on Escape.
+        const target = panels.dismiss()
+        requestAnimationFrame(() => target?.focus())
+        return
+      }
+      panels.toggle(focused instanceof HTMLElement ? focused : null)
     },
   )
 
