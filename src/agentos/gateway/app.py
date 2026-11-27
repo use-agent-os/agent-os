@@ -673,6 +673,13 @@ def create_gateway_app(
             close_all_sessions()
         except Exception:  # noqa: BLE001 - shutdown must not raise
             pass
+        # The browser view's capture directory goes with the browsers.
+        try:
+            from agentos.gateway.rpc_browser import release_capture_dir
+
+            release_capture_dir()
+        except Exception:  # noqa: BLE001 - shutdown must not raise
+            pass
 
     def _record_clean_shutdown(_app: Starlette) -> None:
         """A SIGTERM ends here (uvicorn's graceful shutdown), not in ``close()``.

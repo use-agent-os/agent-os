@@ -30,9 +30,11 @@ tool, under that tool's policy, not through the operator's view.
 
 from __future__ import annotations
 
+import atexit
 import base64
 import os
 import re
+import shutil
 import tempfile
 import uuid
 from pathlib import Path
@@ -190,15 +192,37 @@ def status_payload(session_key: str) -> dict[str, Any]:
 # Screenshots
 # ---------------------------------------------------------------------------
 
+#: Where the capture directory is made; None is the system temp directory.
+#: Tests point it at their own tmp path so a run leaves nothing behind.
+CAPTURE_PARENT: str | None = None
+CAPTURE_PREFIX = "agentos-browser-view-"
+
 _capture_dir: Path | None = None
+_exit_cleanup_registered = False
 
 
 def _capture_path() -> Path:
-    """A fresh file name in a private (0700) directory owned by this process."""
-    global _capture_dir
+    """A fresh file name in a private (0700) directory owned by this process.
+
+    The directory outlives one capture (each file is removed once read) and
+    goes when the process does: at interpreter exit, and earlier on the
+    gateway's shutdown (:func:`release_capture_dir`).
+    """
+    global _capture_dir, _exit_cleanup_registered
     if _capture_dir is None or not _capture_dir.is_dir():
-        _capture_dir = Path(tempfile.mkdtemp(prefix="agentos-browser-view-"))
+        _capture_dir = Path(tempfile.mkdtemp(prefix=CAPTURE_PREFIX, dir=CAPTURE_PARENT))
+        if not _exit_cleanup_registered:
+            atexit.register(release_capture_dir)
+            _exit_cleanup_registered = True
     return _capture_dir / f"{uuid.uuid4().hex}.jpg"
+
+
+def release_capture_dir() -> None:
+    """Remove the capture directory, if one was made. Safe to call repeatedly."""
+    global _capture_dir
+    directory, _capture_dir = _capture_dir, None
+    if directory is not None:
+        shutil.rmtree(directory, ignore_errors=True)
 
 
 def _read_capture(path: Path) -> bytes:
@@ -421,4 +445,10 @@ async def _handle_browser_tabs_select(params: dict | None, ctx: RpcContext) -> d
     return {"sessionKey": key, "tabId": tab_id}
 
 
-__all__ = ["HISTORY_ACTIONS", "MAX_IMAGE_BYTES", "MAX_TABS", "status_payload"]
+__all__ = [
+    "HISTORY_ACTIONS",
+    "MAX_IMAGE_BYTES",
+    "MAX_TABS",
+    "release_capture_dir",
+    "status_payload",
+]

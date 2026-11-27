@@ -113,6 +113,22 @@ def _reset() -> Any:
     browser_tool.reset_browser_runtime()
 
 
+@pytest.fixture(autouse=True)
+def captures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Captures go under this test's tmp path, and none is left when it ends."""
+    parent = tmp_path / "captures"
+    parent.mkdir()
+    rpc_browser.release_capture_dir()
+    monkeypatch.setattr(rpc_browser, "CAPTURE_PARENT", str(parent))
+    yield parent
+    rpc_browser.release_capture_dir()
+    assert _capture_dirs(parent) == []
+
+
+def _capture_dirs(parent: Path) -> list[Path]:
+    return sorted(parent.glob(f"{rpc_browser.CAPTURE_PREFIX}*"))
+
+
 @pytest.fixture
 def public_dns(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Stand in for DNS: ``*.internal`` hosts resolve privately, others publicly."""
@@ -229,6 +245,21 @@ class TestSurface:
         assert _log(engine) == []
 
 
+def test_gateway_shutdown_removes_the_capture_directory(captures: Path) -> None:
+    """``agentos gateway stop`` ends in the ASGI lifespan shutdown: the
+    directory goes with the browsers, not only at interpreter exit."""
+    from starlette.testclient import TestClient
+
+    from agentos.gateway.app import create_gateway_app
+    from agentos.gateway.config import GatewayConfig
+
+    rpc_browser._capture_path()
+    assert len(_capture_dirs(captures)) == 1
+    with TestClient(create_gateway_app(GatewayConfig())):
+        pass
+    assert _capture_dirs(captures) == []
+
+
 class TestStatus:
     @pytest.mark.asyncio
     async def test_reports_a_stopped_browser_without_running_the_engine(self, engine: Path) -> None:
@@ -329,6 +360,45 @@ class TestSnapshot:
         assert "screenshot" in argv and "jpeg" in argv
         # The capture file is removed once read.
         assert not Path(argv[-1]).exists()
+
+    @pytest.mark.asyncio
+    async def test_the_capture_directory_is_private_and_removed(
+        self, engine: Path, captures: Path
+    ) -> None:
+        await _start(engine)
+        res = await _call("browser.snapshot", {"sessionKey": KEY})
+        assert res.ok, res.error
+        [directory] = _capture_dirs(captures)
+        # One directory for the process, emptied after every capture.
+        assert list(directory.iterdir()) == []
+        if sys.platform != "win32":
+            assert directory.stat().st_mode & 0o777 == 0o700
+        rpc_browser.release_capture_dir()
+        assert _capture_dirs(captures) == []
+        rpc_browser.release_capture_dir()  # a second release is a no-op
+
+    @pytest.mark.asyncio
+    async def test_a_failed_capture_leaves_no_file(self, engine: Path, captures: Path) -> None:
+        await _start(engine)
+        _set_state(engine, fail=["screenshot"])
+        res = await _call("browser.snapshot", {"sessionKey": KEY})
+        assert not res.ok
+        assert [list(d.iterdir()) for d in _capture_dirs(captures)] == [[]]
+
+    @pytest.mark.asyncio
+    async def test_the_capture_directory_goes_at_process_exit(
+        self, engine: Path, captures: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        registered: list[Any] = []
+        monkeypatch.setattr(rpc_browser.atexit, "register", registered.append)
+        monkeypatch.setattr(rpc_browser, "_exit_cleanup_registered", False)
+        await _start(engine)
+        assert (await _call("browser.snapshot", {"sessionKey": KEY})).ok
+        assert (await _call("browser.snapshot", {"sessionKey": KEY})).ok
+        assert registered == [rpc_browser.release_capture_dir]
+        assert len(_capture_dirs(captures)) == 1
+        registered[0]()  # what the interpreter runs at exit
+        assert _capture_dirs(captures) == []
 
     @pytest.mark.asyncio
     async def test_viewing_never_extends_the_browsers_life(self, engine: Path) -> None:
