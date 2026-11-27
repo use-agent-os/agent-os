@@ -6,6 +6,7 @@ import { useRpc } from '@/app/providers'
 import { exportMarkdownDocument, type ExportMessage } from '@/views/chat/logic'
 import { t } from '~/i18n'
 import { errorText } from '~/stores/projects'
+import { useComposerDrafts } from '~/stores/composer-drafts'
 import { useSessionMarks } from '~/stores/session-marks'
 import type { SessionRow, SessionsList } from '~/stores/sessions'
 
@@ -154,6 +155,7 @@ export function useSessionActions(row: SessionRow): {
       return false
     }
     forget(key)
+    useComposerDrafts.getState().forget(key)
     toast.success(t('session.toast.deleted'), { id: 'session-delete' })
     // The chat on screen was this session: leave it before the list refetches.
     if (showing(pathname, key)) {
@@ -269,7 +271,10 @@ export function useRemoveSessions(): (
         return { deleted: [], failed: [...keys] }
       }
       const { deleted, failed } = deleteOutcome(keys, reply)
-      for (const k of deleted) forget(k)
+      for (const k of deleted) {
+        forget(k)
+        useComposerDrafts.getState().forget(k)
+      }
       if (failed.length === 0) {
         toast.success(t('session.bulk.toast.deleted').replace('{n}', String(deleted.length)), {
           id: 'session-delete',
