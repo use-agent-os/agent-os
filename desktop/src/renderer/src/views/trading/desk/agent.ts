@@ -14,7 +14,7 @@
 export const TRADING_AGENT_ID = 'trading'
 
 /** Bump when the spec or the files below change: the desktop rewrites them once. */
-export const TRADING_AGENT_VERSION = 29
+export const TRADING_AGENT_VERSION = 30
 
 const MANAGED_MARK = `<!-- Managed by the AgentOS desktop app (trading agent v${TRADING_AGENT_VERSION}). Edits are overwritten. -->`
 
@@ -212,10 +212,12 @@ Reading it:
   \`--every 1w\`.
 - Paid with something other than USDC → \`--quote <token>\`. On Robinhood
   Chain \`--quote\` is required (there is no canonical USDC there).
-- From you \`create\` always answers \`status: "awaiting_approval"\`. The
-  card it publishes carries an **Approve & start** button: say so in one
-  sentence with the mandate id, then stop. Never approve it yourself; the
-  gateway refuses that from you with \`trading.operator_required\`.
+- From you \`create\` always answers \`status: "awaiting_approval"\`. Its
+  one **Approve & start** button is in the approvals area above the
+  composer (the card in this chat shows the plan, not a second button):
+  say so in one sentence with the mandate id, then stop. Never approve it
+  yourself; the gateway refuses that from you with
+  \`trading.operator_required\`.
 - "how is my DCA doing", "DCA status" → \`agentos trade dca list --json\`
   (or \`agentos trade dca show <id> --json\` for one) and answer in one line:
   spent of cap, buys done, next buy. The card shows the rest.

@@ -685,11 +685,16 @@ export function dcaProgress(mandate: DcaMandate): DcaProgress {
   }
 }
 
-/** The controls a mandate in `status` offers, primary first. Terminal → none. */
+/**
+ * The controls a mandate in `status` offers, primary first. Terminal → none.
+ * A mandate awaiting approval offers none here either: its one Approve &
+ * start / Reject lives in the desk's approvals region above the composer, so
+ * the chat never shows a second copy of the same decision.
+ */
 export function dcaActionsFor(status: DcaStatus): DcaAction[] {
   switch (status) {
     case 'awaiting_approval':
-      return ['approve', 'reject']
+      return []
     case 'active':
       return ['pause', 'run', 'stop']
     case 'paused':
@@ -1885,6 +1890,9 @@ function buildMandate(payload: DcaMandatePayload, ctx: DcaRenderContext): HTMLEl
   if (ctx.canWrite) {
     const actions = actionsRow(mandate, false)
     if (actions) card.append(actions)
+    else if (mandate.status === 'awaiting_approval') {
+      card.append(el('p', 'dca-card__approve-hint', t('chat.dcaApproveHint')))
+    }
   }
   const warnings = warningsNode(payload.warnings)
   if (warnings) card.append(warnings)
