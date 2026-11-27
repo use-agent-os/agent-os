@@ -123,6 +123,10 @@ export const webChat = defineNamespace('webChat', {
   artifactOpen: 'Open {name}',
   artifactOtherGateway:
     'This card loads over HTTP, which reaches only the gateway that served this page.',
+  artifactNoFile: 'this artifact names no file',
+  artifactNoTicket: 'the gateway gave no download link (reconnect and try again)',
+  artifactDownloadFailed: "Couldn't download {name}: {message}",
+  artifactLoadFailed: "Couldn't load this file: {message}",
   acpTitle: 'Coding agent: {name}',
   acpCancel: 'Cancel',
   acpCancelled: 'Cancel requested',

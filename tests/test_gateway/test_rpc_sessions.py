@@ -14,7 +14,7 @@ import pytest
 
 from agentos.agents.registry import AgentRegistry
 from agentos.attachment_refs import transcript_material_path
-from agentos.engine.types import DoneEvent, ErrorEvent
+from agentos.engine.types import ArtifactEvent, DoneEvent, ErrorEvent
 from agentos.gateway import rpc_chat, rpc_sessions
 from agentos.gateway.access import ConnectionSurface
 from agentos.gateway.agent_tasks import get_agent_task_registry
@@ -875,6 +875,46 @@ class TestSessionsSend:
             (session.session_key, "user", "keep this overlong input")
         ]
         assert manager.removed_messages == []
+
+    @pytest.mark.asyncio
+    async def test_send_streams_a_published_artifact_as_session_event_artifact(
+        self, dispatcher, session, monkeypatch
+    ):
+        # The engine's event carries the artifact ref's own kind.
+        artifact = {
+            "id": "art-live",
+            "kind": "artifact_ref",
+            "name": "cards.json",
+            "mime": "application/vnd.agentos.cards+json",
+            "size": 2,
+            "sha256": "a" * 64,
+            "session_id": "session-1",
+            "session_key": session.session_key,
+            "source": "publish_artifact",
+            "download_url": "/api/v1/artifacts/art-live",
+        }
+
+        class _PublishingTurnRunner(_RecordingTurnRunner):
+            async def run(self, message: str, session_key: str, **kwargs):
+                yield ArtifactEvent(**artifact)
+                yield DoneEvent()
+
+        emitted = _capture_compaction_emits(monkeypatch)
+        ctx = make_ctx(
+            session_manager=FakeSessionManager([session]), turn_runner=_PublishingTurnRunner()
+        )
+
+        res = await dispatcher.dispatch(
+            "r1", "sessions.send", {"key": session.session_key, "message": "chart it"}, ctx
+        )
+        task = get_agent_task_registry().get(session.session_key)
+        if task is not None:
+            await task
+
+        assert res.ok is True
+        frames = [(name, payload) for _, name, payload in emitted if "artifact" in name]
+        assert [name for name, _ in frames] == ["session.event.artifact"]
+        assert frames[0][1]["id"] == "art-live"
 
     @pytest.mark.asyncio
     async def test_send_passes_persisted_user_message_id_to_task_runtime(self, dispatcher, session):

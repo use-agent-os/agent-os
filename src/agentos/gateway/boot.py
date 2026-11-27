@@ -39,6 +39,7 @@ from starlette.applications import Starlette
 
 from agentos.agents.scope import resolve_agent_model, resolve_agent_workspace_dir
 from agentos.asyncio_utils import create_background_task
+from agentos.engine.types import ArtifactEvent
 from agentos.engine.usage import UsageTracker as _UsageTracker
 from agentos.gateway.app import create_gateway_app
 from agentos.gateway.config import (
@@ -1123,6 +1124,10 @@ async def _emit_task_runtime_stream_events(
                 if not key.startswith("_")
             }
         event_kind = event_dict.pop("kind", getattr(event, "kind", event.__class__.__name__))
+        if isinstance(event, ArtifactEvent):
+            # Built from an artifact ref, it carries the ref's own kind
+            # (``artifact_ref``); clients listen for ``session.event.artifact``.
+            event_kind = "artifact"
         if event_kind == "done" and error_message is not None:
             # The engine ends every turn with a DoneEvent, after its error on
             # a failed turn. The wire carries exactly one terminal frame per

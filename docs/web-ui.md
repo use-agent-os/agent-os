@@ -880,6 +880,9 @@ one strip:
   browser**.
 - **Tool output**, **artifact** and **reasoning** tabs open from the
   transcript (**Open in side panel** on a long result, an artifact card).
+  An artifact tab shows an image, or Markdown, plain text or an HTML page
+  of up to 1 MB (HTML in a sandboxed frame, scripts off), and offers any
+  other file as a download.
 
 The **+** button opens a tool; a gateway too old to offer one lists it as
 unavailable. Drag a tab to reorder it (or `Ctrl+Shift+←`/`→` on a focused

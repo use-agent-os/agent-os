@@ -12,6 +12,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   longer repeats **Approve & start** / **Reject**; it shows the plan and a
   line pointing to the approvals area (trading agent prompt v30).
 
+### Fixed
+- Web UI: chat cards (DCA, LP, markets, trigger, chart, cards, flow) said
+  "Couldn't load this card: HTTP 404", with or without auth, for saved and
+  live turns alike. They asked for the artifact's bare download URL, which
+  names no session. Cards, their **Refresh**, image previews, artifact
+  downloads and artifact tabs in the workspace panel now load the file
+  through a ticket from `artifacts.download`, as the rest of the console
+  does. An artifact tab shows an image, Markdown, plain text or an HTML page
+  (sandboxed) and offers any other file, a PDF included, as a download.
+- Gateway: a published artifact streamed as `session.event.artifact_ref`
+  instead of `session.event.artifact`, the name clients, the live-turn
+  snapshot and the text-segment boundary listen for.
+
 ## [2026.11.27] - 2026-11-27
 
 ### Added

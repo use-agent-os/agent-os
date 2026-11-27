@@ -422,6 +422,52 @@ def test_ticket_over_websocket_then_plain_get_until_the_socket_closes(tmp_path: 
     assert client.get(url).status_code == 404
 
 
+@pytest.mark.parametrize("mode", ["none", "token"])
+def test_a_transcript_artifact_url_loads_only_through_a_ticket(tmp_path: Path, mode: str) -> None:
+    """What the web console relies on to show a card, an image or a file.
+
+    A transcript row names its artifact by a bare ``download_url``. That URL
+    resolves nothing on its own (it has no session), with or without auth; the
+    socket's ``artifacts.download`` ticket for the same id serves the bytes to
+    a request with no header at all.
+    """
+    from agentos.artifacts import artifact_payload
+    from agentos.gateway.app import create_gateway_app
+
+    auth = AuthConfig(mode="token", token="secret") if mode == "token" else AuthConfig()
+    config = GatewayConfig(auth=auth, attachments=AttachmentsConfig(media_root=str(tmp_path)))
+    ref = _publish(tmp_path, b'{"type":"cards"}', name="cards.json", mime="application/json")
+    row = artifact_payload(ref.to_dict())
+    assert row["download_url"] == f"/api/v1/artifacts/{ref.id}"
+    app = create_gateway_app(config, session_manager=_FakeSessionManager())
+    # A loopback peer: auth "none" admits only that.
+    client = TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000))
+    bearer = {"Authorization": "Bearer secret"} if mode == "token" else {}
+    assert client.get(row["download_url"], headers=bearer).status_code == 404
+    with client.websocket_connect("/ws") as ws:
+        _connect(ws)
+        ws.send_json(
+            {
+                "type": "req",
+                "id": "1",
+                "method": "artifacts.download",
+                "params": {
+                    "session_key": SESSION_KEY,
+                    "artifact_id": row["id"],
+                    "transport": "http",
+                },
+            }
+        )
+        res = ws.receive_json()
+        while res.get("type") != "res":
+            res = ws.receive_json()
+        assert res["ok"], res
+        served = client.get(res["payload"]["url"])
+        assert served.status_code == 200
+        assert served.content == b'{"type":"cards"}'
+        assert served.headers["content-type"].startswith("application/json")
+
+
 def test_legacy_route_can_be_switched_off(tmp_path: Path) -> None:
     from agentos.gateway.artifacts import register_artifact_routes
 
