@@ -107,14 +107,16 @@ export function TradingPage() {
   const syncing = syncShown(portfolio.data) || syncShown(status.data)
   const pickerId = useId()
 
+  const statusFailed = status.isError && !status.data
   let body: ReactNode
   if (status.isPending || (enabled && vault.isPending)) body = <PageLoading />
-  else if (status.isError || vault.isError)
+  // A refresh that fails leaves the last answer, and the page, standing.
+  else if (statusFailed || (vault.isError && !vault.data))
     body = (
       <ErrorState
         title={t('webTrading.errorTitle')}
-        message={errorText(status.error ?? vault.error)}
-        onRetry={() => void (status.isError ? status.refetch() : vault.refetch())}
+        message={errorText(statusFailed ? status.error : vault.error)}
+        onRetry={() => void (statusFailed ? status.refetch() : vault.refetch())}
       />
     )
   else if (!enabled)

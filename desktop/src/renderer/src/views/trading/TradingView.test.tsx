@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useGateway } from '~/stores/gateway'
 import { useTradingUi } from '~/stores/trading-ui'
@@ -61,6 +61,48 @@ describe('TradingView · gate', () => {
         before,
       ),
     )
+  })
+
+  // A busy gateway refuses requests it cannot start (QUEUE_FULL). One refused
+  // refresh used to replace the whole desk, open ticket included, with
+  // "Waiting for the gateway" while the gateway was up and answering.
+  it('keeps the desk when a status refresh fails after a good answer', async () => {
+    let fail = false
+    rpcCall.mockImplementation(async (method: string) => {
+      if (fail && (method === 'trading.status' || method === 'wallet.status'))
+        throw new Error('Too many requests in flight on this connection; retry shortly')
+      switch (method) {
+        case 'trading.status':
+          return {
+            enabled: true,
+            chains: [],
+            limits: { approvalThresholdUsd: 100, dailyCapUsd: 1000, approvalTtlSeconds: 900 },
+            unlockMode: 'auto',
+            unlocked: true,
+            syncing: false,
+            lastSyncAt: null,
+          }
+        case 'wallet.status':
+          return { initialized: true, unlocked: true, unlockMode: 'auto', walletCount: 1 }
+        case 'wallet.list':
+          return { wallets: [WALLET], primary: WALLET.address }
+        default:
+          return {}
+      }
+    })
+    const { client, rerender } = renderDesk(<TradingView />)
+    await screen.findByTestId('trading-desk')
+    fail = true
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ['trading', 'status'] })
+      await client.refetchQueries({ queryKey: ['trading', 'wallet-status'] })
+    })
+    expect(client.getQueryState(['trading', 'status'])?.status).toBe('error')
+    expect(client.getQueryState(['trading', 'wallet-status'])?.status).toBe('error')
+    // Rendered again with both reads failed: the gate decides on these.
+    rerender(<TradingView />)
+    expect(screen.getByTestId('trading-desk')).toBeInTheDocument()
+    expect(screen.queryByTestId('trading-retry')).toBeNull()
   })
 })
 
