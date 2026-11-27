@@ -42,6 +42,7 @@ import { t } from '~/i18n'
 import { rememberLastSession } from '~/lib/last-session'
 import { useQuickAskSend } from '~/lib/use-quick-ask'
 import { ease, spring } from '~/lib/motion'
+import { NEW_SESSION_DRAFT, useComposerDrafts } from '~/stores/composer-drafts'
 import { useGateway } from '~/stores/gateway'
 import { gatedCall } from '~/stores/trading'
 import { useTradingUi } from '~/stores/trading-ui'
@@ -675,6 +676,8 @@ function ConnectedChat({
       if (!normalized) return
       send(normalized.text, normalized.attachments, null)
       if (!docked) {
+        // The draft left in the home's composer goes with the session.
+        useComposerDrafts.getState().moveDraft(NEW_SESSION_DRAFT, sessionKey)
         setStartedKey(sessionKey)
         void navigate(sessionPath(sessionKey), { replace: true })
       }
@@ -1028,6 +1031,7 @@ function ConnectedChat({
               placeholder={instruments.placeholder}
               onFocusChange={instruments.onFocusChange}
               disabledReason={acpClosedReason}
+              draftKey={paramKey || NEW_SESSION_DRAFT}
             />
           </motion.div>
         </motion.div>

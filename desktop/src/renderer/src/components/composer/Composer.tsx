@@ -5,6 +5,7 @@ import {
   useEffect,
   useId,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -15,6 +16,7 @@ import type { ComposerHandle } from '@/views/chat/Composer'
 import { MAX_PENDING, sendButtonState } from '@/views/chat/logic'
 import { t } from '~/i18n'
 import { quick } from '~/lib/motion'
+import { readDraft, useComposerDrafts } from '~/stores/composer-drafts'
 
 export type { ComposerHandle }
 
@@ -76,6 +78,13 @@ export interface ComposerProps {
    * the composer stays in place, switched off, and says why in one line.
    */
   disabledReason?: string | null
+  /**
+   * Whose unsent text this is (a session key, or the new session's slot).
+   * The text is kept under it as it is typed, and put back when the composer
+   * mounts or the key changes, so a draft survives leaving the chat and each
+   * session keeps its own. Absent: the text lives and dies with the composer.
+   */
+  draftKey?: string
 }
 
 const MIN_TEXTAREA_HEIGHT = 26
@@ -111,6 +120,7 @@ export function Composer({
   suggestion = null,
   onFocusChange,
   disabledReason = null,
+  draftKey,
 }: ComposerProps) {
   const disabled = Boolean(disabledReason)
   const disabledNoteId = useId()
@@ -119,6 +129,12 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const historyIdxRef = useRef<number | null>(null)
   const historyDraftRef = useRef('')
+  const draftKeyRef = useRef(draftKey)
+  const saveDraft = useCallback((text: string) => {
+    if (draftKeyRef.current !== undefined) {
+      useComposerDrafts.getState().setDraft(draftKeyRef.current, text)
+    }
+  }, [])
   const [runModesOpen, setRunModesOpen] = useState(false)
   const runModesWrapRef = useRef<HTMLDivElement>(null)
   const runModesTriggerRef = useRef<HTMLButtonElement>(null)
@@ -183,11 +199,25 @@ export function Composer({
           /* detached */
         }
       }
+      saveDraft(text)
       onValueChange?.(text)
       autoResize()
     },
-    [autoResize, onValueChange],
+    [autoResize, onValueChange, saveDraft],
   )
+
+  // On mount and on every change of session: the composer takes that
+  // session's draft (none: it empties). What it held was saved as it was
+  // typed, under the key it was typed for. Focus stays where it is.
+  useLayoutEffect(() => {
+    draftKeyRef.current = draftKey
+    if (draftKey === undefined) return
+    const draft = readDraft(draftKey)
+    if ((textareaRef.current?.value ?? '') === draft) return
+    setProgrammatic(draft)
+    historyIdxRef.current = null
+    historyDraftRef.current = ''
+  }, [draftKey, setProgrammatic])
 
   useEffect(() => {
     if (autoFocus) textareaRef.current?.focus({ preventScroll: true })
@@ -356,10 +386,11 @@ export function Composer({
       setValue(e.target.value)
       historyIdxRef.current = null
       historyDraftRef.current = ''
+      saveDraft(e.target.value)
       onValueChange?.(e.target.value)
       autoResize()
     },
-    [autoResize, onValueChange],
+    [autoResize, onValueChange, saveDraft],
   )
 
   const showSuggestion = Boolean(suggestion) && !value && !disabled
