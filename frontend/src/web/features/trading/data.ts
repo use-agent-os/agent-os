@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo } from 'react'
 import { useRpc } from '@/app/providers'
+import { createEventInvalidator } from '@/lib/event-invalidation'
 import type { WsRpcClient } from '@/lib/ws-rpc'
 import { useConnection } from '@/stores/connection'
 import { errorCode, sameAddress } from '@/views/trading/logic'
@@ -116,18 +117,12 @@ export function useTradingInvalidation(): void {
   const rpc = useRpc()
   const queryClient = useQueryClient()
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const invalidate = () => {
-      if (timer) return
-      timer = setTimeout(() => {
-        timer = null
-        void queryClient.invalidateQueries({ queryKey: [ROOT] })
-      }, 150)
-    }
-    const offs = TRADING_EVENTS.map((event) => rpc.on(event, invalidate))
+    // One request per query on the wire, however fast the engine emits.
+    const invalidator = createEventInvalidator(queryClient, [ROOT])
+    const offs = TRADING_EVENTS.map((event) => rpc.on(event, invalidator.notify))
     return () => {
       offs.forEach((off) => off())
-      if (timer) clearTimeout(timer)
+      invalidator.dispose()
     }
   }, [rpc, queryClient])
 }

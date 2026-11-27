@@ -126,8 +126,11 @@ function Gate({ entering, automations }: { entering: boolean; automations?: Desk
   const [sheet, setSheet] = useState<WalletSheetMode | null>(null)
 
   // A failed status call is not "no vault yet": say the gateway did not
-  // answer, and offer the one thing that helps — asking again.
-  if (status.isError || vault.isError) {
+  // answer, and offer the one thing that helps — asking again. Only while
+  // there is no answer at all: a refresh that fails (a busy gateway refuses
+  // a request it cannot start) leaves the last answer standing, and the desk
+  // with it, instead of throwing away an open ticket.
+  if ((status.isError && !status.data) || (vault.isError && !vault.data)) {
     return (
       <State
         icon={
