@@ -507,3 +507,41 @@ class TestMaxSessionsOnReconfigure:
 
         assert agent_browser.active_session_count() == 3
         assert "s4" in agent_browser._sessions
+
+
+@posix_only
+class TestObserveWithoutStarting:
+    """``create=False`` / ``touch=False``: the operator's view of a session's browser."""
+
+    @pytest.mark.asyncio
+    async def test_no_session_spawns_nothing(self, fake_engine: tuple[str, Path]) -> None:
+        binary, log = fake_engine
+        agent_browser.configure_browser(_config(binary_path=binary))
+        result = await agent_browser.run_command("s-view", "tab", ["list"], create=False)
+        assert result == {
+            "success": False,
+            "code": "not_running",
+            "error": "No browser is running for this session.",
+        }
+        assert agent_browser.get_session("s-view") is None
+        assert _read_log(log) == []
+
+    @pytest.mark.asyncio
+    async def test_an_untouched_read_leaves_the_idle_clock(
+        self, fake_engine: tuple[str, Path]
+    ) -> None:
+        binary, log = fake_engine
+        agent_browser.configure_browser(_config(binary_path=binary))
+        await agent_browser.run_command("s-view", "open", ["https://example.com"])
+        session = agent_browser.get_session("s-view")
+        assert session is not None
+        session.last_used_at = 5.0
+        result = await agent_browser.run_command(
+            "s-view", "tab", ["list"], create=False, touch=False
+        )
+        assert result["success"] is True
+        assert session.last_used_at == 5.0
+        # A touched read is use, as any tool call is.
+        await agent_browser.run_command("s-view", "reload", [], create=False)
+        assert session.last_used_at > 5.0
+        assert [entry["command"] for entry in _read_log(log)] == ["open", "tab", "reload"]

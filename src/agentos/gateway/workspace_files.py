@@ -30,7 +30,7 @@ import mimetypes
 import os
 import stat
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any, Literal
 
 from agentos.redact import CREDENTIAL_FILE_NAMES
@@ -59,6 +59,7 @@ ErrorCode = Literal[
     "not_a_file",
     "too_large",
     "unsupported",
+    "outside",
 ]
 
 
@@ -290,6 +291,69 @@ def parse_relative_path(raw: Any) -> tuple[str, ...]:
         if is_denied_name(part):
             raise WorkspaceFileError("denied", "this file is not available in the file browser")
     return parts
+
+
+#: The segment the file tools treat as a workspace alias (``/workspace/a.md``,
+#: ``~/.agentos/workspace/a.md``): see :mod:`agentos.tools.path_aliases`.
+_WORKSPACE_ALIAS_SEGMENT = "workspace"
+
+
+def _lexical(path: str) -> PurePath:
+    return PurePath(os.path.normpath(path))
+
+
+def relative_location(raw: Any, root: Path) -> str:
+    """The workspace-relative form of a path an agent wrote, or raise.
+
+    File tools accept a path relative to the workspace, an absolute path
+    inside it, or an alias such as ``/workspace/notes.md``; transcripts carry
+    whichever the model typed. This maps one back to the browser's relative
+    form *lexically*: it reads nothing below the root and says nothing about
+    whether the file exists, so it reveals no more than the root itself. The
+    answer is then held to :func:`parse_relative_path`, and opening it goes
+    through every check a listed file does.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        raise WorkspaceFileError("invalid_path", "path must be a non-empty string")
+    text = raw.strip()
+    if len(text) > MAX_PATH_LENGTH:
+        raise WorkspaceFileError("invalid_path", "path is too long")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in text):
+        raise WorkspaceFileError("invalid_path", "path contains control characters")
+    if text.startswith("~"):
+        text = os.path.expanduser(text)
+    candidate = _lexical(text)
+    parts: tuple[str, ...] | None = None
+    # Rooted counts as absolute: ``/workspace/a.md`` has no drive on Windows.
+    if candidate.is_absolute() or candidate.root:
+        roots = [_lexical(str(root.expanduser()))]
+        try:
+            roots.append(_lexical(str(root.expanduser().resolve(strict=False))))
+        except (OSError, RuntimeError, ValueError):
+            pass
+        for base in roots:
+            if candidate == base:
+                parts = ()
+                break
+            if candidate.is_relative_to(base):
+                parts = candidate.relative_to(base).parts
+                break
+        if parts is None:
+            segments = candidate.parts
+            if _WORKSPACE_ALIAS_SEGMENT in segments:
+                last = len(segments) - 1 - segments[::-1].index(_WORKSPACE_ALIAS_SEGMENT)
+                parts = segments[last + 1 :]
+        if parts is None:
+            raise WorkspaceFileError("outside", "this path is outside the workspace")
+    else:
+        parts = candidate.parts
+        if parts and parts[0] == "..":
+            raise WorkspaceFileError("outside", "this path is outside the workspace")
+        if parts == (".",):
+            parts = ()
+    relative = "/".join(parts)
+    parse_relative_path(relative)
+    return relative
 
 
 def _sensitive(path: Path) -> bool:
@@ -705,5 +769,6 @@ __all__ = [
     "parse_relative_path",
     "read_download",
     "read_text",
+    "relative_location",
     "stat_download",
 ]

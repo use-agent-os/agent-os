@@ -4,6 +4,7 @@ import {
   ChevronRight,
   FileText,
   FolderOpen,
+  FolderSearch,
   Globe,
   Loader2,
   PanelRightOpen,
@@ -16,10 +17,12 @@ import {
 import { useId, useState } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webChat'
+import '@/i18n/en/webPanel'
 import { cn } from '@/lib/utils'
 import { fmtToolDuration, toolDisplayName, toolIconName } from '@/views/chat/transcript/tools'
 import { Button } from '@/web/components/ui/button'
 import type { Item } from '../model/types'
+import { isBrowserTool, toolFilePaths } from '../panels/open-paths'
 import { useChatActions } from './context'
 
 type ToolItem = Extract<Item, { kind: 'toolCall' }>
@@ -82,6 +85,8 @@ export function ToolRow({ item, live = false }: { item: ToolItem; live?: boolean
   const long = result.length > INLINE_RESULT_LIMIT
   const running = item.state === 'running'
   const settle = live ? 'chat-pop' : undefined
+  const paths = running ? [] : toolFilePaths(item)
+  const browser = isBrowserTool(item.name)
 
   return (
     <div data-tool-state={item.state} className="text-[length:var(--text-prose)]">
@@ -171,6 +176,44 @@ export function ToolRow({ item, live = false }: { item: ToolItem; live?: boolean
                     >
                       <PanelRightOpen />
                       {t('webChat.toolOpenPanel')}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+              {paths.length || browser ? (
+                <div className="flex flex-wrap gap-2">
+                  {paths.length === 1 ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={(e) => actions.openInFiles(paths[0]!, e.currentTarget)}
+                    >
+                      <FolderSearch />
+                      {t('webPanel.openInFiles')}
+                    </Button>
+                  ) : (
+                    paths.map((path) => (
+                      <Button
+                        key={path}
+                        size="sm"
+                        variant="secondary"
+                        title={path}
+                        aria-label={`${t('webPanel.openInFiles')}: ${path}`}
+                        onClick={(e) => actions.openInFiles(path, e.currentTarget)}
+                      >
+                        <FolderSearch />
+                        <span className="max-w-48 truncate">{path.split('/').at(-1)}</span>
+                      </Button>
+                    ))
+                  )}
+                  {browser ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={(e) => actions.showBrowser(e.currentTarget)}
+                    >
+                      <Globe />
+                      {t('webPanel.showBrowser')}
                     </Button>
                   ) : null}
                 </div>

@@ -158,7 +158,7 @@ describe('mobile chat layout', () => {
     const header = screen.getAllByRole('banner').find((b) => b.querySelector('h1'))!
     // One ☰ on phones: the shell's top bar owns it, not the session header.
     expect(within(header).queryByRole('button', { name: 'Open navigation' })).toBeNull()
-    expect(within(header).getByRole('button', { name: 'Panels' })).toBeInTheDocument()
+    expect(within(header).getByRole('button', { name: 'Show workspace panel' })).toBeInTheDocument()
     // The route picker gives way on a narrow composer; Send was pushed past its edge at 360 px.
     expect((await screen.findByRole('button', { name: /^Model route: / })).className).toMatch(
       /(^|\s)min-w-0(\s|$)/,

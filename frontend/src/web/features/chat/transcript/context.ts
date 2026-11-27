@@ -6,6 +6,10 @@ import type { Turn } from '../model/types'
 export interface ChatActions {
   sessionKey: string
   openPanel(tab: PanelTab, opener?: HTMLElement | null): void
+  /** Show a path a tool call named in the panel's Files tab, if it is in the workspace. */
+  openInFiles(path: string, opener?: HTMLElement | null): void
+  /** Show the session's browser in the panel's Browser tab. */
+  showBrowser(opener?: HTMLElement | null): void
   retry(turn: Turn): void
   edit(turn: Turn): void
   /** Answer an ask_user card by sending the composed reply. */

@@ -9,6 +9,8 @@ export class FakeRpc {
   private listeners = new Map<string, Set<(...args: unknown[]) => void>>()
   state: RpcState = 'connected'
   capabilities: string[] = []
+  /** `hello-ok.features.methods`; null (unknown) unless a test sets it. */
+  methods: string[] | null = null
   policy: Record<string, unknown> = {}
   lastFrameTime = Date.now()
   /** WsRpcClient's URL of the last connect(); tests set it to simulate a new gateway. */

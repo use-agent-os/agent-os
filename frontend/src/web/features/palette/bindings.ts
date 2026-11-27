@@ -4,7 +4,7 @@ import type { MessageKey } from '@/i18n'
 // "Navigation chords"). One source for registration, the shortcut overview
 // and docs/web-ui.md.
 
-export type BindingCategory = 'global' | 'navigation' | 'composer'
+export type BindingCategory = 'global' | 'navigation' | 'chat' | 'composer'
 
 export interface Binding {
   combo: string
@@ -61,6 +61,13 @@ export const NAVIGATION_CHORDS: readonly Chord[] = [
   chord('o', '/home', 'webPalette.navOverview'),
 ]
 
+/** Shows or hides the chat's workspace panel (registered by the chat page). */
+export const PANEL_TOGGLE_KEY = 'mod+\\'
+
+export const CHAT_BINDINGS: readonly Binding[] = [
+  { combo: PANEL_TOGGLE_KEY, descriptionKey: 'webPalette.bindPanel', category: 'chat' },
+]
+
 export const COMPOSER_BINDINGS: readonly Binding[] = [
   {
     combo: 'enter',
@@ -103,5 +110,6 @@ export const COMPOSER_BINDINGS: readonly Binding[] = [
 export const ALL_BINDINGS: readonly Binding[] = [
   ...GLOBAL_BINDINGS,
   ...NAVIGATION_CHORDS,
+  ...CHAT_BINDINGS,
   ...COMPOSER_BINDINGS,
 ]

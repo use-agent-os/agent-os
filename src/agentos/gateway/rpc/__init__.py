@@ -56,6 +56,7 @@ import agentos.gateway.download_grants  # noqa: E402, F401  (artifacts.download)
 import agentos.gateway.rpc_acp  # noqa: E402, F401
 import agentos.gateway.rpc_agents  # noqa: E402, F401
 import agentos.gateway.rpc_approvals  # noqa: E402, F401
+import agentos.gateway.rpc_browser  # noqa: E402, F401
 import agentos.gateway.rpc_channels  # noqa: E402, F401
 import agentos.gateway.rpc_chat  # noqa: E402, F401
 import agentos.gateway.rpc_commands  # noqa: E402, F401

@@ -156,6 +156,8 @@ describe('actions registry', () => {
     openInbox: vi.fn(),
     compact: vi.fn(),
     exportSession: vi.fn(),
+    togglePanel: vi.fn(),
+    openPanelTool: vi.fn(),
     ...patch,
   })
 
@@ -171,7 +173,26 @@ describe('actions registry', () => {
       'inbox',
       'compact',
       'export',
+      'toggle-panel',
+      'open-files',
+      'open-browser',
     ])
+  })
+
+  it('opens the workspace panel only with a session open', () => {
+    const noSession = buildActions(ctx({ sessionKey: null }))
+    for (const id of ['toggle-panel', 'open-files', 'open-browser']) {
+      expect(noSession.find((a) => a.id === id)!.gate.reason).toBe('Open a session first.')
+    }
+    // It needs no connection: the panel shows its own offline states.
+    const offline = buildActions(ctx({ connection: 'disconnected' }))
+    expect(offline.find((a) => a.id === 'toggle-panel')!.gate.disabled).toBe(false)
+    const c = ctx()
+    const actions = buildActions(c)
+    actions.find((a) => a.id === 'open-browser')!.run()
+    expect(c.openPanelTool).toHaveBeenCalledWith('browser')
+    actions.find((a) => a.id === 'toggle-panel')!.run()
+    expect(c.togglePanel).toHaveBeenCalledOnce()
   })
 
   it('gives disabled reasons from gate()', () => {

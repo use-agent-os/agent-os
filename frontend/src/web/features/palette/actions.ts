@@ -30,6 +30,10 @@ export interface ActionContext {
   openInbox(): void
   compact(key: string): void
   exportSession(key: string): void
+  /** Show or hide the open session's workspace panel. */
+  togglePanel(): void
+  /** Open a tool in the open session's workspace panel. */
+  openPanelTool(kind: 'files' | 'browser'): void
 }
 
 const OPEN = gate()
@@ -43,6 +47,7 @@ export function buildActions(ctx: ActionContext): PaletteAction[] {
     ctx.sessionRunning ? blockedBecause(t('webPalette.reasonTurnRunning')) : null,
   )
   const key = ctx.sessionKey
+  const panelGate = gate(noSession)
   return [
     {
       id: 'new-session',
@@ -113,6 +118,27 @@ export function buildActions(ctx: ActionContext): PaletteAction[] {
       keywords: ['markdown', 'download'],
       gate: sessionGate,
       run: () => key && ctx.exportSession(key),
+    },
+    {
+      id: 'toggle-panel',
+      labelKey: 'webPalette.actionTogglePanel',
+      keywords: ['side panel', 'workspace', 'tools', 'tabs'],
+      gate: panelGate,
+      run: ctx.togglePanel,
+    },
+    {
+      id: 'open-files',
+      labelKey: 'webPalette.actionOpenFiles',
+      keywords: ['workspace', 'browse', 'tree', 'panel'],
+      gate: panelGate,
+      run: () => ctx.openPanelTool('files'),
+    },
+    {
+      id: 'open-browser',
+      labelKey: 'webPalette.actionOpenBrowser',
+      keywords: ['web', 'page', 'screenshot', 'panel'],
+      gate: panelGate,
+      run: () => ctx.openPanelTool('browser'),
     },
   ]
 }

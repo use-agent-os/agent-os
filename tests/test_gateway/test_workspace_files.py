@@ -561,3 +561,124 @@ class TestRoute:
         config = _config(root)
         url = await _ticket(config, "pic.png")
         assert _client(config).get(url + "?variant=thumbnail").status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Locating a path a tool call carried
+# ---------------------------------------------------------------------------
+
+
+class TestRelativeLocation:
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("notes.txt", "notes.txt"),
+            ("./documents/Plan.md", "documents/Plan.md"),
+            ("documents//Plan.md", "documents/Plan.md"),
+            ("documents/../notes.txt", "notes.txt"),
+            (".", ""),
+            ("/workspace/documents/Plan.md", "documents/Plan.md"),
+            ("/srv/other/.agentos/workspace/a/b.md", "a/b.md"),
+            ("  notes.txt  ", "notes.txt"),
+        ],
+    )
+    def test_maps_relative_and_alias_forms(self, root: Path, raw: str, expected: str) -> None:
+        assert wf.relative_location(raw, root) == expected
+
+    def test_maps_an_absolute_path_inside_the_root(self, root: Path) -> None:
+        assert wf.relative_location(str(root / "documents" / "Plan.md"), root) == (
+            "documents/Plan.md"
+        )
+        assert wf.relative_location(str(root), root) == ""
+
+    @posix_only
+    def test_maps_through_a_symlinked_root(self, root: Path, tmp_path: Path) -> None:
+        link = tmp_path / "ws-link"
+        os.symlink(root, link)
+        # Configured through the link, written by the tool through the target.
+        assert wf.relative_location(str(root / "notes.txt"), link) == "notes.txt"
+
+    @pytest.mark.parametrize(
+        ("raw", "code"),
+        [
+            ("../outside-secret.txt", "outside"),
+            ("documents/../../outside-secret.txt", "outside"),
+            ("/etc/passwd", "outside"),
+            ("~/.ssh/id_rsa", "outside"),
+            (".env", "denied"),
+            ("/workspace/.env", "denied"),
+            ("/workspace/.git/config", "denied"),
+            ("documents/server.pem", "denied"),
+            ("", "invalid_path"),
+            ("a\x00b", "invalid_path"),
+            ("x" * 2000, "invalid_path"),
+        ],
+    )
+    def test_refuses_what_the_browser_cannot_show(
+        self, root: Path, outside: Path, raw: str, code: str
+    ) -> None:
+        with pytest.raises(WorkspaceFileError) as exc:
+            wf.relative_location(raw, root)
+        assert _code(exc) == code
+
+    def test_an_absolute_path_beside_the_root_is_outside(self, root: Path) -> None:
+        sibling = root.parent / (root.name + "-other") / "notes.txt"
+        with pytest.raises(WorkspaceFileError) as exc:
+            wf.relative_location(str(sibling), root)
+        assert _code(exc) == "outside"
+
+    def test_reads_nothing(self, root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        def forbidden(*_a: Any, **_k: Any) -> Any:
+            raise AssertionError("relative_location touched the workspace")
+
+        monkeypatch.setattr(os, "scandir", forbidden)
+        monkeypatch.setattr(os, "open", forbidden)
+        assert wf.relative_location("/workspace/missing/file.md", root) == "missing/file.md"
+
+
+class TestResolveRpc:
+    @pytest.mark.asyncio
+    async def test_resolves_an_absolute_tool_path(self, root: Path) -> None:
+        res = await _call(
+            "workspace.files.resolve",
+            {"path": str(root / "documents" / "Plan.md")},
+            _ctx(_config(root)),
+        )
+        assert res.ok, res.error
+        assert res.payload == {"agentId": "main", "path": "documents/Plan.md"}
+
+    @pytest.mark.asyncio
+    async def test_an_unshowable_path_is_null_with_a_reason(self, root: Path) -> None:
+        res = await _call("workspace.files.resolve", {"path": "/etc/passwd"}, _ctx(_config(root)))
+        assert res.ok, res.error
+        assert res.payload == {"agentId": "main", "path": None, "reason": "outside"}
+        res = await _call("workspace.files.resolve", {"path": ".env"}, _ctx(_config(root)))
+        assert res.payload["path"] is None and res.payload["reason"] == "denied"
+
+    @pytest.mark.asyncio
+    async def test_resolves_against_the_named_agents_root(self, root: Path) -> None:
+        helper = root / "agents" / "helper"
+        helper.mkdir(parents=True)
+        res = await _call(
+            "workspace.files.resolve",
+            {"path": str(helper / "SOUL.md"), "agentId": "helper"},
+            _ctx(_config(root)),
+        )
+        assert res.payload["path"] == "SOUL.md"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("via", ["token", "process", "window"])
+    async def test_an_agent_is_refused(self, root: Path, via: str) -> None:
+        res = await _call(
+            "workspace.files.resolve", {"path": "notes.txt"}, _ctx(_config(root), via=via)
+        )
+        assert not res.ok and res.error.code == "agent.operator_required"
+
+    @pytest.mark.asyncio
+    async def test_not_on_the_channel_surface(self, root: Path) -> None:
+        res = await _call(
+            "workspace.files.resolve",
+            {"path": "notes.txt"},
+            _ctx(_config(root), surface=ConnectionSurface.CHANNEL),
+        )
+        assert not res.ok

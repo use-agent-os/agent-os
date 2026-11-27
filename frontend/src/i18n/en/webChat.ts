@@ -57,7 +57,6 @@ export const webChat = defineNamespace('webChat', {
 
   // Header
   headerRename: 'Rename session',
-  headerPanels: 'Panels',
   headerMenu: 'Session actions',
   headerCompact: 'Compact',
   headerReset: 'Reset session',
@@ -178,10 +177,6 @@ export const webChat = defineNamespace('webChat', {
   headerIdCopied: 'Session ID copied',
 
   // Side panel
-  panelTitle: 'Side panel',
-  panelClose: 'Close side panel',
-  panelCloseTab: 'Close {title}',
-  panelResize: 'Resize side panel',
   panelEmpty: 'Open tool output, artifacts or reasoning to see them here.',
 
   // Chat v2: the reply identity line, the side panel

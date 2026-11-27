@@ -3,6 +3,7 @@ import {
   Download,
   FolderOpen,
   MoreHorizontal,
+  PanelBottom,
   PanelRight,
   Pencil,
   RotateCcw,
@@ -13,9 +14,11 @@ import { useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useRpc } from '@/app/providers'
+import { formatCombo } from '@/components/KeyboardShortcuts'
 import { t } from '@/i18n'
 import '@/i18n/en/webChat'
 import '@/i18n/en/webShell'
+import '@/i18n/en/webPanel'
 import { Button } from '@/web/components/ui/button'
 import { fieldVariants } from '@/web/components/ui/input'
 import { SimpleTooltip } from '@/web/components/ui/tooltip'
@@ -38,6 +41,8 @@ import {
 } from '@/web/shell/session-list'
 import '@/web/styles/chat-stage.css'
 import { AgentAvatar } from './AgentAvatar'
+import { PANEL_TOGGLE_KEY } from './panels/open-paths'
+import { PANEL_ID, PANEL_TOGGLE_ID, type PanelDock } from './panels/panel-store'
 
 // Round outlined, like the composer's options button (chat-stage.css).
 const ICON_BUTTON = 'chat-head-action'
@@ -70,7 +75,10 @@ export interface ChatHeaderProps {
   row: SessionRow | undefined
   running: boolean
   phone: boolean
-  onTogglePanels(): void
+  /** The workspace panel is showing. */
+  panelOpen: boolean
+  panelDock: PanelDock
+  onTogglePanels(opener: HTMLElement): void
   onCompact(): void
   onReset(): void
   /** The first user message, for a title when the session has no name. */
@@ -90,6 +98,7 @@ export function ChatHeader(props: ChatHeaderProps) {
   const [error, setError] = useState<string | null>(null)
   const [confirmReset, setConfirmReset] = useState(false)
   const project = row ? sessionProject(row) : null
+  const panelLabel = props.panelOpen ? t('webPanel.hide') : t('webPanel.show')
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -110,7 +119,7 @@ export function ChatHeader(props: ChatHeaderProps) {
   }
 
   return (
-    <header className="chat-header sticky top-0 z-[var(--z-sticky)] flex min-h-14 items-center gap-2 px-3 py-2 sm:px-4">
+    <header className="chat-header @container/chat sticky top-0 z-[var(--z-sticky)] flex min-h-14 items-center gap-2 px-3 py-2 sm:px-4">
       {/* Phones open navigation from the shell's top bar; a second ☰ here duplicated it. */}
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {editing ? (
@@ -150,7 +159,7 @@ export function ChatHeader(props: ChatHeaderProps) {
           </button>
         )}
         {!phone && !editing ? (
-          <div className="hidden min-w-0 shrink items-center gap-1.5 md:flex">
+          <div className="hidden min-w-0 shrink items-center gap-1.5 @xl/chat:flex">
             {row ? (
               <>
                 <span
@@ -194,15 +203,19 @@ export function ChatHeader(props: ChatHeaderProps) {
           </div>
         ) : null}
       </div>
-      <SimpleTooltip side="bottom" label={t('webChat.headerPanels')}>
+      <SimpleTooltip side="bottom" label={`${panelLabel} (${formatCombo(PANEL_TOGGLE_KEY)})`}>
         <Button
+          id={PANEL_TOGGLE_ID}
           size="icon"
           variant="ghost"
-          aria-label={t('webChat.headerPanels')}
-          onClick={props.onTogglePanels}
-          className={ICON_BUTTON}
+          aria-label={panelLabel}
+          aria-expanded={props.panelOpen}
+          aria-controls={props.panelOpen ? PANEL_ID : undefined}
+          data-active={props.panelOpen || undefined}
+          onClick={(e) => props.onTogglePanels(e.currentTarget)}
+          className={cn(ICON_BUTTON, 'chat-panel-toggle')}
         >
-          <PanelRight />
+          {props.panelDock === 'bottom' ? <PanelBottom /> : <PanelRight />}
         </Button>
       </SimpleTooltip>
       <DropdownMenu>

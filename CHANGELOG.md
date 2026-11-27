@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Web UI: the chat's side panel is now a tabbed **workspace panel**. The
+  panel toggle in the chat header (or `Mod+\`, or the command palette)
+  shows or hides it; its **+** menu opens **Files** and **Browser** beside
+  the existing tool-output, artifact and reasoning tabs. Tabs reorder by
+  drag (or `Ctrl+Shift+←/→`), close with their × (or Delete) and switch
+  with the arrow keys. The panel docks right or bottom, expands over the
+  chat, resizes by pointer or arrow keys in either reading direction, takes
+  the chat's place when the pane is too small to share it, and is a
+  full-screen sheet on phones. Each session remembers its own layout in the
+  browser; a session without one starts closed.
+- Web UI: **Files** browses the session agent's workspace read-only: a tree
+  that loads folders as they open, a name filter, breadcrumbs, source with
+  line numbers and syntax colours, rendered Markdown (relative links open
+  in Files), images, and clear notices for binary, cut-off (past 1 MB),
+  empty and refused files, with Copy path and Download. Tool rows that read
+  or wrote a workspace file offer **Open in Files**.
+- Web UI: **Browser** shows the browser the session's agent drives: a page
+  image refreshed every two seconds while on screen (Fit or 100%), its
+  tabs, an address bar, Back, Forward, Reload and Open in your browser, and
+  says when the browser tool is off, not installed, waiting for attach
+  consent or not started (with **Start browser**). Clicks and typing on the
+  page are not forwarded.
+- Gateway: `browser.status`, `browser.snapshot`, `browser.start`,
+  `browser.navigate`, `browser.history` and `browser.tabs.select` back the
+  Browser tab. They are Control-surface methods, refused to an agent's
+  connection, and apply the browser tool's own policy: navigation goes
+  through its allowlist and private-network check, a page that ends on a
+  private address after redirects is left for `about:blank`, and a page on
+  one is not captured (relaxed in attach mode, as the tool relaxes them).
+  No method takes a script, a selector or a raw engine command. Reading the
+  status never runs the engine, and watching never starts a browser or
+  keeps an idle one past its TTL.
+- Gateway: `workspace.files.resolve` maps a path a tool call carried
+  (relative, absolute inside the workspace, `~/…` or the `/workspace/…`
+  alias) to the file browser's relative form. It is lexical: it reads
+  nothing in the workspace and answers `path: null` with a reason for a
+  path the browser cannot show.
+
 ### Fixed
 - Image Flows: an `image` node with two or more reference images on a
   Surplus model came back square (or in another shape the model chose)

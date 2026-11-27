@@ -1,29 +1,42 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { useKeyboardShortcut } from '@/components/KeyboardShortcuts'
 import { t } from '@/i18n'
 import '@/i18n/en/webChat'
+import '@/i18n/en/webPalette'
+import '@/i18n/en/webPanel'
 import { gate, requireConnection } from '@/lib/disabled-reason'
 import { useApprovals } from '@/services/approval-monitor'
+import { FILES_QUERY_ROOT } from '@/lib/workspace-files'
 import { readPromptFromUrl } from '@/views/chat/logic'
 import { computeHasPendingForSession } from '@/views/chat/useApprovalPending'
 import { SESSIONS_QUERY_KEY, useSessionsList } from '@/web/shell/session-data'
-import { pathToSessionKey, sessionKeyToPath, defaultSessionKey } from '@/web/shell/session-url'
+import { sessionAgent } from '@/web/shell/session-list'
+import {
+  agentOfSessionKey,
+  defaultSessionKey,
+  pathToSessionKey,
+  sessionKeyToPath,
+} from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { PHONE_QUERY, useMediaQuery } from '@/web/shell/use-media-query'
 import '@/web/styles/chat.css'
 import '@/web/styles/chat-stage.css'
+import '@/web/styles/workspace-panel.css'
 import { ApprovalDock } from './ApprovalDock'
 import { ChatHeader } from './ChatHeader'
 import { Composer } from './composer/Composer'
 import { enqueueMessage } from './composer/queue'
 import { isRunning } from './model/reducer'
 import type { Turn } from './model/types'
-import { usePanels } from './panels/panel-store'
-import { SidePanel } from './panels/SidePanel'
+import { useElementSize, useGatewayMethods } from './panels/hooks'
+import { fittedSize, presentationFor } from './panels/layout'
+import { PANEL_TOGGLE_KEY, resolveWorkspacePath, writtenFileCount } from './panels/open-paths'
+import { insidePanel, usePanels } from './panels/panel-store'
+import { WorkspacePanel } from './panels/WorkspacePanel'
 import { ChatActionsContext, type ChatActions } from './transcript/context'
 import { TranscriptView } from './transcript/TranscriptView'
 import { useChatSession } from './useChatSession'
@@ -79,8 +92,36 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
   const waitingApproval = computeHasPendingForSession(pending, sessionKey)
   const running = isRunning(session.state)
   const openPanel = usePanels((s) => s.open)
-  const panelTabs = usePanels((s) => s.tabs.length)
-  const closeAllPanels = usePanels((s) => s.closeAll)
+  const panelBound = usePanels((s) => s.sessionKey === sessionKey)
+  const panelOpen = usePanels((s) => s.visible) && panelBound
+  const panelDock = usePanels((s) => s.dock)
+  const panelExpanded = usePanels((s) => s.expanded)
+  const panelWidth = usePanels((s) => s.width)
+  const panelHeight = usePanels((s) => s.height)
+  const methods = useGatewayMethods()
+  const agentId = (row ? sessionAgent(row) : agentOfSessionKey(sessionKey)) || 'main'
+  const workbench = useRef<HTMLDivElement>(null)
+  const room = useElementSize(workbench)
+  // Before paint: a session never shows the previous session's panel.
+  useLayoutEffect(() => {
+    usePanels.getState().bindSession(sessionKey)
+  }, [sessionKey])
+  const presentation = presentationFor({
+    phone,
+    dock: panelDock,
+    expanded: panelExpanded,
+    containerWidth: room.width,
+    containerHeight: room.height,
+  })
+  const panelAxis = presentation === 'bottom' ? 'y' : 'x'
+  const panelSize =
+    panelAxis === 'x'
+      ? fittedSize('x', panelWidth, room.width)
+      : fittedSize('y', panelHeight, room.height)
+  // Over the chat (expanded, taken over, a phone's sheet): the covered pane is out of reach.
+  const panelCovers =
+    panelOpen &&
+    (presentation === 'expanded' || presentation === 'takeover' || presentation === 'sheet')
   const [followSignal, setFollowSignal] = useState(0)
   const navigate = useNavigate()
   const { search } = useLocation()
@@ -148,6 +189,15 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
     () => ({
       sessionKey,
       openPanel,
+      openInFiles: (path: string, opener?: HTMLElement | null) => {
+        void resolveWorkspacePath(rpc, methods, path, agentId).then((result) => {
+          if (result.path !== null) usePanels.getState().revealFile(result.path, opener)
+          else if (result.reason === 'denied') toast.info(t('webPanel.filesHiddenPath', { path }))
+          else toast.info(t('webPanel.filesOutside', { path }))
+        })
+      },
+      showBrowser: (opener?: HTMLElement | null) =>
+        usePanels.getState().openTool('browser', opener),
       retry: (turn: Turn) => {
         const message = turn.userMessage
         if (!runningRef.current || !message) return void retry(turn)
@@ -168,7 +218,7 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
         }
       },
     }),
-    [sessionKey, openPanel, retry, sendOrQueue, rpc, queryClient],
+    [sessionKey, openPanel, retry, sendOrQueue, rpc, queryClient, methods, agentId],
   )
 
   // Escape in chat: stop the running turn (the composer handles its own
@@ -185,17 +235,51 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
     },
   )
   const onSent = useCallback(() => setFollowSignal((n) => n + 1), [])
+  // A file the agent wrote shows in Files without a Refresh.
+  const written = writtenFileCount(session.state.liveTurns)
+  useEffect(() => {
+    if (written > 0) void queryClient.invalidateQueries({ queryKey: [FILES_QUERY_ROOT, agentId] })
+  }, [written, queryClient, agentId])
+  useKeyboardShortcut(
+    {
+      combo: PANEL_TOGGLE_KEY,
+      description: t('webPalette.bindPanel'),
+      category: t('webPalette.categoryChat'),
+      allowInInputs: true,
+    },
+    (e) => {
+      e.preventDefault()
+      const focused = document.activeElement
+      const panels = usePanels.getState()
+      if (panels.visible && insidePanel(focused)) {
+        // Hidden from inside: focus goes back, as on Escape.
+        const target = panels.dismiss()
+        requestAnimationFrame(() => target?.focus())
+        return
+      }
+      panels.toggle(focused instanceof HTMLElement ? focused : null)
+    },
+  )
 
   return (
     <ChatActionsContext.Provider value={actions}>
-      <div className="flex h-full min-h-0">
-        <div className="chat-pane bg-atmosphere flex min-w-0 flex-1 flex-col">
+      <div
+        ref={workbench}
+        className="chat-workbench"
+        data-dock={presentation === 'bottom' ? 'bottom' : 'right'}
+      >
+        <div
+          className="chat-pane bg-atmosphere flex min-h-0 min-w-0 flex-1 flex-col"
+          inert={panelCovers || undefined}
+        >
           <ChatHeader
             sessionKey={sessionKey}
             row={row}
             running={running}
             phone={phone}
-            onTogglePanels={() => (panelTabs ? closeAllPanels() : undefined)}
+            panelOpen={panelOpen}
+            panelDock={presentation === 'bottom' ? 'bottom' : 'right'}
+            onTogglePanels={(opener) => usePanels.getState().toggle(opener)}
             onCompact={compact}
             onReset={() => void reset()}
             firstMessage={session.state.turns.find((turn) => turn.userMessage)?.userMessage?.text}
@@ -232,7 +316,14 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
             </div>
           </div>
         </div>
-        <SidePanel transcript={session.state} phone={phone} />
+        <WorkspacePanel
+          transcript={session.state}
+          sessionKey={sessionKey}
+          agentId={agentId}
+          presentation={presentation}
+          size={panelSize}
+          container={panelAxis === 'x' ? room.width : room.height}
+        />
       </div>
     </ChatActionsContext.Provider>
   )
