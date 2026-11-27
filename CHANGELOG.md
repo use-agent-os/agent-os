@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.27.post1] - 2026-11-27
+
 ### Changed
 - Desktop Trading: a DCA mandate the agent proposes in chat is approved in
   one place only, the approvals area above the composer. The chat card no
