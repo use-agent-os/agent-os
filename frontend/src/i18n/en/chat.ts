@@ -390,6 +390,7 @@ export const chat = defineNamespace('chat', {
   dcaRunUnknown: 'unknown',
   dcaActionsLabel: 'Controls for {name}',
   dcaApprove: 'Approve & start',
+  dcaApproveHint: 'Approve or reject it in the approvals above the message box.',
   dcaApproveTitle: 'Approve this mandate; the engine starts buying on schedule',
   dcaReject: 'Reject',
   dcaRejectTitle: 'Reject this proposal; nothing is bought',

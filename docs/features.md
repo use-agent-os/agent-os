@@ -66,10 +66,12 @@ Read: [`acp-agents.md`](acp-agents.md)
 
 ### Browser automation
 
-The `browser` tool drives a real Chromium — navigate, read pages as
-accessibility snapshots, click, type, run JavaScript, and answer dialogs — via
-the `agent-browser` engine, with SSRF, secret, and eval policy enforced in
-AgentOS. Managed headless by default; opt-in attach to your own Chrome.
+The `browser` tool drives a real Chromium — navigate, read pages as compact
+accessibility snapshots, click, type, run several steps in one call, run
+JavaScript, and answer dialogs — via the `agent-browser` engine, with SSRF,
+secret, and eval policy enforced in AgentOS. An action answers with what it
+changed on the page, so an unchanged page costs a few tokens. Managed headless
+by default; opt-in attach to your own Chrome.
 
 Read: [`features/browser.md`](features/browser.md)
 

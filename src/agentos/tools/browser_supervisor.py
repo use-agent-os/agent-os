@@ -57,6 +57,10 @@ PAGE_ATTACH_TIMEOUT = 8.0
 
 CONSOLE_HISTORY_MAX = 50
 RECENT_DIALOGS_MAX = 20
+#: A main-frame load older than this stops counting as a pending navigation.
+NAVIGATION_PENDING_MAX_S = 15.0
+#: CDP events that mean the main frame has begun moving to another document.
+_NAVIGATION_STARTED = frozenset({"Page.frameRequestedNavigation", "Page.frameStartedLoading"})
 
 
 def parse_dialog_policy(policy: Any, timeout: Any) -> tuple[str, float]:
@@ -183,6 +187,10 @@ class CDPSupervisor:
         self._dialog_seq = 0
         self._active = False
         self._transport: Transport = transport or _WebSocketTransport(cdp_url)
+        #: Page session id -> its main frame id (a page's main frame id is its
+        #: target id), and the sessions whose main frame is mid-navigation.
+        self._main_frames: dict[str, str] = {}
+        self._navigating: dict[str, float] = {}
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -218,6 +226,44 @@ class CDPSupervisor:
             self._on_dialog_opening(params, session_id)
         elif method == "Runtime.consoleAPICalled":
             self._on_console(params)
+        elif method == "Target.attachedToTarget":
+            child = params.get("sessionId")
+            target = (params.get("targetInfo") or {}).get("targetId")
+            if child and target:
+                with self._lock:
+                    self._main_frames[str(child)] = str(target)
+        elif method == "Target.detachedFromTarget":
+            with self._lock:
+                self._main_frames.pop(str(params.get("sessionId")), None)
+                self._navigating.pop(str(params.get("sessionId")), None)
+        elif method in _NAVIGATION_STARTED or method == "Page.frameStoppedLoading":
+            self._on_main_frame_loading(method, params, session_id)
+
+    def _on_main_frame_loading(
+        self, method: str, params: dict[str, Any], session_id: str | None
+    ) -> None:
+        if session_id is None:
+            return
+        with self._lock:
+            if params.get("frameId") != self._main_frames.get(session_id):
+                return  # an iframe, or a page we do not know the main frame of
+            if method == "Page.frameStoppedLoading":
+                self._navigating.pop(session_id, None)
+            elif params.get("disposition", "currentTab") == "currentTab":
+                self._navigating.setdefault(session_id, time.monotonic())
+
+    def navigation_pending(self, max_age_s: float = NAVIGATION_PENDING_MAX_S) -> bool:
+        """True while a page's main frame is between starting and finishing a load.
+
+        What the tool waits on before reading the page after an action: a click
+        that submitted a form returns before the new document commits, and a
+        read in that window sees the old page. A load older than *max_age_s* no
+        longer counts, so a page that never finishes loading cannot hold a read
+        back for good.
+        """
+        now = time.monotonic()
+        with self._lock:
+            return any(now - since < max_age_s for since in self._navigating.values())
 
     def _on_dialog_opening(self, params: dict[str, Any], session_id: str | None) -> None:
         with self._lock:
@@ -680,6 +726,10 @@ class _WebSocketTransport:
                     asyncio.ensure_future(self._enable_on(dom, child))
                 if self._page_ready is not None:
                     self._page_ready.set()
+                # The supervisor learns each page's main frame id from this.
+                if self._on_event is not None:
+                    with contextlib.suppress(Exception):
+                        self._on_event(method, params, sess)
             return
         if method and self._on_event is not None:
             with contextlib.suppress(Exception):

@@ -8,6 +8,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
+import { createEventInvalidator } from '@/lib/event-invalidation'
 import { useConnection } from '@/stores/connection'
 import { t, type MessageKey } from '~/i18n'
 import { isTouchIdDeclined, requireBiometric, type GateKind } from '~/lib/biometric-gate'
@@ -167,25 +168,19 @@ export async function primeTradingList<T extends { id: string; status: string }>
 
 /**
  * Bind once from a mounted page: every trading event refetches whatever is
- * on screen (debounced, so a burst of order updates is one round).
+ * on screen (debounced, so a burst of order updates is one round). A read
+ * still in flight is not sent again: see `createEventInvalidator`.
  */
 export function useTradingInvalidation(enabled = true): void {
   const rpc = useRpc()
   const queryClient = useQueryClient()
   useEffect(() => {
     if (!enabled) return
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const invalidate = () => {
-      if (timer) return
-      timer = setTimeout(() => {
-        timer = null
-        invalidateTrading(queryClient)
-      }, 150)
-    }
-    const offs = TRADING_EVENTS.map((event) => rpc.on(event, invalidate))
+    const invalidator = createEventInvalidator(queryClient, ['trading'])
+    const offs = TRADING_EVENTS.map((event) => rpc.on(event, invalidator.notify))
     return () => {
       offs.forEach((off) => off())
-      if (timer) clearTimeout(timer)
+      invalidator.dispose()
     }
   }, [rpc, queryClient, enabled])
 }

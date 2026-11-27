@@ -553,6 +553,7 @@ async def run_command(
     args: list[str] | None = None,
     *,
     timeout: float | None = None,
+    max_timeout: float | None = None,
     create: bool = True,
     touch: bool = True,
 ) -> dict[str, Any]:
@@ -567,6 +568,8 @@ async def run_command(
     nothing (any engine command against an unknown session launches a
     browser). ``touch=False`` leaves the session's idle clock alone, so a
     viewer polling the page never keeps a browser alive past its TTL.
+    ``max_timeout`` caps whichever timeout applies, so a caller with a deadline
+    of its own (a batch) cannot be overrun by one command's default.
     """
     binary = resolve_binary()
     if binary is None:
@@ -587,6 +590,8 @@ async def run_command(
             session.last_used_at = time.time()
     argv = _command_line(binary, session, command, args or [])
     effective_timeout = timeout if timeout is not None else _command_timeout(command, session)
+    if max_timeout is not None:
+        effective_timeout = min(effective_timeout, max_timeout)
 
     try:
         result = await _spawn_and_collect(argv, effective_timeout)
@@ -653,6 +658,9 @@ async def _spawn_and_collect(argv: list[str], timeout: float) -> dict[str, Any]:
     """Spawn the engine, enforce *timeout*, and parse stdout as JSON."""
     proc = await asyncio.create_subprocess_exec(
         *argv,
+        # No command the tool runs reads stdin; an engine that treats a `-`
+        # operand as "read from stdin" must not get the gateway's.
+        stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=_scrubbed_env(),

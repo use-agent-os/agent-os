@@ -69,24 +69,85 @@ is not enough. Managed headless mode needs no confirmation.
 
 | action | args | what it does |
 | --- | --- | --- |
-| `navigate` | `url` | open a URL; returns final URL, title, and a page snapshot |
-| `snapshot` | — | accessibility tree with `@e` refs (the default "read the page") |
+| `navigate` | `url` | open a URL; returns final URL, title, and the page's interactive elements with refs |
+| `snapshot` | `full`, `selector`, `depth` (all optional) | read the page again: interactive elements by default, the whole tree with text when `full` is true, scoped to a CSS `selector` and/or limited to `depth` levels |
 | `click` | `ref` | click an element by ref |
 | `type` | `ref`, `text` | type into a field (secret-guarded) |
 | `fill` | `ref`, `text` | clear then set a field's value (secret-guarded) |
 | `select` | `ref`, `value` | choose a `<select>` option |
-| `wait` | `condition` | wait for a selector / text / URL / load state |
+| `wait` | `condition` | wait for a selector or ref to appear, or a number of milliseconds |
 | `press` | `key` | keyboard key (Enter, Tab, …) |
 | `scroll` | `direction` | scroll the viewport |
 | `back` | — | history back |
+| `get_text` | `selector` (default `body`) | the text of the first element the selector (or ref) matches, bounded by `snapshot_max_chars` |
+| `title` | — | the page title |
+| `url` | — | the page URL |
+| `batch` | `steps` | run up to 20 of the actions above in order, in one call |
 | `screenshot` | — | capture the page |
 | `tabs` | — | list tabs in this session |
 | `eval` | `expression` | run JavaScript in the page |
 | `dialog` | `dialog_action` | accept/dismiss a native alert/confirm/prompt |
 | `close` | — | end this session's browser (managed) / disconnect (attach) |
 
-`navigate`, `snapshot`, `click`, `type`, `fill`, and `wait` are the everyday
-loop. `eval` and `dialog` are covered below.
+`navigate`, then actions on the refs it returned, is the everyday loop. `eval`
+and `dialog` are covered below.
+
+### What an action returns
+
+`click`, `type`, `fill`, `select`, `press`, `scroll`, `back` and `wait` answer
+with what they did to the page, so the model rarely needs a separate snapshot:
+
+- `"page": "unchanged"` — nothing in the interactive view changed; refs the
+  model holds still work. This is the whole answer: a few tokens.
+- `"page": "changed"` — same page; `snapshot` carries the changed lines (an
+  engine delta against the view the model last saw), or the page's new
+  elements when the engine re-sent them.
+- `"page": "new"` — the action moved to another URL; `snapshot` carries the new
+  page's elements and fresh refs.
+
+When the delta or the new page is longer than about 2,000 characters, the
+answer names the page (URL and title) and says how to look instead of inlining
+it, so a click that opens a long article does not cost thousands of tokens the
+model may not need. After a click, key press, select or back, the answer waits
+(up to 5 s) for a navigation the action started to finish before reading the
+page; this needs the dialog supervisor's CDP connection, and without it a read
+that races a navigation is retried once.
+
+A `snapshot` after an action the model has not seen the effect of (an `eval`,
+say) is a delta too; asked again with nothing done in between, it is the whole
+view. A delta is only ever used against the exact view the model last read;
+anything else (another view in between, a new browser, a page too large to
+have been shown) gets the whole view.
+
+### Long pages
+
+A view over `snapshot_max_chars` is cut on a line break, and the answer's
+`note` says where it was cut and how to read the rest: `snapshot` with a
+`selector` (such as `main` or `#content`) or a `depth`, or `get_text` with a
+selector for prose. On link-heavy pages (a long article, a repository page) the
+interactive view is still large; scoping it, or reading text, is the way in.
+
+### batch
+
+`batch` takes `steps`, a list of objects with the same fields as a single call
+(`{"action": "fill", "ref": "e2", "text": "…"}`), runs them in order and stops
+at the first failure. It answers with how many steps completed, the output of
+any read steps (`snapshot`, `get_text`, `title`, `url`, `eval`, …), the failed
+step and its error, and one page view at the end when the last steps acted on
+the page.
+
+Each step is validated and run by the same code as the single action, so a
+batch passes every gate a single call does. On top of that a batch:
+
+- validates every step before running any (unknown actions or fields, a
+  `batch` inside a batch, `close`, a navigation the allowlist or the SSRF check
+  refuses, an `eval` the policy blocks, credential text for `type`/`fill`), and
+  runs nothing if one fails;
+- checks the page's address before every step, so a redirect onto a private
+  address stops the batch instead of letting later steps act on that page;
+- stops when a native dialog opens, and reports it;
+- runs at most 20 steps and stops when its 90-second time budget is used up;
+  every engine command in it is capped to what is left of that budget.
 
 ## How the agent decides to use it
 
@@ -131,13 +192,23 @@ bubblewrap/seatbelt — so these controls are enforced in AgentOS instead:
   is allowed; `file://`, `data:`, and other `about:` URLs are refused.
 - **Private-page read guard.** In managed mode, a read action re-checks the live
   page URL — a JavaScript redirect onto a private address after navigation does
-  not let the next snapshot exfiltrate it. Relaxed in attach mode (your Chrome
-  legitimately sits on intranet pages, and the attach consent covers that).
-- **Untrusted envelope.** Everything the engine returns — snapshots, `eval`
-  results, tab titles and URLs, every action payload — is wrapped in the
-  `<untrusted>` envelope, so page content can't smuggle instructions to the
-  agent. `eval("document.body.innerText")` is the shortest path from a page into
-  the transcript, so it carries the boundary like any other read.
+  not let the next snapshot exfiltrate it. The page view an action answers with
+  is checked the same way, and so is the address each snapshot reports it read.
+  Relaxed in attach mode (your Chrome legitimately sits on intranet pages, and
+  the attach consent covers that).
+- **Untrusted envelope.** Everything the page influences — snapshots and
+  deltas, `get_text`, titles and URLs, `eval` results, tab titles, dialog
+  messages and console lines — is wrapped in the `<untrusted>` envelope, so page
+  content can't smuggle instructions to the agent. `eval("document.body.innerText")`
+  is the shortest path from a page into the transcript, so it carries the
+  boundary like any other read. Console lines are reported once each, not
+  repeated on every read.
+- **Engine arguments.** Every value the model supplies reaches the engine as one
+  argument of a fixed command line built by the tool — never through a shell,
+  and never as a raw engine command. A value shaped like a command-line option
+  (one token that starts with `-` and is not a number) is refused, because the
+  engine would read it as an option rather than as the value. `batch` takes
+  only the tool's own actions and fields.
 - **Output redaction.** Snapshots, console output, and eval results are masked
   for credentials before reaching the model.
 - **Secret-typing guard.** `type` and `fill` refuse text that looks like a
@@ -179,7 +250,8 @@ that navigates somewhere private cannot return that page's content.
 ## Dialogs
 
 Native `alert` / `confirm` / `prompt` / `beforeunload` dialogs are captured by a
-CDP supervisor and surfaced as `pending_dialogs` in a snapshot. Respond with
+CDP supervisor and surfaced as `pending_dialogs` in a snapshot or an action's
+answer (a `batch` stops at the step that opened one). Respond with
 `browser(action="dialog", dialog_action="accept" | "dismiss", prompt_text=…)`.
 Policy for unanswered dialogs:
 
@@ -206,7 +278,7 @@ allowed_domains = []          # [] = open web (SSRF still blocks private ranges)
 persist_profile = false       # true = keep cookies/login between sessions (on disk)
 session_ttl_minutes = 15
 max_sessions = 3
-snapshot_max_chars = 24000    # snapshots over this are truncated with a marker
+snapshot_max_chars = 24000    # longer snapshots / get_text are cut, with a note on reading the rest
 dialog_policy = "must_respond"  # must_respond | auto_dismiss | auto_accept
 dialog_timeout_s = 300.0
 restrict_evaluate = false     # true = block sensitive JS primitives in eval

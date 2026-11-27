@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- Desktop Trading: a DCA mandate the agent proposes in chat is approved in
+  one place only, the approvals area above the composer. The chat card no
+  longer repeats **Approve & start** / **Reject**; it shows the plan and a
+  line pointing to the approvals area (trading agent prompt v30).
+
 ### Fixed
 - Web UI: chat cards (DCA, LP, markets, trigger, chart, cards, flow) said
   "Couldn't load this card: HTTP 404", with or without auth, for saved and
@@ -59,6 +65,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   alias) to the file browser's relative form. It is lexical: it reads
   nothing in the workspace and answers `path: null` with a reason for a
   path the browser cannot show.
+- Browser tool: `batch` runs up to 20 of the tool's own actions in one call
+  (fill a form and submit it, search and press Enter), stopping at the first
+  failure, with one page view at the end. Every step is validated and run by
+  the same code as the single action, so it passes the same gates; a batch
+  also checks every step before running any, re-checks the page's address
+  before each step, stops when a native dialog opens, and has a 90-second
+  budget that caps every engine command in it.
+- Browser tool: `get_text` (text of the first element a selector or ref
+  matches, default `body`, bounded by `snapshot_max_chars`), `title` and
+  `url` read the page without a snapshot. `snapshot` takes `full` (the whole
+  tree with text), `selector` and `depth`.
+
+### Changed
+- Browser tool: `navigate` and `snapshot` return the page's interactive
+  elements (the engine's interactive + compact view) instead of the whole
+  accessibility tree, as the tool's description already said: on the pages
+  measured this is 15–81% fewer tokens when the page fits (Hacker News 7,325 →
+  6,210, a form 523 → 280, example.com 329 → 62). `full=true` gives the old
+  view. A long article or a repository page still fills `snapshot_max_chars`;
+  the interactive view packs more tokens into the same characters, so a cut
+  view there costs more than before (Wikipedia article 6,521 → 9,516) — scope
+  it with `selector`/`depth` or read it with `get_text`.
+- Browser tool: actions answer with what they changed: `page` is `unchanged`
+  (a few tokens; refs still work), `changed` (the engine's delta against the
+  view the model last saw) or `new` (another URL, fresh refs), with the delta
+  or the new page inline when short and a URL/title summary otherwise. After a
+  click, key press, select or back the answer waits up to 5 s for a navigation
+  it started to finish, so a submit does not read back the old page. Action
+  answers no longer repeat the engine's own echo and bookkeeping. Measured on
+  real pages: filling and submitting a form 1,969 tokens in 8 calls → 885 in
+  3; a Wikipedia search 12,559 in 4 → 4,769 in 2; opening Hacker News "new"
+  14,848 in 3 → 6,303 in 2.
+- Browser tool: a cut snapshot says where it was cut and how to read the rest
+  (`selector`, `depth`, `get_text`) instead of a bare marker inside the page
+  text, and cuts on a line break.
+- Browser tool: dialog messages and console lines are wrapped in the untrusted
+  envelope like the rest of the page, and each console line is reported once
+  instead of on every snapshot.
+- Browser tool: a field value shaped like a command-line option (one token
+  starting with `-` that is not a number) is refused; every value reaches the
+  engine as a single argument of a command line the tool builds.
 
 ### Fixed
 - Image Flows: an `image` node with two or more reference images on a
