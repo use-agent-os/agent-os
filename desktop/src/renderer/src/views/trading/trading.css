@@ -1606,7 +1606,7 @@ tr:focus-within .trd-row__actions {
    caption, indented to the same column. */
 .trd-order {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) 92px 68px 28px;
+  grid-template-columns: 26px minmax(0, 1fr) 92px 84px 28px;
   align-items: center;
   gap: 3px 10px;
   padding: 9px 12px 10px 14px;
@@ -1689,17 +1689,23 @@ tr:focus-within .trd-row__actions {
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+/* Who and when sit on one line: the tag, then the age. The age keeps a fixed
+   width, right-aligned, so the tags line up down the page whatever it reads. */
 .trd-order__who {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
   grid-area: 1 / 4 / span 2 / 5;
+  white-space: nowrap;
 }
 .trd-order__time {
+  min-width: 4ch;
   font-family: var(--font-mono);
   font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
   color: var(--dim);
+  text-align: right;
 }
 .trd-order__link {
   display: flex;
