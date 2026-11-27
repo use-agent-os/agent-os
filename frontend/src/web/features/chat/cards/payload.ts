@@ -1,29 +1,24 @@
 import { useQuery } from '@tanstack/react-query'
-import { t } from '@/i18n'
-import '@/i18n/en/webChat'
-import { gatewayHttpReachable } from '@/lib/api-origin'
-import { authenticatedHeaders } from '@/lib/http-auth'
+import { useRpc } from '@/app/providers'
 import { artifactDownloadUrl, type Artifact } from '@/views/chat/transcript/artifacts'
+import { fetchArtifact, type TicketRpc } from '../artifact-files'
+import { useChatActions } from '../transcript/context'
 
-/** Fetch an artifact's JSON body (card payloads are not inline). */
-export async function fetchArtifactJson(artifact: Artifact): Promise<unknown> {
-  const url = artifactDownloadUrl(artifact)
-  if (!url) throw new Error('missing download URL')
-  // HTTP reaches only the gateway that served this page (the console's CSP).
-  if (!gatewayHttpReachable()) throw new Error(t('webChat.artifactOtherGateway'))
-  // Already gateway-resolved (absolute off-gateway, root-relative on it).
-  const response = await fetch(url, {
-    headers: authenticatedHeaders(url),
-    credentials: 'same-origin',
-  })
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  return response.json()
+/** Fetch an artifact's JSON body (card payloads are not inline) through a ticket. */
+export async function fetchArtifactJson(
+  rpc: TicketRpc,
+  artifact: Artifact,
+  sessionKey: string,
+): Promise<unknown> {
+  return (await fetchArtifact(rpc, artifact, sessionKey)).json()
 }
 
 export function useArtifactJson(artifact: Artifact) {
+  const rpc = useRpc()
+  const { sessionKey } = useChatActions()
   return useQuery({
-    queryKey: ['artifact', artifact.id ?? artifactDownloadUrl(artifact)],
-    queryFn: () => fetchArtifactJson(artifact),
+    queryKey: ['artifact', sessionKey, artifact.id ?? artifactDownloadUrl(artifact)],
+    queryFn: () => fetchArtifactJson(rpc, artifact, sessionKey),
     staleTime: Infinity,
   })
 }

@@ -1,9 +1,19 @@
 import '@/test/web'
 import { act, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { FakeArtifactGateway } from '@/test/artifact-gateway'
 import { stubMatchMedia } from '@/test/web'
-import { KEY, assistantRow, chatRpc, openChat, resetChatState, userRow } from '@/test/web-chat'
+import {
+  KEY,
+  assistantRow,
+  chatRpc,
+  emit,
+  openChat,
+  resetChatState,
+  userRow,
+} from '@/test/web-chat'
 
 vi.mock('lightweight-charts', () => {
   const series = { setData: vi.fn(), priceScale: () => ({ applyOptions: vi.fn() }) }
@@ -28,25 +38,36 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/**
+ * A chat whose reply carries one card artifact, served by a gateway that
+ * answers as the real one does: through a ticket only.
+ */
+function cardChat(mime: string, body: unknown, name = 'card.json') {
+  const gateway = new FakeArtifactGateway(KEY).put(`art-${name}`, body, { name, mime })
+  const rpc = chatRpc([
+    userRow('u1', 'show'),
+    assistantRow('a1', 'Here.', { artifacts: [gateway.artifact(`art-${name}`)] }),
+  ])
+  gateway.install(rpc)
+  return { rpc, gateway }
+}
+
 function withArtifact(mime: string, body: unknown, name = 'card.json') {
-  const artifact = {
-    id: `art-${name}`,
-    name,
-    mime,
-    size: 10,
-    download_url: `/api/v1/artifacts/art-${name}`,
-  }
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(
-      async () =>
-        new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
-    ),
-  )
-  return chatRpc([userRow('u1', 'show'), assistantRow('a1', 'Here.', { artifacts: [artifact] })])
+  return cardChat(mime, body, name).rpc
+}
+
+const CARDS_BODY = {
+  type: 'cards',
+  title: 'Tokens',
+  cards: [{ title: 'ETH', fields: [{ label: 'Price', value: '$3,000' }] }],
+}
+
+async function tradingCard(): Promise<HTMLElement> {
+  return waitFor(() => {
+    const el = document.querySelector('[data-trading-card]')
+    if (!el) throw new Error('no card yet')
+    return el as HTMLElement
+  })
 }
 
 describe('data cards', () => {
@@ -70,15 +91,60 @@ describe('data cards', () => {
   })
 
   it('renders a cards artifact', async () => {
-    await openChat(
-      withArtifact('application/vnd.agentos.cards+json', {
-        type: 'cards',
-        title: 'Tokens',
-        cards: [{ title: 'ETH', fields: [{ label: 'Price', value: '$3,000' }] }],
-      }),
-    )
+    await openChat(withArtifact('application/vnd.agentos.cards+json', CARDS_BODY))
     expect(await screen.findByText('ETH')).toBeInTheDocument()
     expect(screen.getByText('$3,000')).toBeInTheDocument()
+  })
+
+  it('reads the payload through a ticket for its session, never the bare artifact URL', async () => {
+    // A token in the tab must not ride along: the ticket is the credential.
+    sessionStorage.setItem('agentos.wsToken', 'tokA')
+    const { rpc, gateway } = cardChat('application/vnd.agentos.cards+json', CARDS_BODY)
+    await openChat(rpc)
+    expect(await screen.findByText('ETH')).toBeInTheDocument()
+    expect(rpc.callsTo('artifacts.download')).toEqual([
+      { session_key: KEY, artifact_id: 'art-card.json', transport: 'http' },
+    ])
+    expect(gateway.legacyRequests).toEqual([])
+    expect(gateway.ticketUrls()).toHaveLength(1)
+    for (const [, init] of vi.mocked(fetch).mock.calls) {
+      expect(new Headers(init?.headers).has('authorization')).toBe(false)
+    }
+    sessionStorage.clear()
+  })
+
+  it("says why when the gateway refuses the artifact (another session's file)", async () => {
+    const gateway = new FakeArtifactGateway(KEY).put('art-x', CARDS_BODY, {
+      name: 'x.json',
+      mime: 'application/vnd.agentos.cards+json',
+      sessionKey: 'agent:main:webchat:other',
+    })
+    const rpc = chatRpc([
+      userRow('u1', 'show'),
+      assistantRow('a1', 'Here.', { artifacts: [gateway.artifact('art-x')] }),
+    ])
+    gateway.install(rpc)
+    await openChat(rpc)
+    expect(
+      await screen.findByText("Couldn't load this card: artifact not found", {}, { timeout: 3000 }),
+    ).toBeInTheDocument()
+    expect(gateway.requests).toEqual([])
+  })
+
+  it('renders a card that arrives live, through a ticket', async () => {
+    const gateway = new FakeArtifactGateway(KEY).put('art-live', CARDS_BODY, {
+      name: 'live.json',
+      mime: 'application/vnd.agentos.cards+json',
+    })
+    const rpc = chatRpc([userRow('u1', 'show')])
+    gateway.install(rpc)
+    await openChat(rpc)
+    // Mid-turn, as the engine publishes it.
+    emit(rpc, 'text_delta', { text: 'Charting' })
+    emit(rpc, 'artifact', { ...gateway.artifact('art-live'), epoch: 0 })
+    expect(await screen.findByText('ETH')).toBeInTheDocument()
+    expect(rpc.callsTo('artifacts.download')[0]).toMatchObject({ artifact_id: 'art-live' })
+    expect(gateway.legacyRequests).toEqual([])
   })
 
   it('renders a flow-change artifact', async () => {
@@ -135,14 +201,35 @@ describe('trading cards', () => {
     ['lp positions', 'application/vnd.agentos.lp+json', 'lp/positions.json'],
   ])('renders %s read-only with Refresh and no write action', async (_label, mime, path) => {
     await openChat(withArtifact(mime, fixture(path), path.replace('/', '-')))
-    const card = await waitFor(() => {
-      const el = document.querySelector('[data-trading-card]')
-      if (!el) throw new Error('no card yet')
-      return el as HTMLElement
-    })
+    const card = await tradingCard()
     expect(within(card).getByRole('button', { name: 'Refresh' })).toBeInTheDocument()
     expect(within(card).getAllByRole('button')).toHaveLength(1)
     expect(card).toHaveTextContent('Read-only in the web console')
+  })
+
+  it('Refresh reads the card again, with a new ticket once the socket changed', async () => {
+    const user = userEvent.setup()
+    const { rpc, gateway } = cardChat(
+      'application/vnd.agentos.lp+json',
+      fixture('lp/positions.json'),
+      'lp.json',
+    )
+    await openChat(rpc)
+    expect(await tradingCard()).toHaveTextContent('3 rows')
+    gateway.put('art-lp.json', fixture('lp/positions-empty.json'), {
+      name: 'lp.json',
+      mime: 'application/vnd.agentos.lp+json',
+    })
+    // A reconnect: the old socket's tickets are gone.
+    act(() => {
+      rpc.setState('connecting')
+      rpc.setState('connected')
+    })
+    gateway.dropTickets()
+    await user.click(within(await tradingCard()).getByRole('button', { name: 'Refresh' }))
+    await waitFor(async () => expect(await tradingCard()).toHaveTextContent('0 rows'))
+    expect(rpc.callsTo('artifacts.download')).toHaveLength(2)
+    expect(gateway.legacyRequests).toEqual([])
   })
 })
 

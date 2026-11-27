@@ -19,16 +19,17 @@ import { t } from '@/i18n'
 import '@/i18n/en/webChat'
 import { composeAskAnswer, parseAskQuestions, type AskQuestion } from '@/lib/ask-questions'
 import {
-  artifactDownloadUrl,
   artifactKind,
   artifactKindLabel,
   artifactName,
   artifactSizeLabel,
   isImageArtifact,
+  type Artifact,
 } from '@/views/chat/transcript/artifacts'
 import { modelDisplayName } from '@/views/chat/transcript/routerFx'
 import { cn } from '@/lib/utils'
-import { Button, buttonVariants } from '@/web/components/ui/button'
+import { Button } from '@/web/components/ui/button'
+import { artifactTarget, useArtifactDownload, useArtifactImage } from '../artifact-files'
 import { Markdown } from '../markdown'
 import type { Item } from '../model/types'
 import { useChatActions } from '../transcript/context'
@@ -191,16 +192,41 @@ export function AskCard({ payload, answered }: { payload: unknown; answered: boo
   )
 }
 
+/** An image artifact's preview on its chip; the file tile until (or unless) it loads. */
+function ArtifactThumb({ artifact, sessionKey }: { artifact: Artifact; sessionKey: string }) {
+  const image = useArtifactImage(artifact, sessionKey, true)
+  if (!image.src) {
+    return (
+      <span
+        className={cn('chat-artifact-thumb chat-tile', !image.failed && 'skeleton-shimmer')}
+        aria-hidden
+      >
+        {image.failed ? <FileText /> : null}
+      </span>
+    )
+  }
+  return (
+    <img
+      src={image.src}
+      alt=""
+      className="chat-artifact-thumb object-cover"
+      data-decorative
+      onError={image.onError}
+    />
+  )
+}
+
 export function ArtifactChip({ item }: { item: Extract<Item, { kind: 'artifact' }> }) {
-  const { openPanel } = useChatActions()
+  const { openPanel, sessionKey } = useChatActions()
+  const download = useArtifactDownload(sessionKey)
   const artifact = item.artifact
   const name = artifactName(artifact)
   const kind = artifactKind(artifact)
-  const url = artifactDownloadUrl(artifact)
+  const hasFile = artifactTarget(artifact) !== null
   return (
     <div className="chat-card chat-artifact lift">
-      {isImageArtifact(artifact) && url ? (
-        <img src={url} alt="" className="chat-artifact-thumb object-cover" data-decorative />
+      {isImageArtifact(artifact) && hasFile ? (
+        <ArtifactThumb artifact={artifact} sessionKey={sessionKey} />
       ) : (
         <span className="chat-artifact-thumb chat-tile" aria-hidden>
           <FileText />
@@ -220,15 +246,15 @@ export function ArtifactChip({ item }: { item: Extract<Item, { kind: 'artifact' 
       >
         <PanelRightOpen />
       </Button>
-      {url ? (
-        <a
-          href={url}
-          download={name}
+      {hasFile ? (
+        <Button
+          size="icon-sm"
+          variant="ghost"
           aria-label={t('webChat.artifactDownload', { name })}
-          className={buttonVariants({ size: 'icon-sm', variant: 'ghost' })}
+          onClick={() => void download(artifact)}
         >
           <Download aria-hidden />
-        </a>
+        </Button>
       ) : null}
     </div>
   )

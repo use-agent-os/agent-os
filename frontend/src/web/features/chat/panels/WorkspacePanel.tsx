@@ -24,10 +24,14 @@ import { t } from '@/i18n'
 import '@/i18n/en/webChat'
 import '@/i18n/en/webPanel'
 import { cn } from '@/lib/utils'
+import { useQuery } from '@tanstack/react-query'
+import { useRpc } from '@/app/providers'
+import { TEXT_PREVIEW_BYTES } from '@/lib/workspace-files'
 import {
-  artifactDownloadUrl,
   artifactMime,
+  artifactName,
   isImageArtifact,
+  type Artifact,
 } from '@/views/chat/transcript/artifacts'
 import { Button } from '@/web/components/ui/button'
 import {
@@ -42,11 +46,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/web/components/ui/dropdown-menu'
-import { Skeleton } from '@/web/components/ui/states'
+import { ErrorState, Skeleton } from '@/web/components/ui/states'
 import { SimpleTooltip, Tooltip, TooltipContent, TooltipTrigger } from '@/web/components/ui/tooltip'
 import { useGlide } from '@/web/components/ui/use-glide'
 import '@/web/styles/chat-thread.css'
 import '@/web/styles/workspace-panel.css'
+import {
+  artifactTarget,
+  fetchArtifact,
+  useArtifactDownload,
+  useArtifactImage,
+} from '../artifact-files'
 import { Markdown } from '../markdown'
 import type { Item, TranscriptState } from '../model/types'
 import { useGatewayMethods } from './hooks'
@@ -87,7 +97,81 @@ function findItem(state: TranscriptState, id: string): Item | undefined {
 
 /* ── Item tabs ────────────────────────────────────────────────────────── */
 
-function ItemBody({ item }: { item: Item | undefined }) {
+/** Shown in the tab as text; the gateway serves every file as a download. */
+const TEXT_MIMES = new Set(['text/markdown', 'text/plain', 'text/html'])
+
+function ArtifactImageView({ artifact, sessionKey }: { artifact: Artifact; sessionKey: string }) {
+  const image = useArtifactImage(artifact, sessionKey)
+  if (image.failed) return <p className="text-text-muted">{t('webPanel.filesImageFailed')}</p>
+  if (!image.src) return <Skeleton className="h-48 w-full" />
+  return (
+    <img src={image.src} alt="" onError={image.onError} className="chat-side-media max-w-full" />
+  )
+}
+
+/**
+ * A text artifact, read through a ticket: the ticket answers as an
+ * attachment, which a frame would download (or, sandboxed, refuse) rather
+ * than show.
+ */
+function ArtifactTextView({ artifact, sessionKey }: { artifact: Artifact; sessionKey: string }) {
+  const rpc = useRpc()
+  const query = useQuery({
+    queryKey: ['artifact-text', sessionKey, artifact.id ?? artifact.download_url],
+    queryFn: async () => (await fetchArtifact(rpc, artifact, sessionKey)).text(),
+    staleTime: Infinity,
+  })
+  if (query.isPending) return <Skeleton className="h-48 w-full" />
+  if (query.isError) {
+    return (
+      <ErrorState
+        message={t('webChat.artifactLoadFailed', {
+          message: query.error instanceof Error ? query.error.message : String(query.error),
+        })}
+        onRetry={() => void query.refetch()}
+      />
+    )
+  }
+  const mime = artifactMime(artifact)
+  if (mime === 'text/markdown') return <Markdown text={query.data} />
+  if (mime === 'text/html') {
+    return (
+      <iframe
+        title={artifactName(artifact)}
+        srcDoc={query.data}
+        sandbox=""
+        className="chat-side-media h-full min-h-[60dvh] w-full bg-white"
+      />
+    )
+  }
+  return (
+    <pre tabIndex={0} className="chat-well chat-side-well">
+      {query.data}
+    </pre>
+  )
+}
+
+function ArtifactBody({ artifact, sessionKey }: { artifact: Artifact; sessionKey: string }) {
+  const download = useArtifactDownload(sessionKey)
+  if (!artifactTarget(artifact)) return <p className="text-text-muted">{t('webChat.panelEmpty')}</p>
+  if (isImageArtifact(artifact)) {
+    return <ArtifactImageView artifact={artifact} sessionKey={sessionKey} />
+  }
+  if (TEXT_MIMES.has(artifactMime(artifact)) && (artifact.size ?? 0) <= TEXT_PREVIEW_BYTES) {
+    return <ArtifactTextView artifact={artifact} sessionKey={sessionKey} />
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => void download(artifact)}
+      className="text-start text-accent underline"
+    >
+      {artifactName(artifact)}
+    </button>
+  )
+}
+
+function ItemBody({ item, sessionKey }: { item: Item | undefined; sessionKey: string }) {
   if (!item) return <p className="text-text-muted">{t('webChat.panelEmpty')}</p>
   if (item.kind === 'toolCall') {
     return (
@@ -100,36 +184,21 @@ function ItemBody({ item }: { item: Item | undefined }) {
     return <div className="chat-thought-text">{item.text ?? ''}</div>
   }
   if (item.kind === 'artifact' || item.kind === 'card') {
-    const url = artifactDownloadUrl(item.artifact)
-    if (isImageArtifact(item.artifact))
-      return <img src={url} alt="" className="chat-side-media max-w-full" />
-    const mime = artifactMime(item.artifact)
-    if (
-      mime === 'text/markdown' ||
-      mime === 'text/plain' ||
-      mime === 'application/pdf' ||
-      mime === 'text/html'
-    ) {
-      return (
-        <iframe
-          title={String(item.artifact.name ?? '')}
-          src={url}
-          sandbox=""
-          className="chat-side-media h-full min-h-[60dvh] w-full bg-white"
-        />
-      )
-    }
-    return (
-      <a href={url} download className="text-accent underline">
-        {String(item.artifact.name ?? url)}
-      </a>
-    )
+    return <ArtifactBody artifact={item.artifact} sessionKey={sessionKey} />
   }
   if (item.kind === 'text') return <Markdown text={item.text} />
   return null
 }
 
-function ItemTab({ tab, transcript }: { tab: PanelTab; transcript: TranscriptState }) {
+function ItemTab({
+  tab,
+  transcript,
+  sessionKey,
+}: {
+  tab: PanelTab
+  transcript: TranscriptState
+  sessionKey: string
+}) {
   const meta = tabMeta(tab.kind)
   const Icon = meta.icon
   return (
@@ -143,7 +212,7 @@ function ItemTab({ tab, transcript }: { tab: PanelTab; transcript: TranscriptSta
           <p className="truncate text-ui font-semibold">{tab.title}</p>
         </div>
       </div>
-      <ItemBody item={findItem(transcript, tab.id)} />
+      <ItemBody item={findItem(transcript, tab.id)} sessionKey={sessionKey} />
     </div>
   )
 }
@@ -754,7 +823,7 @@ export function WorkspacePanel(props: WorkspacePanelProps) {
                   active={shown}
                 />
               ) : shown ? (
-                <ItemTab tab={tab} transcript={props.transcript} />
+                <ItemTab tab={tab} transcript={props.transcript} sessionKey={sessionKey} />
               ) : null}
             </div>
           )
