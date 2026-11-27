@@ -178,3 +178,46 @@ async def test_real_dialog_intercepted_and_dismissed(request: pytest.FixtureRequ
     resp = await _call(action="dialog", dialog_action="accept")
     assert resp["success"] is True
     await _call(action="close")
+
+
+_GROWING_PAGE = (
+    "document.title = 'Live views'; "
+    "document.body.innerHTML = '<h1>Live</h1>"
+    '<button onclick="this.insertAdjacentHTML(`afterend`, `<button>Added</button>`)">Grow</button>'
+    "<input aria-label=Name>'; 1"
+)
+
+
+@pytest.mark.asyncio
+async def test_action_views_batch_and_reads_on_the_real_engine() -> None:
+    """The engine's --delta answers, parsed: an action returns what it changed."""
+    import re
+
+    browser_mod.configure_browser(_config())
+    assert (await _call(action="navigate", url=_BLANK))["success"] is True
+    assert (await _call(action="eval", expression=_GROWING_PAGE))["success"] is True
+    tree = _unwrap((await _call(action="snapshot"))["snapshot"])
+    grow = re.search(r'button "Grow" \[ref=(e\d+)', tree)
+    name = re.search(r'textbox "Name" \[ref=(e\d+)', tree)
+    assert grow and name, tree
+
+    clicked = await _call(action="click", ref=grow.group(1))
+    assert clicked["page"] == "changed", clicked
+    assert "Added" in _unwrap(clicked["snapshot"])
+
+    batch = await _call(
+        action="batch",
+        steps=[
+            {"action": "fill", "ref": name.group(1), "text": "Key"},
+            {"action": "get_text", "selector": "h1"},
+            {"action": "title"},
+        ],
+    )
+    assert batch["success"] is True, batch
+    outputs = {entry["action"]: entry for entry in batch["results"]}
+    assert _unwrap(outputs["get_text"]["text"]) == "Live"
+    assert _unwrap(outputs["title"]["title"]) == "Live views"
+
+    repeat = await _call(action="snapshot")
+    assert "Key" in _unwrap(repeat["snapshot"])
+    await _call(action="close")

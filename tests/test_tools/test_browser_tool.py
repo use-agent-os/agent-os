@@ -249,7 +249,11 @@ class TestTruncation:
         result = await _call(action="snapshot")
         assert result["success"] is True
         assert result["truncated"] is True
-        assert "truncated" in result["snapshot"]
+        # The note is the tool's own text, outside the envelope, and says how
+        # to read what was cut rather than only that something was.
+        assert "Cut at" in result["note"]
+        assert "selector" in result["note"] and "get_text" in result["note"]
+        assert "Cut at" not in result["snapshot"]
 
     @pytest.mark.asyncio
     async def test_snapshot_not_truncated_when_short(self, fake_binary: str) -> None:
@@ -321,10 +325,15 @@ class TestUntrustedBoundary:
         assert "<untrusted" in result["data"]
 
     @pytest.mark.asyncio
-    async def test_click_payload_is_wrapped(self, fake_binary: str) -> None:
+    async def test_click_answers_with_a_wrapped_page_view(self, fake_binary: str) -> None:
+        # A click answers with the page it left behind, not the engine's echo;
+        # that view is page content and carries the envelope.
         browser_mod.configure_browser(_config(fake_binary))
         result = await _call(action="click", ref="e1")
-        assert "<untrusted" in result["data"]
+        assert result["success"] is True
+        assert "data" not in result
+        assert result["page"] in {"changed", "new", "unchanged"}
+        assert "<untrusted" in result["snapshot"]
 
 
 class TestEvalSsrfInManagedMode:
