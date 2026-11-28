@@ -37,9 +37,17 @@ log = structlog.get_logger(__name__)
 #: ``AGENTOS_VAULT_KEK`` stays in this process's environment on purpose: the
 #: vault opens ``unlock.key`` with it after boot, and it is withheld from
 #: children by ``tools.env_passthrough`` (it is in ``GATEWAY_CREDENTIAL_ENV``),
-#: which is the boundary that matters -- so it is not scrubbed here.
+#: which is the boundary that matters -- so it is not scrubbed here. The
+#: desktop's handed-over key (``AGENTOS_VAULT_KEK_FD`` / ``_FILE``) is read
+#: and removed by ``trading.unlock_key.load_handoff_kek``.
 _HANDLED_ELSEWHERE = frozenset(
-    {"AGENTOS_OPERATOR_SECRET", "AGENTOS_OPERATOR_SECRET_FILE", "AGENTOS_VAULT_KEK"}
+    {
+        "AGENTOS_OPERATOR_SECRET",
+        "AGENTOS_OPERATOR_SECRET_FILE",
+        "AGENTOS_VAULT_KEK",
+        "AGENTOS_VAULT_KEK_FD",
+        "AGENTOS_VAULT_KEK_FILE",
+    }
 )
 
 _scrubbed: dict[str, str] = {}

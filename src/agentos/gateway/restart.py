@@ -56,6 +56,7 @@ from agentos.gateway.agent_surface import OPERATOR_SECRET_FILE_ENV, get_agent_su
 from agentos.gateway.credential_env import credential_env_for_reexec
 from agentos.paths import default_agentos_home
 from agentos.safe_python import launch_env, python_argv
+from agentos.trading import unlock_key
 
 log = structlog.get_logger(__name__)
 
@@ -491,6 +492,12 @@ class GatewayRestarter:
             secret_path = self._export_operator_secret()
             if secret_path is not None:
                 env[OPERATOR_SECRET_FILE_ENV] = str(secret_path)
+            # The pipe the app's vault key arrived on is closed; the new image
+            # gets the key the same way it gets the operator secret.
+            env.pop(unlock_key.KEK_FD_ENV, None)
+            kek_path = unlock_key.export_handoff_kek_file(default_agentos_home() / "wallets")
+            if kek_path is not None:
+                env[unlock_key.KEK_FILE_ENV] = str(kek_path)
             self._exec_plan = (argv, env)
             req.exec_at = time.time()
             self._write_request(req)

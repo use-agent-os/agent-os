@@ -166,6 +166,11 @@ GATEWAY_CREDENTIAL_ENV: frozenset[str] = frozenset(
         # service manager injects it (agentos.trading.unlock_key). Held in the
         # gateway's memory only, never in a child's environment.
         "AGENTOS_VAULT_KEK",
+        # The same key when the desktop app holds it in the keychain: the pipe
+        # it is handed over on, and the one-shot file of an in-place re-exec.
+        # Both are read and removed at boot (unlock_key.load_handoff_kek).
+        "AGENTOS_VAULT_KEK_FD",
+        "AGENTOS_VAULT_KEK_FILE",
     }
 )
 

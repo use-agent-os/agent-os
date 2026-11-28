@@ -1,10 +1,11 @@
-import { app, BrowserWindow, globalShortcut } from 'electron'
+import { app, BrowserWindow, globalShortcut, safeStorage } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { gatewayUrl, type DesktopSettings } from '@shared/settings'
 import { GatewaySupervisor } from './gateway/supervisor'
+import { VaultKekStore } from './gateway/vault-kek'
 import { registerIpc } from './ipc'
 import { gatewayOriginFor, installGatewayCors } from './loopback-cors'
 import { installAppMenu } from './menu'
@@ -33,8 +34,16 @@ if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   const settings = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'))
+  // Only a packaged build: its keychain entry belongs to the signed app. A
+  // dev run is the unsigned Electron binary, whose entry any other Electron
+  // dev app shares, and it must not move a real vault onto such a key.
+  const vaultKek = new VaultKekStore(
+    path.join(app.getPath('userData'), 'vault-kek.bin'),
+    safeStorage,
+  )
   const gateway = new GatewaySupervisor(() => settings.get().gateway, {
     logPath: path.join(app.getPath('logs'), 'gateway.log'),
+    vaultKek: () => (app.isPackaged && app.isReady() ? vaultKek.load() : null),
   })
   const pets = new PetStore(path.join(app.getPath('userData'), 'pets'))
   const engineUpdater = new EngineUpdater({

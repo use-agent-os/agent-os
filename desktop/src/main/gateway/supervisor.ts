@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { createWriteStream, mkdirSync, rmSync, writeFileSync, type WriteStream } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import type { Writable } from 'node:stream'
 import { gatewayUrl, type GatewaySettings } from '@shared/settings'
 import { GATEWAY_EXIT_CONFIG, STOPPED_GATEWAY, type GatewayStatus } from '@shared/gateway'
 import { hardenedEnv, lastJson } from '../updates/engine-updater'
@@ -23,6 +24,35 @@ export const STOP_DRAIN_MS = 8_000
 export const STOP_FORCE_MS = 4_000
 /** `agentos doctor --json` reads config offline; it should never take this long. */
 const DOCTOR_TIMEOUT_MS = 30_000
+/** The child's descriptor for the vault-key pipe: the first one after stdio. */
+const VAULT_KEK_FD = 3
+
+/**
+ * Variables that make an interpreter load code of someone else's choosing
+ * before the gateway's own. The gateway is about to be handed the operator
+ * secret and the vault key; a value planted in the app's launch environment
+ * (`launchctl setenv` needs no privilege) must not ride along into it.
+ */
+const CODE_INJECTION_ENV = [
+  'PYTHONPATH',
+  'PYTHONSTARTUP',
+  'PYTHONHOME',
+  'PYTHONUSERBASE',
+  'PYTHONINSPECT',
+  'PYTHONBREAKPOINT',
+  'DYLD_INSERT_LIBRARIES',
+  'DYLD_LIBRARY_PATH',
+  'DYLD_FRAMEWORK_PATH',
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+]
+
+/** `hardenedEnv` for the gateway process itself: without the names above. */
+export function gatewayEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = hardenedEnv(base)
+  for (const name of CODE_INJECTION_ENV) delete env[name]
+  return env
+}
 
 /** Readiness of a spawned child: `/ready` answers, or an engine without it. */
 export type ReadyProbe = (url: string) => Promise<'ready' | 'waiting' | 'unsupported'>
@@ -81,9 +111,16 @@ export class GatewaySupervisor {
       logPath?: string
       /** Where the one-shot operator secret file is written before a spawn. */
       secretDir?: string
+      /**
+       * The keychain-held key that opens the vault's stored password (64 hex
+       * characters), or null when the app has none (./vault-kek). Asked at
+       * every spawn; handed to the child over a pipe, never a file or env.
+       */
+      vaultKek?: () => string | null
       spawn?: typeof nodeSpawn
     } = {},
   ) {
+    this.vaultKek = deps.vaultKek ?? (() => null)
     this.probe = deps.probe ?? defaultProbe
     this.probeReady =
       deps.probeReady ??
@@ -98,6 +135,7 @@ export class GatewaySupervisor {
   }
 
   private readonly spawn: typeof nodeSpawn
+  private readonly vaultKek: () => string | null
 
   private readonly logPath: string | null
   private logFile: WriteStream | null = null
@@ -129,6 +167,16 @@ export class GatewaySupervisor {
       // Without the file the gateway falls back to its exec-window rule and
       // the app still works; the connection just cannot prove it is ours.
       this.secret = null
+      return null
+    }
+  }
+
+  private readVaultKek(): string | null {
+    try {
+      const kek = this.vaultKek()
+      return kek && /^[0-9a-f]{64}$/.test(kek) ? kek : null
+    } catch {
+      // Without it the gateway keeps its own key file, as before.
       return null
     }
   }
@@ -277,19 +325,31 @@ export class GatewaySupervisor {
     // launch hands us a bare PATH; without the login-shell dirs the gateway's
     // harness checks miss Homebrew/npm CLIs such as `codex` and `npx`.
     const secretFile = this.writeSecretFile()
+    // The vault key travels on a pipe (fd 3 in the child): the gateway reads
+    // it once at boot and closes it, so it is never a file a process could
+    // find, nor a variable a child of the gateway could inherit. An engine
+    // from before the handoff ignores both the variable and the pipe.
+    const vaultKek = this.readVaultKek()
     const child = this.spawn(
       cli,
       ['gateway', 'run', '--bind', cfg.host, '--port', String(cfg.port)],
       {
         env: {
-          ...hardenedEnv(),
+          ...gatewayEnv(),
           ...(cfg.token ? { AGENTOS_AUTH_TOKEN: cfg.token, AGENTOS_AUTH_MODE: 'token' } : {}),
           ...(secretFile ? { AGENTOS_OPERATOR_SECRET_FILE: secretFile } : {}),
+          ...(vaultKek ? { AGENTOS_VAULT_KEK_FD: String(VAULT_KEK_FD) } : {}),
         },
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: vaultKek ? ['ignore', 'pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
       },
     )
     this.child = child
+    if (vaultKek) {
+      const pipe = child.stdio?.[VAULT_KEK_FD] as Writable | null | undefined
+      // An engine that never reads it exits with the pipe unread (EPIPE).
+      pipe?.on('error', () => {})
+      pipe?.end(vaultKek + '\n')
+    }
     this.openLog(cli)
     let stderrTail = ''
     child.stdout?.on('data', (chunk: Buffer) => {

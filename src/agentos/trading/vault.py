@@ -8,7 +8,8 @@ an operating system secret store:
   (:mod:`agentos.trading.unlock_key`), and the gateway opens it at first use.
   Neither file opens the vault alone, but anyone who can run code as this OS
   user can read both and spend: the OS sandbox or ``manual`` mode is the
-  boundary against that.
+  boundary against that. Under the desktop app that key is in no file: the
+  app keeps it in the keychain and hands it to the gateway it spawns.
 * ``manual`` — nothing on disk; ``unlock(password)`` is called per gateway
   session and the decrypted keys live only in this process's memory.
 
@@ -433,7 +434,13 @@ class Vault:
             self._unlock(password)
             self._clear_lock_latch()
             if self.unlock_mode == "auto" and self.unlock_path.exists():
-                if not self._unlock_key_opens_to(password):
+                if self._unlock_key_awaits_app():
+                    # Sealed under the desktop app's key, which this gateway
+                    # was not given: unlocked for this session, and the file
+                    # stays the app's. Sealing again here would put the
+                    # password back under a key on disk.
+                    log.info("vault.unlock_key_left_for_app")
+                elif not self._unlock_key_opens_to(password):
                     try:
                         self._store_unlock_key(password)
                     except (OSError, VaultError) as exc:
@@ -518,7 +525,7 @@ class Vault:
                 if envelope is not None:
                     password = unlock_key.open_password(envelope)
                     self._unlock(password)
-                    self._move_unlock_key_if_displaced(envelope, password)
+                    self._reseal_unlock_key_if_due(envelope, password)
                     return True
             except (unlock_key.UnlockKeyError, VaultError, ValueError) as exc:
                 self._warn_unlock_key_unavailable(exc)
@@ -586,14 +593,20 @@ class Vault:
             return
         log.warning("vault.unlock_key_migrated", protection=self._unlock_key_protection())
 
-    def _move_unlock_key_if_displaced(self, envelope: unlock_key.Envelope, password: str) -> None:
-        """Seal again when the key was found outside the configured directory.
+    def _unlock_key_awaits_app(self) -> bool:
+        """``unlock.key`` is sealed under the desktop app's key and this gateway lacks it."""
+        return unlock_key.awaits_handoff(self._read_unlock_key())
+
+    def _reseal_unlock_key_if_due(self, envelope: unlock_key.Envelope, password: str) -> None:
+        """Seal again when the key that just opened ``unlock.key`` should not stay.
 
         ``AGENTOS_VAULT_KEK_DIR`` set (or changed) on a vault that already
         auto-unlocks: the old key still opens it, once, and the fresh seal
         puts the key where the operator now wants it and deletes the old one.
+        Likewise a key on disk once the desktop app hands the gateway its
+        own: the fresh seal goes under the app's key and the file is deleted.
         """
-        if unlock_key.kek_in_place(envelope):
+        if not unlock_key.should_reseal(envelope):
             return
         try:
             self._store_unlock_key(password)
@@ -733,7 +746,16 @@ class Vault:
             # old one no longer opens anything, and writing the new one would
             # be the very thing the operator configured away.
             if index.get("unlock_mode") == "auto" and self.policy_mode() != "manual":
-                self._store_unlock_key(new_password)
+                if self._unlock_key_awaits_app():
+                    # The app's key is not here to seal the new password with,
+                    # and a key on disk is what the app's replaced. The stored
+                    # one is stale until the next unlock in the app seals again.
+                    log.warning(
+                        "vault.unlock_key_stale",
+                        hint="unlock once in the desktop app to store the new password",
+                    )
+                else:
+                    self._store_unlock_key(new_password)
 
     def _settle_rekey(self) -> None:
         """Finish a committed password change, or drop what an uncommitted one staged.

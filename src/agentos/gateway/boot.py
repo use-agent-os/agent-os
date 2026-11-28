@@ -3062,6 +3062,13 @@ async def start_gateway_server(
     from agentos.gateway.agent_surface import ensure_operator_file, get_agent_surface
 
     get_agent_surface().load_operator_secret_from_env()
+    # Likewise the key that opens the vault's stored password, when the app
+    # keeps it in the keychain: read once from the pipe (or the re-exec file)
+    # and held in memory only (see trading.unlock_key).
+    from agentos.trading import unlock_key
+
+    if unlock_key.load_handoff_kek():
+        log.info("gateway.vault_kek_handed_over")
     # The config holds the env-sourced gateway/hooks token now; nothing else in
     # this process reads the variables, so no child may inherit them either
     # (gateway.credential_env keeps them only for an in-place re-exec).
