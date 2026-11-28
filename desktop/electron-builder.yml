@@ -23,6 +23,16 @@ extraResources:
   - from: resources/trayTemplate@2x.png
     to: trayTemplate@2x.png
 asar: true
+# Electron fuses, flipped in the packaged binary before it is signed. The app
+# keeps the trading vault's unlock key in the keychain under its own signature
+# (src/main/gateway/vault-kek.ts), so anything that makes this signed binary
+# run someone else's JavaScript reads that key as the app. These close the
+# ways to do that without touching the bundle: ELECTRON_RUN_AS_NODE,
+# NODE_OPTIONS, and --inspect on the command line.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
 mac:
   category: public.app-category.developer-tools
   # 1024x1024 PNG rendered by scripts/make-icon.py; electron-builder derives the .icns.

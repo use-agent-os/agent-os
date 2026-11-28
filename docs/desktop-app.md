@@ -324,6 +324,12 @@ when Settings closes.
   asks for the vault password), and the agent's limits (ask-me-above amount,
   daily cap, approval timeout, default slippage). When the gateway does not
   take trading changes from this window, the page says so and is read-only.
+  With automatic unlock, the key that opens the stored vault password is kept
+  by the app in the macOS keychain and handed to the gateway it starts, not
+  left in a file: the first start after an update moves an existing vault onto
+  it. If the keychain entry is ever lost the vault stays locked until you
+  unlock it once with the vault password. A gateway you start from a terminal
+  does not have the key; unlock there with `agentos wallet unlock`.
 - **Gateway** shows whether the gateway runs and where, with Start, Stop and
   Restart when the app manages it and a link to the web console. Run mode is
   Managed (recommended) or External. The address (protocol, host, port) and

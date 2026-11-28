@@ -7,6 +7,7 @@ import { PassThrough } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 import type { GatewaySettings } from '@shared/settings'
 import {
+  gatewayEnv,
   GatewaySupervisor,
   STOP_DRAIN_MS,
   STOP_FORCE_MS,
@@ -186,6 +187,83 @@ describe('GatewaySupervisor (spawn arguments)', () => {
     // The old double-underscore names never reached the gateway's settings.
     expect(spawnCalls[0]?.env.AGENTOS_GATEWAY__PORT).toBeUndefined()
     expect(spawnCalls[0]?.env.AGENTOS_AUTH__TOKEN).toBeUndefined()
+  })
+
+  it('hands the vault key over a pipe, never in a file or the environment', async () => {
+    const kek = 'ab'.repeat(32)
+    const written: string[] = []
+    const stdioSeen: unknown[] = []
+    const spawnCalls: { env: NodeJS.ProcessEnv }[] = []
+    const spawn = vi.fn(
+      (_command: string, _args: string[], options: { env: NodeJS.ProcessEnv; stdio: unknown }) => {
+        spawnCalls.push({ env: options.env })
+        stdioSeen.push(options.stdio)
+        const pipe = new PassThrough()
+        pipe.on('data', (chunk: Buffer) => written.push(chunk.toString()))
+        const child = new EventEmitter() as EventEmitter & Record<string, unknown>
+        child.pid = 4242
+        child.stdout = new PassThrough()
+        child.stderr = new PassThrough()
+        child.stdio = [null, child.stdout, child.stderr, pipe]
+        child.kill = () => true
+        return child
+      },
+    ) as unknown as typeof import('node:child_process').spawn
+    let probes = 0
+    const secretDir = mkdtempSync(path.join(os.tmpdir(), 'agentos-sup-'))
+    const sup = new GatewaySupervisor(
+      () => ({ ...external, mode: 'managed', cliPath: '/opt/agentos' }),
+      { probe: async () => probes++ > 0, locate: (o) => o, secretDir, vaultKek: () => kek, spawn },
+    )
+    await sup.start()
+    expect(stdioSeen[0]).toEqual(['ignore', 'pipe', 'pipe', 'pipe'])
+    expect(spawnCalls[0]?.env.AGENTOS_VAULT_KEK_FD).toBe('3')
+    expect(written.join('')).toBe(kek + '\n')
+    expect(Object.values(spawnCalls[0]!.env)).not.toContain(kek)
+    expect(spawnCalls[0]?.env.AGENTOS_VAULT_KEK).toBeUndefined()
+    expect(spawnCalls[0]?.env.AGENTOS_VAULT_KEK_FILE).toBeUndefined()
+  })
+
+  it('opens no pipe when the app has no vault key, or a malformed one', async () => {
+    for (const vaultKek of [
+      () => null,
+      () => 'short',
+      () => {
+        throw new Error('keychain')
+      },
+    ]) {
+      const { spawn, spawnCalls } = fakeSpawn()
+      let probes = 0
+      const sup = new GatewaySupervisor(
+        () => ({ ...external, mode: 'managed', cliPath: '/opt/agentos' }),
+        {
+          probe: async () => probes++ > 0,
+          locate: (o) => o,
+          secretDir: mkdtempSync(path.join(os.tmpdir(), 'agentos-sup-')),
+          vaultKek,
+          spawn,
+        },
+      )
+      expect((await sup.start()).state).toBe('running')
+      expect(spawnCalls[0]?.env.AGENTOS_VAULT_KEK_FD).toBeUndefined()
+    }
+  })
+
+  it('drops interpreter-injection variables from the gateway environment', () => {
+    const env = gatewayEnv({
+      PATH: '/usr/bin',
+      HOME: '/Users/x',
+      PYTHONPATH: '/tmp/evil',
+      PYTHONSTARTUP: '/tmp/evil.py',
+      DYLD_INSERT_LIBRARIES: '/tmp/evil.dylib',
+      PYTHONUTF8: '1',
+    })
+    expect(env.PYTHONPATH).toBeUndefined()
+    expect(env.PYTHONSTARTUP).toBeUndefined()
+    expect(env.DYLD_INSERT_LIBRARIES).toBeUndefined()
+    expect(env.PYTHONUTF8).toBe('1')
+    expect(env.HOME).toBe('/Users/x')
+    expect(env.PATH).toContain('/usr/bin')
   })
 
   it('spawns the gateway with the login-shell dirs on PATH, not the bare GUI PATH', async () => {

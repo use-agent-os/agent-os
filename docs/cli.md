@@ -1215,10 +1215,19 @@ together, `--pct` outside `(0, 100]` — `TOKEN_NOT_FOUND`, `TOKEN_UNVERIFIED`,
 `VERSION_SKEW`).
 
 Wallets live in the engine's **vault** (`~/.agentos/wallets/`, keystore v3
-files encrypted with one vault password). Nothing here is tied to an OS
-keychain: `auto` mode keeps the password in `unlock.key` (mode 0600) so the
-gateway unlocks at boot and the agent can sign unattended; `manual` mode
-keeps keys only in the gateway's memory after `agentos wallet unlock`. Export
+files encrypted with one vault password). `auto` mode keeps the password in
+`unlock.key` (mode 0600), sealed under a key kept elsewhere, so the gateway
+unlocks at boot and the agent can sign unattended; `manual` mode keeps keys
+only in the gateway's memory after `agentos wallet unlock`. Where the sealing
+key lives decides who can open `unlock.key`: a gateway you start from a
+terminal keeps it in a 0600 file outside `~/.agentos`, which any process
+running as you can read; a gateway the macOS desktop app starts gets it from
+the app, which keeps it in the keychain, and moves an existing vault onto it
+(`unlockKeyProtection: sealed:handoff` in `agentos wallet status --json`).
+Such a vault does not unlock by itself in a gateway started without the app:
+run `agentos wallet unlock` there. A backup of your home directory made before
+the move still holds the previous key file beside the `unlock.key` it opens:
+treat such a backup as holding the vault password. Export
 always asks the vault password. Passwords are read from a hidden prompt or
 `AGENTOS_WALLET_PASSWORD` (`AGENTOS_KEYSTORE_PASSWORD` for an imported
 keystore) — never from the command line.

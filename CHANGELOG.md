@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+- Trading vault, auto unlock under the macOS desktop app: the key that opens
+  the stored vault password (`unlock.key`) is no longer a file in your home
+  directory. The app keeps it in the macOS keychain and hands it to the
+  gateway it starts over a pipe the gateway reads once at boot
+  (`AGENTOS_VAULT_KEK_FD`); the gateway seals the password under it and
+  deletes the key file it used before. Reading every file you own no longer
+  recovers the vault password. An existing vault moves over on the first
+  start after the update, with nothing to do. What does not change: a
+  process running as you that rewrites AgentOS's own installed files can
+  still reach the key at the next start; the OS sandbox and `manual` unlock
+  remain the boundaries against that.
+- A vault moved onto the app's key does not unlock by itself in a gateway
+  started without the app (`agentos gateway run`): unlock there with
+  `agentos wallet unlock`. Such a gateway never seals the password back under
+  a key on disk. `agentos wallet mode auto`, run there, still does, as an
+  explicit request.
+- Desktop: the packaged app disables Electron's `ELECTRON_RUN_AS_NODE`,
+  `NODE_OPTIONS` and `--inspect` entry points, which would let another
+  process run its own code as the signed app, and no longer passes
+  `PYTHONPATH`, `PYTHONSTARTUP`, `DYLD_INSERT_LIBRARIES` and similar
+  variables from its launch environment into the gateway.
+
 ## [2026.11.27.post1] - 2026-11-27
 
 ### Changed
