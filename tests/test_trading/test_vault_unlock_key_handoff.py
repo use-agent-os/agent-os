@@ -24,6 +24,8 @@ from tests.test_trading.conftest import FAST_KDF
 
 PASSWORD = "DUMMYvaultPW_7777777777"
 NEW_PASSWORD = "DUMMYvaultPW_8888888888"
+#: What a vault sealed under a key on disk reports: DPAPI on Windows, a file elsewhere.
+ON_DISK = "sealed:dpapi" if unlock_key.dpapi_available() else "sealed:file"
 
 
 @pytest.fixture(autouse=True)
@@ -89,7 +91,7 @@ def test_a_key_file_is_read_once_and_deleted(tmp_path: Path) -> None:
     assert not path.exists()
 
 
-@pytest.mark.skipif(not hasattr(socket, "socketpair"), reason="needs socketpair")
+@pytest.mark.skipif(os.name == "nt", reason="a Windows socket is not a C descriptor")
 def test_a_key_arrives_over_the_socket_pair_node_uses_for_a_pipe() -> None:
     # Node's `stdio: 'pipe'` is a UNIX socket pair on macOS and Linux, not a
     # FIFO: the app's key reaches the gateway on one of those.
@@ -184,7 +186,7 @@ def test_a_gateway_without_the_key_stays_locked(state: Path, kek_dir: Path) -> N
 def test_an_existing_vault_moves_onto_the_apps_key(state: Path, kek_dir: Path) -> None:
     vault = _vault(state)
     vault.setup(PASSWORD, "auto")
-    assert vault.status()["unlockKeyProtection"] == "sealed:file"
+    assert vault.status()["unlockKeyProtection"] == ON_DISK
     assert len(_key_files(kek_dir)) == 1
 
     _hand_over()  # the app now starts this gateway
@@ -271,5 +273,5 @@ def test_switching_to_auto_without_the_key_is_the_operators_call(
     unlock_key.clear_handoff_kek()
     vault = _vault(state)
     vault.set_unlock_mode("auto", PASSWORD)
-    assert vault.status()["unlockKeyProtection"] == "sealed:file"
+    assert vault.status()["unlockKeyProtection"] == ON_DISK
     assert len(_key_files(kek_dir)) == 1
